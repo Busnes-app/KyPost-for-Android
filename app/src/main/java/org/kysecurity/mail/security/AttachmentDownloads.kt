@@ -29,7 +29,7 @@ internal fun saveAttachmentToDownloads(
     write: (OutputStream, ByteArray) -> Unit = { stream, payload -> stream.write(payload) },
 ): Boolean {
     val resolver = context.contentResolver
-    val safeType = safeMimeType(mimeType)
+    val safeType = safeMimeType(mimeType, name)
     val values = ContentValues().apply {
         // The name's extension is derived from safeType, not from the sender's filename.
         put(MediaStore.Downloads.DISPLAY_NAME, safeFileName(name, safeType))

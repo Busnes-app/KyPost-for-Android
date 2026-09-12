@@ -602,6 +602,20 @@ class EmailDetailActivityTest {
         assertEquals("application/octet-stream", safeMimeType(""))
     }
 
+    /** Mailers that label every file application/octet-stream cost the user the extension: a PDF
+     *  saved as "invoice" with no type opened nowhere. */
+    @Test
+    fun safeMimeType_fallsBackToTheSenderExtensionWhenTheDeclaredTypeIsOpaque() {
+        assertEquals("application/pdf", safeMimeType("application/octet-stream", "invoice.pdf"))
+        assertEquals("application/pdf", safeMimeType("application/x-pdf", "Invoice.PDF"))
+        assertEquals("image/jpeg", safeMimeType("", "photo.jpeg"))
+        assertEquals("invoice.pdf", safeFileName("invoice.pdf", safeMimeType("application/octet-stream", "invoice.pdf")))
+        // Only the final extension counts, and only benign ones; the declared type wins when known.
+        assertEquals("application/octet-stream", safeMimeType("application/octet-stream", "invoice.pdf.apk"))
+        assertEquals("application/octet-stream", safeMimeType("application/octet-stream", "payload.apk"))
+        assertEquals("image/jpeg", safeMimeType("image/jpeg", "photo.pdf"))
+    }
+
     /** The ephemeral sink handed the sender's filename to the chooser verbatim while the Downloads
      *  sink sanitised it; the display name is what a viewer persists the file under. */
     @Test
