@@ -834,7 +834,7 @@ class EmailDetailActivity : LockedActivity() {
     /** Hostile Location Protection path: hands the bytes to [org.kysecurity.mail.security.EphemeralAttachmentBytes]
      *  (never written to disk) and launches a viewer via ACTION_VIEW — nothing is saved anywhere. */
     private fun viewAttachmentEphemerally(downloaded: org.kysecurity.mail.mail.DownloadedAttachment) {
-        val mimeType = safeMimeType(downloaded.mimeType)
+        val mimeType = safeMimeType(downloaded.mimeType, downloaded.name)
         // Null when the held-plaintext ceiling is reached — say so rather than launching a chooser
         // for a URI that will fail to open. See EphemeralAttachmentBytes.register.
         val uri = org.kysecurity.mail.security.EphemeralAttachmentBytes
@@ -1405,10 +1405,19 @@ private val VIEWABLE_MIME_TYPES = setOf(
     "video/mp4", "video/webm",
 )
 
-internal fun safeMimeType(raw: String): String =
-    raw.substringBefore(';').trim().lowercase()
-        .takeIf { it in VIEWABLE_MIME_TYPES }
+// Inverse of extensionForMimeType, plus the spellings it does not emit.
+private val MIME_TYPE_FOR_EXTENSION: Map<String, String> =
+    VIEWABLE_MIME_TYPES.associateBy { extensionForMimeType(it)!! } + ("jpeg" to "image/jpeg")
+
+/** Mailers that label every file application/octet-stream would otherwise cost the user the
+ *  extension. Falling back to a benign extension hands a sender nothing: declaring that type
+ *  outright already works. */
+internal fun safeMimeType(raw: String, name: String = ""): String {
+    val declared = raw.substringBefore(';').trim().lowercase()
+    if (declared in VIEWABLE_MIME_TYPES) return declared
+    return MIME_TYPE_FOR_EXTENSION[name.substringAfterLast('.', "").lowercase()]
         ?: "application/octet-stream"
+}
 
 // A CSS comment is transparent between any two tokens, including between `!` and `important`.
 private val CSS_COMMENT = Regex("""/\*[^*]*\*+(?:[^/*][^*]*\*+)*/""")
