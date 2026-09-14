@@ -24,6 +24,9 @@ internal class DeviceEnrollmentViewModel(application: Application) : AndroidView
     @Volatile
     private var activitySealer: VaultSealer? = null
 
+    @Volatile
+    private var activityOpener: VaultOpener? = null
+
     private val ceremony = EnrollmentCeremony(
         identity = AndroidIdentitySource(application),
         transport = AndroidEnrollmentTransport(application),
@@ -32,6 +35,10 @@ internal class DeviceEnrollmentViewModel(application: Application) : AndroidView
         sealer = object : VaultSealer {
             override suspend fun seal(plaintext: ByteArray): SealOutcome =
                 activitySealer?.seal(plaintext) ?: SealOutcome.Cancelled
+        },
+        previousVault = object : VaultOpener {
+            override suspend fun open(): OpenOutcome =
+                activityOpener?.open() ?: OpenOutcome.Cancelled
         },
         mailCache = RoomDecryptedMailCache(application),
         clock = SystemEnrollmentClock,
@@ -52,8 +59,9 @@ internal class DeviceEnrollmentViewModel(application: Application) : AndroidView
         }
     }
 
-    fun installSealer(sealer: VaultSealer?) {
+    fun installVaultPorts(sealer: VaultSealer?, opener: VaultOpener?) {
         activitySealer = sealer
+        activityOpener = opener
     }
 
     /** Reopens a polling window against the same keypair. Ignored while one is already running, so

@@ -148,6 +148,20 @@ class SourceRulesTest {
         )
     }
 
+    @Test
+    fun webmailHandoffCannotTransferOrDiscardTheComposition() {
+        val compose = mainSources().single { it.relativePath.endsWith("/ComposeActivity.kt") }.readText()
+        val handoff = compose.substringAfter("private fun handOffToWebmail()")
+            .substringBefore("override fun onStop()")
+        val forbidden = listOf("exportHtml", "MailDraft(", ".saveDraft(", "ComposeDraftCache.clear", "finish()")
+            .filter { it in handoff }
+        assertEquals(
+            emptyList(),
+            forbidden,
+            "Webmail handoff may open only a data-free URL and must leave the live composer intact.",
+        )
+    }
+
     private class Source(val path: String, val relativePath: String, private val file: File) {
         fun readText(): String = file.readText()
     }
@@ -262,7 +276,7 @@ class SourceRulesTest {
         val SENSITIVE_PROPERTY_NAMES = setOf(
             "plaintext", "body", "html", "plain", "preview", "protectedSubject", "encryptedPayload",
             "secret", "deviceSecret", "pairingToken", "passphrase",
-            "privateKey", "armoredPrivateKey",
+            "privateKey", "armoredPrivateKey", "bytes",
         )
         // `pin` is absent on purpose: the only `pin` property is an SPKI hash of a public cert.
         val IMPORT = Regex("""^import\s+([\w.]+)""", RegexOption.MULTILINE)

@@ -1,11 +1,12 @@
 package org.kysecurity.mail
 
-/** Every ceiling on attacker-influenced heap, in one place; the sum is the number that matters.
+/** Modeled attacker-influenced payload and buffer ceilings, summed for each operation.
  *
  *  A term belongs here if a remote party chooses its size. "The relay would never send that many"
  *  is not a ceiling — the relay is in this app's threat model everywhere else — and a budget that
  *  omits a term is worse than no budget, because the file reads as a completeness claim.
  *  `MemoryBudgetTest` asserts the total rather than leaving it to this comment.
+ *  These named buffers are not whole-process accounting of parser, UI or WebView allocations.
  *
  *  Two rules learned the hard way, both of which had a term wrong by a factor of two or three:
  *   - a `String` costs TWO bytes per character on ART, which has no compact-string representation;
@@ -42,6 +43,60 @@ internal object MemoryBudget {
      *  a doubling. It used to accumulate a chunk list and then join it into a full-size result,
      *  which held both in full — a guaranteed 2x on every message. */
     const val PGP_PLAINTEXT_PEAK_BYTES = 3L * PGP_PLAINTEXT_BYTES / 2L
+
+    /** One armored secret-key collection admitted during enrollment. Secret keys are normally a
+     *  few KiB; raise this only with a streaming parser/serializer upgrade. */
+    const val PGP_SECRET_KEY_INPUT_BYTES = 256 * 1024
+
+    /** A previously merged vault must remain admissible on the next rotation. */
+    const val PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES = 384 * 1024
+
+    /** The accumulated armored collection after rotation. This is a refusal limit: historical
+     *  keys are never dropped to fit it. */
+    const val PGP_SECRET_KEY_OUTPUT_BYTES = 384 * 1024
+
+    /** A collection may contain this many primary identities before enrollment refuses it. */
+    const val PGP_SECRET_KEY_RING_COUNT = 32
+
+    /** Wiped scratch used while a secret-key stream is copied into its bounded parser input. */
+    const val PGP_SECRET_KEY_STREAM_BUFFER_BYTES = 8 * 1024
+
+    /** Enrollment is separate from reading. At peak it holds both caller inputs, the UTF-8
+     *  encoder's two temporary copies, parsed packet storage conservatively charged at both input
+     *  caps, and the bounded output backing plus its final copy. */
+    const val PGP_ENROLLMENT_PEAK_BYTES =
+        3 * PGP_SECRET_KEY_INPUT_BYTES +
+            2 * PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES +
+            2 * PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES +
+            2 * PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES +
+            2 * PGP_SECRET_KEY_OUTPUT_BYTES +
+            PGP_SECRET_KEY_STREAM_BUFFER_BYTES
+
+    /** A sender chooses the MIME part count; cap retained attachment objects as well as bytes. */
+    const val DECRYPTED_ATTACHMENT_PART_COUNT = 50
+
+    /** Attachment parts kept out of one decrypted message, decoded, for the life of the detail
+     *  screen. Bounded by [PgpMimeReader], which drops parts past this rather than truncating one. */
+    const val DECRYPTED_ATTACHMENT_BYTES = 4L * 1024 * 1024
+
+    /** `readAllWithLimit` can briefly hold old + doubled arrays while earlier parts remain kept. */
+    const val DECRYPTED_ATTACHMENT_DECODE_GROWTH_BYTES = DECRYPTED_ATTACHMENT_BYTES / 2L
+
+    /** One admitted Downloads save owns a copy while the retained source remains available. */
+    const val DECRYPTED_SAVE_SNAPSHOT_BYTES = DECRYPTED_ATTACHMENT_BYTES
+
+    /** Tap-to-open copies before provider admission, so even a rejected registration costs this. */
+    const val DECRYPTED_OPEN_SNAPSHOT_BYTES = DECRYPTED_ATTACHMENT_BYTES
+
+    /** Decoded-byte allowance for CID expansion and aggregate data URLs retained by the sanitizer.
+     *  Larger parts remain available as attachments. */
+    const val INLINE_IMAGE_BYTES = 128L * 1024
+
+    /** Conservative added-image buffer allowance: twelve base64/UTF-16 copies, each rounded
+     *  from 8/3 to 3x. This covers raw HTML, two sanitized and two wrapped variants, plus scratch
+     *  for jsoup attributes/serialization growth, dark-theme rewriting and trimIndent.
+     *  It does not bound the original sender HTML, general DOM overhead or WebView image decoding. */
+    const val INLINE_IMAGE_HTML_PEAK_BYTES = 12L * 3L * INLINE_IMAGE_BYTES
 
     /** Decrypted attachments awaiting a viewer: retained until read or swept. */
     const val PENDING_ATTACHMENT_BYTES = 32L * 1024 * 1024
@@ -90,7 +145,12 @@ internal object MemoryBudget {
         PENDING_ATTACHMENT_BYTES +
             FORWARD_ATTACHMENT_PEAK_BYTES +
             LARGEST_READ_IN_FLIGHT_BYTES +
-            PGP_PLAINTEXT_PEAK_BYTES
+            PGP_PLAINTEXT_PEAK_BYTES +
+            DECRYPTED_ATTACHMENT_BYTES +
+            DECRYPTED_ATTACHMENT_DECODE_GROWTH_BYTES +
+            DECRYPTED_SAVE_SNAPSHOT_BYTES +
+            DECRYPTED_OPEN_SNAPSHOT_BYTES +
+            INLINE_IMAGE_HTML_PEAK_BYTES
 
     /** Sending a message. A different screen and a different operation from [READ_SCENARIO_PEAK_BYTES],
      *  so the two are alternatives rather than addends — summing every term in the app at once

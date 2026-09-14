@@ -10,11 +10,11 @@ import org.junit.Test
 class MemoryBudgetTest {
 
     @Test
-    fun readScenarioFitsTheAssumedHeap() {
+    fun readScenarioLeavesFourMiBOfHeadroom() {
         assertTrue(
-            "Reading peaks at ${MemoryBudget.READ_SCENARIO_PEAK_BYTES}, over the assumed " +
-                "${MemoryBudget.ASSUMED_HEAP_BYTES} byte heap. Lower a ceiling, do not raise this.",
-            MemoryBudget.READ_SCENARIO_PEAK_BYTES <= MemoryBudget.ASSUMED_HEAP_BYTES,
+            "Reading peaks at ${MemoryBudget.READ_SCENARIO_PEAK_BYTES}; leave at least 4 MiB " +
+                "below the ${MemoryBudget.ASSUMED_HEAP_BYTES} byte heap. Lower a ceiling, do not raise this.",
+            MemoryBudget.READ_SCENARIO_PEAK_BYTES <= MemoryBudget.ASSUMED_HEAP_BYTES - 4L * 1024 * 1024,
         )
     }
 
@@ -50,9 +50,20 @@ class MemoryBudgetTest {
             MemoryBudget.PENDING_ATTACHMENT_BYTES +
                 MemoryBudget.FORWARD_ATTACHMENT_PEAK_BYTES +
                 MemoryBudget.LARGEST_READ_IN_FLIGHT_BYTES +
-                MemoryBudget.PGP_PLAINTEXT_PEAK_BYTES,
+                MemoryBudget.PGP_PLAINTEXT_PEAK_BYTES +
+                MemoryBudget.DECRYPTED_ATTACHMENT_BYTES +
+                MemoryBudget.DECRYPTED_ATTACHMENT_DECODE_GROWTH_BYTES +
+                MemoryBudget.DECRYPTED_SAVE_SNAPSHOT_BYTES +
+                MemoryBudget.DECRYPTED_OPEN_SNAPSHOT_BYTES +
+                MemoryBudget.INLINE_IMAGE_HTML_PEAK_BYTES,
             MemoryBudget.READ_SCENARIO_PEAK_BYTES,
         )
+    }
+
+    /** Twelve conservative base64/UTF-16 copies include retained variants and render scratch. */
+    @Test
+    fun inlineImageHtmlPeakCountsRetainedAndTransientCopies() {
+        assertEquals(12L * 3L * MemoryBudget.INLINE_IMAGE_BYTES, MemoryBudget.INLINE_IMAGE_HTML_PEAK_BYTES)
     }
 
     /** The in-flight term takes a max over the three network paths. Naming one of them by hand is
@@ -84,5 +95,18 @@ class MemoryBudgetTest {
     @Test
     fun retainedForwardAttachmentsAreHeldDecoded() {
         assertEquals(MemoryBudget.FORWARD_ATTACHMENT_BYTES, MemoryBudget.FORWARD_ATTACHMENT_PEAK_BYTES)
+    }
+
+    @Test
+    fun enrollmentScenarioFitsTheAssumedHeapAndCountsEveryTerm() {
+        assertEquals(
+            3L * MemoryBudget.PGP_SECRET_KEY_INPUT_BYTES +
+                6L * MemoryBudget.PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES +
+                2L * MemoryBudget.PGP_SECRET_KEY_OUTPUT_BYTES +
+                MemoryBudget.PGP_SECRET_KEY_STREAM_BUFFER_BYTES,
+            MemoryBudget.PGP_ENROLLMENT_PEAK_BYTES.toLong(),
+        )
+        assertTrue(MemoryBudget.PGP_ENROLLMENT_PEAK_BYTES <= MemoryBudget.ASSUMED_HEAP_BYTES)
+        assertTrue(MemoryBudget.PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES >= MemoryBudget.PGP_SECRET_KEY_OUTPUT_BYTES)
     }
 }

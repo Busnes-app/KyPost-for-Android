@@ -20,7 +20,7 @@ Owns production Android app code and resources.
 - Account replacement is staged: `attemptPairing` registers FIRST and only then purges the account being replaced. Nothing may be destroyed before the replacement is proven, or an offline scan of a valid QR silently unpairs a working account. `clearPairing` returns the stores that survived the purge; a non-empty result during replacement refuses the new account and escalates to `SecurityWipe.wipeAndResetApp`, because no table carries a subscriber column and survivors are readable by whoever pairs next. Never let a purge failure become a log line.
 - A PIN change is staged, not swapped in place. The verifier (`app_lock_secure`) and the wrapped device secret (`push_pairing_secure`) are different preference files, so no single `commit()` covers both. `SecuritySettingsActivity.changePin` writes the new wrapping via `SecurePairingStore.stagePendingSecret` **before** `setPin`, `resolveDeviceSecret` tries the live wrapping then the staged one, and the following `savePairing` promotes and clears the staged copy. Without staging, a process death between the two files sealed the secret under a key no surviving PIN derived, `needsCredentialRewrap()` could not see it (it answers a scheme-version question only — `deviceSecretIsStranded` is the one that detects this), and the relay's eventual 409 read to the user as "re-pair this device". Both of its key derivations go through `CredentialCipher.deriveKeysOrNull` and abort the change on null: an unreadable Keystore pepper is not a wrong PIN, and letting `PepperUnavailableException` out killed the process mid-protocol. Both abort points sit ahead of `setPin`, so there is nothing staged to roll back. `SourceRulesTest.credentialDerivationsHandleAnUnavailableKeystore` keeps raw `deriveKeys` out of every caller but `AppLockManager`.
 - `AppLockStore.putCredentialSaltIfAbsent` is compare-and-set under a companion-scoped lock and never overwrites. It replaced a `check()` that threw `IllegalStateException` through `AppLockManager`'s PIN paths, which catch only `PepperUnavailableException`.
-- Saving an attachment to Downloads is `security/AttachmentDownloads.kt`'s `saveAttachmentToDownloads`, not the detail Activity. The row is recorded in `DownloadedAttachmentLedger` BEFORE the first byte (it is the only handle a later wipe has on decrypted mail outside the sandbox) and is created `IS_PENDING = 1`, published only once the write completes; any failure deletes the row and KEEPS the ledger entry, since a row the delete could not remove must stay findable by the wipe.
+- Saving an attachment to Downloads is `security/AttachmentDownloads.kt`'s `saveAttachmentToDownloads`, not the detail Activity. Pass the raw sender name and MIME type: the sink resolves the safe type from both before sanitising the display name. The row is recorded in `DownloadedAttachmentLedger` BEFORE the first byte (it is the only handle a later wipe has on decrypted mail outside the sandbox) and is created `IS_PENDING = 1`, published only once the write completes; any failure deletes the row and KEEPS the ledger entry, since a row the delete could not remove must stay findable by the wipe. A decrypted-part save uses `OwnedAttachmentSave`: confirmation admits at most one owned snapshot before the executor hop; lock/destroy wipes a queued snapshot and makes its stale runnable refuse the write, while an already-started write keeps coherent ownership; completion or scheduling rejection wipes the remaining snapshot.
 - `EphemeralAttachmentProvider.openFile` peeks rather than consumes: viewers that probe before reading open the same URI twice, and consuming on the first open made the attachment unreopenable. The TTL sweep is the single owner of pending bytes — the writer does not zero on completion, because that races a second reader streaming the same array. Every mutation of the pending map shares one monitor so the size budget is computed against a map nothing is concurrently draining. `PendingAttachment` sanitises `displayName` through `safeFileName` in its own constructor: the sender's Content-Disposition filename is served to the chooser as `OpenableColumns.DISPLAY_NAME`, so it gets the same treatment as the Downloads sink's name, at the sink rather than at each caller.
 - `NativePairingDeepLinkParser` emits an already-resolved `registrationUrl`; it is never blank. A blank one is meaningless downstream (`readPairing` reads it as "no pairing at all", `register` rejects it), so resolution happens once at the parse boundary. `PushSyncCoordinator.syncAndPersist` still re-derives it for *stored* pairings — a different concern, guarding host divergence written by older builds.
 - FCM token sync goes through the backend's native registration endpoint (`reg` from the pairing QR, or derived as `{srv}/api/notifications/native/register`) — there is no user-editable Server URL setting; `srv` is a required QR field and is always sourced from the QR.
@@ -51,6 +51,10 @@ Owns production Android app code and resources.
   `mail/MailRepository` writes results into the Room cache (`data/AppDatabase`,
   `EmailDao.replaceFolderSnapshot`) and is what `InboxActivity`/`EmailDetailActivity`/
   `ComposeActivity` call.
+- The client-custody compose handoff opens the account's webmail without transferring recipients,
+  subject, body, or attachments. `ComposeActivity` stays alive and its existing `onStop` path keeps
+  the composition in `ComposeDraftCache`; cancel or launch failure leaves it editable. The relay
+  rejects plaintext drafts for client custody, so this handoff must never call `saveDraft`.
 - **`MailRepository` is the one synchronization boundary: the source returns facts, the repository
   decides when they become durable.** Two rules follow from that, and both were once broken.
   1. `RelayMailSource.fetchInbox` READS the cursor (to build `since`) and returns the next one as
@@ -95,6 +99,29 @@ Owns production Android app code and resources.
   decrypts client-protected messages locally. So `CLIENT_PROTECTED` no longer means "cannot be read
   here": it means "not readable here **unless** this device is enrolled and unlocked". Webmail
   remains the fallback for every device that is not.
+  A key rotation merges the newly enrolled secret-key collection first, then every retired primary
+  identity; a matching primary also recovers any historical subkey absent from the new collection.
+  For the same fingerprint, retain a nonempty historical private packet with incoming public
+  metadata. Merge never extracts private keys or runs incoming password KDFs: a small Argon2
+  packet can request more memory than the entire app budget. A corrupt nonempty historical
+  packet requires explicit recovery; re-enrollment does not silently replace it.
+  Invalid, empty, oversized, or over-count material fails the entire merge, preserving the old
+  vault rather than sealing a partial history. `MemoryBudget` owns the input, output, ring-count,
+  and separate enrollment-peak ceilings. Secret-key consumers parse packet order through
+  `orderedSecretKeyRings`; Bouncy Castle's collection iterator returns map order, which cannot
+  choose the current ring for signing or own-public-key derivation. That parser accepts exactly one
+  complete private-key armor block and checks the underlying bounded input has only whitespace left
+  after decoder EOF; Bouncy Castle accepts several whitespace-prefixed dash terminators, so a
+  hand-written approximation of its footer grammar is not sufficient.
+  Re-enrollment opens that existing vault through the live enrollment Activity and seals only a
+  successful current-first merge. `EnrollmentVault.stored()` returns null only when both envelope
+  fields are absent; incomplete/corrupt records and read errors propagate to `AndroidVaultOpener`
+  as `Failed`. Only `NotEnrolled` permits a current-only seal; cancellation,
+  open failure, a lost opened session, or merge refusal must leave the old vault and server state
+  unchanged. A successful seal wipes both plaintext arrays and clears `EnrollmentSession` before
+  cache deletion or the enrollment report. Both enrollment biometric operations are owned by the
+  live Activity: destruction explicitly resolves a pending open or seal exactly once, and a late
+  callback from the destroyed Activity cannot write the session or vault.
   Hostile Location Protection destroys the envelope and is the mode in which none of this exists.
   `pgpRowMarker` marks inbox rows for the two states that yield nothing readable (🔒 client-protected,
   ⚠ decrypt failed) and deliberately leaves server-decrypted rows unmarked — those open normally, so
@@ -104,9 +131,11 @@ Owns production Android app code and resources.
   A failed signature or a CHANGED signer key (`PgpSignatureState.KEY_CHANGED`) outranks both with
   ⚠. `SIGNER_UNKNOWN` deliberately does not mark: it is the ordinary state for a correspondent not
   yet in the address book, and a glyph on most rows carries nothing actionable.
-- `PgpSignatureState` has six values, not a verified/unverified pair: `NONE` (unsigned, or no opinion
-  expressed), `VERIFIED_CONFIRMED` (a key bound to the sender that the user confirmed out of band —
-  the only state that claims identity), `VERIFIED_SEEN_BEFORE` (a bound key still matching its TOFU
+- `PgpSignatureState` has seven values, not a verified/unverified pair: `NONE` (no opinion expressed),
+  `UNSIGNED` (local decryption proved the ciphertext carried no signature; it gets an informational
+  detail notice but no inbox warning, even when the relay resolved no sender), `VERIFIED_CONFIRMED`
+  (a key bound to the sender that the user
+  confirmed out of band — the only state that claims identity), `VERIFIED_SEEN_BEFORE` (a bound key still matching its TOFU
   pin, but never confirmed — most keys arrive by Autocrypt harvest, so this claims only continuity,
   "same key as last time", not who they say they are), `SIGNER_UNKNOWN` (no key bound to this sender
   at all — an ordinary correspondent not yet in the address book, a key that rotated before harvest,
@@ -225,10 +254,18 @@ Owns production Android app code and resources.
   HTML fallback/quoting, while HTML bodies must not be detected by content when the server supplied
   a mode. The detail screen renders known plain bodies in a native wrapping `TextView`, so email
   reading never requires horizontal scrolling.
+- `pgp/deliverReadOutcome` owns completed attachment arrays inside the worker until rendering
+  accepts them. Cancellation across the dispatcher return, render rejection, or a rendering
+  exception wipes unadopted bytes; successful adoption transfers cleanup to the detail Activity.
 - `renderableBody`/`blockExternalResources` strip remote resources from **both** reader variants
   before anything reaches the WebView; "Show images" restores `<img src>` and nothing else. An
   `<iframe>` is dropped whole, because `srcdoc` carries an inline document no attribute strip
   reaches. `EmailDetailActivityTest` is the contract for that.
+- Decrypted reader variants share a sanitizer-enforced aggregate data-image allowance, covering
+  literal data URLs and rewritten CIDs even after "Show images". The 128 KiB inline ceiling leaves
+  larger parts available for attachment open/save under the separate 4 MiB attachment budget.
+  `MemoryBudget` counts conservative retained/render image buffers and reserves at least 4 MiB
+  read headroom; this is not a bound on general HTML parsing or WebView image decoding.
 - Keyword tuning is managed in `KeywordSettingsActivity` and persists both hidden/visible state and
   the user-defined drag order used by Inbox tabs. Newly discovered keywords append to that order.
   Its RecyclerView owns theming its checkbox rows because the global theme walker deliberately
@@ -383,6 +420,8 @@ Owns production Android app code and resources.
   the Activity only picks views. Room schema changes need a matching `MigrationTest` case in
   `app/src/androidTest/`; migrations may set SQLite column defaults without the entity declaring
   `@ColumnInfo(defaultValue=…)`, since Room only validates a default when the entity side has one.
+- `pgp/SecretKeyRingMergeTest` proves current-first signing, retired-key decryption, same-primary
+  subkey retention, idempotence, invalid-input refusal, and every enrollment limit on the JVM.
 
 # Child DOX Index
 

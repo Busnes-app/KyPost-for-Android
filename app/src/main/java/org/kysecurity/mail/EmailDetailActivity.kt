@@ -91,6 +91,17 @@ class EmailDetailActivity : LockedActivity() {
     /** Only what the user actually opened is here - the honest limit of what Forward has in hand. */
     private val downloadedAttachments = linkedMapOf<Int, org.kysecurity.mail.mail.OutgoingAttachment>()
 
+    /** Parts of the decrypted message, retained for the chips; zeroed on lock and destroy. Never
+     *  copied into [downloadedAttachments]: Forward is blocked for CLIENT_PROTECTED and must stay so. */
+    private var decryptedAttachments: List<org.kysecurity.mail.pgp.DecryptedAttachment> = emptyList()
+    private val decryptedAttachmentSave = org.kysecurity.mail.security.OwnedAttachmentSave()
+
+    private fun dropDecryptedAttachments() {
+        decryptedAttachmentSave.stopAccepting()
+        decryptedAttachments.forEach { java.util.Arrays.fill(it.bytes, 0) }
+        decryptedAttachments = emptyList()
+    }
+
     /** This message's attachment listing, once loaded — what Forward has to fetch. */
     private var attachmentInfos: List<AttachmentInfo> = emptyList()
 
@@ -557,6 +568,7 @@ class EmailDetailActivity : LockedActivity() {
 
     /** Shared by [renderPgpBar] and [renderReadOutcome] so the wording cannot drift. */
     private fun signatureNoticeFor(state: PgpSignatureState): String? = when (state) {
+        PgpSignatureState.UNSIGNED -> "⬜ " + getString(R.string.email_pgp_signature_unsigned)
         PgpSignatureState.VERIFIED_CONFIRMED -> "✅ " + getString(R.string.email_pgp_signature_confirmed)
         PgpSignatureState.VERIFIED_SEEN_BEFORE -> "🟢 " + getString(R.string.email_pgp_signature_seen_before)
         PgpSignatureState.SIGNER_UNKNOWN -> "⬜ " + getString(R.string.email_pgp_signature_signer_unknown)
@@ -595,15 +607,15 @@ class EmailDetailActivity : LockedActivity() {
                 renderReadOutcome(ReadOutcome.NotEnrolled)
                 return@launch
             }
-            val outcome = withContext(Dispatchers.Default) {
-                reader.read(mailbox, messageId, sender, unlockIfNeeded)
-            }
-            renderReadOutcome(outcome)
+            org.kysecurity.mail.pgp.deliverReadOutcome(
+                read = { reader.read(mailbox, messageId, sender, unlockIfNeeded) },
+                render = ::renderReadOutcome,
+            )
         }
     }
 
-    private fun renderReadOutcome(outcome: ReadOutcome) {
-        if (isFinishing || isDestroyed) return
+    private fun renderReadOutcome(outcome: ReadOutcome): Boolean {
+        if (isFinishing || isDestroyed) return false
         btnDecryptHere.visibility = View.GONE
         btnDecryptHere.isEnabled = true
         btnRetryPayload.visibility = View.GONE
@@ -619,9 +631,9 @@ class EmailDetailActivity : LockedActivity() {
                 plainTextScroll.visibility = if (plainText != null) View.VISIBLE else View.GONE
                 webView.visibility = if (plainText != null) View.GONE else View.VISIBLE
                 plainTextView.text = plainText?.replace('\u00a0', ' ')?.let(::softWrapPlainText)
-                val rawHtml = emailBodyToHtml(
-                    outcome.body.html ?: plainText.orEmpty(),
-                    outcome.body.bodyMode,
+                val rawHtml = org.kysecurity.mail.pgp.inlineCidImages(
+                    emailBodyToHtml(outcome.body.html ?: plainText.orEmpty(), outcome.body.bodyMode),
+                    outcome.body.attachments,
                 )
                 // The same dark-theme override every other body gets, or a sender's colors go black-on-black.
                 val palette = getStoredThemePalette(this)
@@ -629,7 +641,8 @@ class EmailDetailActivity : LockedActivity() {
                 // stripping decision, with a different guard, on a WebView whose blockNetworkLoads
                 // is mutable and shared with the envelope render above it. Two copies of one
                 // security control had already drifted once.
-                val rendered = renderableBody(rawHtml, palette, ibmPlexMonoFontFaceCss(this), isDarkPalette(palette))
+                // The sanitizer shares one data-image allowance across literal and rewritten CID sources.
+                val rendered = renderableBody(rawHtml, palette, ibmPlexMonoFontFaceCss(this), isDarkPalette(palette), keepInlineDataImages = true)
                 if (plainText == null) {
                     lastRenderedHtml = rendered.withImages
                     webView.loadDataWithBaseURL(null, rendered.stripped, "text/html", "utf-8", null)
@@ -642,10 +655,12 @@ class EmailDetailActivity : LockedActivity() {
                 val verdict = displaySignatureVerdict(outcome)
                 pgpSignatureState = verdict
                 // Show the mailbox the verdict is ABOUT, not the sender-written header beside it.
-                if (verdict != PgpSignatureState.NONE) {
+                if (verdict != PgpSignatureState.NONE && outcome.resolvedSender.isNotBlank()) {
                     fromView.text = getString(R.string.email_from, outcome.resolvedSender)
                 }
-                val notice = signatureNoticeFor(verdict)
+                val omission = decryptedAttachmentNotice(outcome.body.attachmentsOmitted)
+                    ?.let { getString(it) }
+                val notice = listOfNotNull(signatureNoticeFor(verdict), omission).joinToString("\n\n").ifBlank { null }
                 if (notice != null) {
                     pgpBar.visibility = View.VISIBLE
                     pgpText.text = notice
@@ -656,6 +671,10 @@ class EmailDetailActivity : LockedActivity() {
                     pgpText.visibility = View.GONE
                 }
                 btnOpenInWebmail.visibility = View.GONE
+                dropDecryptedAttachments()
+                decryptedAttachments = outcome.body.attachments
+                decryptedAttachmentSave.allow()
+                renderDecryptedAttachments()
             }
             // The decrypt can still be retried here and the user is the missing input, so offer
             // it rather than the webmail fallback. Cancelled is silent on purpose: the user
@@ -690,6 +709,7 @@ class EmailDetailActivity : LockedActivity() {
         }
         // Routed through the pure decision below so NoEncryptedContent cannot drift into offering Retry.
         btnRetryPayload.visibility = if (showsRetryButton(outcome)) View.VISIBLE else View.GONE
+        return true
     }
 
     /** Resolves [readFailureNotice] against resources; empty for an outcome that has no sentence. */
@@ -705,6 +725,8 @@ class EmailDetailActivity : LockedActivity() {
         // Otherwise the decrypted plaintext DOM from an earlier Decrypted render lives on behind
         // the padlock, unloaded but still present.
         webView.loadUrl("about:blank")
+        dropDecryptedAttachments()
+        findViewById<ChipGroup>(R.id.emailAttachmentChips).removeAllViews()
         lockedPlaceholder.visibility = View.VISIBLE
         pgpBar.visibility = View.VISIBLE
         val body = if (webmailUnavailable) {
@@ -768,6 +790,80 @@ class EmailDetailActivity : LockedActivity() {
         label.text = getString(
             if (saveOffered) R.string.email_attachments_label_tap_to_view_hold_to_save
             else R.string.email_attachments_label_tap_to_view,
+        )
+    }
+
+    /** Chips for parts that came out of the ciphertext. Tap opens through the ephemeral provider;
+     *  hold saves after the same confirmation the server-listed chips use. */
+    private fun renderDecryptedAttachments() {
+        val label = findViewById<TextView>(R.id.emailAttachmentsLabel)
+        val chips = findViewById<ChipGroup>(R.id.emailAttachmentChips)
+        chips.removeAllViews()
+        if (decryptedAttachments.isEmpty()) {
+            label.visibility = View.GONE
+            chips.visibility = View.GONE
+            return
+        }
+        label.visibility = View.VISIBLE
+        chips.visibility = View.VISIBLE
+        val protectionEnabled = org.kysecurity.mail.security.SecurityRuntime
+            .graph(this).hostileLocationSettings.isEnabled()
+        val saveOffered = org.kysecurity.mail.security.attachmentSaveOffered(protectionEnabled)
+        decryptedAttachments.forEach { part ->
+            val chip = Chip(this).apply {
+                text = getString(R.string.attachment_chip_label, part.name)
+                setOnClickListener {
+                    // register() takes ownership and zeroes; the chip must survive a second tap.
+                    viewAttachmentEphemerally(
+                        org.kysecurity.mail.mail.DownloadedAttachment(part.name, part.mimeType, part.bytes.copyOf()),
+                    )
+                }
+                if (saveOffered) {
+                    setOnLongClickListener {
+                        androidx.appcompat.app.AlertDialog.Builder(this@EmailDetailActivity)
+                            .setTitle(R.string.attachment_save_confirm_title)
+                            .setMessage(getString(R.string.attachment_save_confirm_message, part.name))
+                            .setPositiveButton(R.string.attachment_save_confirm_positive) { _, _ ->
+                                val snapshot = decryptedAttachmentSave.admit(
+                                    part.bytes,
+                                    lifecycleValid = !isFinishing && !isDestroyed,
+                                ) ?: return@setPositiveButton
+                                try {
+                                    ioExecutor.execute {
+                                        if (!decryptedAttachmentSave.begin(snapshot)) return@execute
+                                        val saved = try {
+                                            org.kysecurity.mail.security.saveAttachmentToDownloads(
+                                                this@EmailDetailActivity,
+                                                part.name,
+                                                part.mimeType,
+                                                snapshot,
+                                            )
+                                        } finally {
+                                            decryptedAttachmentSave.finish(snapshot)
+                                        }
+                                        runOnUiThread {
+                                            if (isFinishing || isDestroyed) return@runOnUiThread
+                                            val id = if (saved) R.string.attachment_saved else R.string.attachment_save_failed
+                                            Toast.makeText(this@EmailDetailActivity, getString(id, part.name), Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                } catch (_: java.util.concurrent.RejectedExecutionException) {
+                                    decryptedAttachmentSave.finish(snapshot)
+                                }
+                            }
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .create()
+                            .showSecurely()
+                        true
+                    }
+                }
+            }
+            applyPillChipTheme(this, chip)
+            chips.addView(chip)
+        }
+        label.text = getString(
+            if (saveOffered) R.string.email_pgp_attachments_label_hold_to_save
+            else R.string.email_pgp_attachments_label,
         )
     }
 
@@ -958,6 +1054,7 @@ class EmailDetailActivity : LockedActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        dropDecryptedAttachments()
         // No redirectedToUnlock guard: ioExecutor is a property initializer, so it exists even
         // when onCreate bailed, and skipping shutdown would leak its thread.
         ioExecutor.shutdownNow()
@@ -1008,9 +1105,10 @@ internal fun renderableBody(
     palette: ThemePalette,
     monoFontFace: String,
     isDark: Boolean,
+    keepInlineDataImages: Boolean = false,
 ): RenderableBody {
-    val stripped = blockExternalResources(body)
-    val keptImages = blockExternalResources(body, keepImages = true)
+    val stripped = blockExternalResources(body, keepInlineDataImages = keepInlineDataImages)
+    val keptImages = blockExternalResources(body, keepImages = true, keepInlineDataImages = keepInlineDataImages)
     return RenderableBody(
         stripped = buildEmailBodyHtml(stripped, palette, monoFontFace, isDark),
         // What "Show images" loads: images restored, every OTHER remote resource still stripped.
@@ -1161,6 +1259,8 @@ internal fun softWrapPlainText(text: String): String = LONG_PLAIN_TOKEN.replace(
 internal fun blockExternalResources(
     html: String,
     keepImages: Boolean = false,
+    // Decrypted mail keeps bounded raster data images in both reader variants.
+    keepInlineDataImages: Boolean = false,
     /** Injectable so the fail-closed path can be PROVEN rather than assumed: jsoup is too tolerant
      *  to be made to throw from a test fixture, and "it fails closed" is exactly the kind of claim
      *  that must not rest on reading the code. */
@@ -1174,9 +1274,25 @@ internal fun blockExternalResources(
     // so there is nothing to preserve — the composer's Safelist drops the tag for the same reason.
     document.select("iframe").remove()
     // `track` fetches over the network exactly like its sibling `source`, and never as an image.
-    val resourceTags = if (keepImages) "video, audio, source, track, embed, object" else "img, video, audio, source, track, embed, object"
+    val resourceTags = if (keepImages && !keepInlineDataImages) "video, audio, source, track, embed, object" else "img, video, audio, source, track, embed, object"
+    // Charge the entire URL, including prefix/padding, without decoding or copying its payload.
+    var inlineImageCharsLeft = MemoryBudget.INLINE_IMAGE_BYTES * 4L / 3L
     document.select(resourceTags).forEach { element ->
-        element.removeAttr("src")
+        val src = element.attr("src")
+        val inlinePrefix = org.kysecurity.mail.pgp.INLINE_DATA_IMAGE_PREFIXES.firstOrNull { src.startsWith(it) }
+        val keepsInline = keepInlineDataImages && element.tagName() == "img" &&
+            src.length <= inlineImageCharsLeft && inlinePrefix != null &&
+            // Base64's alphabet cannot grow when jsoup escapes the attribute during serialization.
+            (inlinePrefix.length until src.length).all { index ->
+                val c = src[index]
+                c in 'A'..'Z' || c in 'a'..'z' || c in '0'..'9' || c == '+' || c == '/' || c == '='
+            }
+        if (keepsInline) inlineImageCharsLeft -= src.length
+        // Allow explicit remote images on opt-in; other schemes cannot bypass the data budget.
+        val keepsSrc = keepsInline || (keepImages && element.tagName() == "img" &&
+            (src.startsWith("https://", ignoreCase = true) ||
+                src.startsWith("http://", ignoreCase = true) || src.startsWith("//")))
+        if (!keepsSrc) element.removeAttr("src")
         element.removeAttr("srcset")
         element.removeAttr("poster")
         element.removeAttr("data")
@@ -1340,9 +1456,15 @@ internal fun readFailureNotice(outcome: ReadOutcome): Pair<Int, String?>? = when
     is ReadOutcome.Decrypted, ReadOutcome.NeedsUnlock, ReadOutcome.Cancelled -> null
 }
 
-/** A verdict with no resolved mailbox reads as being about the raw sender text, so return NONE. */
+/** Sender verdicts need a resolved mailbox. UNSIGNED describes the message and always passes. */
 internal fun displaySignatureVerdict(outcome: ReadOutcome.Decrypted): PgpSignatureState =
-    outcome.signature.takeIf { outcome.resolvedSender.isNotBlank() } ?: PgpSignatureState.NONE
+    outcome.signature.takeIf {
+        it == PgpSignatureState.UNSIGNED || outcome.resolvedSender.isNotBlank()
+    } ?: PgpSignatureState.NONE
+
+/** A dropped part is said out loud; a complete list needs no sentence. */
+internal fun decryptedAttachmentNotice(omitted: Boolean): Int? =
+    if (omitted) R.string.email_pgp_attachments_omitted else null
 
 /** False only for CLIENT_PROTECTED: `POST /api/mail/draft` would upload the plaintext. */
 internal fun mayReplyOrForward(state: PgpMessageState): Boolean = state != PgpMessageState.CLIENT_PROTECTED

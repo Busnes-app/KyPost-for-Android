@@ -1,5 +1,6 @@
 package org.kysecurity.mail.pgp
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
@@ -21,6 +22,7 @@ internal class EnrollmentCeremony(
     private val transport: EnrollmentTransport,
     private val keys: EnrollmentKeys,
     private val sealer: VaultSealer,
+    private val previousVault: VaultOpener,
     private val mailCache: DecryptedMailCache,
     private val clock: EnrollmentClock,
     private val hostileLocationEnabled: () -> Boolean,
@@ -255,20 +257,63 @@ internal class EnrollmentCeremony(
             return
         }
 
-        // NonCancellable around this call only: a cancel here would zero plaintext mid-read on the sealer.
-        when (withContext(NonCancellable) { sealer.seal(plaintext) }) {
-            is SealOutcome.Sealed -> {
-                // Sealed and durable by now; zero before report()'s network round trip rather than after.
-                plaintext.fill(0)
-                // Before report(): server-decrypted plaintext must not outlive this, and deltas never clear it.
-                mailCache.clearServerDecryptedBodies()
-                report()
-            }
-            is SealOutcome.NoSecureLockScreen -> failAndDestroy(FailureReason.NO_SECURE_LOCK_SCREEN)
-            is SealOutcome.Failed -> failAndDestroy(FailureReason.SEAL_FAILED)
-            is SealOutcome.Cancelled ->
-                // NOT back to the code: it would go stale with no window to refresh it. The envelope waits 7 days.
+        val hadPrevious = EnrollmentSession.isHeld()
+        val openOutcome = if (hadPrevious) OpenOutcome.Opened else try {
+            previousVault.open()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            OpenOutcome.Failed("The existing vault could not be opened")
+        }
+
+        val previousExpected = when (openOutcome) {
+            OpenOutcome.Opened -> true
+            OpenOutcome.NotEnrolled -> false
+            OpenOutcome.Cancelled -> {
                 emit(EnrollmentUiState.ReadyToFinish)
+                return
+            }
+            is OpenOutcome.Failed -> {
+                failAndDestroy(FailureReason.SEAL_FAILED)
+                return
+            }
+            OpenOutcome.NoSecureLockScreen -> {
+                failAndDestroy(FailureReason.NO_SECURE_LOCK_SCREEN)
+                return
+            }
+        }
+
+        var toSeal: ByteArray? = null
+        try {
+            toSeal = if (previousExpected) {
+                EnrollmentSession.withKey { previous -> mergeSecretKeyRings(plaintext, previous) }
+            } else {
+                plaintext
+            }
+            if (toSeal == null) {
+                failAndDestroy(FailureReason.SEAL_FAILED)
+                return
+            }
+
+            // NonCancellable around this call only: a cancel here would zero plaintext mid-read on the sealer.
+            when (withContext(NonCancellable) { sealer.seal(toSeal) }) {
+                is SealOutcome.Sealed -> {
+                    // Sealed and durable by now; zero before cache deletion or report's network round trip.
+                    plaintext.fill(0)
+                    if (toSeal !== plaintext) toSeal.fill(0)
+                    EnrollmentSession.clear()
+                    mailCache.clearServerDecryptedBodies()
+                    report()
+                }
+                is SealOutcome.NoSecureLockScreen -> failAndDestroy(FailureReason.NO_SECURE_LOCK_SCREEN)
+                is SealOutcome.Failed -> failAndDestroy(FailureReason.SEAL_FAILED)
+                is SealOutcome.Cancelled ->
+                    // NOT back to the code: it would go stale with no window to refresh it. The envelope waits 7 days.
+                    emit(EnrollmentUiState.ReadyToFinish)
+            }
+        } finally {
+            plaintext.fill(0)
+            if (toSeal !== plaintext) toSeal?.fill(0)
         }
     }
 

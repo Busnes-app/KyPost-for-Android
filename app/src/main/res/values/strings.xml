@@ -132,6 +132,7 @@
     <string name="email_pgp_signature_seen_before">Key trusted on first use</string>
     <string name="email_pgp_signature_signer_unknown">No Signing Key</string>
     <string name="email_pgp_signature_key_changed">Signing Key Mismatch</string>
+    <string name="email_pgp_signature_unsigned">Encrypted, not signed</string>
     <string name="email_row_pgp_failed_description">Encrypted, couldn\'t be decrypted: %1$s</string>
     <string name="attachment_downloading">Downloading %1$s…</string>
     <string name="email_attachments_label_tap_to_view">Attachments — tap to open</string>
@@ -143,6 +144,9 @@
     <string name="attachment_saved">Saved %1$s to Downloads</string>
     <string name="attachment_save_failed">Couldn\'t save %1$s</string>
     <string name="attachment_open_with">Open attachment with</string>
+    <string name="email_pgp_attachments_omitted">Some attachments in this message could not be shown on this device. Open it in webmail to get them.</string>
+    <string name="email_pgp_attachments_label">Decrypted attachments — tap to open</string>
+    <string name="email_pgp_attachments_label_hold_to_save">Decrypted attachments — tap to open, hold to save</string>
     <string name="attachment_too_many_open">Too many attachments are still open. Close one and try again.</string>
     <string name="forward_fetching_attachments">Fetching attachments to forward…</string>
     <plurals name="forward_attachments_failed">
@@ -178,12 +182,11 @@
     <string name="compose_pickup_dialog_body">We don\'t have a PGP key for %1$s. They\'ll get an email with a one-time link instead.\n\nTo make that work, this message\'s contents are stored on your KyPost server — unencrypted — for up to 7 days or until the link is opened. Everyone else on this message still gets it encrypted.</string>
     <string name="compose_pickup_dialog_confirm">Send link anyway</string>
     <string name="compose_handoff_dialog_title">Finish this in webmail</string>
-    <string name="compose_handoff_dialog_body">This account\'s PGP key is held only by your browser, so neither this app nor your server can encrypt on your behalf. Continuing saves this message as a draft on your KyPost server — unencrypted — so you can finish and send it in webmail.</string>
+    <string name="compose_handoff_dialog_body">This composition won\'t be transferred to webmail. Open webmail and recreate it there. Your current fields and attachments will remain here when you return.</string>
     <string name="compose_send_needs_webmail">This account\'s PGP key is held only by your browser, so this app can\'t encrypt or sign. Use “Continue in webmail” to send it protected.</string>
     <string name="compose_handoff_dialog_confirm">Open webmail</string>
-    <string name="compose_handoff_draft_failed">Couldn\'t save the draft, so webmail wouldn\'t have your message: %1$s</string>
-    <string name="compose_handoff_no_webmail">Couldn\'t work out this server\'s web address — open your drafts in your browser.</string>
-    <string name="compose_handoff_no_handler">No app on this device can open that link — open your drafts in your browser.</string>
+    <string name="compose_handoff_no_webmail">Couldn\'t work out this server\'s web address.</string>
+    <string name="compose_handoff_no_handler">No app on this device can open webmail.</string>
     <!-- Client-custody send: no pickup-link fallback, which stores plaintext for 7 days. -->
     <string name="compose_pgp_no_key_title">No key for some recipients</string>
     <string name="compose_pgp_no_key_body">We don\'t have a usable PGP key for %1$s, so nothing was sent.\n\nOn this account your key never leaves your devices, so your server can\'t send them a link on your behalf. Add their key in Contacts, or continue in webmail.</string>

@@ -6,6 +6,7 @@ import android.view.WindowManager
 import android.widget.Button
 import android.widget.TextView
 import androidx.activity.viewModels
+import androidx.annotation.VisibleForTesting
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -50,6 +51,8 @@ class DeviceEnrollmentActivity : LockedActivity() {
 
     /** Where the seal runs: not the main thread, and not `lifecycleScope` — a cancel would hang it. */
     private val sealExecutor = Executors.newSingleThreadExecutor()
+
+    private val vaultOpener = AndroidVaultOpener(this)
 
     private class LiveSeal(
         val prompt: BiometricPrompt,
@@ -203,7 +206,7 @@ class DeviceEnrollmentActivity : LockedActivity() {
 
         // Installed here rather than in onStart: the ceremony may reach the seal at any moment, and
         // a null sealer resolves as a cancel.
-        viewModel.installSealer(vaultSealer)
+        viewModel.installVaultPorts(vaultSealer, vaultOpener)
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -230,14 +233,18 @@ class DeviceEnrollmentActivity : LockedActivity() {
     override fun onDestroy() {
         // Guarded: touching `viewModel` after ComponentActivity cleared the store would start a new one.
         if (!created) {
+            vaultOpener.cancel()
             sealExecutor.shutdown()
             super.onDestroy()
             return
         }
 
+        // The ViewModel coroutine survives rotation, so this Activity must resolve its own prompt.
+        vaultOpener.cancel()
+
         // Skip on a rotation: the new Activity's onCreate already installed its sealer before this runs.
         if (!isChangingConfigurations()) {
-            viewModel.installSealer(null)
+            viewModel.installVaultPorts(null, null)
         }
 
         // Resolve any waiting seal, unless sealExecutor already owns the write (LiveSeal.committing).
@@ -263,6 +270,12 @@ class DeviceEnrollmentActivity : LockedActivity() {
         sealExecutor.shutdown()
         super.onDestroy()
     }
+
+    @VisibleForTesting
+    internal suspend fun openPreviousVaultForTest(): OpenOutcome = vaultOpener.open()
+
+    @VisibleForTesting
+    internal fun hasPendingVaultPromptForTest(): Boolean = vaultOpener.hasPendingPromptForTest()
 
     private fun render(scope: CoroutineScope, state: EnrollmentUiState, idle: Boolean) {
         countdown?.cancel()

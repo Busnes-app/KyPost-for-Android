@@ -11,7 +11,6 @@ import org.bouncycastle.openpgp.PGPLiteralDataGenerator
 import org.bouncycastle.openpgp.PGPPublicKey
 import org.bouncycastle.openpgp.PGPPublicKeyRing
 import org.bouncycastle.openpgp.PGPPublicKeyRingCollection
-import org.bouncycastle.openpgp.PGPSecretKeyRingCollection
 import org.bouncycastle.openpgp.PGPSignature
 import org.bouncycastle.openpgp.PGPSignatureGenerator
 import org.bouncycastle.openpgp.PGPUtil
@@ -101,9 +100,7 @@ internal object PgpEncryptor {
 
     /** Derived from the private key, never fetched; the whole ring, since only the subkey encrypts. */
     fun ownPublicKey(armoredPrivateKey: CharArray): String? = runCatching {
-        val ring = armoredPrivateKey.useArmoredStream { keyStream ->
-            PGPSecretKeyRingCollection(PGPUtil.getDecoderStream(keyStream), BcKeyFingerprintCalculator())
-        }.keyRings.asSequence().firstOrNull() ?: return null
+        val ring = armoredPrivateKey.useArmoredStream(::orderedSecretKeyRings)?.firstOrNull() ?: return null
 
         val out = ByteArrayOutputStream()
         ArmoredOutputStream(out).use { armoredOut ->
@@ -134,9 +131,8 @@ internal object PgpEncryptor {
 
     /** Empty passphrase: the armored key came out of the device envelope already unwrapped. */
     private fun signatureGeneratorFor(armoredPrivateKey: CharArray): PGPSignatureGenerator? = runCatching {
-        val secretKey = armoredPrivateKey.useArmoredStream { keyStream ->
-            PGPSecretKeyRingCollection(PGPUtil.getDecoderStream(keyStream), BcKeyFingerprintCalculator())
-        }.keyRings.asSequence()
+        val secretKey = armoredPrivateKey.useArmoredStream(::orderedSecretKeyRings)
+            ?.asSequence().orEmpty()
             .flatMap { ring -> ring.secretKeys.asSequence() }
             .firstOrNull { it.isSigningKey }
             ?: return null

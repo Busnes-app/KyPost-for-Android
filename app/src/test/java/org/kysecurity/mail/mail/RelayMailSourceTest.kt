@@ -403,6 +403,38 @@ class RelayMailSourceTest {
         assertEquals("cursor-2", outcome.checkpoint().cursor)
     }
 
+    /** Encrypted rows can arrive without bodies while preserving the relay's delta classification. */
+    @Test
+    fun deltaPoll_keepsEncryptedRowsFlagsWithoutBodies() {
+        val body = """
+            {
+              "tabs": ["Work"],
+              "byTab": {"Work": [
+                {"messageId": "e1", "sender": "a@example.com", "subject": "New", "label": "Work",
+                 "status": "unread", "changeType": "new", "pgpEncrypted": true, "pgpSigned": true},
+                {"messageId": "e2", "sender": "b@example.com", "subject": "Updated", "label": "Work",
+                 "status": "read", "changeType": "updated", "pgpEncrypted": true, "pgpSigned": true}
+              ]},
+              "cursor": "cursor-2", "delta": true, "removed": []
+            }
+        """.trimIndent()
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(storedCursor = "cursor-1"),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body) },
+        )
+
+        val result = (source.fetchInbox("INBOX", 50) as MailOutcome.Success).value
+
+        assertEquals(setOf("e2"), result.updatedMessageIds)
+        assertEquals(setOf("e1", "e2"), result.messages.map { it.id }.toSet())
+        result.messages.forEach { row ->
+            assertTrue(row.pgpEncrypted)
+            assertTrue(row.pgpSigned)
+            assertNull(row.body)
+        }
+    }
+
     @Test
     fun explicitForceFullResync_sendsSinceZero_regardlessOfPersistedCursor() {
         val cursorProvider = FakeMailCursorProvider(storedCursor = "cursor-99")

@@ -10,6 +10,12 @@ Owns Android instrumentation tests executed on emulator/device.
 
 - Use instrumentation tests for integration checks that require Android runtime.
 - Keep assertions focused on user-visible behavior and Android context wiring.
+- Activity fixtures must release runtime graphs they initialize after their scenarios close.
+  A cached `MailRuntime` repository retains its DAO across later database-wipe tests; invalidate
+  that graph in teardown while leaving `DataRuntime` and its open database owned by the suite.
+- Prompt lifecycle tests must await the visible system prompt before recreating its Activity,
+  then assert the replacement regains window focus. Request registration alone precedes window
+  attachment; API 31 SystemUI can strand a window if cancelled during that interval.
 
 # Work Guidance
 
@@ -19,6 +25,10 @@ Owns Android instrumentation tests executed on emulator/device.
 # Verification
 
 - Run connected Android tests when instrumentation changes are made.
+- `EnrollmentVaultReadFailureTest` injects a recoverable lazy preference failure while retaining
+  the real stored ciphertext, then checks the Android opener and recovery. `ReadOutcomeActivityTest`
+  checks accepted and rejected attachment ownership through the real renderer. Both Activity tests
+  require an unlocked app; the vault opener also requires a secure device lock screen.
 
 # Child DOX Index
 

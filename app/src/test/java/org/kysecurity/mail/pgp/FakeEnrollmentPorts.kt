@@ -12,6 +12,7 @@ internal fun sealEnvelope(
     keys: FakeEnrollmentKeys,
     deviceId: String = "dev-1",
     aadFingerprint: String = FAKE_FINGERPRINT,
+    plaintext: String = FAKE_PLAINTEXT,
 ): String {
     val sharedSecret = requireNotNull(keys.sharedSecretResult)
     val ephemeral = ByteArray(65).also { it[0] = 0x04; for (i in 1..64) it[i] = 0x44 }
@@ -30,7 +31,7 @@ internal fun sealEnvelope(
         )
         updateAAD(deviceEnvelopeAad(deviceId, aadFingerprint))
     }
-    val ct = cipher.doFinal(FAKE_PLAINTEXT.toByteArray(Charsets.UTF_8))
+    val ct = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
     val b64 = java.util.Base64.getEncoder()
     return """
         {"v":"2","alg":"ECDH-P256+HKDF-SHA256+A256GCM",
@@ -39,6 +40,8 @@ internal fun sealEnvelope(
          "ct":"${b64.encodeToString(ct)}"}
     """.trimIndent().replace("\n", "")
 }
+
+internal fun ringCount(armored: ByteArray): Int = orderedSecretKeyRings(armored.inputStream())!!.size
 
 internal class FakeIdentitySource(private val result: IdentityCheck) : IdentitySource {
     var checkCalls = 0
@@ -143,8 +146,10 @@ internal class FakeEnrollmentTransport(
 internal class FakeDecryptedMailCache(private val cachedRows: Int = 3) : DecryptedMailCache {
     var clearCalls = 0
         private set
+    var beforeClear: () -> Unit = {}
 
     override suspend fun clearServerDecryptedBodies(): Int {
+        beforeClear()
         clearCalls++
         return cachedRows
     }
@@ -153,6 +158,7 @@ internal class FakeDecryptedMailCache(private val cachedRows: Int = 3) : Decrypt
 internal class FakeVaultSealer(
     var outcome: SealOutcome = SealOutcome.Sealed,
 ) : VaultSealer {
+    var failure: Exception? = null
     /** A copy of what was handed over, taken before the ceremony zeroes the caller's array, so a
      *  test can prove the original was wiped without the fake's own copy being wiped too. */
     val received = mutableListOf<ByteArray>()
@@ -163,6 +169,7 @@ internal class FakeVaultSealer(
     override suspend fun seal(plaintext: ByteArray): SealOutcome {
         received += plaintext.copyOf()
         handedArrays += plaintext
+        failure?.let { throw it }
         return outcome
     }
 }
@@ -201,6 +208,7 @@ internal class FakePorts(
     reportResult: EnrollmentCallResult = EnrollmentCallResult.Ok,
     /** A keystore that refuses to mint — StrongBox and the TEE fallback both failing. */
     minting: Boolean = true,
+    val previousVault: VaultOpener = FakeVaultOpener(outcome = OpenOutcome.NotEnrolled),
 ) {
     val identity = FakeIdentitySource(identityResult)
     val keys = FakeEnrollmentKeys(minting = minting)
@@ -223,6 +231,7 @@ internal class FakePorts(
         transport = transport,
         keys = keys,
         sealer = sealer,
+        previousVault = previousVault,
         mailCache = mailCache,
         clock = clock,
         hostileLocationEnabled = { hostileLocation },

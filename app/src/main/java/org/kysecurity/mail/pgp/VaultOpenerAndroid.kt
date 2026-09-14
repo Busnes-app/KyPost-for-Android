@@ -1,5 +1,6 @@
 package org.kysecurity.mail.pgp
 
+import androidx.annotation.VisibleForTesting
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -8,12 +9,53 @@ import androidx.lifecycle.Lifecycle
 import org.kysecurity.mail.R
 import javax.crypto.Cipher
 import kotlin.coroutines.resume
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /** Opens via a `CryptoObject`; the plaintext lands in [EnrollmentSession] and is never returned. */
-internal class AndroidVaultOpener(private val activity: FragmentActivity) : VaultOpener {
+internal class AndroidVaultOpener(
+    private val activity: FragmentActivity,
+    private val vault: () -> EnrollmentVault = { EnrollmentVault(activity) },
+) : VaultOpener {
+
+    private class LiveOpen(
+        val prompt: BiometricPrompt,
+        val continuation: CancellableContinuation<OpenOutcome>,
+    )
+
+    @Volatile
+    private var liveOpen: LiveOpen? = null
+
+    private val openLock = Any()
+
+    @VisibleForTesting
+    fun hasPendingPromptForTest(): Boolean = synchronized(openLock) { liveOpen != null }
+
+    private fun claim(continuation: CancellableContinuation<OpenOutcome>): Boolean =
+        synchronized(openLock) {
+            if (liveOpen?.continuation === continuation) {
+                liveOpen = null
+                true
+            } else {
+                false
+            }
+        }
+
+    private fun resolve(continuation: CancellableContinuation<OpenOutcome>, outcome: OpenOutcome) {
+        if (claim(continuation) && continuation.isActive) continuation.resume(outcome)
+    }
+
+    /** Activity teardown owns this resolution; callbacks arriving afterwards cannot claim it. */
+    fun cancel() {
+        val open = synchronized(openLock) {
+            liveOpen.also { liveOpen = null }
+        } ?: return
+        runCatching { open.prompt.cancelAuthentication() }
+        if (open.continuation.isActive) open.continuation.resume(OpenOutcome.Cancelled)
+    }
 
     /** `withContext` is not `inline`, so the IO side's early exits travel out as a value. */
     private sealed class VaultUnlock {
@@ -26,13 +68,21 @@ internal class AndroidVaultOpener(private val activity: FragmentActivity) : Vaul
     override suspend fun open(): OpenOutcome {
         // Blocking Keystore/disk work; the Main hop is explicit — the caller builds this from IO.
         val unlock = withContext(Dispatchers.IO) {
-            val vault = EnrollmentVault(activity)
-
+            val vault = vault()
             // Never ensureKey() here: it mutates and would wipe a still-good envelope.
             if (!hasSecureLockScreen(activity)) {
                 return@withContext VaultUnlock.Blocked(OpenOutcome.NoSecureLockScreen)
             }
-            val (iv, ciphertext) = vault.stored()
+            val stored = try {
+                vault.stored()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                return@withContext VaultUnlock.Blocked(
+                    OpenOutcome.Failed(activity.getString(R.string.email_pgp_unseal_failed)),
+                )
+            }
+            val (iv, ciphertext) = stored
                 ?: return@withContext VaultUnlock.Blocked(OpenOutcome.NotEnrolled)
             // A stored blob this key cannot open is Failed, never NotEnrolled — different advice.
             val cipher = vault.openCipher(iv)
@@ -63,9 +113,10 @@ internal class AndroidVaultOpener(private val activity: FragmentActivity) : Vaul
                         override fun onAuthenticationSucceeded(
                             result: BiometricPrompt.AuthenticationResult,
                         ) {
+                            if (!claim(cont)) return
                             val authenticated = result.cryptoObject?.cipher
                             if (authenticated == null) {
-                                cont.resume(
+                                if (cont.isActive) cont.resume(
                                     OpenOutcome.Failed(activity.getString(R.string.email_pgp_unseal_failed)),
                                 )
                                 return
@@ -73,19 +124,22 @@ internal class AndroidVaultOpener(private val activity: FragmentActivity) : Vaul
                             val outcome = runCatching {
                                 // GCM tag failure = wrong key for this ciphertext: re-enrol.
                                 val plaintext = authenticated.doFinal(ciphertext)
-                                // putUtf8: a String copy of the private key could not be zeroed.
-                                EnrollmentSession.putUtf8(plaintext)
-                                plaintext.fill(0)
+                                try {
+                                    // putUtf8: a String copy of the private key could not be zeroed.
+                                    EnrollmentSession.putUtf8(plaintext)
+                                } finally {
+                                    plaintext.fill(0)
+                                }
                                 OpenOutcome.Opened
                             }.getOrElse {
                                 OpenOutcome.Failed(activity.getString(R.string.email_pgp_unseal_failed))
                             }
-                            cont.resume(outcome)
+                            if (cont.isActive) cont.resume(outcome)
                         }
 
                         /** Every error is [OpenOutcome.Cancelled]: the envelope is not broken. */
                         override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                            cont.resume(OpenOutcome.Cancelled)
+                            resolve(cont, OpenOutcome.Cancelled)
                         }
 
                         // onAuthenticationFailed is a non-matching finger. The prompt stays up and the
@@ -103,9 +157,13 @@ internal class AndroidVaultOpener(private val activity: FragmentActivity) : Vaul
                     )
                     .build()
 
+                synchronized(openLock) { liveOpen = LiveOpen(prompt, cont) }
+
                 prompt.authenticate(info, BiometricPrompt.CryptoObject(cipher))
 
-                cont.invokeOnCancellation { runCatching { prompt.cancelAuthentication() } }
+                cont.invokeOnCancellation {
+                    if (claim(cont)) runCatching { prompt.cancelAuthentication() }
+                }
             }
         }
     }

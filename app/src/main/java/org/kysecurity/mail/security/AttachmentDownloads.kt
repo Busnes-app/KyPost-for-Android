@@ -10,6 +10,14 @@ import java.io.OutputStream
 
 private const val TAG = "AttachmentDownloads"
 
+internal data class AttachmentDownloadMetadata(val displayName: String, val mimeType: String)
+
+/** Resolves type from the raw sender name before sanitising that name for Downloads. */
+internal fun attachmentDownloadMetadata(name: String, mimeType: String): AttachmentDownloadMetadata {
+    val safeType = safeMimeType(mimeType, name)
+    return AttachmentDownloadMetadata(safeFileName(name, safeType), safeType)
+}
+
 /** Saves a decrypted attachment into shared Downloads, or leaves nothing behind.
  *
  *  Name and type come from the sender's headers, unfiltered by the relay: both are sanitised here.
@@ -29,11 +37,11 @@ internal fun saveAttachmentToDownloads(
     write: (OutputStream, ByteArray) -> Unit = { stream, payload -> stream.write(payload) },
 ): Boolean {
     val resolver = context.contentResolver
-    val safeType = safeMimeType(mimeType, name)
+    val metadata = attachmentDownloadMetadata(name, mimeType)
     val values = ContentValues().apply {
         // The name's extension is derived from safeType, not from the sender's filename.
-        put(MediaStore.Downloads.DISPLAY_NAME, safeFileName(name, safeType))
-        put(MediaStore.Downloads.MIME_TYPE, safeType)
+        put(MediaStore.Downloads.DISPLAY_NAME, metadata.displayName)
+        put(MediaStore.Downloads.MIME_TYPE, metadata.mimeType)
         put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
         // Invisible to every other app until the write completes below.
         put(MediaStore.Downloads.IS_PENDING, 1)
