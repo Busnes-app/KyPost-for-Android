@@ -9,6 +9,8 @@ import org.kysecurity.mail.push.PairingData
 import org.kysecurity.mail.push.pairingUrlHost
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import okhttp3.Call
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -195,6 +197,20 @@ class RelayMailSource(
             .authed(pairing)
             .build()
         return execute(request) { code, rawBody -> mutationOutcome(code, rawBody) }
+    }
+
+    override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        val base = baseUrl(pairing, "/api/mail/draft") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val body = json.encodeToString(RelayClientEncryptedDraftDto(draft.to, draft.pgpDraft))
+        val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
+            .authed(pairing).build()
+        return execute(request) { code, rawBody ->
+            if (code != 200) return@execute mapErrorCode(code, rawBody)
+            val reply = runCatching { json.parseToJsonElement(rawBody) as? JsonObject }.getOrNull()
+            if (reply?.get("ok") == JsonPrimitive(true)) MailOutcome.Success(Unit)
+            else MailOutcome.UpstreamFailure("Draft save was not acknowledged")
+        }
     }
 
     override fun sendMail(draft: MailDraft): MailOutcome<MailSendOutcome> {

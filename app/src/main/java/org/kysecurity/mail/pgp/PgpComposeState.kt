@@ -31,3 +31,14 @@ fun pgpComposeStateOf(
         PgpComposeState(canEncrypt = true, canSign = true, handoffToWebmail = false)
     else -> PgpComposeState(canEncrypt = false, canSign = false, handoffToWebmail = false)
 }
+
+internal enum class DraftHandoffMode { ENCRYPT_AND_SAVE, OPEN_WITHOUT_SAVE, REFUSE }
+
+internal fun draftHandoffMode(
+    hasIdentity: Boolean?, protection: String?, enrolled: Boolean, accountAddress: String,
+): DraftHandoffMode = when {
+    hasIdentity != true || protection != PROTECTION_CLIENT -> DraftHandoffMode.REFUSE
+    !enrolled -> DraftHandoffMode.OPEN_WITHOUT_SAVE
+    accountAddress.isBlank() -> DraftHandoffMode.REFUSE
+    else -> DraftHandoffMode.ENCRYPT_AND_SAVE
+}

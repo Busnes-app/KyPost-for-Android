@@ -29,6 +29,20 @@ class ComposePgpControllerTest {
     fun clearCache() = ComposePgpController.resetSessionCache()
 
     @Test
+    fun draftHandoffFailsClosedExceptForKnownClientCustody() {
+        val refused = org.kysecurity.mail.pgp.DraftHandoffMode.REFUSE
+        for (protection in listOf(null, "server", "future")) {
+            assertEquals(refused, org.kysecurity.mail.pgp.draftHandoffMode(true, protection, true, "me@example.com"))
+        }
+        assertEquals(refused, org.kysecurity.mail.pgp.draftHandoffMode(false, "client", true, "me@example.com"))
+        assertEquals(refused, org.kysecurity.mail.pgp.draftHandoffMode(true, "client", true, ""))
+        assertEquals(org.kysecurity.mail.pgp.DraftHandoffMode.OPEN_WITHOUT_SAVE,
+            org.kysecurity.mail.pgp.draftHandoffMode(true, "client", false, ""))
+        assertEquals(org.kysecurity.mail.pgp.DraftHandoffMode.ENCRYPT_AND_SAVE,
+            org.kysecurity.mail.pgp.draftHandoffMode(true, "client", true, "me@example.com"))
+    }
+
+    @Test
     fun splitAddresses_flattensTheThreeCommaJoinedFields() {
         assertEquals(
             listOf("a@example.com", "b@example.com", "c@example.com"),
@@ -136,10 +150,14 @@ class ComposePgpControllerTest {
         )
 
         assertTrue(controller.composeState().handoffToWebmail, "unenrolled device hands off")
+        assertEquals(org.kysecurity.mail.pgp.DraftHandoffMode.OPEN_WITHOUT_SAVE, controller.draftHandoffMode())
 
         enrolled = true
 
         assertTrue(controller.composeState().clientSide, "enrolling mid-session must take effect")
+        assertEquals(org.kysecurity.mail.pgp.DraftHandoffMode.ENCRYPT_AND_SAVE, controller.draftHandoffMode())
+        enrolled = false
+        assertEquals(org.kysecurity.mail.pgp.DraftHandoffMode.OPEN_WITHOUT_SAVE, controller.draftHandoffMode())
         assertEquals(1, calls, "bootstrap itself is still cached")
     }
 

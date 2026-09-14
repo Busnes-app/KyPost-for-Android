@@ -1019,6 +1019,34 @@ class RelayMailSourceTest {
     }
 
     @Test
+    fun encryptedDraft_postsOnlyRecipientAndCiphertext() {
+        val calls = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true}""") }
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() }, cursorProvider = FakeMailCursorProvider(), callFactory = calls,
+        )
+        val draft = ClientEncryptedDraft("alice@example.com", "encrypted MIME")
+        assertTrue(source.saveClientEncryptedDraft(draft) is MailOutcome.Success)
+        assertEquals("https://relay.example.com/api/mail/draft", calls.urls.single())
+        val fields = Json.parseToJsonElement(calls.bodies.single()) as kotlinx.serialization.json.JsonObject
+        assertEquals(setOf("to", "pgpDraft"), fields.keys)
+        assertEquals(Json.parseToJsonElement("\"alice@example.com\""), fields["to"])
+        assertEquals(Json.parseToJsonElement("\"encrypted MIME\""), fields["pgpDraft"])
+        assertEquals("ClientEncryptedDraft(redacted)", draft.toString())
+    }
+
+    @Test
+    fun encryptedDraftRejectsUnacknowledgedSuccessResponses() {
+        for (body in listOf("{\"ok\":false}", "{}", "not JSON", "{\"ok\":\"true\"}")) {
+            val calls = BodyRecordingCallFactory { request -> jsonResponse(request, body) }
+            val source = RelayMailSource(
+                pairingProvider = { testPairing() }, cursorProvider = FakeMailCursorProvider(), callFactory = calls,
+            )
+            assertTrue("unacknowledged 200 accepted: $body",
+                source.saveClientEncryptedDraft(ClientEncryptedDraft("a@example.com", "MIME")) is MailOutcome.UpstreamFailure)
+        }
+    }
+
+    @Test
     fun saveDraft_omitsPgpFlags() {
         val callFactory = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true}""") }
         val source = RelayMailSource(

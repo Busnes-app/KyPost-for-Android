@@ -154,6 +154,11 @@ class OutgoingAttachment(
     override fun toString(): String = "OutgoingAttachment(redacted)"
 }
 
+/** Only an already self-encrypted MIME message crosses the draft transport boundary. */
+data class ClientEncryptedDraft(val to: String, val pgpDraft: String) {
+    override fun toString(): String = "ClientEncryptedDraft(redacted)"
+}
+
 data class MailSendOutcome(val sentSaved: Boolean, val warning: String)
 
 data class ClientEncryptedDelivery(val recipients: List<String>, val ciphertext: String)
@@ -203,6 +208,7 @@ interface MailSource {
         targetMailbox: String? = null,
     ): MailOutcome<MailActionOutcome>
     fun saveDraft(draft: MailDraft): MailOutcome<Unit>
+    fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit>
     fun sendMail(draft: MailDraft): MailOutcome<MailSendOutcome>
 
     /** Relays ciphertext this device already built; a different endpoint and failure set. */
