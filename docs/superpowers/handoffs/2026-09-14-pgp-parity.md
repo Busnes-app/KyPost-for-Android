@@ -11,27 +11,27 @@
 ## Delivered behavior
 
 - Decrypted MIME attachments stay in memory and can be opened through the existing ephemeral content provider or explicitly saved through the existing download sink. Raster CID images render through the sanitized encrypted-message path. Decrypted bytes never enter Room, cached fetched HTML, or the attachments used by Forward.
-- Attachment retention is capped at 4 MiB total, with one owned save snapshot. Queued snapshots are wiped on teardown; an already-started save finishes with its own stable bytes and then wipes them. The modeled read allocation peak, including decoding growth and save/open copies, remains 128 MiB. This is an allocation model, not a measured whole-process peak.
+- Attachment retention is capped at 4 MiB total, with one owned save snapshot. Completed read results retain a cleanup owner across dispatcher delivery and rendering; cancellation or rejection wipes arrays before UI adoption. Queued snapshots are wiped on teardown; an already-started save finishes with its own stable bytes and then wipes them. The modeled read allocation peak, including decoding growth and save/open copies, remains 128 MiB. This is an allocation model, not a measured whole-process peak.
 - Successfully decrypted unsigned messages say “Encrypted, not signed,” including messages without a resolved sender. Existing signed-only verification behavior remains.
-- Re-enrollment preserves retired keys and missing historical subkeys, restores usable private packets when the new same-fingerprint packet is an empty stub, and keeps current public metadata and packet order for signing and own-key selection. Failed unlocks or refused merges leave the stored vault unchanged; only genuine first enrollment can seal current-only material.
-- Merge limits are 256 KiB current input, 384 KiB previous input/output, and 32 rings. Invalid, incomplete, or excessive key material is refused. The separately modeled enrollment buffer peak is 3,940,352 bytes; it does not claim to measure Bouncy Castle's object heap.
+- Re-enrollment preserves retired keys and missing historical subkeys, retains nonempty historical private packets for a matching fingerprint, and keeps current public metadata and packet order for signing and own-key selection. Storage errors and incomplete/corrupt records are distinct from confirmed absence. Failed unlocks or refused merges leave the stored vault unchanged; only genuine first enrollment can seal current-only material.
+- Merge limits are 256 KiB current input, 384 KiB previous input/output, and 32 rings. Invalid, incomplete, or excessive key material is refused. Merging does not execute incoming password-derivation parameters. The separately modeled enrollment buffer peak is 3,940,352 bytes; it does not claim to measure Bouncy Castle's object heap.
 - Destroying the enrollment Activity resolves its pending old-vault prompt as cancelled, including during rotation. Stale callbacks cannot repopulate the key session.
 - Webmail handoff explains that it transfers no composition, makes no draft request, and leaves the Android composer available. Server PR #185 rejects client-custody plaintext draft uploads. Full self-encrypted draft saving is **not implemented here**; it has a [separate follow-up plan](../plans/2026-09-14-encrypted-draft-handoff.md).
 - Regression coverage pins encrypted bodyless delta rows and tolerance of unknown resolver tiers and signer sources.
 
 ## Verification
 
-Verified implementation: `ac55626` (later documentation commits do not change runtime code). The whole-branch review is in progress.
+Verified implementation: `38dc112` (later documentation commits do not change runtime code). Whole-branch review and scoped follow-ups approved; all reported blockers are closed.
 
 | Check | Play | GitHub | F-Droid |
 | --- | --- | --- | --- |
-| JVM unit suite | 1,175 passed | 1,175 passed | 1,175 passed |
+| JVM unit suite | 1,180 passed | 1,180 passed | 1,180 passed |
 | Lint | 0 errors, 284 warnings | 0 errors, 294 warnings | 0 errors, 294 warnings |
 | Release APK assembly, disposable verification signer | Passed | Passed | Passed |
 | Runtime matched class-name gate | Passed | Passed | Passed |
 | Exported-component gate | Passed | Passed | Passed |
 
-All unit suites had zero failures, errors, or skipped tests. The signing-secret check and `git diff --check` also passed. The combined Gradle invocation completed in 3m27s. Reproduce its gates with:
+All unit suites had zero failures, errors, or skipped tests. The signing-secret check and `git diff --check` also passed. The combined Gradle invocation completed in 3m25s. Reproduce its gates with:
 
 ```bash
 ./gradlew checkSigningSecretsAreNotInTheTree \
@@ -48,20 +48,24 @@ Release packaging needs the disposable key supplied through `KYPOST_*` environme
 
 Focused checks completed during implementation include MIME/CID parsing, attachment ownership and filename handling, unsigned display, delta sync, real retired-key decryption/current-key signing, invalid and over-limit merge refusal, and enrollment buffer/session cleanup. Deliberate mutations were used to prove the affected regression assertions.
 
-The combined final PlayDebug device run passed all **14 tests** on the disposable API 36 emulator in 13 seconds:
+The final PlayDebug device runs passed all **42 tests** on the disposable API 36 emulator: the full PGP package (29) plus attachment/provider/composer checks (13).
 
 ```bash
 ANDROID_SERIAL=emulator-5554 ./gradlew :app:connectedPlayDebugAndroidTest \
-  -Pandroid.testInstrumentationRunnerArguments.class=org.kysecurity.mail.security.AttachmentDownloadCleanupTest,org.kysecurity.mail.security.EphemeralAttachmentProviderTest,org.kysecurity.mail.ui.ComposeDraftSurvivesTeardownTest,org.kysecurity.mail.pgp.DeviceEnrollmentOpenLifecycleTest
+  -Pandroid.testInstrumentationRunnerArguments.package=org.kysecurity.mail.pgp
+ANDROID_SERIAL=emulator-5554 ./gradlew :app:connectedPlayDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=org.kysecurity.mail.security.AttachmentDownloadCleanupTest,org.kysecurity.mail.security.EphemeralAttachmentProviderTest,org.kysecurity.mail.ui.ComposeDraftSurvivesTeardownTest
 ```
 
-Covered:
-
-- 12 attachment download cleanup and ephemeral-provider tests passed.
-- ComposeDraftSurvivesTeardownTest passed.
-- DeviceEnrollmentOpenLifecycleTest passed after waiting for an actual pending biometric prompt. Removing destroy cancellation made it fail after five seconds with a stranded-open assertion; restoring cancellation passed.
+Coverage includes the existing enrollment/vault/teardown/worker checks, storage failure and corruption, actual renderer adoption/rejection and destruction, attachment downloads and ephemeral-provider cleanup, and composer retention. DeviceEnrollmentOpenLifecycleTest waits for an actual pending biometric prompt: removing destroy cancellation made it fail after five seconds with a stranded-open assertion; restoring cancellation passed.
 
 The old pre-existing emulator was credential-locked and could not access shared storage. Those attachment setup failures were reproduced and resolved by using a new unlocked disposable AVD; the original AVD was not wiped.
+
+## Final review corrections
+
+The whole-branch review identified two historical-key preservation failures and a cancelled-result cleanup gap. The fixes distinguish unavailable storage from an absent vault, retain historical private packets with current public metadata, and keep attachment cleanup ownership until the UI accepts the result. All three failures were deliberately restored: storage classification, historical decrypt, and queued-delivery cleanup regressions failed; restoring the fixes returned them to green.
+
+The first key-usability fix exposed an allocation risk by executing incoming Argon2 parameters. That extraction was removed entirely. A committed regression traps any merge-time private extraction, and the reviewer's real 816-byte input subsequently merged under a 64 MiB JVM heap without the earlier out-of-memory condition. Bounds stay unchanged.
 
 ## Not run / follow-up
 
@@ -108,3 +112,7 @@ The original plan below remains a historical implementation recipe. The followin
 - Task9 UI ruling: cancellation may remain ReadyToFinish; failed vault open and malformed/over-limit merge should use honest generic failure (existing SEAL_FAILED) rather than Almost done/authentication-only copy, while never altering old vault. Agreement-key teardown on true failure is acceptable; user can restart ceremony.
 
 - Ruling: final release packaging may use a disposable verification signing key, matching CI; production signing credentials are unavailable. Artifacts are verification-only and must not be published as a production release. Cost if wrong: no production-signature validation is claimed.
+
+- Ruling: for a matching fingerprint, retain a nonempty historical private packet with the current public metadata, without running any incoming KDF during merge. The same fingerprint identifies the same key; history preservation does not require testing attacker-supplied password derivation. Cost: re-enrollment will not silently repair a corrupt nonempty historical packet for the same fingerprint; that requires explicit recovery rather than risking key loss or unbounded allocation.
+
+- Ruling: apply one narrowly scoped follow-up for the new allocation blocker and re-review it, despite the skill's one-wave stopping guideline. This is an authorized reversible correctness fix, and handing off a known avoidable key-import OOM would leave the task unfinished. No broader second review/fix wave.
