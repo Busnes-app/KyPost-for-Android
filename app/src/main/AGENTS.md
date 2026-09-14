@@ -56,6 +56,8 @@ Owns production Android app code and resources.
   and `pgpDraft`. Protected To/Cc/Bcc/Subject, body and attachments travel inside the ciphertext;
   the outer MIME has To and a placeholder Subject, with no Cc/Bcc. Bootstrap keys and recipient
   discovery are not inputs to self-encryption. Consent names the exposed From/To/date metadata.
+  Initial restored/prefilled HTML seeds the synchronous body mirror before the editor export, so
+  an immediate recreation cannot replace it with an empty body.
   The encrypted transport requires JSON `ok:true`, but this is not a receipt proving ciphertext
   was stored by an older relay. The composer therefore stays available even after save and browser
   launch succeed; only the user's normal discard/send action removes it. A modal

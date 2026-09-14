@@ -246,6 +246,8 @@ class ComposeActivity : LockedActivity() {
             bccInput.setInitialRecipients(restored.bcc)
             attachments.addAll(restored.attachments)
             renderAttachmentChips()
+            // onStop can precede the editor's first asynchronous export.
+            mirroredBodyHtml = restored.bodyHtml
             bodyEditor.setHtml(restored.bodyHtml)
             // Deferred rather than set directly: the chips' listeners are installed by
             // applyPgpComposeState, and re-checking Encrypt has to re-run the keyless preflight.
@@ -259,6 +261,7 @@ class ComposeActivity : LockedActivity() {
             val (to, subject, bodyHtml) = parseComposeIntent(intent, ::plainTextToHtml)
             subjectField.setText(subject)
             toInput.setInitialRecipients(to)
+            mirroredBodyHtml = bodyHtml
             bodyEditor.setHtml(bodyHtml)
 
             // A forward's attachments, handed over out-of-band because they are far too large for

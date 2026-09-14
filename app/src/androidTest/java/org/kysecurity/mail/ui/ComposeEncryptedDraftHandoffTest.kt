@@ -4,6 +4,10 @@ import android.content.Intent
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleCallback
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
+import java.util.concurrent.atomic.AtomicReference
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
@@ -26,6 +30,22 @@ class ComposeEncryptedDraftHandoffTest {
             "<p>Private body</p>", listOf(OutgoingAttachment("note.txt", "text/plain", byteArrayOf(1, 2, 3))),
         ))
         return ActivityScenario.launch(Intent(InstrumentationRegistry.getInstrumentation().targetContext, ComposeActivity::class.java))
+    }
+
+    @Test fun initialBodyIsRecoverableBeforeTheFirstAsyncExport() {
+        val firstMirror = AtomicReference<String>()
+        val callback = ActivityLifecycleCallback { activity, stage ->
+            if (activity is ComposeActivity && stage == Stage.RESUMED) {
+                firstMirror.compareAndSet(null, activity.mirroredBodyHtmlForTest())
+            }
+        }
+        val monitor = ActivityLifecycleMonitorRegistry.getInstance()
+        monitor.addLifecycleCallback(callback)
+        try {
+            launch().use {
+                assertTrue("initial body missing before the queued export", firstMirror.get().orEmpty().contains("Private body"))
+            }
+        } finally { monitor.removeLifecycleCallback(callback) }
     }
 
     @Test fun failuresAndMissingBrowserKeepAllComposeFields() {

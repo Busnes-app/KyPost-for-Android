@@ -30,3 +30,9 @@ The draft transport now requires a JSON boolean `ok:true`; malformed or negative
 Consent now states that content, Cc/Bcc and attachments are encrypted while From/To/date metadata is visible to the server. The new public record uses repository/branch references instead of local host paths. Before-fix tests failed on both unacknowledged-200 admission and successful-handoff discard; the fixes preserve a recoverable composition.
 
 After the review corrections, 60 focused JVM tests, both handoff device tests and Play lint passed. The full Play JVM suite passed 1,197 cases with zero failures/errors/skips before the fix push. The current CI matrix and independent re-review remain the final PR gates.
+
+## Early recreation correction
+
+The second CI matrix exposed a body-retention race on API 36 after the handoff test immediately recreated Compose. Restored/prefilled HTML reached the editor, but the synchronous mirror remained empty until an asynchronous export. A lifecycle-resume regression reproduced the empty mirror deterministically. Both initial-body paths now seed the mirror before `setHtml`; teardown has a copy even before the editor is ready. This is a production preservation fix, not a delay added to the test.
+
+After seeding the mirror, the new deterministic test and handoff tests passed. The first full API 36 run encountered the previously observed embedded-pane fold/lock assertion; an unchanged full retry passed all 243 cases with four precondition skips and zero failures/errors (1m28s). The initial failure remains recorded rather than claimed fixed. Focused compose-cache JVM tests and Play lint also passed.
