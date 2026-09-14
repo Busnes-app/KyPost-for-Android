@@ -10,8 +10,8 @@
 
 ## Delivered behavior
 
-- Decrypted MIME attachments stay in memory and can be opened through the existing ephemeral content provider or explicitly saved through the existing download sink. Raster CID images render through the sanitized encrypted-message path. Decrypted bytes never enter Room, cached fetched HTML, or the attachments used by Forward.
-- Attachment retention is capped at 4 MiB total, with one owned save snapshot. Completed read results retain a cleanup owner across dispatcher delivery and rendering; cancellation or rejection wipes arrays before UI adoption. Queued snapshots are wiped on teardown; an already-started save finishes with its own stable bytes and then wipes them. The modeled read allocation peak, including decoding growth and save/open copies, remains 128 MiB. This is an allocation model, not a measured whole-process peak.
+- Decrypted MIME attachments stay in memory and can be opened through the existing ephemeral content provider or explicitly saved through the existing download sink. Raster CID images render through the sanitized encrypted-message path. CID expansion is capped at 128 KiB, and the sanitizer shares that allowance across literal and rewritten data-image URLs in both image-display variants. Decrypted bytes never enter Room, cached fetched HTML, or the attachments used by Forward.
+- Attachment retention is capped at 4 MiB total, with one owned save snapshot. Completed read results retain a cleanup owner across dispatcher delivery and rendering; cancellation or rejection wipes arrays before UI adoption. Queued snapshots are wiped on teardown; an already-started save finishes with its own stable bytes and then wipes them. The modeled read allocation peak, including decoding growth, save/open copies, and conservative added-image render scratch, is 123.5 MiB against a 128 MiB assumption. This models buffers, not a measured whole-process peak or a bound on arbitrary original HTML, general DOM overhead, or WebView image decoding.
 - Successfully decrypted unsigned messages say “Encrypted, not signed,” including messages without a resolved sender. Existing signed-only verification behavior remains.
 - Re-enrollment preserves retired keys and missing historical subkeys, retains nonempty historical private packets for a matching fingerprint, and keeps current public metadata and packet order for signing and own-key selection. Storage errors and incomplete/corrupt records are distinct from confirmed absence. Failed unlocks or refused merges leave the stored vault unchanged; only genuine first enrollment can seal current-only material.
 - Merge limits are 256 KiB current input, 384 KiB previous input/output, and 32 rings. Invalid, incomplete, or excessive key material is refused. Merging does not execute incoming password-derivation parameters. The separately modeled enrollment buffer peak is 3,940,352 bytes; it does not claim to measure Bouncy Castle's object heap.
@@ -21,17 +21,17 @@
 
 ## Verification
 
-Verified implementation: `38dc112` (later documentation commits do not change runtime code). Whole-branch review and scoped follow-ups approved; all reported blockers are closed.
+Verified implementation: `7719c71` (subsequent documentation changes do not change runtime code). Whole-branch review and scoped follow-ups approved; all reported blockers are closed.
 
 | Check | Play | GitHub | F-Droid |
 | --- | --- | --- | --- |
-| JVM unit suite | 1,180 passed | 1,180 passed | 1,180 passed |
+| JVM unit suite | 1,185 passed | 1,185 passed | 1,185 passed |
 | Lint | 0 errors, 284 warnings | 0 errors, 294 warnings | 0 errors, 294 warnings |
 | Release APK assembly, disposable verification signer | Passed | Passed | Passed |
 | Runtime matched class-name gate | Passed | Passed | Passed |
 | Exported-component gate | Passed | Passed | Passed |
 
-All unit suites had zero failures, errors, or skipped tests. The signing-secret check and `git diff --check` also passed. The combined Gradle invocation completed in 3m25s. Reproduce its gates with:
+All unit suites had zero failures, errors, or skipped tests. The signing-secret check and `git diff --check` also passed. The final combined Gradle invocation completed in 4m. Reproduce its gates with:
 
 ```bash
 ./gradlew checkSigningSecretsAreNotInTheTree \
@@ -122,3 +122,15 @@ The original plan below remains a historical implementation recipe. The followin
 PR #109's first CI matrix exposed a test-order failure reproduced locally: the new reader Activity fixture retained `MailRuntime` after scenario teardown, and subsequent database-wipe tests left that cached DAO closed. Commit `cf43e5a` releases the mail graph in fixture teardown and documents its ownership; production code is unchanged.
 
 The ordered six-test reproduction now passes. Full Play and F-Droid instrumentation on API 36 each completed 240 cases with zero failures/errors and four existing device-precondition skips (one AuthGateKeyTest and three BiometricUnlockVaultTest cases). The initial F-Droid run hit a separate embedded-pane lock assertion; both its isolated retry and a full-suite retry passed without changes. That transient failure is recorded, not claimed fixed. Full CI across API 31/34/36 and independent review remain PR gates.
+
+The next matrix passed unit, release, CodeQL, API 34 Play/F-Droid, and API 36 Play. API 31 completed its suite but two compose Espresso checks lost focus to a system BiometricPrompt left by the new rotation fixture. A local A/B reproduced this: compose alone passed; prompt lifecycle then compose failed. The fixture had checked request registration before the prompt window attached. Commit `d3b7084` waits for the visible prompt and additionally checks that the replacement Activity regains focus. Disabling actual prompt cancellation makes that new assertion fail. Restored full API 31 instrumentation passed 236 cases plus four assumption skips; five affected API 36 cases passed.
+
+This fixture correction does not fix Android 12 SystemUI's observed pre-attachment cancellation race: a real extremely early Activity teardown can still encounter that platform behavior. App cancellation was delivered in the trace; no production timing workaround was added.
+
+## Independent review follow-up
+
+The PR reviewer identified a literal data-image budget bypass and an undercount of retained/transient HTML copies. Before-failing regressions confirmed both; an additional malformed-base64 case demonstrated attribute-escaping growth. The sanitizer now charges complete raster data URLs to an aggregate allowance, rejects non-base64 payload characters without decoding, and applies the same limit when remote images are enabled. Existing plaintext behavior is unchanged.
+
+The inline allowance is reduced from 3 MiB to 128 KiB; larger CID parts remain available as attachments within the 4 MiB attachment limit. The model conservatively reserves twelve base64/UTF-16-sized copies (36 times the inline allowance) for retained variants and rendering scratch. Its total is 129,499,136 bytes (123.5 MiB), and a regression requires at least 4 MiB of headroom. This does not claim a general browser/HTML heap ceiling.
+
+Final local gates after `7719c71`: all three complete JVM suites (1,185 cases each, zero failures/errors/skips), all three lint/release/runtime-name/exported-component gates, and the signing-secret check passed. CI and independent exact-head re-review follow the final push.
