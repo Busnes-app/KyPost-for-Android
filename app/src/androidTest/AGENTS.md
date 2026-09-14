@@ -13,6 +13,9 @@ Owns Android instrumentation tests executed on emulator/device.
 - Activity fixtures must release runtime graphs they initialize after their scenarios close.
   A cached `MailRuntime` repository retains its DAO across later database-wipe tests; invalidate
   that graph in teardown while leaving `DataRuntime` and its open database owned by the suite.
+- Prompt lifecycle tests must await the visible system prompt before recreating its Activity,
+  then assert the replacement regains window focus. Request registration alone precedes window
+  attachment; API 31 SystemUI can strand a window if cancelled during that interval.
 
 # Work Guidance
 
