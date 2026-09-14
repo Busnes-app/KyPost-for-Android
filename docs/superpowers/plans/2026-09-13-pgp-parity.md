@@ -1,5 +1,7 @@
 # Android PGP Parity With the Server Punch List — Implementation Plan
 
+> **Execution status (2026-09-14):** Tasks 1–4 and 6–10 are implemented. Task 5's server decision is resolved: client-custody plaintext drafts are rejected, so Android now offers a no-transfer webmail handoff that retains the composer. Full encrypted draft saving is [separately planned](2026-09-14-encrypted-draft-handoff.md). See the [implementation and verification record](../handoffs/2026-09-14-pgp-parity.md) for final checks, limits, and live-device checks still outstanding. The recipe and unchecked boxes below are historical; use the record to resume, rather than repeating completed tasks.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Bring the Android client level with the six server-side PGP changes: attachments inside the ciphertext, encrypted drafts, signed-only mail, the inbox cache change, key retirement, and the new resolver tiers.
