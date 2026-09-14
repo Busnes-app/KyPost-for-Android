@@ -656,7 +656,7 @@ class EmailDetailActivity : LockedActivity() {
                 val verdict = displaySignatureVerdict(outcome)
                 pgpSignatureState = verdict
                 // Show the mailbox the verdict is ABOUT, not the sender-written header beside it.
-                if (verdict != PgpSignatureState.NONE) {
+                if (verdict != PgpSignatureState.NONE && outcome.resolvedSender.isNotBlank()) {
                     fromView.text = getString(R.string.email_from, outcome.resolvedSender)
                 }
                 val omission = decryptedAttachmentNotice(outcome.body.attachmentsOmitted)
@@ -1443,9 +1443,11 @@ internal fun readFailureNotice(outcome: ReadOutcome): Pair<Int, String?>? = when
     is ReadOutcome.Decrypted, ReadOutcome.NeedsUnlock, ReadOutcome.Cancelled -> null
 }
 
-/** A verdict with no resolved mailbox reads as being about the raw sender text, so return NONE. */
+/** Sender verdicts need a resolved mailbox. UNSIGNED describes the message and always passes. */
 internal fun displaySignatureVerdict(outcome: ReadOutcome.Decrypted): PgpSignatureState =
-    outcome.signature.takeIf { outcome.resolvedSender.isNotBlank() } ?: PgpSignatureState.NONE
+    outcome.signature.takeIf {
+        it == PgpSignatureState.UNSIGNED || outcome.resolvedSender.isNotBlank()
+    } ?: PgpSignatureState.NONE
 
 /** A dropped part is said out loud; a complete list needs no sentence. */
 internal fun decryptedAttachmentNotice(omitted: Boolean): Int? =

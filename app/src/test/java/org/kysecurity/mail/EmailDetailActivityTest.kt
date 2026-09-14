@@ -753,6 +753,16 @@ class EmailDetailActivityTest {
     }
 
     @Test
+    fun displaySignatureVerdict_passesThroughUnsignedWithNoResolvedSender() {
+        val outcome = ReadOutcome.Decrypted(
+            body = decryptedBody,
+            signature = PgpSignatureState.UNSIGNED,
+            resolvedSender = "",
+        )
+        assertEquals(PgpSignatureState.UNSIGNED, displaySignatureVerdict(outcome))
+    }
+
+    @Test
     fun displaySignatureVerdict_isNoneWhenTheReadOutcomeItselfIsNone() {
         val outcome = ReadOutcome.Decrypted(
             body = decryptedBody,
