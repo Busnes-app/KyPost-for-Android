@@ -1176,7 +1176,10 @@ internal fun blockExternalResources(
     // `track` fetches over the network exactly like its sibling `source`, and never as an image.
     val resourceTags = if (keepImages) "video, audio, source, track, embed, object" else "img, video, audio, source, track, embed, object"
     document.select(resourceTags).forEach { element ->
-        element.removeAttr("src")
+        // A data: raster image is bytes already in hand, not a fetch; every other src goes.
+        val keepsSrc = element.tagName() == "img" &&
+            org.kysecurity.mail.pgp.INLINE_DATA_IMAGE_PREFIXES.any { element.attr("src").startsWith(it) }
+        if (!keepsSrc) element.removeAttr("src")
         element.removeAttr("srcset")
         element.removeAttr("poster")
         element.removeAttr("data")

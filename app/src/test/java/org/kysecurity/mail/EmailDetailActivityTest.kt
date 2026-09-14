@@ -774,4 +774,25 @@ class EmailDetailActivityTest {
     fun initialReplyForwardState_isNoneWhenNotEncrypted() {
         assertEquals(PgpMessageState.NONE, initialReplyForwardState(pgpEncrypted = false))
     }
+
+    @Test
+    fun blockExternalResources_keepsInlineRasterDataImages() {
+        val blocked = blockExternalResources("""<img src="data:image/png;base64,iVBORw=="><img src="https://x/y.png">""")
+
+        assertTrue(blocked, blocked.contains("data:image/png;base64,iVBORw=="))
+        assertTrue(blocked, !blocked.contains("https://x/y.png"))
+    }
+
+    @Test
+    fun blockExternalResources_stillStripsDataSvgAndNonImageData() {
+        val blocked = blockExternalResources("""<img src="data:image/svg+xml;base64,PHN2Zz4="><img src="data:text/html;base64,PGI+">""")
+
+        assertTrue(blocked, !blocked.contains("data:"))
+    }
+
+    @Test
+    fun blockExternalResources_inlineDataImagesDoNotCountAsRemote() {
+        val html = """<img src="data:image/png;base64,iVBORw==">"""
+        assertEquals(blockExternalResources(html), blockExternalResources(html, keepImages = true))
+    }
 }
