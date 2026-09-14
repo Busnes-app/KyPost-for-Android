@@ -120,7 +120,7 @@ class PgpMimeReaderTest {
 
     @Test
     fun attachmentsPastThePartCapAreDroppedAndReported() {
-        val parts = (1..PgpMimeReader.MAX_ATTACHMENT_PARTS + 1).joinToString("\n") { i ->
+        val parts = (1..org.kysecurity.mail.MemoryBudget.DECRYPTED_ATTACHMENT_PART_COUNT + 1).joinToString("\n") { i ->
             """
             --b1
             Content-Type: application/octet-stream; name="f$i.bin"
@@ -131,7 +131,7 @@ class PgpMimeReaderTest {
         }
         val body = read("Content-Type: multipart/mixed; boundary=\"b1\"\n\n$parts\n--b1--")
 
-        assertEquals(PgpMimeReader.MAX_ATTACHMENT_PARTS, body?.attachments?.size)
+        assertEquals(org.kysecurity.mail.MemoryBudget.DECRYPTED_ATTACHMENT_PART_COUNT, body?.attachments?.size)
         assertTrue(body!!.attachmentsOmitted)
     }
 

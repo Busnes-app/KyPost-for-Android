@@ -101,6 +101,8 @@ Owns production Android app code and resources.
   remains the fallback for every device that is not.
   A key rotation merges the newly enrolled secret-key collection first, then every retired primary
   identity; a matching primary also recovers any historical subkey absent from the new collection.
+  A same-fingerprint replacement must be extractable with Android's empty passphrase; otherwise
+  keep its historical private packet with the incoming public metadata.
   Invalid, empty, oversized, or over-count material fails the entire merge, preserving the old
   vault rather than sealing a partial history. `MemoryBudget` owns the input, output, ring-count,
   and separate enrollment-peak ceilings. Secret-key consumers parse packet order through
@@ -110,7 +112,9 @@ Owns production Android app code and resources.
   after decoder EOF; Bouncy Castle accepts several whitespace-prefixed dash terminators, so a
   hand-written approximation of its footer grammar is not sufficient.
   Re-enrollment opens that existing vault through the live enrollment Activity and seals only a
-  successful current-first merge. Only `NotEnrolled` permits a current-only seal; cancellation,
+  successful current-first merge. `EnrollmentVault.stored()` returns null only when both envelope
+  fields are absent; incomplete/corrupt records and read errors propagate to `AndroidVaultOpener`
+  as `Failed`. Only `NotEnrolled` permits a current-only seal; cancellation,
   open failure, a lost opened session, or merge refusal must leave the old vault and server state
   unchanged. A successful seal wipes both plaintext arrays and clears `EnrollmentSession` before
   cache deletion or the enrollment report. Both enrollment biometric operations are owned by the
@@ -248,6 +252,9 @@ Owns production Android app code and resources.
   HTML fallback/quoting, while HTML bodies must not be detected by content when the server supplied
   a mode. The detail screen renders known plain bodies in a native wrapping `TextView`, so email
   reading never requires horizontal scrolling.
+- `pgp/deliverReadOutcome` owns completed attachment arrays inside the worker until rendering
+  accepts them. Cancellation across the dispatcher return, render rejection, or a rendering
+  exception wipes unadopted bytes; successful adoption transfers cleanup to the detail Activity.
 - `renderableBody`/`blockExternalResources` strip remote resources from **both** reader variants
   before anything reaches the WebView; "Show images" restores `<img src>` and nothing else. An
   `<iframe>` is dropped whole, because `srcdoc` carries an inline document no attribute strip

@@ -2,7 +2,7 @@ package org.kysecurity.mail.pgp
 
 import org.jsoup.Jsoup
 
-/** Raster only. SVG is a document with script and event handlers; not worth a JS-off argument. */
+/** Allowlist of declared raster MIME types; this does not inspect or identify the file contents. */
 private val INLINEABLE_IMAGE_TYPES = setOf("image/png", "image/jpeg", "image/gif", "image/webp")
 
 /** `src` prefixes [org.kysecurity.mail.blockExternalResources] leaves alone on an `img`. */

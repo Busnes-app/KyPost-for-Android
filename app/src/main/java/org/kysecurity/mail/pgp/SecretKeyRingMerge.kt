@@ -8,6 +8,8 @@ import org.bouncycastle.openpgp.PGPObjectFactory
 import org.bouncycastle.openpgp.PGPPadding
 import org.bouncycastle.openpgp.PGPUtil
 import org.bouncycastle.openpgp.operator.bc.BcKeyFingerprintCalculator
+import org.bouncycastle.openpgp.operator.bc.BcPBESecretKeyDecryptorBuilder
+import org.bouncycastle.openpgp.operator.bc.BcPGPDigestCalculatorProvider
 import org.kysecurity.mail.MemoryBudget
 import java.io.ByteArrayInputStream
 import java.io.OutputStream
@@ -50,7 +52,7 @@ internal fun mergeParsedSecretKeyRings(
                 val currentSecret = merged.getSecretKey(historical.publicKey.fingerprint)
                 if (currentSecret == null) {
                     merged = PGPSecretKeyRing.insertSecretKey(merged, historical)
-                } else if (currentSecret.isPrivateKeyEmpty && !historical.isPrivateKeyEmpty) {
+                } else if (!currentSecret.isUsableOnDevice() && !historical.isPrivateKeyEmpty) {
                     val restored = PGPSecretKey.replacePublicKey(historical, currentSecret.publicKey)
                     merged = PGPSecretKeyRing.insertSecretKey(merged, restored)
                 }
@@ -73,6 +75,14 @@ internal fun mergeParsedSecretKeyRings(
 
     return result
 }
+
+/** Every Android consumer extracts with an empty passphrase. A nonempty packet alone proves
+ *  nothing: retain the historical private packet if the incoming replacement cannot be used. */
+private fun PGPSecretKey.isUsableOnDevice(): Boolean = runCatching {
+    extractPrivateKey(
+        BcPBESecretKeyDecryptorBuilder(BcPGPDigestCalculatorProvider()).build(CharArray(0)),
+    ) != null
+}.getOrDefault(false)
 
 internal fun serializeSecretKeyRings(rings: List<PGPSecretKeyRing>): ByteArray? = runCatching {
     BoundedSecretOutput(MemoryBudget.PGP_SECRET_KEY_OUTPUT_BYTES).use { sink ->

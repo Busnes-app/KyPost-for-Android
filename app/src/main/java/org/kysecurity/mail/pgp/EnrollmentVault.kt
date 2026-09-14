@@ -99,14 +99,19 @@ internal class EnrollmentVault(context: Context) {
             .commit()
     }
 
-    /** A corrupt or undecodable blob reads as "no blob", never as an exception: the callers of this
-     *  are a background worker and the app-foreground path, and a throw there freezes the enrollment
-     *  marker at its last value rather than correcting it. */
-    fun stored(): Pair<ByteArray, ByteArray>? = runCatching {
-        val iv = prefs.getString(KEY_IV, null) ?: return null
-        val ct = prefs.getString(KEY_CT, null) ?: return null
-        Base64.decode(iv, Base64.NO_WRAP) to Base64.decode(ct, Base64.NO_WRAP)
-    }.getOrNull()
+    /** Null proves both fields are absent. Failed or incomplete reads must never authorize a
+     *  current-only enrollment seal over a recoverable historical vault. Background probes catch
+     *  failures at their own boundary; the opener maps them to OpenOutcome.Failed. */
+    fun stored(): Pair<ByteArray, ByteArray>? {
+        val iv = prefs.getString(KEY_IV, null)
+        val ct = prefs.getString(KEY_CT, null)
+        if (iv == null && ct == null) return null
+        check(iv != null && ct != null) { "Incomplete enrollment vault" }
+        val decodedIv = Base64.decode(iv, Base64.NO_WRAP)
+        val decodedCt = Base64.decode(ct, Base64.NO_WRAP)
+        check(decodedIv.size == 12 && decodedCt.size >= 16) { "Invalid enrollment vault" }
+        return decodedIv to decodedCt
+    }
 
     fun hasBlob(): Boolean = runCatching { prefs.contains(KEY_CT) }.getOrDefault(false)
 

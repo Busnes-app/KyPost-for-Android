@@ -9,13 +9,17 @@ import androidx.lifecycle.Lifecycle
 import org.kysecurity.mail.R
 import javax.crypto.Cipher
 import kotlin.coroutines.resume
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /** Opens via a `CryptoObject`; the plaintext lands in [EnrollmentSession] and is never returned. */
-internal class AndroidVaultOpener(private val activity: FragmentActivity) : VaultOpener {
+internal class AndroidVaultOpener(
+    private val activity: FragmentActivity,
+    private val vault: () -> EnrollmentVault = { EnrollmentVault(activity) },
+) : VaultOpener {
 
     private class LiveOpen(
         val prompt: BiometricPrompt,
@@ -64,13 +68,21 @@ internal class AndroidVaultOpener(private val activity: FragmentActivity) : Vaul
     override suspend fun open(): OpenOutcome {
         // Blocking Keystore/disk work; the Main hop is explicit — the caller builds this from IO.
         val unlock = withContext(Dispatchers.IO) {
-            val vault = EnrollmentVault(activity)
-
+            val vault = vault()
             // Never ensureKey() here: it mutates and would wipe a still-good envelope.
             if (!hasSecureLockScreen(activity)) {
                 return@withContext VaultUnlock.Blocked(OpenOutcome.NoSecureLockScreen)
             }
-            val (iv, ciphertext) = vault.stored()
+            val stored = try {
+                vault.stored()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                return@withContext VaultUnlock.Blocked(
+                    OpenOutcome.Failed(activity.getString(R.string.email_pgp_unseal_failed)),
+                )
+            }
+            val (iv, ciphertext) = stored
                 ?: return@withContext VaultUnlock.Blocked(OpenOutcome.NotEnrolled)
             // A stored blob this key cannot open is Failed, never NotEnrolled — different advice.
             val cipher = vault.openCipher(iv)

@@ -276,7 +276,7 @@ class SourceRulesTest {
         val SENSITIVE_PROPERTY_NAMES = setOf(
             "plaintext", "body", "html", "plain", "preview", "protectedSubject", "encryptedPayload",
             "secret", "deviceSecret", "pairingToken", "passphrase",
-            "privateKey", "armoredPrivateKey",
+            "privateKey", "armoredPrivateKey", "bytes",
         )
         // `pin` is absent on purpose: the only `pin` property is an SPKI hash of a public cert.
         val IMPORT = Regex("""^import\s+([\w.]+)""", RegexOption.MULTILINE)

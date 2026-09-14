@@ -108,6 +108,32 @@ class EnrollmentCeremonyMergeTest {
     }
 
     @Test
+    fun transientPreviousVaultFailureRefusesSealingAndCanRetryWithTheHistoricalKey() = runBlocking {
+        var unavailable = true
+        val previous = object : VaultOpener {
+            override suspend fun open(): OpenOutcome {
+                if (unavailable) throw org.kysecurity.mail.security.EncryptedStoreUnavailableException(
+                    "device_envelope_secure", IllegalStateException("transient test failure"),
+                )
+                EnrollmentSession.put(TestPgpPrivateKey.ARMORED_PRIVATE.toCharArray())
+                return OpenOutcome.Opened
+            }
+        }
+        val failed = ports(previous)
+        failed.ceremony().run()
+        assertTrue(failed.sealer.received.isEmpty())
+        assertTrue(failed.transport.reported.isEmpty())
+        assertEquals(EnrollmentUiState.Failed(FailureReason.SEAL_FAILED), failed.states.last())
+
+        unavailable = false
+        val retry = ports(previous)
+        retry.ceremony().run()
+        val merged = retry.sealer.received.single().toString(Charsets.UTF_8).toCharArray()
+        assertEquals(listOf(true), retry.transport.reported)
+        assertTrue(PgpDecryptor.decrypt(merged, TestPgpPrivateKey.ARMORED_MESSAGE, emptyList()) is DecryptResult.Ok)
+    }
+
+    @Test
     fun malformedOrOverLimitMergeNeverGetsOverwrittenOrReported() = runBlocking {
         val ring = orderedSecretKeyRings(
             TestPgpPrivateKey.ARMORED_PRIVATE.byteInputStream(),

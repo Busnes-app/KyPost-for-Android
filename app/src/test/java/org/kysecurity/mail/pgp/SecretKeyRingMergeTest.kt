@@ -1,6 +1,10 @@
 package org.kysecurity.mail.pgp
 
 import org.bouncycastle.bcpg.ArmoredOutputStream
+import org.bouncycastle.bcpg.SymmetricKeyAlgorithmTags
+import org.bouncycastle.openpgp.operator.bc.BcPBESecretKeyDecryptorBuilder
+import org.bouncycastle.openpgp.operator.bc.BcPBESecretKeyEncryptorBuilder
+import org.bouncycastle.openpgp.operator.bc.BcPGPDigestCalculatorProvider
 import org.bouncycastle.openpgp.PGPSecretKeyRing
 import org.bouncycastle.openpgp.PGPPublicKeyRingCollection
 import org.bouncycastle.openpgp.PGPPrivateKey
@@ -149,6 +153,31 @@ class SecretKeyRingMergeTest {
             TestPgpPrivateKey.EXPECTED_PLAINTEXT,
             String((decrypted as DecryptResult.Ok).plaintext, Charsets.UTF_8),
         )
+    }
+
+    @Test
+    fun restoresHistoricalSecretsWhenNonemptyCurrentPacketsRequireAPassword() {
+        val historical = rings(previous.bytes()).single()
+        val emptyPassphrase = BcPBESecretKeyDecryptorBuilder(BcPGPDigestCalculatorProvider())
+            .build(CharArray(0))
+        val passwordProtection = BcPBESecretKeyEncryptorBuilder(SymmetricKeyAlgorithmTags.AES_256)
+            .build("not-an-android-passphrase".toCharArray())
+        val protected = historical.secretKeys.asSequence().fold(historical) { ring, key ->
+            PGPSecretKeyRing.insertSecretKey(
+                ring, PGPSecretKey.copyWithNewPassword(key, emptyPassphrase, passwordProtection),
+            )
+        }
+        assertTrue(protected.secretKeys.asSequence().all { !it.isPrivateKeyEmpty })
+        assertTrue(PgpDecryptor.decrypt(armor(protected).chars(), TestPgpPrivateKey.ARMORED_MESSAGE, emptyList()) is DecryptResult.Failed)
+
+        val merged = mergeSecretKeyRings(armor(protected), previous)!!
+        val restored = rings(merged).single()
+        protected.secretKeys.asSequence().forEach { key ->
+            assertArrayEquals(key.publicKey.encoded, restored.getSecretKey(key.publicKey.fingerprint).publicKey.encoded)
+        }
+        val decrypted = PgpDecryptor.decrypt(merged.chars(), TestPgpPrivateKey.ARMORED_MESSAGE, emptyList())
+        assertTrue("expected historical decryption, got $decrypted", decrypted is DecryptResult.Ok)
+        assertEquals(TestPgpPrivateKey.EXPECTED_PLAINTEXT, String((decrypted as DecryptResult.Ok).plaintext, Charsets.UTF_8))
     }
 
     @Test

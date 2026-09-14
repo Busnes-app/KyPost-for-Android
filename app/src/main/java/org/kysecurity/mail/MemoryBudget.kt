@@ -71,6 +71,9 @@ internal object MemoryBudget {
             2 * PGP_SECRET_KEY_OUTPUT_BYTES +
             PGP_SECRET_KEY_STREAM_BUFFER_BYTES
 
+    /** A sender chooses the MIME part count; cap retained attachment objects as well as bytes. */
+    const val DECRYPTED_ATTACHMENT_PART_COUNT = 50
+
     /** Attachment parts kept out of one decrypted message, decoded, for the life of the detail
      *  screen. Bounded by [PgpMimeReader], which drops parts past this rather than truncating one. */
     const val DECRYPTED_ATTACHMENT_BYTES = 4L * 1024 * 1024

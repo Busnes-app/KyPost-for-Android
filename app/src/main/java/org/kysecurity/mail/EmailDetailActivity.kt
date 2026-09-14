@@ -607,15 +607,15 @@ class EmailDetailActivity : LockedActivity() {
                 renderReadOutcome(ReadOutcome.NotEnrolled)
                 return@launch
             }
-            val outcome = withContext(Dispatchers.Default) {
-                reader.read(mailbox, messageId, sender, unlockIfNeeded)
-            }
-            renderReadOutcome(outcome)
+            org.kysecurity.mail.pgp.deliverReadOutcome(
+                read = { reader.read(mailbox, messageId, sender, unlockIfNeeded) },
+                render = ::renderReadOutcome,
+            )
         }
     }
 
-    private fun renderReadOutcome(outcome: ReadOutcome) {
-        if (isFinishing || isDestroyed) return
+    private fun renderReadOutcome(outcome: ReadOutcome): Boolean {
+        if (isFinishing || isDestroyed) return false
         btnDecryptHere.visibility = View.GONE
         btnDecryptHere.isEnabled = true
         btnRetryPayload.visibility = View.GONE
@@ -675,7 +675,7 @@ class EmailDetailActivity : LockedActivity() {
                 dropDecryptedAttachments()
                 decryptedAttachments = outcome.body.attachments
                 decryptedAttachmentSave.allow()
-                renderDecryptedAttachments(outcome.body.attachmentsOmitted)
+                renderDecryptedAttachments()
             }
             // The decrypt can still be retried here and the user is the missing input, so offer
             // it rather than the webmail fallback. Cancelled is silent on purpose: the user
@@ -710,6 +710,7 @@ class EmailDetailActivity : LockedActivity() {
         }
         // Routed through the pure decision below so NoEncryptedContent cannot drift into offering Retry.
         btnRetryPayload.visibility = if (showsRetryButton(outcome)) View.VISIBLE else View.GONE
+        return true
     }
 
     /** Resolves [readFailureNotice] against resources; empty for an outcome that has no sentence. */
@@ -795,7 +796,7 @@ class EmailDetailActivity : LockedActivity() {
 
     /** Chips for parts that came out of the ciphertext. Tap opens through the ephemeral provider;
      *  hold saves after the same confirmation the server-listed chips use. */
-    private fun renderDecryptedAttachments(omitted: Boolean) {
+    private fun renderDecryptedAttachments() {
         val label = findViewById<TextView>(R.id.emailAttachmentsLabel)
         val chips = findViewById<ChipGroup>(R.id.emailAttachmentChips)
         chips.removeAllViews()

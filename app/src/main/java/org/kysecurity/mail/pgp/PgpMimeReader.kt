@@ -29,7 +29,7 @@ internal data class DecryptedBody(
      *  The outer envelope subject is a placeholder for KyPost-to-KyPost mail. */
     val protectedSubject: String?,
     val attachments: List<DecryptedAttachment> = emptyList(),
-    /** True when a part was dropped for size or count. The screen says so; silence would show a
+    /** True when a part was dropped for size, count, or decoding failure. The screen says so; silence would show a
      *  message that appears to have fewer files than it does. */
     val attachmentsOmitted: Boolean = false,
 ) {
@@ -39,9 +39,6 @@ internal data class DecryptedBody(
 
 /** Returns null rather than throwing; unparsed bytes never reach a WebView. */
 internal object PgpMimeReader {
-
-    /** A sender chooses the part count; fifty is past any real message and cheap to hold. */
-    const val MAX_ATTACHMENT_PARTS = 50
 
     /** Total decoded attachment bytes retained from one message. */
     val attachmentByteCap: Long = org.kysecurity.mail.MemoryBudget.DECRYPTED_ATTACHMENT_BYTES
@@ -57,7 +54,7 @@ internal object PgpMimeReader {
         var retained = 0L
 
         fun collect(part: Part) {
-            if (attachments.size >= MAX_ATTACHMENT_PARTS) { omitted = true; return }
+            if (attachments.size >= org.kysecurity.mail.MemoryBudget.DECRYPTED_ATTACHMENT_PART_COUNT) { omitted = true; return }
             val remaining = (attachmentByteCap - retained).coerceAtLeast(0L)
             // Bounded read; null means the part alone would cross the ceiling, and it is dropped
             // whole rather than truncated. A partial file is worse than a missing one.

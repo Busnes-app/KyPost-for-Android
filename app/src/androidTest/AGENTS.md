@@ -19,6 +19,10 @@ Owns Android instrumentation tests executed on emulator/device.
 # Verification
 
 - Run connected Android tests when instrumentation changes are made.
+- `EnrollmentVaultReadFailureTest` injects a recoverable lazy preference failure while retaining
+  the real stored ciphertext, then checks the Android opener and recovery. `ReadOutcomeActivityTest`
+  checks accepted and rejected attachment ownership through the real renderer. Both Activity tests
+  require an unlocked app; the vault opener also requires a secure device lock screen.
 
 # Child DOX Index
 
