@@ -78,6 +78,78 @@ class EncryptedMessageReaderTest {
     }
 
     @Test
+    fun anEncryptedDetachedMimeSignatureAtTheRootIsNotUnsigned() {
+        assertEncryptedMimeSignatureState(detachedMime(), PgpSignatureState.UNCHECKED)
+    }
+
+    @Test
+    fun anEncryptedNestedDetachedMimeSignatureIsNotUnsigned() {
+        val mime = "Content-Type: multipart/mixed; boundary=outer\r\n\r\n" +
+            "--outer\r\n" + detachedMime() + "\r\n--outer--\r\n"
+        assertEncryptedMimeSignatureState(mime, PgpSignatureState.UNCHECKED)
+    }
+
+    @Test
+    fun aMalformedSignatureDeclarationMustNotSilenceTheNotice() {
+        val outcome = assertEncryptedMimeSignatureState(detachedMime("not a signature"), PgpSignatureState.UNCHECKED)
+        assertTrue("a declared but unchecked signature needs a visible notice", outcome.signature != PgpSignatureState.NONE)
+    }
+
+    @Test
+    fun aPacketSignatureStillVerifiesAroundADetachedMimeSignature() {
+        assertEncryptedMimeSignatureState(
+            detachedMime(), PgpSignatureState.VERIFIED_SEEN_BEFORE,
+            signingKey = TestPgpPrivateKey.ARMORED_PRIVATE.toCharArray(),
+        )
+    }
+
+    private fun assertEncryptedMimeSignatureState(
+        mime: String,
+        expected: PgpSignatureState,
+        signingKey: CharArray? = null,
+    ): ReadOutcome.Decrypted {
+        val encrypted = PgpEncryptor.encrypt(
+            mime.toByteArray(Charsets.UTF_8), listOf(TestPgpPrivateKey.ARMORED_PUBLIC), signingKey,
+        ) as EncryptResult.Ok
+        val (r, _) = reader(payloads = FakePayloadSource(successPayload(
+            encrypted = encrypted.armored, signerKeys = listOf(boundKey()),
+        )))
+        val outcome = read(r) as ReadOutcome.Decrypted
+        assertEquals(expected, outcome.signature)
+        assertEquals("Signed MIME body.", outcome.body.plain)
+        return outcome
+    }
+
+    private fun detachedMime(signatureOverride: String? = null): String {
+        val signedPart = "Content-Type: text/plain; charset=utf-8\r\n\r\nSigned MIME body."
+        val secret = orderedSecretKeyRings(TestPgpPrivateKey.ARMORED_PRIVATE.byteInputStream())!!
+            .first().secretKeys.asSequence().first { it.isSigningKey }
+        val key = secret.extractPrivateKey(
+            org.bouncycastle.openpgp.operator.bc.BcPBESecretKeyDecryptorBuilder(
+                org.bouncycastle.openpgp.operator.bc.BcPGPDigestCalculatorProvider(),
+            ).build(CharArray(0)),
+        )
+        val generator = org.bouncycastle.openpgp.PGPSignatureGenerator(
+            org.bouncycastle.openpgp.operator.bc.BcPGPContentSignerBuilder(
+                secret.publicKey.algorithm, org.bouncycastle.bcpg.HashAlgorithmTags.SHA256,
+            ), secret.publicKey,
+        )
+        generator.init(org.bouncycastle.openpgp.PGPSignature.BINARY_DOCUMENT, key)
+        generator.update(signedPart.toByteArray(Charsets.UTF_8))
+        val buffer = java.io.ByteArrayOutputStream()
+        org.bouncycastle.bcpg.ArmoredOutputStream(buffer).use { generator.generate().encode(it) }
+        val signature = signatureOverride ?: buffer.toString("UTF-8").also {
+            val checked = PgpDecryptor.verifyDetached(
+                TestPgpPrivateKey.ARMORED_PUBLIC, signedPart.toByteArray(Charsets.UTF_8), it,
+            ) as RawSignature.Checked
+            assertTrue("fixture signature must verify over the exact MIME part", checked.verified)
+        }
+        return "Content-Type: MuLtIpArT/SiGnEd; protocol=\"Application/PGP-Signature\"; boundary=signed\r\n\r\n" +
+            "--signed\r\n$signedPart\r\n--signed\r\n" +
+            "Content-Type: application/pgp-signature\r\n\r\n$signature\r\n--signed--\r\n"
+    }
+
+    @Test
     fun aSignedOnlyMessageWithNothingToCheckStaysNone() {
         val (r, _) = reader(
             payloads = FakePayloadSource(

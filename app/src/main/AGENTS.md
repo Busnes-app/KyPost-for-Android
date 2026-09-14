@@ -141,9 +141,10 @@ Owns production Android app code and resources.
   A failed signature or a CHANGED signer key (`PgpSignatureState.KEY_CHANGED`) outranks both with
   ⚠. `SIGNER_UNKNOWN` deliberately does not mark: it is the ordinary state for a correspondent not
   yet in the address book, and a glyph on most rows carries nothing actionable.
-- `PgpSignatureState` has seven values, not a verified/unverified pair: `NONE` (no opinion expressed),
-  `UNSIGNED` (local decryption proved the ciphertext carried no signature; it gets an informational
-  detail notice but no inbox warning, even when the relay resolved no sender), `VERIFIED_CONFIRMED`
+- `PgpSignatureState` has eight values, not a verified/unverified pair: `NONE` (no opinion expressed),
+  `UNSIGNED` (local decryption found neither a packet signature nor a declared PGP/MIME signature
+  wrapper; it gets an informational detail notice but no inbox warning, even when the relay resolved
+  no sender), `VERIFIED_CONFIRMED`
   (a key bound to the sender that the user
   confirmed out of band — the only state that claims identity), `VERIFIED_SEEN_BEFORE` (a bound key still matching its TOFU
   pin, but never confirmed — most keys arrive by Autocrypt harvest, so this claims only continuity,
@@ -157,8 +158,13 @@ Owns production Android app code and resources.
   RFC 5322 comment like `Bob (Eve <eve@evil>) <bob@x>`, where the client bound `eve@evil` and the
   server binds `bob@x`, letting any contact forge a verified badge for anyone. The server now ships
   `signerKeys` already narrowed to the sender it resolved (`pgp/SignerBinding.signatureStateFor`,
-  consumed by `pgp/EncryptedMessageReader`). Do not reintroduce a client-side `From` parser to "wire
-  up" that narrowing yourself — a second parser deciding the same binding is exactly the defect that
+  consumed by `pgp/EncryptedMessageReader`). Root and nested `multipart/signed` wrappers with
+  `protocol=application/pgp-signature` suppress UNSIGNED. They are detected, not verified: without
+  a packet signature the verdict is UNCHECKED ("Signature not checked"), including malformed
+  signature contents. This message-level notice remains visible even without a resolved sender.
+  Existing sender-bound packet verification remains authoritative when present.
+  `EncryptedMessageReaderTest` covers real encrypted root/nested signatures and invalid declarations.
+  Do not reintroduce a client-side `From` parser to "wire up" that narrowing yourself — a second parser deciding the same binding is exactly the defect that
   was removed. `signerKeyIdsOf` also excludes revoked and expired OpenPGP keys before a signature can
   become a trusted state, and `PgpDecryptor` caps decompressed plaintext at 32 MiB before allocation.
 - **The account's own PGP identity is never in the contacts database.** `ContactEntity.pgpKey` — even

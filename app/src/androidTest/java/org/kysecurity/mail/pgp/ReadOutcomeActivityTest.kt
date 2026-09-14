@@ -25,6 +25,25 @@ class ReadOutcomeActivityTest {
     }
 
     @Test
+    fun uncheckedSignaturesKeepAVisibleNoticeWithoutAResolvedSender() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val notice = EmailDetailActivity::class.java.getDeclaredMethod("signatureNoticeFor", PgpSignatureState::class.java)
+            .apply { isAccessible = true }
+        ActivityScenario.launch<EmailDetailActivity>(
+            Intent(context, EmailDetailActivity::class.java).putExtra("email_preview", "body"),
+        ).use { scenario ->
+            scenario.onActivity { activity ->
+                assertFalse("test device must have the app unlocked", activity.isFinishing)
+                val outcome = ReadOutcome.Decrypted(
+                    DecryptedBody(null, "body", protectedSubject = null), PgpSignatureState.UNCHECKED, "",
+                )
+                val text = notice.invoke(activity, org.kysecurity.mail.displaySignatureVerdict(outcome)) as String?
+                assertTrue("unchecked declarations must not disappear", text?.contains("Signature not checked") == true)
+            }
+        }
+    }
+
+    @Test
     fun acceptedAttachmentsSurviveDeliveryAndAreWipedOnDestroyWhileFinishingRejectsThem() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         for (finishing in listOf(false, true)) {

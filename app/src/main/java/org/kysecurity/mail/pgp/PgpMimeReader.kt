@@ -2,6 +2,7 @@ package org.kysecurity.mail.pgp
 
 import jakarta.mail.Part
 import jakarta.mail.Session
+import jakarta.mail.internet.ContentType
 import jakarta.mail.internet.MimeMessage
 import jakarta.mail.internet.MimeMultipart
 import java.io.ByteArrayInputStream
@@ -32,6 +33,8 @@ internal data class DecryptedBody(
     /** True when a part was dropped for size, count, or decoding failure. The screen says so; silence would show a
      *  message that appears to have fewer files than it does. */
     val attachmentsOmitted: Boolean = false,
+    /** Declared PGP/MIME signature wrapper; presence does not establish validity or a signer. */
+    val hasDetachedSignature: Boolean = false,
 ) {
     /** Redacted: every field is a decrypted message. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "DecryptedBody(redacted)"
@@ -52,6 +55,14 @@ internal object PgpMimeReader {
         val attachments = ArrayList<DecryptedAttachment>()
         var omitted = false
         var retained = 0L
+        var hasDetachedSignature = false
+
+        fun noteSignature(part: Part) {
+            if (runCatching {
+                part.isMimeType("multipart/signed") && ContentType(part.contentType)
+                    .getParameter("protocol").equals("application/pgp-signature", ignoreCase = true)
+            }.getOrDefault(false)) hasDetachedSignature = true
+        }
 
         fun collect(part: Part) {
             if (attachments.size >= org.kysecurity.mail.MemoryBudget.DECRYPTED_ATTACHMENT_PART_COUNT) { omitted = true; return }
@@ -87,6 +98,7 @@ internal object PgpMimeReader {
             if (content !is MimeMultipart) return
             for (i in 0 until content.count) {
                 val part = content.getBodyPart(i)
+                noteSignature(part)
                 if (isAttachment(part)) { collect(part); continue }
                 val body = runCatching { part.content }.getOrNull()
                 when {
@@ -104,6 +116,7 @@ internal object PgpMimeReader {
             }
         }
 
+        noteSignature(message)
         val hadContentTypeHeader = message.getHeader("Content-Type", null) != null
         val content = message.content
         when {
@@ -126,6 +139,7 @@ internal object PgpMimeReader {
             protectedSubject = message.subject?.takeIf { it.isNotBlank() },
             attachments = attachments,
             attachmentsOmitted = omitted,
+            hasDetachedSignature = hasDetachedSignature,
         )
     }.getOrNull()
 }

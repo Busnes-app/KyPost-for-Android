@@ -42,10 +42,14 @@ enum class PgpSignatureState {
     /** No opinion was expressed. Nothing to say. */
     NONE,
 
-    /** Decrypted, and the ciphertext carried no signature at all. A statement about the message,
+    /** Decrypted, with neither a packet signature nor a declared PGP/MIME signature wrapper.
+     *  A statement about the message,
      *  never about the sender: no glyph stronger than "nothing to say". Only
      *  [EncryptedMessageReader] produces it; the inbox flags cannot tell it from [NONE]. */
     UNSIGNED,
+
+    /** A MIME signature was declared but not checked, including malformed declarations. */
+    UNCHECKED,
 
     /** Signed by a key bound to the sender, and the user confirmed that key out of band — by
      *  eyeballing the fingerprint or scanning a QR code. The only state that claims identity. */
