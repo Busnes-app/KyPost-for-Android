@@ -19,7 +19,7 @@
 - **Release gate after every task that touches jakarta.mail.** The R8 incident (`docs/superpowers/plans/2026-08-24-android-encrypted-read-incident.md`) is why. Find the exact task name once with `./gradlew :app:tasks --all | grep checkRuntimeMatchedClassNames` (flavors are `play`, `github`, `fdroid`, so it is `checkRuntimeMatchedClassNames<Flavor>Release`), then run it. Green output prints nothing; red names the class.
 - **`isReturnDefaultValues = true` is set project-wide.** Every new test is proven by deliberate break: invert the assertion, watch it fail, restore it.
 - **Top-level test fakes are `internal`, never `private`.**
-- **Tests:** `./gradlew :app:testDebugUnitTest --tests "<pattern>"`. Full suite before any PR: `./gradlew :app:testDebugUnitTest lintDebug`.
+- **Tests:** `./gradlew :app:testFdroidDebugUnitTest --tests "<pattern>"`. Full suite before any PR: `./gradlew :app:testFdroidDebugUnitTest lintFdroidDebug`.
 - **Commit per task, on a branch off `main`.** Suggested branch: `feature/pgp-parity`.
 
 ---
@@ -80,7 +80,7 @@ In `MemoryBudgetTest.readScenarioSumsEveryTerm`, extend the expected sum:
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.MemoryBudgetTest"`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.MemoryBudgetTest"`
 Expected: compile failure, unresolved `DECRYPTED_ATTACHMENT_BYTES`.
 
 - [ ] **Step 3: Add the terms**
@@ -113,7 +113,7 @@ And extend `READ_SCENARIO_PEAK_BYTES`:
 
 - [ ] **Step 4: Run to verify it passes**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.MemoryBudgetTest"`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.MemoryBudgetTest"`
 Expected: PASS. The heap test still passes: 105 + 8 + 9 = 122 MiB ≤ 128 MiB. If it fails, the numbers above are wrong; lower `DECRYPTED_ATTACHMENT_BYTES`, do not raise `ASSUMED_HEAP_BYTES`.
 
 - [ ] **Step 5: Commit**
@@ -295,7 +295,7 @@ Append to `PgpMimeReaderTest`:
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.pgp.PgpMimeReaderTest"`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.pgp.PgpMimeReaderTest"`
 Expected: compile failure on `attachments`, `attachmentsOmitted`, `attachmentByteCap`, `MAX_ATTACHMENT_PARTS`.
 
 - [ ] **Step 3: Implement**
@@ -442,7 +442,7 @@ Note `isAttachment` treats a non-text, non-multipart leaf (e.g. `application/pgp
 
 - [ ] **Step 4: Run to verify they pass, and that the existing reader tests still pass**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.pgp.PgpMimeReaderTest" --tests "org.kysecurity.mail.pgp.EncryptedMessageReaderTest" --tests "org.kysecurity.mail.SourceRulesTest"`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.pgp.PgpMimeReaderTest" --tests "org.kysecurity.mail.pgp.EncryptedMessageReaderTest" --tests "org.kysecurity.mail.SourceRulesTest"`
 Expected: PASS. If `SourceRulesTest` names `DecryptedAttachment`, it is because `bytes` was added to `SENSITIVE_PROPERTY_NAMES`; the class already overrides `toString`, so fix the test's expectation, not the class.
 
 - [ ] **Step 5: Prove the byte-cap test by deliberate break**
@@ -451,7 +451,7 @@ Change `if (bytes == null) { omitted = true; return }` to `if (bytes == null) re
 
 - [ ] **Step 6: Release gate**
 
-Run: `./gradlew :app:tasks --all | grep checkRuntimeMatchedClassNames` then the `...Release` task it prints for one flavor, e.g. `./gradlew :app:checkRuntimeMatchedClassNamesGithubRelease`.
+Run: `./gradlew :app:tasks --all | grep checkRuntimeMatchedClassNames` then the `...Release` task it prints for one flavor, e.g. `./gradlew :app:checkRuntimeMatchedClassNamesFdroidRelease`.
 Expected: BUILD SUCCESSFUL, no class named. `part.inputStream` reaches the base64/quoted-printable decoders through bytecode, not mailcap, so no new keep rule is expected. If the gate goes red, add the named class to both `runtimeMatchedClassNames` and `proguard-rules.pro` and update `MimeContentHandlersTest.kept`.
 
 - [ ] **Step 7: Commit**
@@ -565,7 +565,7 @@ Append to `EmailDetailActivityTest`:
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.pgp.InlineImagesTest" --tests "org.kysecurity.mail.EmailDetailActivityTest"`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.pgp.InlineImagesTest" --tests "org.kysecurity.mail.EmailDetailActivityTest"`
 Expected: `InlineImagesTest` fails to compile; the three new `EmailDetailActivityTest` cases fail because `src` is removed from every `img`.
 
 - [ ] **Step 3: Implement `InlineImages.kt`**
@@ -623,7 +623,7 @@ In `EmailDetailActivity.kt` replace the loop at lines 1178-1183:
 
 - [ ] **Step 5: Run to verify they pass**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.pgp.InlineImagesTest" --tests "org.kysecurity.mail.EmailDetailActivityTest"`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.pgp.InlineImagesTest" --tests "org.kysecurity.mail.EmailDetailActivityTest"`
 Expected: PASS, including every pre-existing `blockExternalResources_*` case.
 
 - [ ] **Step 6: Deliberate break**
@@ -646,7 +646,7 @@ git commit -m "pgp: inline cid images from the decrypted message as raster data 
 
 **Interfaces:**
 - Consumes: `DecryptedBody.attachments`, `DecryptedBody.attachmentsOmitted`, `inlineCidImages`, existing `viewAttachmentEphemerally(DownloadedAttachment)`, `saveAttachmentToDownloads`, `attachmentSaveOffered`.
-- Produces: a pure helper for the test: `internal fun decryptedAttachmentNotice(omitted: Boolean, count: Int): Int?` returning a string resource id or null.
+- Produces: a pure helper for the test: `internal fun decryptedAttachmentNotice(omitted: Boolean): Int?` returning a string resource id or null.
 
 - [ ] **Step 1: Add strings**
 
@@ -661,14 +661,12 @@ git commit -m "pgp: inline cid images from the decrypted message as raster data 
 ```kotlin
     @Test
     fun decryptedAttachmentNotice_onlyWhenSomethingWasDropped() {
-        assertNull(decryptedAttachmentNotice(omitted = false, count = 0))
-        assertNull(decryptedAttachmentNotice(omitted = false, count = 3))
-        assertEquals(R.string.email_pgp_attachments_omitted, decryptedAttachmentNotice(omitted = true, count = 0))
-        assertEquals(R.string.email_pgp_attachments_omitted, decryptedAttachmentNotice(omitted = true, count = 3))
+        assertNull(decryptedAttachmentNotice(omitted = false))
+        assertEquals(R.string.email_pgp_attachments_omitted, decryptedAttachmentNotice(omitted = true))
     }
 ```
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.EmailDetailActivityTest"`. Expected: compile failure.
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.EmailDetailActivityTest"`. Expected: compile failure.
 
 - [ ] **Step 3: Implement**
 
@@ -676,7 +674,7 @@ Top-level, next to `displaySignatureVerdict` (~line 1344):
 
 ```kotlin
 /** A dropped part is said out loud; a complete list needs no sentence. */
-internal fun decryptedAttachmentNotice(omitted: Boolean, count: Int): Int? =
+internal fun decryptedAttachmentNotice(omitted: Boolean): Int? =
     if (omitted) R.string.email_pgp_attachments_omitted else null
 ```
 
@@ -709,7 +707,7 @@ In the `Decrypted` branch, change the `rawHtml` computation to inline images, an
 Where the notice is assembled (the `notice`/`pgpBar` block), prepend the omission sentence:
 
 ```kotlin
-                val omission = decryptedAttachmentNotice(outcome.body.attachmentsOmitted, outcome.body.attachments.size)
+                val omission = decryptedAttachmentNotice(outcome.body.attachmentsOmitted)
                     ?.let { getString(it) }
                 val notice = listOfNotNull(signatureNoticeFor(verdict), omission).joinToString("\n\n").ifBlank { null }
 ```
@@ -787,7 +785,7 @@ New private function, modelled on `renderAttachments`:
 
 - [ ] **Step 4: Run tests and lint**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.EmailDetailActivityTest" lintDebug`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.EmailDetailActivityTest" lintFdroidDebug`
 Expected: PASS, lint clean.
 
 - [ ] **Step 5: Verify on device (this is the artifact; the unit tests are not)**
@@ -817,7 +815,7 @@ The server has not decided whether `POST /api/mail/draft` keeps accepting plaint
 
 - [ ] **Step 1: Confirm the block still holds**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.EmailDetailActivityTest" --tests "org.kysecurity.mail.ComposePgpControllerTest"`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.EmailDetailActivityTest" --tests "org.kysecurity.mail.ComposePgpControllerTest"`
 Expected: PASS.
 
 - [ ] **Step 2: Read the Drafts folder through the normal path**
@@ -926,7 +924,7 @@ Run both classes. Expected: compile failure on `UNSIGNED`.
 
 - [ ] **Step 3: Run**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.pgp.*" --tests "org.kysecurity.mail.EmailDetailActivityTest"`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.pgp.*" --tests "org.kysecurity.mail.EmailDetailActivityTest"`
 Expected: PASS. If a `when` over `PgpSignatureState` elsewhere fails to compile, add the `UNSIGNED` arm there mirroring `NONE`.
 
 - [ ] **Step 4: Commit**
@@ -985,7 +983,7 @@ If `UiEmail` names the flags differently, use its names; do not add fields.
 
 - [ ] **Step 2: Run the whole sync surface**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.mail.RelayMailSourceTest" --tests "org.kysecurity.mail.mail.MailRepositoryTest" --tests "org.kysecurity.mail.mail.RelayModelsSerializationTest"`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.mail.RelayMailSourceTest" --tests "org.kysecurity.mail.mail.MailRepositoryTest" --tests "org.kysecurity.mail.mail.RelayModelsSerializationTest"`
 Expected: PASS.
 
 - [ ] **Step 3: Real relay**
@@ -1098,7 +1096,7 @@ private fun ByteArray.toHexString() = joinToString("") { "%02X".format(it) }
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.pgp.SecretKeyRingMergeTest"`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.pgp.SecretKeyRingMergeTest"`
 Expected: compile failure on `mergeSecretKeyRings`.
 
 - [ ] **Step 3: Implement**
@@ -1139,7 +1137,7 @@ private fun ringsOf(input: java.io.InputStream): List<PGPSecretKeyRing> =
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.pgp.SecretKeyRingMergeTest"`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.pgp.SecretKeyRingMergeTest"`
 Expected: PASS.
 
 - [ ] **Step 5: Deliberate break**
@@ -1316,7 +1314,7 @@ class EnrollmentCeremonyMergeTest {
 
 - [ ] **Step 3: Run to verify they fail**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.pgp.EnrollmentCeremonyMergeTest"`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.pgp.EnrollmentCeremonyMergeTest"`
 Expected: compile failure on `previousVault`.
 
 - [ ] **Step 4: Implement the ceremony change**
@@ -1411,7 +1409,7 @@ Wherever the ViewModel installs and clears `activitySealer` (grep `activitySeale
 
 - [ ] **Step 6: Run**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.pgp.*" lintDebug`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.pgp.*" lintFdroidDebug`
 Expected: PASS, including every pre-existing ceremony test (they get a `NotEnrolled` opener by default and behave as before). If `EnrollmentCeremonyExitTest.expectedCleanup` enumerates terminal states, the new `ReadyToFinish` exit on a cancelled unlock is one it already knows.
 
 - [ ] **Step 7: Deliberate break**
@@ -1484,7 +1482,7 @@ git commit -m "pgp: re-enrolment keeps every ring the device already held"
 
 - [ ] **Step 2: Run**
 
-Run: `./gradlew :app:testDebugUnitTest --tests "org.kysecurity.mail.pgp.RecipientResolveClientTest" --tests "org.kysecurity.mail.pgp.PgpPayloadClientTest"`
+Run: `./gradlew :app:testFdroidDebugUnitTest --tests "org.kysecurity.mail.pgp.RecipientResolveClientTest" --tests "org.kysecurity.mail.pgp.PgpPayloadClientTest"`
 Expected: PASS on first run. Prove them by break: temporarily change `tier: String = ""` in `ResolvedKeyDto` to an enum with two values, confirm the first test fails to decode, restore.
 
 - [ ] **Step 3: Commit**
@@ -1498,6 +1496,6 @@ git commit -m "pgp: pin that unknown resolver tiers and signer sources decode"
 
 ## Finish
 
-- [ ] Full suite and lint: `./gradlew :app:testDebugUnitTest lintDebug`, then the release gate for every flavor printed by `./gradlew :app:tasks --all | grep checkRuntimeMatchedClassNames`.
-- [ ] `./gradlew :app:assembleGithubRelease` (or whichever flavor the device uses) and the device checks in Tasks 4, 7 and 9, recorded honestly.
+- [ ] Full suite and lint: `./gradlew :app:testFdroidDebugUnitTest lintFdroidDebug`, then the release gate for every flavor printed by `./gradlew :app:tasks --all | grep checkRuntimeMatchedClassNames`.
+- [ ] `./gradlew :app:assembleFdroidRelease` (or whichever flavor the device uses) and the device checks in Tasks 4, 7 and 9, recorded honestly.
 - [ ] Open the PR with the `pull-request` skill. Post the hand-off to `kypost-android-pgp-parity` with the `myslop-handoff` skill: what shipped, which device checks ran, and the Task 5 decision still owed by the server.
