@@ -20,6 +20,20 @@ class PgpPayloadClientTest {
     }
 
     @Test
+    fun anUnknownSignerKeySourceParses() {
+        val result = fetchWith(
+            200,
+            """{"encryptedPayload":"X","signaturePayload":"","body":"",
+                "signerKeys":[{"addresses":["bob@example.com"],"publicKey":"KEY","source":"expired"},
+                              {"addresses":["bob@example.com"],"publicKey":"KEY2","source":"source-from-the-future","conflict":true}]}""",
+        )
+
+        val ok = result as PgpPayloadResult.Success
+        assertEquals(listOf("expired", "source-from-the-future"), ok.signerKeys.map { it.source })
+        assertTrue(ok.signerKeys[1].conflict)
+    }
+
+    @Test
     fun parsesAPayloadWithItsSignerKeys() {
         val result = fetchWith(
             200,

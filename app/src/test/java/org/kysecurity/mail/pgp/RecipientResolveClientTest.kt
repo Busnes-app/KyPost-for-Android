@@ -12,6 +12,24 @@ import org.junit.Test
 /** `/resolve` answers JSON on 409 and 413 as well as 200, where `/check` is JSON only on 200. */
 class RecipientResolveClientTest {
 
+    /** `expired` and `revoked` join the tier set server-side, and more may follow. The client must
+     *  carry any tier verbatim and let `usable` decide; a decoder that enumerates tiers would turn
+     *  the next server release into a compose-screen outage. */
+    @Test
+    fun unknownTiersParseAndUsableStillGoverns() = runBlocking {
+        val body = """{"results":[
+            {"address":"a@example.invalid","publicKey":"K","fingerprint":"AA","tier":"expired","usable":false},
+            {"address":"b@example.invalid","publicKey":"K","fingerprint":"BB","tier":"revoked","usable":false},
+            {"address":"c@example.invalid","publicKey":"K","fingerprint":"CC","tier":"tier-from-the-future","usable":true}
+        ]}"""
+        val client = RecipientResolveClient(callFactory = FakeCallFactory { request -> response(request, body, 200) })
+
+        val results = (client.resolve("https://relay.example.com/", "d", "s", listOf("a@example.invalid", "b@example.invalid", "c@example.invalid")) as ResolveResult.Success).results
+
+        assertEquals(listOf("expired", "revoked", "tier-from-the-future"), results.map { it.tier })
+        assertEquals(listOf(false, false, true), results.map { it.usable })
+    }
+
     @Test
     fun parsesResolvedKeys() = runBlocking {
         val body = """{"results":[
