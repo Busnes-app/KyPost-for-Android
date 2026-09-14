@@ -641,8 +641,7 @@ class EmailDetailActivity : LockedActivity() {
                 // stripping decision, with a different guard, on a WebView whose blockNetworkLoads
                 // is mutable and shared with the envelope render above it. Two copies of one
                 // security control had already drifted once.
-                // keepInlineDataImages: only the decrypted body may keep raster data: images, because
-                // only here are they bounded by INLINE_IMAGE_BYTES (see Task 3's ruling).
+                // The sanitizer shares one data-image allowance across literal and rewritten CID sources.
                 val rendered = renderableBody(rawHtml, palette, ibmPlexMonoFontFaceCss(this), isDarkPalette(palette), keepInlineDataImages = true)
                 if (plainText == null) {
                     lastRenderedHtml = rendered.withImages
@@ -1260,8 +1259,7 @@ internal fun softWrapPlainText(text: String): String = LONG_PLAIN_TOKEN.replace(
 internal fun blockExternalResources(
     html: String,
     keepImages: Boolean = false,
-    // Scoped to decrypted mail only: plaintext HTML never carries attacker-controlled inline
-    // images that already passed through PgpMimeReader's byte/part cap.
+    // Decrypted mail keeps bounded raster data images in both reader variants.
     keepInlineDataImages: Boolean = false,
     /** Injectable so the fail-closed path can be PROVEN rather than assumed: jsoup is too tolerant
      *  to be made to throw from a test fixture, and "it fails closed" is exactly the kind of claim
@@ -1276,11 +1274,24 @@ internal fun blockExternalResources(
     // so there is nothing to preserve — the composer's Safelist drops the tag for the same reason.
     document.select("iframe").remove()
     // `track` fetches over the network exactly like its sibling `source`, and never as an image.
-    val resourceTags = if (keepImages) "video, audio, source, track, embed, object" else "img, video, audio, source, track, embed, object"
+    val resourceTags = if (keepImages && !keepInlineDataImages) "video, audio, source, track, embed, object" else "img, video, audio, source, track, embed, object"
+    // Charge the entire URL, including prefix/padding, without decoding or copying its payload.
+    var inlineImageCharsLeft = MemoryBudget.INLINE_IMAGE_BYTES * 4L / 3L
     document.select(resourceTags).forEach { element ->
-        // A data: raster image is bytes already in hand, not a fetch; every other src goes.
-        val keepsSrc = keepInlineDataImages && element.tagName() == "img" &&
-            org.kysecurity.mail.pgp.INLINE_DATA_IMAGE_PREFIXES.any { element.attr("src").startsWith(it) }
+        val src = element.attr("src")
+        val inlinePrefix = org.kysecurity.mail.pgp.INLINE_DATA_IMAGE_PREFIXES.firstOrNull { src.startsWith(it) }
+        val keepsInline = keepInlineDataImages && element.tagName() == "img" &&
+            src.length <= inlineImageCharsLeft && inlinePrefix != null &&
+            // Base64's alphabet cannot grow when jsoup escapes the attribute during serialization.
+            (inlinePrefix.length until src.length).all { index ->
+                val c = src[index]
+                c in 'A'..'Z' || c in 'a'..'z' || c in '0'..'9' || c == '+' || c == '/' || c == '='
+            }
+        if (keepsInline) inlineImageCharsLeft -= src.length
+        // Allow explicit remote images on opt-in; other schemes cannot bypass the data budget.
+        val keepsSrc = keepsInline || (keepImages && element.tagName() == "img" &&
+            (src.startsWith("https://", ignoreCase = true) ||
+                src.startsWith("http://", ignoreCase = true) || src.startsWith("//")))
         if (!keepsSrc) element.removeAttr("src")
         element.removeAttr("srcset")
         element.removeAttr("poster")

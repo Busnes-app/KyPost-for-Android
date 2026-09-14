@@ -1,11 +1,12 @@
 package org.kysecurity.mail
 
-/** Every ceiling on attacker-influenced heap, in one place; the sum is the number that matters.
+/** Modeled attacker-influenced payload and buffer ceilings, summed for each operation.
  *
  *  A term belongs here if a remote party chooses its size. "The relay would never send that many"
  *  is not a ceiling — the relay is in this app's threat model everywhere else — and a budget that
  *  omits a term is worse than no budget, because the file reads as a completeness claim.
  *  `MemoryBudgetTest` asserts the total rather than leaving it to this comment.
+ *  These named buffers are not whole-process accounting of parser, UI or WebView allocations.
  *
  *  Two rules learned the hard way, both of which had a term wrong by a factor of two or three:
  *   - a `String` costs TWO bytes per character on ART, which has no compact-string representation;
@@ -87,11 +88,15 @@ internal object MemoryBudget {
     /** Tap-to-open copies before provider admission, so even a rejected registration costs this. */
     const val DECRYPTED_OPEN_SNAPSHOT_BYTES = DECRYPTED_ATTACHMENT_BYTES
 
-    /** The subset of those that are `cid:` images inlined into the rendered HTML. */
-    const val INLINE_IMAGE_BYTES = 3L * 1024 * 1024
+    /** Decoded-byte allowance for CID expansion and aggregate data URLs retained by the sanitizer.
+     *  Larger parts remain available as attachments. */
+    const val INLINE_IMAGE_BYTES = 128L * 1024
 
-    /** What inlining costs: base64 (4/3) inside a UTF-16 String (2x) is 8/3; rounded up to 3x. */
-    const val INLINE_IMAGE_HTML_PEAK_BYTES = 3L * INLINE_IMAGE_BYTES
+    /** Conservative added-image buffer allowance: twelve base64/UTF-16 copies, each rounded
+     *  from 8/3 to 3x. This covers raw HTML, two sanitized and two wrapped variants, plus scratch
+     *  for jsoup attributes/serialization growth, dark-theme rewriting and trimIndent.
+     *  It does not bound the original sender HTML, general DOM overhead or WebView image decoding. */
+    const val INLINE_IMAGE_HTML_PEAK_BYTES = 12L * 3L * INLINE_IMAGE_BYTES
 
     /** Decrypted attachments awaiting a viewer: retained until read or swept. */
     const val PENDING_ATTACHMENT_BYTES = 32L * 1024 * 1024

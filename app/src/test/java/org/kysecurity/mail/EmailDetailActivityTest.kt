@@ -808,6 +808,79 @@ class EmailDetailActivityTest {
     }
 
     @Test
+    fun blockExternalResources_boundsLiteralDataImagesInBothVariants() {
+        val html = "<img src=\"data:image/png;base64," +
+            "A".repeat(2 * MemoryBudget.INLINE_IMAGE_BYTES.toInt()) + "\">"
+        for (keepImages in listOf(false, true)) {
+            val blocked = blockExternalResources(html, keepImages, keepInlineDataImages = true)
+            assertFalse("oversized literal survived keepImages=$keepImages", blocked.contains("data:image/png"))
+        }
+    }
+
+    @Test
+    fun blockExternalResources_sharesDataBudgetBetweenLiteralAndCidImages() {
+        val literal = "data:image/png;base64," + "A".repeat((MemoryBudget.INLINE_IMAGE_BYTES * 8 / 9).toInt())
+        val cid = org.kysecurity.mail.pgp.DecryptedAttachment(
+            "logo.png", "image/png", ByteArray((MemoryBudget.INLINE_IMAGE_BYTES * 2 / 3).toInt()), "logo",
+        )
+        val html = org.kysecurity.mail.pgp.inlineCidImages(
+            "<img id=literal src=\"$literal\"><img id=cid src=\"cid:logo\">", listOf(cid),
+        )
+        for (keepImages in listOf(false, true)) {
+            val blocked = org.jsoup.Jsoup.parseBodyFragment(
+                blockExternalResources(html, keepImages, keepInlineDataImages = true),
+            )
+            assertTrue(blocked.getElementById("literal")!!.hasAttr("src"))
+            assertFalse("CID bypassed aggregate budget", blocked.getElementById("cid")!!.hasAttr("src"))
+        }
+    }
+
+    @Test
+    fun blockExternalResources_countsEveryDataUrlCharacterAtTheBoundary() {
+        val prefix = "data:image/png;base64,"
+        val limit = (MemoryBudget.INLINE_IMAGE_BYTES * 4 / 3).toInt()
+        val exact = prefix + "A".repeat(limit - prefix.length)
+        for (keepImages in listOf(false, true)) {
+            val html = "<img id=exact src=\"$exact\"><img id=extra src=\"${prefix}AAAA\">"
+            val blocked = org.jsoup.Jsoup.parseBodyFragment(
+                blockExternalResources(html, keepImages, keepInlineDataImages = true),
+            )
+            assertEquals(exact, blocked.getElementById("exact")!!.attr("src"))
+            assertFalse(blocked.getElementById("extra")!!.hasAttr("src"))
+        }
+    }
+
+    @Test
+    fun blockExternalResources_decryptedShowImagesCannotBypassDataBudget() {
+        val html = """<img id=https src="https://example.test/a"><img id=http src="http://example.test/b">
+            <img id=relative src="//example.test/c"><img id=svg src="data:image/svg+xml;base64,AAAA">
+            <img id=obfuscated src=" da&#10;ta:image/png;base64,AAAA">
+            <img id=srcset srcset="data:image/png;base64,AAAA 2x">"""
+        val blocked = org.jsoup.Jsoup.parseBodyFragment(
+            blockExternalResources(html, keepImages = true, keepInlineDataImages = true),
+        )
+        for (id in listOf("https", "http", "relative")) assertTrue(blocked.getElementById(id)!!.hasAttr("src"))
+        for (id in listOf("svg", "obfuscated")) assertFalse(blocked.getElementById(id)!!.hasAttr("src"))
+        assertFalse(blocked.getElementById("srcset")!!.hasAttr("srcset"))
+
+        // The decrypted opt-in must not rewrite the existing plaintext Show images behavior.
+        val plaintext = blockExternalResources(html, keepImages = true)
+        assertTrue(plaintext.contains("data:image/svg+xml"))
+        assertTrue(plaintext.contains("srcset"))
+    }
+
+    @Test
+    fun blockExternalResources_dataPayloadCannotExpandThroughHtmlEscaping() {
+        for (keepImages in listOf(false, true)) {
+            val blocked = blockExternalResources(
+                """<img src="data:image/png;base64,AAAA&amp;AAAA">""",
+                keepImages, keepInlineDataImages = true,
+            )
+            assertFalse(blocked.contains("data:image/png"))
+        }
+    }
+
+    @Test
     fun blockExternalResources_stillStripsDataSvgAndNonImageData() {
         val blocked = blockExternalResources(
             """<img src="data:image/svg+xml;base64,PHN2Zz4="><img src="data:text/html;base64,PGI+">""",

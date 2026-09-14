@@ -10,11 +10,11 @@ import org.junit.Test
 class MemoryBudgetTest {
 
     @Test
-    fun readScenarioFitsTheAssumedHeap() {
+    fun readScenarioLeavesFourMiBOfHeadroom() {
         assertTrue(
-            "Reading peaks at ${MemoryBudget.READ_SCENARIO_PEAK_BYTES}, over the assumed " +
-                "${MemoryBudget.ASSUMED_HEAP_BYTES} byte heap. Lower a ceiling, do not raise this.",
-            MemoryBudget.READ_SCENARIO_PEAK_BYTES <= MemoryBudget.ASSUMED_HEAP_BYTES,
+            "Reading peaks at ${MemoryBudget.READ_SCENARIO_PEAK_BYTES}; leave at least 4 MiB " +
+                "below the ${MemoryBudget.ASSUMED_HEAP_BYTES} byte heap. Lower a ceiling, do not raise this.",
+            MemoryBudget.READ_SCENARIO_PEAK_BYTES <= MemoryBudget.ASSUMED_HEAP_BYTES - 4L * 1024 * 1024,
         )
     }
 
@@ -60,10 +60,10 @@ class MemoryBudgetTest {
         )
     }
 
-    /** Base64 in a UTF-16 String is 8/3 of the bytes; 3x is the round-up the budget carries. */
+    /** Twelve conservative base64/UTF-16 copies include retained variants and render scratch. */
     @Test
-    fun inlineImageHtmlPeakIsThreeTimesTheInlineBytes() {
-        assertEquals(3L * MemoryBudget.INLINE_IMAGE_BYTES, MemoryBudget.INLINE_IMAGE_HTML_PEAK_BYTES)
+    fun inlineImageHtmlPeakCountsRetainedAndTransientCopies() {
+        assertEquals(12L * 3L * MemoryBudget.INLINE_IMAGE_BYTES, MemoryBudget.INLINE_IMAGE_HTML_PEAK_BYTES)
     }
 
     /** The in-flight term takes a max over the three network paths. Naming one of them by hand is

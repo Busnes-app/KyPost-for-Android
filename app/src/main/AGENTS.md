@@ -261,6 +261,11 @@ Owns production Android app code and resources.
   before anything reaches the WebView; "Show images" restores `<img src>` and nothing else. An
   `<iframe>` is dropped whole, because `srcdoc` carries an inline document no attribute strip
   reaches. `EmailDetailActivityTest` is the contract for that.
+- Decrypted reader variants share a sanitizer-enforced aggregate data-image allowance, covering
+  literal data URLs and rewritten CIDs even after "Show images". The 128 KiB inline ceiling leaves
+  larger parts available for attachment open/save under the separate 4 MiB attachment budget.
+  `MemoryBudget` counts conservative retained/render image buffers and reserves at least 4 MiB
+  read headroom; this is not a bound on general HTML parsing or WebView image decoding.
 - Keyword tuning is managed in `KeywordSettingsActivity` and persists both hidden/visible state and
   the user-defined drag order used by Inbox tabs. Newly discovered keywords append to that order.
   Its RecyclerView owns theming its checkbox rows because the global theme walker deliberately
