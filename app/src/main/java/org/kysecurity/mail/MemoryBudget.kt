@@ -45,7 +45,16 @@ internal object MemoryBudget {
 
     /** Attachment parts kept out of one decrypted message, decoded, for the life of the detail
      *  screen. Bounded by [PgpMimeReader], which drops parts past this rather than truncating one. */
-    const val DECRYPTED_ATTACHMENT_BYTES = 8L * 1024 * 1024
+    const val DECRYPTED_ATTACHMENT_BYTES = 4L * 1024 * 1024
+
+    /** `readAllWithLimit` can briefly hold old + doubled arrays while earlier parts remain kept. */
+    const val DECRYPTED_ATTACHMENT_DECODE_GROWTH_BYTES = DECRYPTED_ATTACHMENT_BYTES / 2L
+
+    /** One admitted Downloads save owns a copy while the retained source remains available. */
+    const val DECRYPTED_SAVE_SNAPSHOT_BYTES = DECRYPTED_ATTACHMENT_BYTES
+
+    /** Tap-to-open copies before provider admission, so even a rejected registration costs this. */
+    const val DECRYPTED_OPEN_SNAPSHOT_BYTES = DECRYPTED_ATTACHMENT_BYTES
 
     /** The subset of those that are `cid:` images inlined into the rendered HTML. */
     const val INLINE_IMAGE_BYTES = 3L * 1024 * 1024
@@ -102,6 +111,9 @@ internal object MemoryBudget {
             LARGEST_READ_IN_FLIGHT_BYTES +
             PGP_PLAINTEXT_PEAK_BYTES +
             DECRYPTED_ATTACHMENT_BYTES +
+            DECRYPTED_ATTACHMENT_DECODE_GROWTH_BYTES +
+            DECRYPTED_SAVE_SNAPSHOT_BYTES +
+            DECRYPTED_OPEN_SNAPSHOT_BYTES +
             INLINE_IMAGE_HTML_PEAK_BYTES
 
     /** Sending a message. A different screen and a different operation from [READ_SCENARIO_PEAK_BYTES],

@@ -94,8 +94,10 @@ class EmailDetailActivity : LockedActivity() {
     /** Parts of the decrypted message, retained for the chips; zeroed on lock and destroy. Never
      *  copied into [downloadedAttachments]: Forward is blocked for CLIENT_PROTECTED and must stay so. */
     private var decryptedAttachments: List<org.kysecurity.mail.pgp.DecryptedAttachment> = emptyList()
+    private val decryptedAttachmentSave = org.kysecurity.mail.security.OwnedAttachmentSave()
 
     private fun dropDecryptedAttachments() {
+        decryptedAttachmentSave.stopAccepting()
         decryptedAttachments.forEach { java.util.Arrays.fill(it.bytes, 0) }
         decryptedAttachments = emptyList()
     }
@@ -672,6 +674,7 @@ class EmailDetailActivity : LockedActivity() {
                 btnOpenInWebmail.visibility = View.GONE
                 dropDecryptedAttachments()
                 decryptedAttachments = outcome.body.attachments
+                decryptedAttachmentSave.allow()
                 renderDecryptedAttachments(outcome.body.attachmentsOmitted)
             }
             // The decrypt can still be retried here and the user is the missing input, so offer
@@ -821,18 +824,30 @@ class EmailDetailActivity : LockedActivity() {
                             .setTitle(R.string.attachment_save_confirm_title)
                             .setMessage(getString(R.string.attachment_save_confirm_message, part.name))
                             .setPositiveButton(R.string.attachment_save_confirm_positive) { _, _ ->
-                                ioExecutor.execute {
-                                    val saved = org.kysecurity.mail.security.saveAttachmentToDownloads(
-                                        this@EmailDetailActivity,
-                                        safeFileName(part.name, part.mimeType),
-                                        part.mimeType,
-                                        part.bytes,
-                                    )
-                                    runOnUiThread {
-                                        if (isFinishing || isDestroyed) return@runOnUiThread
-                                        val id = if (saved) R.string.attachment_saved else R.string.attachment_save_failed
-                                        Toast.makeText(this@EmailDetailActivity, getString(id, part.name), Toast.LENGTH_LONG).show()
+                                val snapshot = decryptedAttachmentSave.admit(
+                                    part.bytes,
+                                    lifecycleValid = !isFinishing && !isDestroyed,
+                                ) ?: return@setPositiveButton
+                                try {
+                                    ioExecutor.execute {
+                                        val saved = try {
+                                            org.kysecurity.mail.security.saveAttachmentToDownloads(
+                                                this@EmailDetailActivity,
+                                                part.name,
+                                                part.mimeType,
+                                                snapshot,
+                                            )
+                                        } finally {
+                                            decryptedAttachmentSave.finish(snapshot)
+                                        }
+                                        runOnUiThread {
+                                            if (isFinishing || isDestroyed) return@runOnUiThread
+                                            val id = if (saved) R.string.attachment_saved else R.string.attachment_save_failed
+                                            Toast.makeText(this@EmailDetailActivity, getString(id, part.name), Toast.LENGTH_LONG).show()
+                                        }
                                     }
+                                } catch (_: java.util.concurrent.RejectedExecutionException) {
+                                    decryptedAttachmentSave.finish(snapshot)
                                 }
                             }
                             .setNegativeButton(android.R.string.cancel, null)

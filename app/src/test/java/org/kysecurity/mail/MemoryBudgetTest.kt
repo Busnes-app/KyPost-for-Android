@@ -52,6 +52,9 @@ class MemoryBudgetTest {
                 MemoryBudget.LARGEST_READ_IN_FLIGHT_BYTES +
                 MemoryBudget.PGP_PLAINTEXT_PEAK_BYTES +
                 MemoryBudget.DECRYPTED_ATTACHMENT_BYTES +
+                MemoryBudget.DECRYPTED_ATTACHMENT_DECODE_GROWTH_BYTES +
+                MemoryBudget.DECRYPTED_SAVE_SNAPSHOT_BYTES +
+                MemoryBudget.DECRYPTED_OPEN_SNAPSHOT_BYTES +
                 MemoryBudget.INLINE_IMAGE_HTML_PEAK_BYTES,
             MemoryBudget.READ_SCENARIO_PEAK_BYTES,
         )

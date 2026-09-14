@@ -616,6 +616,17 @@ class EmailDetailActivityTest {
         assertEquals("image/jpeg", safeMimeType("image/jpeg", "photo.pdf"))
     }
 
+    @Test
+    fun downloadsResolveOpaqueTypeBeforeSanitisingTheRawName() {
+        val metadata = org.kysecurity.mail.security.attachmentDownloadMetadata(
+            "invoice.pdf",
+            "application/octet-stream",
+        )
+
+        assertEquals("application/pdf", metadata.mimeType)
+        assertEquals("invoice.pdf", metadata.displayName)
+    }
+
     /** The ephemeral sink handed the sender's filename to the chooser verbatim while the Downloads
      *  sink sanitised it; the display name is what a viewer persists the file under. */
     @Test
