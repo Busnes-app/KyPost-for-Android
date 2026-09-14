@@ -158,6 +158,88 @@ class PgpMimeReaderTest {
     }
 
     @Test
+    fun aContentIdOnTheHtmlBodyDoesNotTurnItIntoAnAttachment() {
+        // Many mailers stamp a Content-ID on every part, including the body. Only disposition
+        // decides; the body must survive alongside the real inline attachment.
+        val body = read(
+            """
+            Content-Type: multipart/related; boundary="b1"
+
+            --b1
+            Content-Type: text/html; charset=utf-8
+            Content-ID: <body@x>
+
+            <p>hello</p><img src="cid:logo@kypost">
+            --b1
+            Content-Type: image/png; name="logo.png"
+            Content-Disposition: inline; filename="logo.png"
+            Content-ID: <logo@kypost>
+            Content-Transfer-Encoding: base64
+
+            $pngBase64
+            --b1--
+            """.trimIndent(),
+        )
+
+        assertEquals("<p>hello</p><img src=\"cid:logo@kypost\">", body?.html?.trim())
+        assertEquals("logo@kypost", body?.attachments?.single()?.contentId)
+    }
+
+    @Test
+    fun aNamedTextPartWithNoDispositionIsTheBodyNotAnAttachment() {
+        // Outlook lineage: a body text/plain part can carry name= with no Content-Disposition at
+        // all. name= alone must never make a text part a file.
+        val body = read(
+            """
+            Content-Type: multipart/mixed; boundary="b1"
+
+            --b1
+            Content-Type: text/plain; charset=utf-8; name="message.txt"
+
+            the body
+            --b1--
+            """.trimIndent(),
+        )
+
+        assertEquals("the body", body?.plain?.trim())
+        assertTrue(body!!.attachments.isEmpty())
+    }
+
+    @Test
+    fun attachmentsPastTheCumulativeByteCapAreDropped() {
+        val chunk = "A".repeat((PgpMimeReader.attachmentByteCap / 2 + 1).toInt())
+        val body = read(
+            """
+            Content-Type: multipart/mixed; boundary="b1"
+
+            --b1
+            Content-Type: text/plain; charset=utf-8
+
+            body
+            --b1
+            Content-Type: application/octet-stream; name="one.bin"
+            Content-Disposition: attachment; filename="one.bin"
+
+            $chunk
+            --b1
+            Content-Type: application/octet-stream; name="two.bin"
+            Content-Disposition: attachment; filename="two.bin"
+
+            $chunk
+            --b1
+            Content-Type: application/octet-stream; name="three.bin"
+            Content-Disposition: attachment; filename="three.bin"
+
+            $chunk
+            --b1--
+            """.trimIndent(),
+        )
+
+        assertEquals(listOf("one.bin"), body?.attachments?.map { it.name })
+        assertTrue(body!!.attachmentsOmitted)
+    }
+
+    @Test
     fun readsAPlainTextOnlyMessage() {
         val body = read(
             """

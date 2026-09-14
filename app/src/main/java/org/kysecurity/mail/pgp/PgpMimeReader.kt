@@ -75,14 +75,15 @@ internal object PgpMimeReader {
             attachments += DecryptedAttachment(name, mimeType, bytes, contentId)
         }
 
-        /** Disposition first: a `text/plain` part named `notes.txt` is a file, not the body. */
+        /** A `text/html` or `text/plain` leaf is a body candidate unless disposition says
+         *  otherwise: a `name=` param or `Content-ID` on a text part never makes it a file — many
+         *  mailers stamp both on every part, including the body. Non-text, non-multipart leaves
+         *  are attachments regardless of headers. */
         fun isAttachment(part: Part): Boolean {
             val disposition = runCatching { part.disposition }.getOrNull()?.lowercase()
             if (disposition == Part.ATTACHMENT) return true
-            if (part.isMimeType("multipart/*")) return false
-            val hasName = runCatching { part.fileName }.getOrNull()?.isNotBlank() == true
-            val hasContentId = runCatching { part.getHeader("Content-ID") }.getOrNull()?.isNotEmpty() == true
-            return hasName || hasContentId || !(part.isMimeType("text/html") || part.isMimeType("text/plain"))
+            if (part.isMimeType("text/html") || part.isMimeType("text/plain")) return false
+            return !part.isMimeType("multipart/*")
         }
 
         fun walk(content: Any?) {
