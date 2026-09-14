@@ -3,6 +3,7 @@ package org.kysecurity.mail.pgp
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Test
 
 class WebmailDeepLinkTest {
@@ -64,11 +65,10 @@ class WebmailDeepLinkTest {
     }
 
     @Test
-    fun draftsUrl_pointsAtTheDraftsMailbox() {
-        assertEquals(
-            "https://relay.example.com/read?mailbox=Drafts",
-            webmailDraftsUrl("https://relay.example.com"),
-        )
+    fun handoffUrlContainsOnlyTheDraftsDestination() {
+        val url = webmailDraftsUrl("https://relay.example.com")!!
+        assertEquals("https://relay.example.com/read?mailbox=Drafts", url)
+        assertEquals(setOf("mailbox"), url.toHttpUrl().queryParameterNames)
     }
 
     @Test

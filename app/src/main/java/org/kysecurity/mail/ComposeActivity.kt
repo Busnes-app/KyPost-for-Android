@@ -800,69 +800,34 @@ class ComposeActivity : LockedActivity() {
             .showSecurely()
     }
 
-    /** Consent first: /api/mail/draft writes plain MIME to the relay and there is no delete path. */
+    /** Opens webmail without transferring compose content; onStop keeps the local composition. */
     private fun handOffToWebmail() {
-        // Disabled for the whole in-flight window: a double-tap would park two drafts.
+        // Disabled while resolving the target and while the confirmation dialog is visible.
         webmailChip.isEnabled = false
-        bodyEditor.exportHtml { html ->
-            // Same rationale as sendEmail's guard: this callback can fire after onDestroy has torn
-            // down ioExecutor.
-            if (isFinishing || isDestroyed) return@exportHtml
-            val draft = MailDraft(
-                to = toInput.commaJoinedRecipients(),
-                cc = ccInput.commaJoinedRecipients(),
-                bcc = bccInput.commaJoinedRecipients(),
-                subject = subjectField.text.toString().trim(),
-                body = html,
-                mode = "html",
-                attachments = attachments.toList(),
-            )
-            // Resolve the destination before asking, so the dialog is not offered when there is
-            // nowhere to send the user — but do not save anything yet.
-            ioExecutor.execute {
-                val serverUrl = PushRuntime.graph(this).repository.pairingForAuthenticatedCall()?.serverUrl
-                val url = serverUrl?.let { webmailDraftsUrl(it) }
-                runOnUiThread {
-                    // See dispatchSend's identical guard: this callback can also fire after the
-                    // Activity has finished (app lock) or been destroyed.
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    if (serverUrl == null || url == null) {
-                        webmailChip.isEnabled = true
-                        Toast.makeText(this, R.string.compose_handoff_no_webmail, Toast.LENGTH_LONG).show()
-                        return@runOnUiThread
-                    }
-                    confirmHandoff(serverUrl, url, draft)
+        ioExecutor.execute {
+            val serverUrl = PushRuntime.graph(this).repository.pairingForAuthenticatedCall()?.serverUrl
+            val url = serverUrl?.let { webmailDraftsUrl(it) }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                if (serverUrl == null || url == null) {
+                    webmailChip.isEnabled = true
+                    Toast.makeText(this, R.string.compose_handoff_no_webmail, Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
                 }
+                confirmHandoff(serverUrl, url)
             }
         }
     }
 
-    /** Asks before the plaintext leaves the device, then saves and opens webmail on acceptance. */
-    private fun confirmHandoff(serverUrl: String, url: String, draft: MailDraft) {
+    private fun confirmHandoff(serverUrl: String, url: String) {
         activeDialog = AlertDialog.Builder(this)
             .setTitle(R.string.compose_handoff_dialog_title)
             .setMessage(R.string.compose_handoff_dialog_body)
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(R.string.compose_handoff_dialog_confirm) { _, _ ->
-                ioExecutor.execute {
-                    val saved = MailRuntime.graph(this).repository.saveDraft(draft)
-                    runOnUiThread {
-                        if (isFinishing || isDestroyed) return@runOnUiThread
-                        if (saved !is MailOutcome.Success) {
-                            webmailChip.isEnabled = true
-                            Toast.makeText(
-                                this,
-                                getString(R.string.compose_handoff_draft_failed, saved.userFacingMessage().orEmpty()),
-                                Toast.LENGTH_LONG,
-                            ).show()
-                            return@runOnUiThread
-                        }
-                        openHandoffTarget(serverUrl, url)
-                    }
-                }
+                openHandoffTarget(serverUrl, url)
             }
-            // FLAG_SECURE on the dialog's own window: it names the account's protection posture and
-            // the recipients, and the Activity's flag does not cover a separate dialog window.
+            // FLAG_SECURE on the dialog's own window: the Activity's flag does not cover it.
             .setOnDismissListener { if (activeDialog != null) webmailChip.isEnabled = true }
             .create()
             .showSecurely()
@@ -870,9 +835,7 @@ class ComposeActivity : LockedActivity() {
 
     private fun openHandoffTarget(serverUrl: String, url: String) {
         // Prefers the installed PWA, then any browser, so the existing session comes with it.
-        if (openWebmail(this, serverUrl, url)) {
-            finish()
-        } else {
+        if (!openWebmail(this, serverUrl, url)) {
             webmailChip.isEnabled = true
             Toast.makeText(this, R.string.compose_handoff_no_handler, Toast.LENGTH_LONG).show()
         }

@@ -51,6 +51,10 @@ Owns production Android app code and resources.
   `mail/MailRepository` writes results into the Room cache (`data/AppDatabase`,
   `EmailDao.replaceFolderSnapshot`) and is what `InboxActivity`/`EmailDetailActivity`/
   `ComposeActivity` call.
+- The client-custody compose handoff opens the account's webmail without transferring recipients,
+  subject, body, or attachments. `ComposeActivity` stays alive and its existing `onStop` path keeps
+  the composition in `ComposeDraftCache`; cancel or launch failure leaves it editable. The relay
+  rejects plaintext drafts for client custody, so this handoff must never call `saveDraft`.
 - **`MailRepository` is the one synchronization boundary: the source returns facts, the repository
   decides when they become durable.** Two rules follow from that, and both were once broken.
   1. `RelayMailSource.fetchInbox` READS the cursor (to build `since`) and returns the next one as

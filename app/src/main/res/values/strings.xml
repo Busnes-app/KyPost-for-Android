@@ -182,12 +182,11 @@
     <string name="compose_pickup_dialog_body">We don\'t have a PGP key for %1$s. They\'ll get an email with a one-time link instead.\n\nTo make that work, this message\'s contents are stored on your KyPost server — unencrypted — for up to 7 days or until the link is opened. Everyone else on this message still gets it encrypted.</string>
     <string name="compose_pickup_dialog_confirm">Send link anyway</string>
     <string name="compose_handoff_dialog_title">Finish this in webmail</string>
-    <string name="compose_handoff_dialog_body">This account\'s PGP key is held only by your browser, so neither this app nor your server can encrypt on your behalf. Continuing saves this message as a draft on your KyPost server — unencrypted — so you can finish and send it in webmail.</string>
+    <string name="compose_handoff_dialog_body">This composition won\'t be transferred to webmail. Open webmail and recreate it there. Your current fields and attachments will remain here when you return.</string>
     <string name="compose_send_needs_webmail">This account\'s PGP key is held only by your browser, so this app can\'t encrypt or sign. Use “Continue in webmail” to send it protected.</string>
     <string name="compose_handoff_dialog_confirm">Open webmail</string>
-    <string name="compose_handoff_draft_failed">Couldn\'t save the draft, so webmail wouldn\'t have your message: %1$s</string>
-    <string name="compose_handoff_no_webmail">Couldn\'t work out this server\'s web address — open your drafts in your browser.</string>
-    <string name="compose_handoff_no_handler">No app on this device can open that link — open your drafts in your browser.</string>
+    <string name="compose_handoff_no_webmail">Couldn\'t work out this server\'s web address.</string>
+    <string name="compose_handoff_no_handler">No app on this device can open webmail.</string>
     <!-- Client-custody send: no pickup-link fallback, which stores plaintext for 7 days. -->
     <string name="compose_pgp_no_key_title">No key for some recipients</string>
     <string name="compose_pgp_no_key_body">We don\'t have a usable PGP key for %1$s, so nothing was sent.\n\nOn this account your key never leaves your devices, so your server can\'t send them a link on your behalf. Add their key in Contacts, or continue in webmail.</string>

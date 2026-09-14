@@ -148,6 +148,20 @@ class SourceRulesTest {
         )
     }
 
+    @Test
+    fun webmailHandoffCannotTransferOrDiscardTheComposition() {
+        val compose = mainSources().single { it.relativePath.endsWith("/ComposeActivity.kt") }.readText()
+        val handoff = compose.substringAfter("private fun handOffToWebmail()")
+            .substringBefore("override fun onStop()")
+        val forbidden = listOf("exportHtml", "MailDraft(", ".saveDraft(", "ComposeDraftCache.clear", "finish()")
+            .filter { it in handoff }
+        assertEquals(
+            emptyList(),
+            forbidden,
+            "Webmail handoff may open only a data-free URL and must leave the live composer intact.",
+        )
+    }
+
     private class Source(val path: String, val relativePath: String, private val file: File) {
         fun readText(): String = file.readText()
     }
