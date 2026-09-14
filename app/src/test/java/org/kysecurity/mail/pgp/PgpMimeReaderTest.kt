@@ -9,6 +9,154 @@ class PgpMimeReaderTest {
 
     private fun read(mime: String) = PgpMimeReader.read(mime.toByteArray(Charsets.UTF_8))
 
+    private val pngBase64 = java.util.Base64.getEncoder().encodeToString(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47))
+
+    @Test
+    fun collectsAnAttachmentPartBesideTheBody() {
+        val body = read(
+            """
+            Content-Type: multipart/mixed; boundary="b1"
+
+            --b1
+            Content-Type: text/plain; charset=utf-8
+
+            see attached
+            --b1
+            Content-Type: application/pdf; name="report.pdf"
+            Content-Disposition: attachment; filename="report.pdf"
+            Content-Transfer-Encoding: base64
+
+            JVBERi0xLjQK
+            --b1--
+            """.trimIndent(),
+        )
+
+        assertEquals("see attached", body?.plain?.trim())
+        val attachment = body!!.attachments.single()
+        assertEquals("report.pdf", attachment.name)
+        assertEquals("application/pdf", attachment.mimeType)
+        assertEquals("%PDF-1.4\n", String(attachment.bytes, Charsets.ISO_8859_1))
+        assertNull(attachment.contentId)
+        assertTrue(!body.attachmentsOmitted)
+    }
+
+    @Test
+    fun aTextPartWithAnAttachmentDispositionIsAnAttachmentNotTheBody() {
+        val body = read(
+            """
+            Content-Type: multipart/mixed; boundary="b1"
+
+            --b1
+            Content-Type: text/plain; charset=utf-8
+
+            the body
+            --b1
+            Content-Type: text/plain; charset=utf-8; name="notes.txt"
+            Content-Disposition: attachment; filename="notes.txt"
+
+            not the body
+            --b1--
+            """.trimIndent(),
+        )
+
+        assertEquals("the body", body?.plain?.trim())
+        assertEquals("notes.txt", body?.attachments?.single()?.name)
+    }
+
+    @Test
+    fun anInlineImageCarriesItsContentIdWithoutTheAngleBrackets() {
+        val body = read(
+            """
+            Content-Type: multipart/related; boundary="b1"
+
+            --b1
+            Content-Type: text/html; charset=utf-8
+
+            <img src="cid:logo@kypost">
+            --b1
+            Content-Type: image/png; name="logo.png"
+            Content-Disposition: inline; filename="logo.png"
+            Content-ID: <logo@kypost>
+            Content-Transfer-Encoding: base64
+
+            $pngBase64
+            --b1--
+            """.trimIndent(),
+        )
+
+        assertEquals("logo@kypost", body?.attachments?.single()?.contentId)
+        assertEquals("image/png", body?.attachments?.single()?.mimeType)
+    }
+
+    @Test
+    fun attachmentsPastTheByteCapAreDroppedWholeAndReported() {
+        val big = "A".repeat(PgpMimeReader.attachmentByteCap.toInt() + 1)
+        val body = read(
+            """
+            Content-Type: multipart/mixed; boundary="b1"
+
+            --b1
+            Content-Type: text/plain; charset=utf-8
+
+            body
+            --b1
+            Content-Type: application/octet-stream; name="huge.bin"
+            Content-Disposition: attachment; filename="huge.bin"
+
+            $big
+            --b1
+            Content-Type: application/octet-stream; name="small.bin"
+            Content-Disposition: attachment; filename="small.bin"
+
+            tiny
+            --b1--
+            """.trimIndent(),
+        )
+
+        // The oversize part is gone entirely: a truncated file is worse than a missing one.
+        assertEquals(listOf("small.bin"), body?.attachments?.map { it.name })
+        assertTrue("the reader must say a part was dropped", body!!.attachmentsOmitted)
+    }
+
+    @Test
+    fun attachmentsPastThePartCapAreDroppedAndReported() {
+        val parts = (1..PgpMimeReader.MAX_ATTACHMENT_PARTS + 1).joinToString("\n") { i ->
+            """
+            --b1
+            Content-Type: application/octet-stream; name="f$i.bin"
+            Content-Disposition: attachment; filename="f$i.bin"
+
+            x
+            """.trimIndent()
+        }
+        val body = read("Content-Type: multipart/mixed; boundary=\"b1\"\n\n$parts\n--b1--")
+
+        assertEquals(PgpMimeReader.MAX_ATTACHMENT_PARTS, body?.attachments?.size)
+        assertTrue(body!!.attachmentsOmitted)
+    }
+
+    @Test
+    fun anAttachmentOnlyMessageStillReadsAsAMessage() {
+        // No body part at all. Today read() returns null when html and plain are both null; an
+        // attachment is content, so it must not.
+        val body = read(
+            """
+            Content-Type: multipart/mixed; boundary="b1"
+
+            --b1
+            Content-Type: application/pdf; name="only.pdf"
+            Content-Disposition: attachment; filename="only.pdf"
+
+            x
+            --b1--
+            """.trimIndent(),
+        )
+
+        assertEquals("only.pdf", body?.attachments?.single()?.name)
+        assertEquals("plain", body?.bodyMode)
+        assertEquals("", body?.plain)
+    }
+
     @Test
     fun readsAPlainTextOnlyMessage() {
         val body = read(
