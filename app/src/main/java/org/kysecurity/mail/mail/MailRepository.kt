@@ -70,6 +70,9 @@ class MailRepository(
         return outcome
     }
 
+    fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> =
+        relaySource.saveClientEncryptedDraft(draft)
+
     fun send(draft: MailDraft): MailOutcome<MailSendOutcome> = relaySource.sendMail(draft)
 
     /** The client-custody send: this device already encrypted and signed, the relay only forwards. */

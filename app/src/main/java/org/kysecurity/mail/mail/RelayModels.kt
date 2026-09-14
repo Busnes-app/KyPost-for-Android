@@ -191,3 +191,9 @@ data class RelayPickupFallbackDto(
     val keylessRecipients: List<String> = emptyList(),
     val pickupFallbackAvailable: Boolean = false,
 )
+
+/** Closed encrypted-draft wire shape; never serialize a plaintext MailDraft here. */
+@Serializable
+data class RelayClientEncryptedDraftDto(val to: String, val pgpDraft: String) {
+    override fun toString(): String = "RelayClientEncryptedDraftDto(redacted)"
+}

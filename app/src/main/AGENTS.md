@@ -51,10 +51,16 @@ Owns production Android app code and resources.
   `mail/MailRepository` writes results into the Room cache (`data/AppDatabase`,
   `EmailDao.replaceFolderSnapshot`) and is what `InboxActivity`/`EmailDetailActivity`/
   `ComposeActivity` call.
-- The client-custody compose handoff opens the account's webmail without transferring recipients,
-  subject, body, or attachments. `ComposeActivity` stays alive and its existing `onStop` path keeps
-  the composition in `ComposeDraftCache`; cancel or launch failure leaves it editable. The relay
-  rejects plaintext drafts for client custody, so this handoff must never call `saveDraft`.
+- Client-custody draft handoff on an enrolled device encrypts and signs the complete draft to the
+  locally unsealed account key through `ClientEncryptedDraftSaver`; the relay receives only `to`
+  and `pgpDraft`. Protected To/Cc/Bcc/Subject, body and attachments travel inside the ciphertext;
+  the outer MIME has To and a placeholder Subject, with no Cc/Bcc. Bootstrap keys and recipient
+  discovery are not inputs to self-encryption. The composer closes only after save and browser
+  launch succeed; cancellation or either failure retains the fields and attachments. A modal
+  prevents edits during saving, and Activity destruction cancels its vault prompt.
+  Unenrolled devices open webmail without transferring any composition; unknown custody refuses
+  the operation. Compose never calls the plaintext `saveDraft` transport. Retry after a successful
+  save but failed browser launch can create another draft: the relay exposes no draft ID/upsert.
 - **`MailRepository` is the one synchronization boundary: the source returns facts, the repository
   decides when they become durable.** Two rules follow from that, and both were once broken.
   1. `RelayMailSource.fetchInbox` READS the cursor (to build `since`) and returns the next one as

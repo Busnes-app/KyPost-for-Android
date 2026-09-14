@@ -45,6 +45,13 @@ class ComposePgpController(
         )
     }
 
+    internal suspend fun draftHandoffMode(): org.kysecurity.mail.pgp.DraftHandoffMode {
+        val state = bootstrap() ?: return org.kysecurity.mail.pgp.DraftHandoffMode.REFUSE
+        return org.kysecurity.mail.pgp.draftHandoffMode(
+            state.hasIdentity, state.protection, enrollmentProbe(), state.accountAddress,
+        )
+    }
+
     /** The address every client-encrypted delivery's `From` must carry. Blank when unknown, which
      *  [pgpComposeStateOf] already degrades to the webmail handoff. */
     suspend fun accountAddress(): String = bootstrap()?.accountAddress.orEmpty()

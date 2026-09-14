@@ -4,7 +4,7 @@
 
 **Goal:** Hand an Android composition to webmail without uploading plaintext when the account uses client custody, while keeping the composition available in Android whenever saving or opening webmail fails.
 
-**Status:** Follow-up plan only; encrypted draft saving is not implemented by the parity branch. That branch already opens webmail without transferring the composition and keeps the Android composer alive. This plan extends that safe fallback for enrolled devices.
+**Status:** Implemented on `feat/encrypted-draft-handoff` after parity PR #109 merged. Automated verification is recorded in [the implementation record](../handoffs/2026-09-14-encrypted-draft-handoff.md). Live relay/account checks below remain unrun.
 
 **Architecture:** Add one encrypted-draft path alongside the existing no-upload handoff. The low-level `MailSource.saveDraft` transport still exists, but its unused `MailRepository` wrapper has been removed. On an enrolled client-custody device, build one complete PGP/MIME draft, encrypt and sign it to the public key derived from the locally unsealed private key, and post only `{to, pgpDraft}` to `/api/mail/draft`. On an unenrolled device there is no trusted key with which Android can encrypt: open webmail without saving, leave `ComposeActivity` alive, and keep its in-memory draft. Unknown custody also fails closed and never calls the plaintext draft path.
 
@@ -21,10 +21,10 @@
 - Modify `app/src/main/java/org/kysecurity/mail/mail/MailRepository.kt`
 - Test `app/src/test/java/org/kysecurity/mail/mail/RelayMailSourceTest.kt`
 
-- [ ] Add a redacted `ClientEncryptedDraft(to: String, pgpDraft: String)` domain value and `saveClientEncryptedDraft` to `MailSource` and `MailRepository`.
-- [ ] Add a dedicated serializable DTO containing exactly `to` and `pgpDraft`. Do not reuse `RelayMailRequestDto`: its subject, body, Cc, Bcc, mode, and attachments fields create opportunities to leak protected values beside the ciphertext.
-- [ ] Implement `RelayMailSource.saveClientEncryptedDraft` against the existing authenticated `/api/mail/draft` request/response machinery.
-- [ ] Test the URL and decoded JSON keys and values. Assert the request has `to` and `pgpDraft` and has no `body`, real `subject`, `cc`, `bcc`, or `attachments` key.
+- [x] Add a redacted `ClientEncryptedDraft(to: String, pgpDraft: String)` domain value and `saveClientEncryptedDraft` to `MailSource` and `MailRepository`.
+- [x] Add a dedicated serializable DTO containing exactly `to` and `pgpDraft`. Do not reuse `RelayMailRequestDto`: its subject, body, Cc, Bcc, mode, and attachments fields create opportunities to leak protected values beside the ciphertext.
+- [x] Implement `RelayMailSource.saveClientEncryptedDraft` against the existing authenticated `/api/mail/draft` request/response machinery.
+- [x] Test the URL and decoded JSON keys and values. Assert the request has `to` and `pgpDraft` and has no `body`, real `subject`, `cc`, `bcc`, or `attachments` key.
 
 Run:
 
@@ -42,12 +42,12 @@ Expected: PASS.
 - Test `app/src/test/java/org/kysecurity/mail/pgp/PgpMimeWriterTest.kt`
 - Add `app/src/test/java/org/kysecurity/mail/pgp/ClientEncryptedDraftSaverTest.kt`
 
-- [ ] Extend `buildProtectedContent` with optional To/Cc/Bcc protected-header inputs. Sanitize them with the existing header sanitizer and put them in the protected `text/rfc822-headers` part with Subject. Keep existing send callers source-compatible by defaulting the new inputs to empty lists.
-- [ ] Add a small `ClientEncryptedDraftSaver` orchestrator with the same `VaultOpener` pattern as `ClientEncryptedSender` and an injected encrypted-draft transport. Its outcomes must distinguish saved, cancelled, not enrolled/no key, no account address, encryption failure, and transport failure.
-- [ ] Build protected content from the exact `MailDraft`, including body and attachments. Parse and normalize recipients with the existing `splitRecipientFields`; require at least one To because the server decoder requires it. Put To/Cc/Bcc only inside the ciphertext, apart from the outer To required by the PGP/MIME envelope.
-- [ ] Open the local vault when needed. Inside `EnrollmentSession.withKey`, derive the own public key with `PgpEncryptor.ownPublicKey(privateKey)`, then call `PgpEncryptor.encrypt(protectedBytes, listOf(ownPublicKey), privateKey)` so the draft is both self-encrypted and signed. Wrap it with existing `wrapAsPgpMime`, using account address, To, date, placeholder Subject, and no outer Cc/Bcc.
-- [ ] Send the resulting `ClientEncryptedDraft` through the injected transport. Do not resolve recipient keys: drafts are encrypted only to the author and recipient discovery has no role here.
-- [ ] Test by decrypting the generated `pgpDraft` with the fixture private key and asserting protected To/Cc/Bcc/Subject, body, and attachment survive. Also test cancellation, missing enrollment/session, blank account address, encryption failure, and transport failure; assert transport is never called for every pre-encryption failure.
+- [x] Extend `buildProtectedContent` with optional To/Cc/Bcc protected-header inputs. Sanitize them with the existing header sanitizer and put them in the protected `text/rfc822-headers` part with Subject. Keep existing send callers source-compatible by defaulting the new inputs to empty lists.
+- [x] Add a small `ClientEncryptedDraftSaver` orchestrator with the same `VaultOpener` pattern as `ClientEncryptedSender` and an injected encrypted-draft transport. Its outcomes must distinguish saved, cancelled, not enrolled/no key, no account address, encryption failure, and transport failure.
+- [x] Build protected content from the exact `MailDraft`, including body and attachments. Parse and normalize recipients with the existing `splitRecipientFields`; require at least one To because the server decoder requires it. Put To/Cc/Bcc only inside the ciphertext, apart from the outer To required by the PGP/MIME envelope.
+- [x] Open the local vault when needed. Inside `EnrollmentSession.withKey`, derive the own public key with `PgpEncryptor.ownPublicKey(privateKey)`, then call `PgpEncryptor.encrypt(protectedBytes, listOf(ownPublicKey), privateKey)` so the draft is both self-encrypted and signed. Wrap it with existing `wrapAsPgpMime`, using account address, To, date, placeholder Subject, and no outer Cc/Bcc.
+- [x] Send the resulting `ClientEncryptedDraft` through the injected transport. Do not resolve recipient keys: drafts are encrypted only to the author and recipient discovery has no role here.
+- [x] Test by decrypting the generated `pgpDraft` with the fixture private key and asserting protected To/Cc/Bcc/Subject, body, and attachment survive. Also test cancellation, missing enrollment/session, blank account address, encryption failure, and transport failure; assert transport is never called for every pre-encryption failure.
 
 Run:
 
@@ -66,13 +66,13 @@ Expected: PASS.
 - Test `app/src/test/java/org/kysecurity/mail/ComposePgpControllerTest.kt`
 - Add focused JVM tests for the handoff decision as a pure function in the nearest existing compose-state test file
 
-- [ ] Expose a pure handoff decision from the already fetched bootstrap state: `ENCRYPT_AND_SAVE` only for client custody plus a locally enrolled device plus a nonblank account address; `OPEN_WEBMAIL_WITHOUT_SAVE` for known client custody without a local key; `REFUSE_SAVE` for server custody and unknown/unrecognized state. Server-custody compose already has its native send and pickup-consent flows, so it has no reason to enter this webmail handoff. Keep this decision separate from UI text and network work.
-- [ ] In `ComposeActivity`, snapshot/export the draft once, resolve the webmail URL first, then execute the decision. For `ENCRYPT_AND_SAVE`, construct `ClientEncryptedDraftSaver` with `AndroidVaultOpener`, the controller's account address, and `repository.saveClientEncryptedDraft`; open webmail and finish only after the encrypted save succeeds.
-- [ ] Keep the existing no-transfer consent and composer retention for `OPEN_WEBMAIL_WITHOUT_SAVE`. On acceptance call `openWebmail` directly, without a draft request or finishing `ComposeActivity`; the existing `onStop`/`ComposeDraftCache` path retains the composition when returning from the browser.
-- [ ] For `REFUSE_SAVE`, show a retryable error and keep the composer. Do not guess custody and do not offer a plaintext consent path.
-- [ ] Preserve the parity branch's removal of plaintext-upload consent and its unused repository wrapper. The added encrypted branch must not restore a plaintext handoff.
-- [ ] On vault cancellation, unseal/encryption failure, transport failure, or missing browser handler, re-enable the chip and leave the fields, editor HTML, attachment objects, and Activity intact. Never clear `ComposeDraftCache` on these paths.
-- [ ] Extend the existing no-upload regression with recording fakes: client custody and unknown custody never call the plaintext transport, and no-key handoff calls neither draft transport.
+- [x] Expose a pure handoff decision from the already fetched bootstrap state: `ENCRYPT_AND_SAVE` only for client custody plus a locally enrolled device plus a nonblank account address; `OPEN_WEBMAIL_WITHOUT_SAVE` for known client custody without a local key; `REFUSE_SAVE` for server custody and unknown/unrecognized state. Server-custody compose already has its native send and pickup-consent flows, so it has no reason to enter this webmail handoff. Keep this decision separate from UI text and network work.
+- [x] In `ComposeActivity`, snapshot/export the draft once, resolve the webmail URL first, then execute the decision. For `ENCRYPT_AND_SAVE`, construct `ClientEncryptedDraftSaver` with `AndroidVaultOpener`, the controller's account address, and `repository.saveClientEncryptedDraft`; open webmail and finish only after the encrypted save succeeds.
+- [x] Keep the existing no-transfer consent and composer retention for `OPEN_WEBMAIL_WITHOUT_SAVE`. On acceptance call `openWebmail` directly, without a draft request or finishing `ComposeActivity`; the existing `onStop`/`ComposeDraftCache` path retains the composition when returning from the browser.
+- [x] For `REFUSE_SAVE`, show a retryable error and keep the composer. Do not guess custody and do not offer a plaintext consent path.
+- [x] Preserve the parity branch's removal of plaintext-upload consent and its unused repository wrapper. The added encrypted branch must not restore a plaintext handoff.
+- [x] On vault cancellation, unseal/encryption failure, transport failure, or missing browser handler, re-enable the chip and leave the fields, editor HTML, attachment objects, and Activity intact. Never clear `ComposeDraftCache` on these paths.
+- [x] Extend the existing no-upload regression with recording fakes: client custody and unknown custody never call the plaintext transport, and no-key handoff calls neither draft transport.
 
 Run:
 
@@ -87,8 +87,8 @@ Expected: PASS. If the pure-decision tests live under a differently named existi
 **Files:**
 - Modify `app/src/main/AGENTS.md`
 
-- [ ] Run the DOX pass. Document that client-custody draft handoff is self-encrypted only on an enrolled device; unenrolled devices open webmail without transferring the composition; unknown custody never uploads plaintext.
-- [ ] Run the original Task 5 regression gate and all new focused tests:
+- [x] Run the DOX pass. Document that client-custody draft handoff is self-encrypted only on an enrolled device; unenrolled devices open webmail without transferring the composition; unknown custody never uploads plaintext.
+- [x] Run the original Task 5 regression gate and all new focused tests:
 
 ```bash
 ./gradlew :app:testPlayDebugUnitTest \

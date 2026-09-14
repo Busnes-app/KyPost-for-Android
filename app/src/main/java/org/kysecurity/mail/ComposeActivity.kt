@@ -31,6 +31,9 @@ import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRuntime
 import org.kysecurity.mail.mail.OutgoingAttachment
 import org.kysecurity.mail.mail.userFacingMessage
+import org.kysecurity.mail.pgp.ClientEncryptedDraftSaver
+import org.kysecurity.mail.pgp.DraftSaveOutcome
+import org.kysecurity.mail.pgp.DraftHandoffMode
 import org.kysecurity.mail.pgp.AndroidVaultOpener
 import org.kysecurity.mail.pgp.ClientEncryptedSender
 import org.kysecurity.mail.pgp.ClientSendOutcome
@@ -91,6 +94,10 @@ class ComposeActivity : LockedActivity() {
 
     /** The in-flight client-encrypted send; guards a double-tap from starting two sends. */
     private var sendJob: Job? = null
+    private var handoffJob: Job? = null
+    private val handoffOpener by lazy { AndroidVaultOpener(this) }
+    private var handoffBusy = false
+    private var handoffAttempt = 0L
     private val ioExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -355,7 +362,7 @@ class ComposeActivity : LockedActivity() {
     /** Withdraws Send on an account this app cannot encrypt for. See [applyPgpComposeState]. */
     private fun applySendAvailability() {
         sendMenuItem?.isVisible = !handoffOnlyAccount
-        sendMenuItem?.isEnabled = !handoffOnlyAccount
+        sendMenuItem?.isEnabled = !handoffOnlyAccount && !handoffBusy
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
@@ -607,6 +614,7 @@ class ComposeActivity : LockedActivity() {
     }
 
     private fun sendEmail() {
+        if (handoffBusy) return
         val to = toInput.commaJoinedRecipients()
         val cc = ccInput.commaJoinedRecipients()
         val bcc = bccInput.commaJoinedRecipients()
@@ -800,44 +808,116 @@ class ComposeActivity : LockedActivity() {
             .showSecurely()
     }
 
-    /** Opens webmail without transferring compose content; onStop keeps the local composition. */
+    /** Resolve custody and the target before asking consent or exporting composition content. */
     private fun handOffToWebmail() {
-        // Disabled while resolving the target and while the confirmation dialog is visible.
+        if (handoffBusy || sendJob?.isActive == true) return
+        handoffBusy = true
+        handoffAttempt++
         webmailChip.isEnabled = false
-        ioExecutor.execute {
-            val serverUrl = PushRuntime.graph(this).repository.pairingForAuthenticatedCall()?.serverUrl
+        sendMenuItem?.isEnabled = false
+        handoffJob = lifecycleScope.launch {
+            val serverUrl = withContext(Dispatchers.IO) {
+                PushRuntime.graph(this@ComposeActivity).repository.pairingForAuthenticatedCall()?.serverUrl
+            }
             val url = serverUrl?.let { webmailDraftsUrl(it) }
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                if (serverUrl == null || url == null) {
-                    webmailChip.isEnabled = true
-                    Toast.makeText(this, R.string.compose_handoff_no_webmail, Toast.LENGTH_LONG).show()
-                    return@runOnUiThread
-                }
-                confirmHandoff(serverUrl, url)
+            if (isFinishing || isDestroyed) return@launch
+            if (serverUrl == null || url == null) {
+                finishHandoffAttempt()
+                Toast.makeText(this@ComposeActivity, R.string.compose_handoff_no_webmail, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val mode = pgpController.draftHandoffMode()
+            if (isFinishing || isDestroyed) return@launch
+            if (mode == DraftHandoffMode.REFUSE) {
+                finishHandoffAttempt()
+                Toast.makeText(this@ComposeActivity, R.string.compose_handoff_refused, Toast.LENGTH_LONG).show()
+            } else {
+                confirmHandoff(serverUrl, url, mode)
             }
         }
     }
 
-    private fun confirmHandoff(serverUrl: String, url: String) {
+    private fun confirmHandoff(serverUrl: String, url: String, mode: DraftHandoffMode) {
+        var accepted = false
         activeDialog = AlertDialog.Builder(this)
             .setTitle(R.string.compose_handoff_dialog_title)
-            .setMessage(R.string.compose_handoff_dialog_body)
+            .setMessage(if (mode == DraftHandoffMode.ENCRYPT_AND_SAVE) R.string.compose_handoff_encrypted_body else R.string.compose_handoff_dialog_body)
             .setNegativeButton(android.R.string.cancel, null)
             .setPositiveButton(R.string.compose_handoff_dialog_confirm) { _, _ ->
-                openHandoffTarget(serverUrl, url)
+                accepted = true
+                if (mode == DraftHandoffMode.ENCRYPT_AND_SAVE) saveEncryptedHandoff(serverUrl, url)
+                else {
+                    finishHandoffAttempt()
+                    if (!openWebmail(this, serverUrl, url)) {
+                        Toast.makeText(this, R.string.compose_handoff_no_handler, Toast.LENGTH_LONG).show()
+                    }
+                }
             }
-            // FLAG_SECURE on the dialog's own window: the Activity's flag does not cover it.
-            .setOnDismissListener { if (activeDialog != null) webmailChip.isEnabled = true }
-            .create()
-            .showSecurely()
+            .setOnDismissListener { if (!accepted) finishHandoffAttempt() }
+            .create().showSecurely()
     }
 
-    private fun openHandoffTarget(serverUrl: String, url: String) {
-        // Prefers the installed PWA, then any browser, so the existing session comes with it.
-        if (!openWebmail(this, serverUrl, url)) {
-            webmailChip.isEnabled = true
-            Toast.makeText(this, R.string.compose_handoff_no_handler, Toast.LENGTH_LONG).show()
+    private fun saveEncryptedHandoff(serverUrl: String, url: String) {
+        // A modal keeps edits from being lost while the captured draft is saved. The system
+        // unlock prompt has its own window; cancellation leaves all composer fields in place.
+        activeDialog = AlertDialog.Builder(this)
+            .setMessage(R.string.compose_handoff_saving)
+            .setNegativeButton(android.R.string.cancel) { _, _ ->
+                handoffJob?.cancel()
+                handoffOpener.cancel()
+                finishHandoffAttempt()
+            }
+            .setCancelable(false)
+            .create().showSecurely()
+        val to = toInput.commaJoinedRecipients()
+        val cc = ccInput.commaJoinedRecipients()
+        val bcc = bccInput.commaJoinedRecipients()
+        val subject = subjectField.text.toString()
+        val parts = attachments.toList()
+        val attempt = handoffAttempt
+        bodyEditor.exportHtml { html ->
+            if (isFinishing || isDestroyed || !handoffBusy || attempt != handoffAttempt) return@exportHtml
+            handoffJob = lifecycleScope.launch {
+                // Re-probe after consent: a removed enrollment must never turn into a plaintext save.
+                if (pgpController.draftHandoffMode() != DraftHandoffMode.ENCRYPT_AND_SAVE) {
+                    completeDraftHandoff(DraftSaveOutcome.NotEnrolled) { false }
+                    return@launch
+                }
+                val saver = ClientEncryptedDraftSaver(handoffOpener, pgpController.accountAddress()) {
+                    MailRuntime.graph(this@ComposeActivity).repository.saveClientEncryptedDraft(it)
+                }
+                val result = saver.save(MailDraft(to, cc, bcc, subject, html, "html", parts))
+                if (isFinishing || isDestroyed) return@launch
+                completeDraftHandoff(result) { openWebmail(this@ComposeActivity, serverUrl, url) }
+            }
+        }
+    }
+
+    private fun finishHandoffAttempt() {
+        handoffBusy = false
+        handoffAttempt++
+        webmailChip.isEnabled = true
+        sendMenuItem?.isEnabled = !handoffOnlyAccount
+    }
+
+    /** Kept internal so device tests exercise the real failure/finish/cache behavior. */
+    internal fun completeDraftHandoff(outcome: DraftSaveOutcome, openTarget: () -> Boolean) {
+        activeDialog?.dismiss()
+        activeDialog = null
+        finishHandoffAttempt()
+        if (outcome == DraftSaveOutcome.Saved) {
+            if (openTarget()) {
+                sendSucceeded = true
+                ComposeDraftCache.clear()
+                finish()
+            } else Toast.makeText(this, R.string.compose_handoff_no_handler, Toast.LENGTH_LONG).show()
+        } else if (outcome != DraftSaveOutcome.Cancelled) {
+            val message = when (outcome) {
+                DraftSaveOutcome.NoRecipient -> getString(R.string.compose_handoff_needs_recipient)
+                is DraftSaveOutcome.SaveFailed -> outcome.outcome.userFacingMessage().orEmpty()
+                else -> getString(R.string.compose_handoff_save_failed)
+            }
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -883,6 +963,7 @@ class ComposeActivity : LockedActivity() {
     }
 
     override fun onDestroy() {
+        if (handoffBusy) handoffOpener.cancel()
         super.onDestroy()
         // Both hold message plaintext, and neither is reachable from InMemoryPlaintext.clearAll().
         // Whatever the cache needed is already in it by now — onStop saved synchronously.

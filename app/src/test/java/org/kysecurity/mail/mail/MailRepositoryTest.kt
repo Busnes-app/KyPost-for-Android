@@ -114,6 +114,7 @@ private class FakeMailSource(
     override fun renameFolder(folder: String, name: String) = unsupported()
     override fun deleteFolder(folder: String) = unsupported()
     override fun saveDraft(draft: MailDraft) = unsupported()
+    override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft) = unsupported()
     override fun sendMail(draft: MailDraft) = unsupported()
     override fun sendClientEncrypted(message: ClientEncryptedMessage) = unsupported()
     /** Null keeps the old throwing behaviour, so tests asserting "must never reach the relay"

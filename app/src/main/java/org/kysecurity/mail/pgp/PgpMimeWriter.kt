@@ -82,20 +82,29 @@ internal fun buildProtectedContent(
     subject: String,
     attachments: List<OutgoingMimeAttachment> = emptyList(),
     boundaryToken: () -> String = ::randomBoundaryToken,
+    to: List<String> = emptyList(),
+    cc: List<String> = emptyList(),
+    bcc: List<String> = emptyList(),
 ): String {
     val clean = sanitizeHeaderValue(subject)
     val boundary = "kypost-protected-${boundaryToken()}"
+    val protectedHeaders = buildList {
+        if (clean.isNotEmpty()) add("Subject: $clean")
+        for ((name, addresses) in listOf("To" to to, "Cc" to cc, "Bcc" to bcc)) {
+            joinAddresses(addresses).takeIf { it.isNotEmpty() }?.let { add("$name: $it") }
+        }
+    }
     val lines = mutableListOf<String>()
-    if (clean.isNotEmpty()) lines += "Subject: $clean"
+    lines += protectedHeaders
     lines += "Content-Type: multipart/mixed; boundary=\"$boundary\"; protected-headers=\"v1\""
     lines += ""
     // The memoryhole convention: Thunderbird, Mutt and K-9 read the subject from this part.
-    if (clean.isNotEmpty()) {
+    if (protectedHeaders.isNotEmpty()) {
         lines += "--$boundary"
         lines += "Content-Type: text/rfc822-headers; protected-headers=\"v1\""
         lines += "Content-Disposition: inline"
         lines += ""
-        lines += "Subject: $clean"
+        lines += protectedHeaders
         lines += ""
     }
     lines += "--$boundary"

@@ -197,6 +197,15 @@ class RelayMailSource(
         return execute(request) { code, rawBody -> mutationOutcome(code, rawBody) }
     }
 
+    override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        val base = baseUrl(pairing, "/api/mail/draft") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val body = json.encodeToString(RelayClientEncryptedDraftDto(draft.to, draft.pgpDraft))
+        val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
+            .authed(pairing).build()
+        return execute(request) { code, rawBody -> mutationOutcome(code, rawBody) }
+    }
+
     override fun sendMail(draft: MailDraft): MailOutcome<MailSendOutcome> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
         val base = baseUrl(pairing, "/api/mail/send") ?: return MailOutcome.BadRequest("Server URL is not valid")
