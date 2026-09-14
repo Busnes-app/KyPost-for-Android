@@ -57,16 +57,19 @@ internal object MemoryBudget {
     /** A collection may contain this many primary identities before enrollment refuses it. */
     const val PGP_SECRET_KEY_RING_COUNT = 32
 
+    /** Wiped scratch used while a secret-key stream is copied into its bounded parser input. */
+    const val PGP_SECRET_KEY_STREAM_BUFFER_BYTES = 8 * 1024
+
     /** Enrollment is separate from reading. At peak it holds both caller inputs, the UTF-8
      *  encoder's two temporary copies, parsed packet storage conservatively charged at both input
      *  caps, and the bounded output backing plus its final copy. */
     const val PGP_ENROLLMENT_PEAK_BYTES =
-        PGP_SECRET_KEY_INPUT_BYTES +
+        3 * PGP_SECRET_KEY_INPUT_BYTES +
             2 * PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES +
             2 * PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES +
-            PGP_SECRET_KEY_INPUT_BYTES +
-            PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES +
-            2 * PGP_SECRET_KEY_OUTPUT_BYTES
+            2 * PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES +
+            2 * PGP_SECRET_KEY_OUTPUT_BYTES +
+            PGP_SECRET_KEY_STREAM_BUFFER_BYTES
 
     /** Attachment parts kept out of one decrypted message, decoded, for the life of the detail
      *  screen. Bounded by [PgpMimeReader], which drops parts past this rather than truncating one. */

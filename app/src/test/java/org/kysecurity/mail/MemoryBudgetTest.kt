@@ -100,9 +100,10 @@ class MemoryBudgetTest {
     @Test
     fun enrollmentScenarioFitsTheAssumedHeapAndCountsEveryTerm() {
         assertEquals(
-            2L * MemoryBudget.PGP_SECRET_KEY_INPUT_BYTES +
-                5L * MemoryBudget.PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES +
-                2L * MemoryBudget.PGP_SECRET_KEY_OUTPUT_BYTES,
+            3L * MemoryBudget.PGP_SECRET_KEY_INPUT_BYTES +
+                6L * MemoryBudget.PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES +
+                2L * MemoryBudget.PGP_SECRET_KEY_OUTPUT_BYTES +
+                MemoryBudget.PGP_SECRET_KEY_STREAM_BUFFER_BYTES,
             MemoryBudget.PGP_ENROLLMENT_PEAK_BYTES.toLong(),
         )
         assertTrue(MemoryBudget.PGP_ENROLLMENT_PEAK_BYTES <= MemoryBudget.ASSUMED_HEAP_BYTES)

@@ -3,6 +3,8 @@ package org.kysecurity.mail.pgp
 import org.bouncycastle.bcpg.ArmoredOutputStream
 import org.bouncycastle.openpgp.PGPSecretKeyRing
 import org.bouncycastle.openpgp.PGPPublicKeyRingCollection
+import org.bouncycastle.openpgp.PGPPrivateKey
+import org.bouncycastle.openpgp.PGPSecretKey
 import org.bouncycastle.openpgp.PGPUtil
 import org.bouncycastle.openpgp.operator.bc.BcKeyFingerprintCalculator
 import org.junit.Assert.assertArrayEquals
@@ -95,6 +97,42 @@ class SecretKeyRingMergeTest {
         val merged = mergeSecretKeyRings(armor(withoutSubkey), previous)!!
 
         assertEquals(keyFingerprints(full), keyFingerprints(rings(merged).single()))
+    }
+
+    @Test
+    fun refusesConcatenatedOrTrailingArmoredMaterial() {
+        val concatenated = TestPgpSecondKey.ARMORED_PRIVATE + "\n" + TestPgpPrivateKey.ARMORED_PRIVATE
+
+        assertNull(mergeSecretKeyRings(current, concatenated.toCharArray()))
+        assertNull(mergeSecretKeyRings(current, (TestPgpPrivateKey.ARMORED_PRIVATE + "\ninvalid").toCharArray()))
+        assertNull(mergeSecretKeyRings(concatenated.toByteArray(), previous))
+    }
+
+    @Test
+    fun restoresUsableHistoricalSecretBehindAnEmptyCurrentStub() {
+        val full = rings(TestPgpPrivateKey.ARMORED_PRIVATE.toByteArray()).single()
+        val historicalSubkey = full.secretKeys.asSequence().drop(1).single()
+        val currentPublic = historicalSubkey.publicKey
+        val stub = PGPSecretKey(
+            PGPPrivateKey(currentPublic.keyID, currentPublic.publicKeyPacket, null),
+            currentPublic,
+            null,
+            false,
+            null,
+        )
+        val currentWithStub = PGPSecretKeyRing.insertSecretKey(full, stub)
+
+        val merged = mergeSecretKeyRings(armor(currentWithStub), previous)!!
+        val restored = rings(merged).single().getSecretKey(currentPublic.fingerprint)
+        val decrypted = PgpDecryptor.decrypt(merged.chars(), TestPgpPrivateKey.ARMORED_MESSAGE, emptyList())
+
+        assertFalse(restored.isPrivateKeyEmpty)
+        assertArrayEquals(currentPublic.encoded, restored.publicKey.encoded)
+        assertTrue("expected old-key decrypt after restoration, got $decrypted", decrypted is DecryptResult.Ok)
+        assertEquals(
+            TestPgpPrivateKey.EXPECTED_PLAINTEXT,
+            String((decrypted as DecryptResult.Ok).plaintext, Charsets.UTF_8),
+        )
     }
 
     @Test

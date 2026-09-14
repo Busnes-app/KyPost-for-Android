@@ -105,7 +105,8 @@ Owns production Android app code and resources.
   vault rather than sealing a partial history. `MemoryBudget` owns the input, output, ring-count,
   and separate enrollment-peak ceilings. Secret-key consumers parse packet order through
   `orderedSecretKeyRings`; Bouncy Castle's collection iterator returns map order, which cannot
-  choose the current ring for signing or own-public-key derivation.
+  choose the current ring for signing or own-public-key derivation. That parser accepts exactly one
+  complete private-key armor block and refuses concatenated blocks or trailing non-whitespace.
   Re-enrollment opens that existing vault through the live enrollment Activity and seals only a
   successful current-first merge. Only `NotEnrolled` permits a current-only seal; cancellation,
   open failure, a lost opened session, or merge refusal must leave the old vault and server state

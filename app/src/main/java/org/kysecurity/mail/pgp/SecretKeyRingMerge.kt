@@ -2,6 +2,7 @@ package org.kysecurity.mail.pgp
 
 import org.bouncycastle.bcpg.ArmoredOutputStream
 import org.bouncycastle.openpgp.PGPSecretKeyRing
+import org.bouncycastle.openpgp.PGPSecretKey
 import org.bouncycastle.openpgp.PGPMarker
 import org.bouncycastle.openpgp.PGPObjectFactory
 import org.bouncycastle.openpgp.PGPPadding
@@ -46,8 +47,12 @@ internal fun mergeParsedSecretKeyRings(
         } else {
             var merged: PGPSecretKeyRing = currentRing
             previousRing.secretKeys.asSequence().forEach { historical ->
-                if (merged.getSecretKey(historical.publicKey.fingerprint) == null) {
+                val currentSecret = merged.getSecretKey(historical.publicKey.fingerprint)
+                if (currentSecret == null) {
                     merged = PGPSecretKeyRing.insertSecretKey(merged, historical)
+                } else if (currentSecret.isPrivateKeyEmpty && !historical.isPrivateKeyEmpty) {
+                    val restored = PGPSecretKey.replacePublicKey(historical, currentSecret.publicKey)
+                    merged = PGPSecretKeyRing.insertSecretKey(merged, restored)
                 }
             }
             val historicalFingerprints = previousRing.secretKeys.asSequence()
@@ -55,6 +60,11 @@ internal fun mergeParsedSecretKeyRings(
             val mergedFingerprints = merged.secretKeys.asSequence()
                 .map { Fingerprint(it.publicKey.fingerprint) }.toSet()
             if (!mergedFingerprints.containsAll(historicalFingerprints)) return null
+            if (previousRing.secretKeys.asSequence().any { historical ->
+                    !historical.isPrivateKeyEmpty &&
+                        merged.getSecretKey(historical.publicKey.fingerprint)?.isPrivateKeyEmpty != false
+                }
+            ) return null
             val index = result.indexOf(currentRing)
             result[index] = merged
             currentByPrimary[primary] = merged
@@ -72,20 +82,68 @@ internal fun serializeSecretKeyRings(rings: List<PGPSecretKeyRing>): ByteArray? 
 }.getOrNull()
 
 internal fun orderedSecretKeyRings(input: java.io.InputStream): List<PGPSecretKeyRing>? = runCatching {
-    val factory = PGPObjectFactory(PGPUtil.getDecoderStream(input), BcKeyFingerprintCalculator())
-    buildList {
-        while (true) {
-            when (val packet = factory.nextObject() ?: break) {
-                is PGPSecretKeyRing -> {
-                    if (size == MemoryBudget.PGP_SECRET_KEY_RING_COUNT) return null
-                    add(packet)
-                }
-                is PGPMarker, is PGPPadding -> Unit
-                else -> return null
+    val encoded = BoundedSecretOutput(MemoryBudget.PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES).use { sink ->
+        val scratch = ByteArray(MemoryBudget.PGP_SECRET_KEY_STREAM_BUFFER_BYTES)
+        try {
+            while (true) {
+                val read = input.read(scratch)
+                if (read < 0) break
+                sink.write(scratch, 0, read)
             }
+        } finally {
+            Arrays.fill(scratch, 0)
         }
-    }.takeIf { it.isNotEmpty() }
+        sink.takeBytes()
+    }
+    try {
+        if (!encoded.isSinglePrivateKeyArmor()) return null
+        val factory = PGPObjectFactory(
+            PGPUtil.getDecoderStream(ByteArrayInputStream(encoded)),
+            BcKeyFingerprintCalculator(),
+        )
+        buildList {
+            while (true) {
+                when (val packet = factory.nextObject() ?: break) {
+                    is PGPSecretKeyRing -> {
+                        if (size == MemoryBudget.PGP_SECRET_KEY_RING_COUNT) return null
+                        add(packet)
+                    }
+                    is PGPMarker, is PGPPadding -> Unit
+                    else -> return null
+                }
+            }
+        }.takeIf { it.isNotEmpty() }
+    } finally {
+        Arrays.fill(encoded, 0)
+    }
 }.getOrNull()
+
+private fun ByteArray.isSinglePrivateKeyArmor(): Boolean {
+    val begin = "-----BEGIN PGP PRIVATE KEY BLOCK-----".toByteArray(Charsets.US_ASCII)
+    val end = "-----END PGP PRIVATE KEY BLOCK-----".toByteArray(Charsets.US_ASCII)
+    val first = indexOf(begin)
+    if (first < 0 || !isWhitespace(0, first)) return false
+    if (indexOf(begin, first + begin.size) >= 0) return false
+    val last = indexOf(end, first + begin.size)
+    if (last < 0 || indexOf(end, last + end.size) >= 0) return false
+    return isWhitespace(last + end.size, size)
+}
+
+private fun ByteArray.isWhitespace(start: Int, end: Int): Boolean {
+    for (index in start until end) if (!this[index].isArmorWhitespace()) return false
+    return true
+}
+
+private fun ByteArray.indexOf(needle: ByteArray, start: Int = 0): Int {
+    for (index in start..size - needle.size) {
+        if (needle.indices.all { this[index + it] == needle[it] }) return index
+    }
+    return -1
+}
+
+private fun Byte.isArmorWhitespace() =
+    this == ' '.code.toByte() || this == '\t'.code.toByte() ||
+        this == '\r'.code.toByte() || this == '\n'.code.toByte()
 
 private class Fingerprint(private val bytes: ByteArray) {
     override fun equals(other: Any?) = other is Fingerprint && bytes.contentEquals(other.bytes)
