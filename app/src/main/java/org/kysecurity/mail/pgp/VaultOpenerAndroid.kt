@@ -1,5 +1,6 @@
 package org.kysecurity.mail.pgp
 
+import androidx.annotation.VisibleForTesting
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
@@ -25,6 +26,9 @@ internal class AndroidVaultOpener(private val activity: FragmentActivity) : Vaul
     private var liveOpen: LiveOpen? = null
 
     private val openLock = Any()
+
+    @VisibleForTesting
+    fun hasPendingPromptForTest(): Boolean = synchronized(openLock) { liveOpen != null }
 
     private fun claim(continuation: CancellableContinuation<OpenOutcome>): Boolean =
         synchronized(openLock) {

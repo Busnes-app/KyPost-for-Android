@@ -59,6 +59,8 @@ class DeviceEnrollmentOpenLifecycleTest {
                     }
                 }
 
+                awaitPendingPrompt(scenario)
+
                 scenario.recreate()
 
                 assertTrue("the destroyed Activity stranded its open", completed.await(5, TimeUnit.SECONDS))
@@ -70,5 +72,16 @@ class DeviceEnrollmentOpenLifecycleTest {
         } finally {
             scope.cancel()
         }
+    }
+
+    private fun awaitPendingPrompt(scenario: ActivityScenario<DeviceEnrollmentActivity>) {
+        val deadline = System.currentTimeMillis() + 5_000L
+        while (System.currentTimeMillis() < deadline) {
+            val pending = booleanArrayOf(false)
+            scenario.onActivity { pending[0] = it.hasPendingVaultPromptForTest() }
+            if (pending[0]) return
+            Thread.sleep(50L)
+        }
+        throw AssertionError("the vault-open prompt was never installed")
     }
 }

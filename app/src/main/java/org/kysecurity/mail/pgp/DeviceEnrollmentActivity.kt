@@ -274,6 +274,9 @@ class DeviceEnrollmentActivity : LockedActivity() {
     @VisibleForTesting
     internal suspend fun openPreviousVaultForTest(): OpenOutcome = vaultOpener.open()
 
+    @VisibleForTesting
+    internal fun hasPendingVaultPromptForTest(): Boolean = vaultOpener.hasPendingPromptForTest()
+
     private fun render(scope: CoroutineScope, state: EnrollmentUiState, idle: Boolean) {
         countdown?.cancel()
         countdown = null
