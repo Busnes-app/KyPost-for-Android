@@ -53,7 +53,7 @@ class InlineImagesTest {
     }
 
     @Test
-    fun anUnparseableFragmentComesBackUntouched() {
+    fun anEmptyFragmentComesBackUntouched() {
         assertEquals("", inlineCidImages("", listOf(logo())))
     }
 }

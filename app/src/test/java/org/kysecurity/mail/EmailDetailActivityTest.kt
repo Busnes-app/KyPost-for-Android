@@ -777,7 +777,10 @@ class EmailDetailActivityTest {
 
     @Test
     fun blockExternalResources_keepsInlineRasterDataImages() {
-        val blocked = blockExternalResources("""<img src="data:image/png;base64,iVBORw=="><img src="https://x/y.png">""")
+        val blocked = blockExternalResources(
+            """<img src="data:image/png;base64,iVBORw=="><img src="https://x/y.png">""",
+            keepInlineDataImages = true,
+        )
 
         assertTrue(blocked, blocked.contains("data:image/png;base64,iVBORw=="))
         assertTrue(blocked, !blocked.contains("https://x/y.png"))
@@ -785,7 +788,10 @@ class EmailDetailActivityTest {
 
     @Test
     fun blockExternalResources_stillStripsDataSvgAndNonImageData() {
-        val blocked = blockExternalResources("""<img src="data:image/svg+xml;base64,PHN2Zz4="><img src="data:text/html;base64,PGI+">""")
+        val blocked = blockExternalResources(
+            """<img src="data:image/svg+xml;base64,PHN2Zz4="><img src="data:text/html;base64,PGI+">""",
+            keepInlineDataImages = true,
+        )
 
         assertTrue(blocked, !blocked.contains("data:"))
     }
@@ -793,6 +799,28 @@ class EmailDetailActivityTest {
     @Test
     fun blockExternalResources_inlineDataImagesDoNotCountAsRemote() {
         val html = """<img src="data:image/png;base64,iVBORw==">"""
-        assertEquals(blockExternalResources(html), blockExternalResources(html, keepImages = true))
+        assertEquals(
+            blockExternalResources(html, keepInlineDataImages = true),
+            blockExternalResources(html, keepImages = true, keepInlineDataImages = true),
+        )
+    }
+
+    @Test
+    fun blockExternalResources_stripsInlineDataImagesByDefault() {
+        val blocked = blockExternalResources("""<img src="data:image/png;base64,iVBORw==">""")
+
+        assertTrue(blocked, !blocked.contains("data:image/png;base64,iVBORw=="))
+    }
+
+    @Test
+    fun blockExternalResources_keptInlineImageStillLosesSrcset() {
+        val blocked = blockExternalResources(
+            """<img src="data:image/png;base64,iVBORw==" srcset="https://tracker/x.png 2x">""",
+            keepInlineDataImages = true,
+        )
+
+        assertTrue(blocked, blocked.contains("data:image/png;base64,iVBORw=="))
+        assertTrue(blocked, !blocked.contains("srcset"))
+        assertTrue(blocked, !blocked.contains("tracker"))
     }
 }

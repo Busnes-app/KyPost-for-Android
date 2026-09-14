@@ -1008,9 +1008,10 @@ internal fun renderableBody(
     palette: ThemePalette,
     monoFontFace: String,
     isDark: Boolean,
+    keepInlineDataImages: Boolean = false,
 ): RenderableBody {
-    val stripped = blockExternalResources(body)
-    val keptImages = blockExternalResources(body, keepImages = true)
+    val stripped = blockExternalResources(body, keepInlineDataImages = keepInlineDataImages)
+    val keptImages = blockExternalResources(body, keepImages = true, keepInlineDataImages = keepInlineDataImages)
     return RenderableBody(
         stripped = buildEmailBodyHtml(stripped, palette, monoFontFace, isDark),
         // What "Show images" loads: images restored, every OTHER remote resource still stripped.
@@ -1161,6 +1162,9 @@ internal fun softWrapPlainText(text: String): String = LONG_PLAIN_TOKEN.replace(
 internal fun blockExternalResources(
     html: String,
     keepImages: Boolean = false,
+    // Scoped to decrypted mail only: plaintext HTML never carries attacker-controlled inline
+    // images that already passed through PgpMimeReader's byte/part cap.
+    keepInlineDataImages: Boolean = false,
     /** Injectable so the fail-closed path can be PROVEN rather than assumed: jsoup is too tolerant
      *  to be made to throw from a test fixture, and "it fails closed" is exactly the kind of claim
      *  that must not rest on reading the code. */
@@ -1177,7 +1181,7 @@ internal fun blockExternalResources(
     val resourceTags = if (keepImages) "video, audio, source, track, embed, object" else "img, video, audio, source, track, embed, object"
     document.select(resourceTags).forEach { element ->
         // A data: raster image is bytes already in hand, not a fetch; every other src goes.
-        val keepsSrc = element.tagName() == "img" &&
+        val keepsSrc = keepInlineDataImages && element.tagName() == "img" &&
             org.kysecurity.mail.pgp.INLINE_DATA_IMAGE_PREFIXES.any { element.attr("src").startsWith(it) }
         if (!keepsSrc) element.removeAttr("src")
         element.removeAttr("srcset")
