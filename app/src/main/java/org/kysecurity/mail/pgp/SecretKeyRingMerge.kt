@@ -126,6 +126,11 @@ private fun ByteArray.isSinglePrivateKeyArmor(): Boolean {
     if (indexOf(begin, first + begin.size) >= 0) return false
     val last = indexOf(end, first + begin.size)
     if (last < 0 || indexOf(end, last + end.size) >= 0) return false
+    // BC treats any line-leading dash as EOF. Make the accepted footer the first terminator it can
+    // encounter, so parser EOF proves consumption through the footer checked below.
+    for (index in first + begin.size until last) {
+        if (this[index] == '-'.code.toByte() && this[index - 1] == '\n'.code.toByte()) return false
+    }
     return isWhitespace(last + end.size, size)
 }
 

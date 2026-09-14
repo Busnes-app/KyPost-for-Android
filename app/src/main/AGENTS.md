@@ -106,7 +106,8 @@ Owns production Android app code and resources.
   and separate enrollment-peak ceilings. Secret-key consumers parse packet order through
   `orderedSecretKeyRings`; Bouncy Castle's collection iterator returns map order, which cannot
   choose the current ring for signing or own-public-key derivation. That parser accepts exactly one
-  complete private-key armor block and refuses concatenated blocks or trailing non-whitespace.
+  complete private-key armor block and refuses concatenated blocks, trailing non-whitespace, or an
+  earlier line-leading dash that Bouncy Castle would mistake for the footer.
   Re-enrollment opens that existing vault through the live enrollment Activity and seals only a
   successful current-first merge. Only `NotEnrolled` permits a current-only seal; cancellation,
   open failure, a lost opened session, or merge refusal must leave the old vault and server state

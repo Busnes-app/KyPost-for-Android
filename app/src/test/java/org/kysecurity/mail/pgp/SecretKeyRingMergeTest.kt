@@ -109,6 +109,17 @@ class SecretKeyRingMergeTest {
     }
 
     @Test
+    fun refusesAnEarlyDashTerminatorBeforeTheExpectedFooter() {
+        val malformed = TestPgpPrivateKey.ARMORED_PRIVATE.replace(
+            "-----END PGP PRIVATE KEY BLOCK-----",
+            "-early-end\ninvalid unconsumed material\n-----END PGP PRIVATE KEY BLOCK-----",
+        )
+
+        assertNull(mergeSecretKeyRings(current, malformed.toCharArray()))
+        assertNull(mergeSecretKeyRings(malformed.toByteArray(), previous))
+    }
+
+    @Test
     fun restoresUsableHistoricalSecretBehindAnEmptyCurrentStub() {
         val full = rings(TestPgpPrivateKey.ARMORED_PRIVATE.toByteArray()).single()
         val historicalSubkey = full.secretKeys.asSequence().drop(1).single()
