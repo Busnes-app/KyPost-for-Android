@@ -203,7 +203,7 @@ class DeviceEnrollmentActivity : LockedActivity() {
 
         // Installed here rather than in onStart: the ceremony may reach the seal at any moment, and
         // a null sealer resolves as a cancel.
-        viewModel.installSealer(vaultSealer)
+        viewModel.installVaultPorts(vaultSealer, AndroidVaultOpener(this))
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -237,7 +237,7 @@ class DeviceEnrollmentActivity : LockedActivity() {
 
         // Skip on a rotation: the new Activity's onCreate already installed its sealer before this runs.
         if (!isChangingConfigurations()) {
-            viewModel.installSealer(null)
+            viewModel.installVaultPorts(null, null)
         }
 
         // Resolve any waiting seal, unless sealExecutor already owns the write (LiveSeal.committing).

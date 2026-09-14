@@ -106,6 +106,11 @@ Owns production Android app code and resources.
   and separate enrollment-peak ceilings. Secret-key consumers parse packet order through
   `orderedSecretKeyRings`; Bouncy Castle's collection iterator returns map order, which cannot
   choose the current ring for signing or own-public-key derivation.
+  Re-enrollment opens that existing vault through the live enrollment Activity and seals only a
+  successful current-first merge. Only `NotEnrolled` permits a current-only seal; cancellation,
+  open failure, a lost opened session, or merge refusal must leave the old vault and server state
+  unchanged. A successful seal wipes both plaintext arrays and clears `EnrollmentSession` before
+  cache deletion or the enrollment report.
   Hostile Location Protection destroys the envelope and is the mode in which none of this exists.
   `pgpRowMarker` marks inbox rows for the two states that yield nothing readable (🔒 client-protected,
   ⚠ decrypt failed) and deliberately leaves server-decrypted rows unmarked — those open normally, so
