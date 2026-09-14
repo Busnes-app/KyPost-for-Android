@@ -21,11 +21,41 @@
 
 ## Verification
 
-Final full-suite, release-build, and whole-branch review results are being collected.
+Verified implementation: `ac55626` (later documentation commits do not change runtime code). The whole-branch review is in progress.
+
+| Check | Play | GitHub | F-Droid |
+| --- | --- | --- | --- |
+| JVM unit suite | 1,175 passed | 1,175 passed | 1,175 passed |
+| Lint | 0 errors, 284 warnings | 0 errors, 294 warnings | 0 errors, 294 warnings |
+| Release APK assembly, disposable verification signer | Passed | Passed | Passed |
+| Runtime matched class-name gate | Passed | Passed | Passed |
+| Exported-component gate | Passed | Passed | Passed |
+
+All unit suites had zero failures, errors, or skipped tests. The signing-secret check and `git diff --check` also passed. The combined Gradle invocation completed in 3m27s. Reproduce its gates with:
+
+```bash
+./gradlew checkSigningSecretsAreNotInTheTree \
+  checkExportedComponentsPlayDebug checkExportedComponentsGithubDebug checkExportedComponentsFdroidDebug \
+  :app:testPlayDebugUnitTest :app:testGithubDebugUnitTest :app:testFdroidDebugUnitTest \
+  :app:lintPlayDebug :app:lintGithubDebug :app:lintFdroidDebug \
+  :app:assembleRelease \
+  :app:checkRuntimeMatchedClassNamesPlayRelease \
+  :app:checkRuntimeMatchedClassNamesGithubRelease \
+  :app:checkRuntimeMatchedClassNamesFdroidRelease
+```
+
+Release packaging needs the disposable key supplied through `KYPOST_*` environment variables, as in CI. Production signing credentials are not needed for this verification.
 
 Focused checks completed during implementation include MIME/CID parsing, attachment ownership and filename handling, unsigned display, delta sync, real retired-key decryption/current-key signing, invalid and over-limit merge refusal, and enrollment buffer/session cleanup. Deliberate mutations were used to prove the affected regression assertions.
 
-Device checks on a disposable API 36 emulator:
+The combined final PlayDebug device run passed all **14 tests** on the disposable API 36 emulator in 13 seconds:
+
+```bash
+ANDROID_SERIAL=emulator-5554 ./gradlew :app:connectedPlayDebugAndroidTest \
+  -Pandroid.testInstrumentationRunnerArguments.class=org.kysecurity.mail.security.AttachmentDownloadCleanupTest,org.kysecurity.mail.security.EphemeralAttachmentProviderTest,org.kysecurity.mail.ui.ComposeDraftSurvivesTeardownTest,org.kysecurity.mail.pgp.DeviceEnrollmentOpenLifecycleTest
+```
+
+Covered:
 
 - 12 attachment download cleanup and ephemeral-provider tests passed.
 - ComposeDraftSurvivesTeardownTest passed.
