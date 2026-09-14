@@ -104,9 +104,10 @@ Owns production Android app code and resources.
   A failed signature or a CHANGED signer key (`PgpSignatureState.KEY_CHANGED`) outranks both with
   ⚠. `SIGNER_UNKNOWN` deliberately does not mark: it is the ordinary state for a correspondent not
   yet in the address book, and a glyph on most rows carries nothing actionable.
-- `PgpSignatureState` has six values, not a verified/unverified pair: `NONE` (unsigned, or no opinion
-  expressed), `VERIFIED_CONFIRMED` (a key bound to the sender that the user confirmed out of band —
-  the only state that claims identity), `VERIFIED_SEEN_BEFORE` (a bound key still matching its TOFU
+- `PgpSignatureState` has seven values, not a verified/unverified pair: `NONE` (no opinion expressed),
+  `UNSIGNED` (local decryption proved the ciphertext carried no signature; it gets an informational
+  detail notice but no inbox warning), `VERIFIED_CONFIRMED` (a key bound to the sender that the user
+  confirmed out of band — the only state that claims identity), `VERIFIED_SEEN_BEFORE` (a bound key still matching its TOFU
   pin, but never confirmed — most keys arrive by Autocrypt harvest, so this claims only continuity,
   "same key as last time", not who they say they are), `SIGNER_UNKNOWN` (no key bound to this sender
   at all — an ordinary correspondent not yet in the address book, a key that rotated before harvest,

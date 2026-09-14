@@ -60,6 +60,40 @@ class EncryptedMessageReaderTest {
         assertTrue("expected Decrypted, got $outcome", outcome is ReadOutcome.Decrypted)
     }
 
+    /** With signing on by default upstream, an encrypted message without one is now worth a
+     *  sentence — but never a warning glyph. */
+    @Test
+    fun anEncryptedUnsignedMessageReportsUnsignedNotNone() {
+        val mime = "Content-Type: text/plain; charset=utf-8\r\n\r\nUnsigned encrypted mail.\r\n"
+        val encrypted = PgpEncryptor.encrypt(
+            plaintext = mime.toByteArray(Charsets.UTF_8),
+            recipientPublicKeys = listOf(TestPgpPrivateKey.ARMORED_PUBLIC),
+            armoredSigningKey = null,
+        ) as EncryptResult.Ok
+        val (r, _) = reader(payloads = FakePayloadSource(successPayload(encrypted = encrypted.armored)))
+
+        val outcome = read(r) as ReadOutcome.Decrypted
+
+        assertEquals(PgpSignatureState.UNSIGNED, outcome.signature)
+    }
+
+    @Test
+    fun aSignedOnlyMessageWithNothingToCheckStaysNone() {
+        val (r, _) = reader(
+            payloads = FakePayloadSource(
+                detachedSignedPayload(signedPart = ByteArray(0), body = "readable"),
+            ),
+        )
+
+        val outcome = read(r) as ReadOutcome.Decrypted
+
+        assertEquals(
+            "could-not-check is not the same claim as unsigned",
+            PgpSignatureState.NONE,
+            outcome.signature,
+        )
+    }
+
     @Test
     fun aDismissedPromptIsCancelledNotAFailure() {
         val (r, _) = reader(FakeVaultOpener(outcome = OpenOutcome.Cancelled))

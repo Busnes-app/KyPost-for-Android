@@ -566,6 +566,7 @@ class EmailDetailActivity : LockedActivity() {
 
     /** Shared by [renderPgpBar] and [renderReadOutcome] so the wording cannot drift. */
     private fun signatureNoticeFor(state: PgpSignatureState): String? = when (state) {
+        PgpSignatureState.UNSIGNED -> "⬜ " + getString(R.string.email_pgp_signature_unsigned)
         PgpSignatureState.VERIFIED_CONFIRMED -> "✅ " + getString(R.string.email_pgp_signature_confirmed)
         PgpSignatureState.VERIFIED_SEEN_BEFORE -> "🟢 " + getString(R.string.email_pgp_signature_seen_before)
         PgpSignatureState.SIGNER_UNKNOWN -> "⬜ " + getString(R.string.email_pgp_signature_signer_unknown)

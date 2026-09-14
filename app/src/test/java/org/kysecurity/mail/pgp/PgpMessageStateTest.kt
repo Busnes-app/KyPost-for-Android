@@ -102,4 +102,10 @@ class PgpMessageStateTest {
         // carries nothing the user can act on — the same reason DECRYPTED_BY_SERVER is unmarked.
         assertNull(pgpRowMarker(PgpMessageState.NONE, PgpSignatureState.SIGNER_UNKNOWN))
     }
+
+    @Test
+    fun unsignedIsNotARowWarning() {
+        assertEquals("🔒", pgpRowMarker(PgpMessageState.CLIENT_PROTECTED, PgpSignatureState.UNSIGNED))
+        assertNull(pgpRowMarker(PgpMessageState.NONE, PgpSignatureState.UNSIGNED))
+    }
 }

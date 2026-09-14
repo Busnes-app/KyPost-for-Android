@@ -39,8 +39,13 @@ fun rendersNothing(state: PgpMessageState, body: String?, preview: String): Bool
 
 /** VERIFIED_CONFIRMED, SIGNER_UNKNOWN and KEY_CHANGED come only from [signatureStateFor]. */
 enum class PgpSignatureState {
-    /** Not signed, or no opinion was expressed. Nothing to say. */
+    /** No opinion was expressed. Nothing to say. */
     NONE,
+
+    /** Decrypted, and the ciphertext carried no signature at all. A statement about the message,
+     *  never about the sender: no glyph stronger than "nothing to say". Only
+     *  [EncryptedMessageReader] produces it; the inbox flags cannot tell it from [NONE]. */
+    UNSIGNED,
 
     /** Signed by a key bound to the sender, and the user confirmed that key out of band — by
      *  eyeballing the fingerprint or scanning a QR code. The only state that claims identity. */

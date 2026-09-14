@@ -177,9 +177,12 @@ internal class EncryptedMessageReader(
             java.util.Arrays.fill(decrypted.plaintext, 0)
         } ?: return ReadOutcome.DecryptFailed("this message could not be read once decrypted")
 
+        val verdict = signatureStateFor(decrypted.signature, payload.signerKeys, localKeys)
         return ReadOutcome.Decrypted(
             body,
-            signatureStateFor(decrypted.signature, payload.signerKeys, localKeys),
+            // Only here, where the bytes were decrypted: a signed-only message with nothing to check
+            // stays NONE because "could not check" and "not signed" are different claims.
+            if (decrypted.signature is RawSignature.Absent) PgpSignatureState.UNSIGNED else verdict,
             payload.resolvedSender,
         )
     }
