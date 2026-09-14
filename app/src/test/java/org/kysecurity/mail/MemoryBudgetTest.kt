@@ -50,9 +50,17 @@ class MemoryBudgetTest {
             MemoryBudget.PENDING_ATTACHMENT_BYTES +
                 MemoryBudget.FORWARD_ATTACHMENT_PEAK_BYTES +
                 MemoryBudget.LARGEST_READ_IN_FLIGHT_BYTES +
-                MemoryBudget.PGP_PLAINTEXT_PEAK_BYTES,
+                MemoryBudget.PGP_PLAINTEXT_PEAK_BYTES +
+                MemoryBudget.DECRYPTED_ATTACHMENT_BYTES +
+                MemoryBudget.INLINE_IMAGE_HTML_PEAK_BYTES,
             MemoryBudget.READ_SCENARIO_PEAK_BYTES,
         )
+    }
+
+    /** Base64 in a UTF-16 String is 8/3 of the bytes; 3x is the round-up the budget carries. */
+    @Test
+    fun inlineImageHtmlPeakIsThreeTimesTheInlineBytes() {
+        assertEquals(3L * MemoryBudget.INLINE_IMAGE_BYTES, MemoryBudget.INLINE_IMAGE_HTML_PEAK_BYTES)
     }
 
     /** The in-flight term takes a max over the three network paths. Naming one of them by hand is

@@ -43,6 +43,16 @@ internal object MemoryBudget {
      *  which held both in full — a guaranteed 2x on every message. */
     const val PGP_PLAINTEXT_PEAK_BYTES = 3L * PGP_PLAINTEXT_BYTES / 2L
 
+    /** Attachment parts kept out of one decrypted message, decoded, for the life of the detail
+     *  screen. Bounded by [PgpMimeReader], which drops parts past this rather than truncating one. */
+    const val DECRYPTED_ATTACHMENT_BYTES = 8L * 1024 * 1024
+
+    /** The subset of those that are `cid:` images inlined into the rendered HTML. */
+    const val INLINE_IMAGE_BYTES = 3L * 1024 * 1024
+
+    /** What inlining costs: base64 (4/3) inside a UTF-16 String (2x) is 8/3; rounded up to 3x. */
+    const val INLINE_IMAGE_HTML_PEAK_BYTES = 3L * INLINE_IMAGE_BYTES
+
     /** Decrypted attachments awaiting a viewer: retained until read or swept. */
     const val PENDING_ATTACHMENT_BYTES = 32L * 1024 * 1024
 
@@ -90,7 +100,9 @@ internal object MemoryBudget {
         PENDING_ATTACHMENT_BYTES +
             FORWARD_ATTACHMENT_PEAK_BYTES +
             LARGEST_READ_IN_FLIGHT_BYTES +
-            PGP_PLAINTEXT_PEAK_BYTES
+            PGP_PLAINTEXT_PEAK_BYTES +
+            DECRYPTED_ATTACHMENT_BYTES +
+            INLINE_IMAGE_HTML_PEAK_BYTES
 
     /** Sending a message. A different screen and a different operation from [READ_SCENARIO_PEAK_BYTES],
      *  so the two are alternatives rather than addends — summing every term in the app at once
