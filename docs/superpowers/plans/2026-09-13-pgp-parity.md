@@ -698,7 +698,11 @@ In the `Decrypted` branch, change the `rawHtml` computation to inline images, an
                     emailBodyToHtml(outcome.body.html ?: plainText.orEmpty(), outcome.body.bodyMode),
                     outcome.body.attachments,
                 )
-                // ...existing render...
+                // The existing renderableBody(...) call gains the flag from Task 3's ruling: only
+                // the decrypted body may keep raster data: images, because only here are they bounded
+                // by INLINE_IMAGE_BYTES.
+                val rendered = renderableBody(rawHtml, palette, ibmPlexMonoFontFaceCss(this), isDarkPalette(palette), keepInlineDataImages = true)
+                // ...rest of the existing render unchanged...
                 dropDecryptedAttachments()
                 decryptedAttachments = outcome.body.attachments
                 renderDecryptedAttachments(outcome.body.attachmentsOmitted)
