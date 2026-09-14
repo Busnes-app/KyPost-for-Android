@@ -132,6 +132,7 @@
     <string name="email_pgp_signature_seen_before">Key trusted on first use</string>
     <string name="email_pgp_signature_signer_unknown">No Signing Key</string>
     <string name="email_pgp_signature_key_changed">Signing Key Mismatch</string>
+    <string name="email_pgp_signature_unchecked">Signature not checked</string>
     <string name="email_pgp_signature_unsigned">Encrypted, not signed</string>
     <string name="email_row_pgp_failed_description">Encrypted, couldn\'t be decrypted: %1$s</string>
     <string name="attachment_downloading">Downloading %1$s…</string>

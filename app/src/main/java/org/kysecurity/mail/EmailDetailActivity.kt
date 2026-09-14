@@ -568,6 +568,7 @@ class EmailDetailActivity : LockedActivity() {
 
     /** Shared by [renderPgpBar] and [renderReadOutcome] so the wording cannot drift. */
     private fun signatureNoticeFor(state: PgpSignatureState): String? = when (state) {
+        PgpSignatureState.UNCHECKED -> "⬜ " + getString(R.string.email_pgp_signature_unchecked)
         PgpSignatureState.UNSIGNED -> "⬜ " + getString(R.string.email_pgp_signature_unsigned)
         PgpSignatureState.VERIFIED_CONFIRMED -> "✅ " + getString(R.string.email_pgp_signature_confirmed)
         PgpSignatureState.VERIFIED_SEEN_BEFORE -> "🟢 " + getString(R.string.email_pgp_signature_seen_before)
@@ -1456,10 +1457,10 @@ internal fun readFailureNotice(outcome: ReadOutcome): Pair<Int, String?>? = when
     is ReadOutcome.Decrypted, ReadOutcome.NeedsUnlock, ReadOutcome.Cancelled -> null
 }
 
-/** Sender verdicts need a resolved mailbox. UNSIGNED describes the message and always passes. */
+/** Sender verdicts need a resolved mailbox; message-level notices always pass. */
 internal fun displaySignatureVerdict(outcome: ReadOutcome.Decrypted): PgpSignatureState =
     outcome.signature.takeIf {
-        it == PgpSignatureState.UNSIGNED || outcome.resolvedSender.isNotBlank()
+        it == PgpSignatureState.UNSIGNED || it == PgpSignatureState.UNCHECKED || outcome.resolvedSender.isNotBlank()
     } ?: PgpSignatureState.NONE
 
 /** A dropped part is said out loud; a complete list needs no sentence. */

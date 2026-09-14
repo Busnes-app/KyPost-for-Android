@@ -79,19 +79,20 @@ class EncryptedMessageReaderTest {
 
     @Test
     fun anEncryptedDetachedMimeSignatureAtTheRootIsNotUnsigned() {
-        assertEncryptedMimeSignatureState(detachedMime(), PgpSignatureState.NONE)
+        assertEncryptedMimeSignatureState(detachedMime(), PgpSignatureState.UNCHECKED)
     }
 
     @Test
     fun anEncryptedNestedDetachedMimeSignatureIsNotUnsigned() {
         val mime = "Content-Type: multipart/mixed; boundary=outer\r\n\r\n" +
             "--outer\r\n" + detachedMime() + "\r\n--outer--\r\n"
-        assertEncryptedMimeSignatureState(mime, PgpSignatureState.NONE)
+        assertEncryptedMimeSignatureState(mime, PgpSignatureState.UNCHECKED)
     }
 
     @Test
-    fun aDeclaredButInvalidDetachedMimeSignatureCannotVerify() {
-        assertEncryptedMimeSignatureState(detachedMime("not a signature"), PgpSignatureState.NONE)
+    fun aMalformedSignatureDeclarationMustNotSilenceTheNotice() {
+        val outcome = assertEncryptedMimeSignatureState(detachedMime("not a signature"), PgpSignatureState.UNCHECKED)
+        assertTrue("a declared but unchecked signature needs a visible notice", outcome.signature != PgpSignatureState.NONE)
     }
 
     @Test
@@ -106,7 +107,7 @@ class EncryptedMessageReaderTest {
         mime: String,
         expected: PgpSignatureState,
         signingKey: CharArray? = null,
-    ) {
+    ): ReadOutcome.Decrypted {
         val encrypted = PgpEncryptor.encrypt(
             mime.toByteArray(Charsets.UTF_8), listOf(TestPgpPrivateKey.ARMORED_PUBLIC), signingKey,
         ) as EncryptResult.Ok
@@ -116,6 +117,7 @@ class EncryptedMessageReaderTest {
         val outcome = read(r) as ReadOutcome.Decrypted
         assertEquals(expected, outcome.signature)
         assertEquals("Signed MIME body.", outcome.body.plain)
+        return outcome
     }
 
     private fun detachedMime(signatureOverride: String? = null): String {

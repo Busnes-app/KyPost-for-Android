@@ -182,8 +182,8 @@ internal class EncryptedMessageReader(
             body,
             // ponytail: nested MIME signatures are detected, not verified. Verify their exact
             // signed-part bytes before assigning any signer verdict to those wrappers.
-            if (decrypted.signature is RawSignature.Absent && !body.hasDetachedSignature) {
-                PgpSignatureState.UNSIGNED
+            if (decrypted.signature is RawSignature.Absent) {
+                if (body.hasDetachedSignature) PgpSignatureState.UNCHECKED else PgpSignatureState.UNSIGNED
             } else verdict,
             payload.resolvedSender,
         )
