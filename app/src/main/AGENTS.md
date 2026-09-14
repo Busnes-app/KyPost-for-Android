@@ -101,8 +101,10 @@ Owns production Android app code and resources.
   remains the fallback for every device that is not.
   A key rotation merges the newly enrolled secret-key collection first, then every retired primary
   identity; a matching primary also recovers any historical subkey absent from the new collection.
-  A same-fingerprint replacement must be extractable with Android's empty passphrase; otherwise
-  keep its historical private packet with the incoming public metadata.
+  For the same fingerprint, retain a nonempty historical private packet with incoming public
+  metadata. Merge never extracts private keys or runs incoming password KDFs: a small Argon2
+  packet can request more memory than the entire app budget. A corrupt nonempty historical
+  packet requires explicit recovery; re-enrollment does not silently replace it.
   Invalid, empty, oversized, or over-count material fails the entire merge, preserving the old
   vault rather than sealing a partial history. `MemoryBudget` owns the input, output, ring-count,
   and separate enrollment-peak ceilings. Secret-key consumers parse packet order through

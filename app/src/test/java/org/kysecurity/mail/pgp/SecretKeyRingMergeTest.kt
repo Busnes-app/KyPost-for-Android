@@ -1,6 +1,10 @@
 package org.kysecurity.mail.pgp
 
 import org.bouncycastle.bcpg.ArmoredOutputStream
+import org.bouncycastle.bcpg.AEADAlgorithmTags
+import org.bouncycastle.bcpg.S2K
+import org.bouncycastle.bcpg.SecretKeyPacket
+import org.bouncycastle.openpgp.operator.PBESecretKeyDecryptor
 import org.bouncycastle.bcpg.SymmetricKeyAlgorithmTags
 import org.bouncycastle.openpgp.operator.bc.BcPBESecretKeyDecryptorBuilder
 import org.bouncycastle.openpgp.operator.bc.BcPBESecretKeyEncryptorBuilder
@@ -176,6 +180,37 @@ class SecretKeyRingMergeTest {
             assertArrayEquals(key.publicKey.encoded, restored.getSecretKey(key.publicKey.fingerprint).publicKey.encoded)
         }
         val decrypted = PgpDecryptor.decrypt(merged.chars(), TestPgpPrivateKey.ARMORED_MESSAGE, emptyList())
+        assertTrue("expected historical decryption, got $decrypted", decrypted is DecryptResult.Ok)
+        assertEquals(TestPgpPrivateKey.EXPECTED_PLAINTEXT, String((decrypted as DecryptResult.Ok).plaintext, Charsets.UTF_8))
+    }
+
+    @Test
+    fun preservesHistoryWithoutExtractingAnIncomingArgon2Secret() {
+        val historical = rings(previous.bytes()).single()
+        val publicKey = historical.publicKey
+        val packet = SecretKeyPacket(
+            publicKey.publicKeyPacket, SymmetricKeyAlgorithmTags.AES_256, AEADAlgorithmTags.GCM,
+            SecretKeyPacket.USAGE_AEAD, S2K(S2K.Argon2Params(ByteArray(16), 1, 1, 18)),
+            ByteArray(12), ByteArray(32),
+        )
+        var extractions = 0
+        // The real packet requests 256 MiB. Trap extraction before BC's KDF so a regression
+        // fails deterministically without ever exhausting the Gradle/test process heap.
+        val currentSecret = object : PGPSecretKey(packet, publicKey) {
+            override fun extractPrivateKey(decryptor: PBESecretKeyDecryptor?): PGPPrivateKey {
+                extractions++
+                error("merge must not execute incoming password derivation")
+            }
+        }
+        val current = PGPSecretKeyRing.insertSecretKey(historical, currentSecret)
+        assertFalse(currentSecret.isPrivateKeyEmpty)
+        assertTrue(armor(current).size < MemoryBudget.PGP_SECRET_KEY_INPUT_BYTES)
+
+        val merged = mergeParsedSecretKeyRings(listOf(current), listOf(historical))!!.single()
+
+        assertEquals("incoming S2K must never execute during merge", 0, extractions)
+        assertArrayEquals(publicKey.encoded, merged.publicKey.encoded)
+        val decrypted = PgpDecryptor.decrypt(armor(merged).chars(), TestPgpPrivateKey.ARMORED_MESSAGE, emptyList())
         assertTrue("expected historical decryption, got $decrypted", decrypted is DecryptResult.Ok)
         assertEquals(TestPgpPrivateKey.EXPECTED_PLAINTEXT, String((decrypted as DecryptResult.Ok).plaintext, Charsets.UTF_8))
     }
