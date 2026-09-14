@@ -38,3 +38,16 @@
   metadata boundary, and exact heap arithmetic are covered on the JVM.
 - A real signed F-Droid release package was not produced because signing material is intentionally
   absent from the worktree.
+
+## Round 2: queued executor cancellation
+
+Re-review found that `shutdownNow()` can remove an admitted save runnable before its `finally`
+runs. `OwnedAttachmentSave` now distinguishes queued from started snapshots. Lifecycle cleanup
+wipes and releases a queued snapshot, and the stale runnable's `begin` refuses to write it. Once
+`begin` succeeds, cleanup leaves the snapshot coherent until the writer's existing `finally` wipes
+it.
+
+Focused verification used the same three JVM classes above and passed. The new deterministic
+`lifecycleCleanupWipesAQueuedSnapshotThatTheExecutorNeverRuns` check models a runnable removed
+without execution. Deliberately removing the queued fill made that test fail at its wipe assertion;
+restoring the fill returned it to green.

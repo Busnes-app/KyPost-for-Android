@@ -13,6 +13,7 @@ class OwnedAttachmentSaveTest {
         owner.allow()
 
         val snapshot = owner.admit(source, lifecycleValid = true)!!
+        assertTrue(owner.begin(snapshot))
         source.fill(0) // lock clears the UI-owned source
         owner.stopAccepting()
 
@@ -26,5 +27,20 @@ class OwnedAttachmentSaveTest {
         owner.finish(rejectedSnapshot) // executor rejection follows this path
         assertTrue(rejectedSnapshot.all { it == 0.toByte() })
         assertNull(owner.admit(byteArrayOf(6), lifecycleValid = false))
+    }
+
+    @Test
+    fun lifecycleCleanupWipesAQueuedSnapshotThatTheExecutorNeverRuns() {
+        val owner = OwnedAttachmentSave()
+        owner.allow()
+        val queued = owner.admit(byteArrayOf(7, 8), lifecycleValid = true)!!
+
+        owner.stopAccepting() // shutdownNow may dequeue the Runnable without invoking its finally
+
+        assertTrue(queued.all { it == 0.toByte() })
+        assertTrue(!owner.begin(queued))
+        owner.allow()
+        val next = owner.admit(byteArrayOf(9), lifecycleValid = true)!!
+        owner.finish(next)
     }
 }

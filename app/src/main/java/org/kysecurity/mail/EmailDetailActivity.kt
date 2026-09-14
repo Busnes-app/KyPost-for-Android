@@ -830,6 +830,7 @@ class EmailDetailActivity : LockedActivity() {
                                 ) ?: return@setPositiveButton
                                 try {
                                     ioExecutor.execute {
+                                        if (!decryptedAttachmentSave.begin(snapshot)) return@execute
                                         val saved = try {
                                             org.kysecurity.mail.security.saveAttachmentToDownloads(
                                                 this@EmailDetailActivity,
