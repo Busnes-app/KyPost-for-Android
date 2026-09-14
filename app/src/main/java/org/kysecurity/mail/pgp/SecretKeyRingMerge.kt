@@ -97,11 +97,9 @@ internal fun orderedSecretKeyRings(input: java.io.InputStream): List<PGPSecretKe
     }
     try {
         if (!encoded.isSinglePrivateKeyArmor()) return null
-        val factory = PGPObjectFactory(
-            PGPUtil.getDecoderStream(ByteArrayInputStream(encoded)),
-            BcKeyFingerprintCalculator(),
-        )
-        buildList {
+        val source = ByteArrayInputStream(encoded)
+        val factory = PGPObjectFactory(PGPUtil.getDecoderStream(source), BcKeyFingerprintCalculator())
+        val rings = buildList {
             while (true) {
                 when (val packet = factory.nextObject() ?: break) {
                     is PGPSecretKeyRing -> {
@@ -112,7 +110,10 @@ internal fun orderedSecretKeyRings(input: java.io.InputStream): List<PGPSecretKe
                     else -> return null
                 }
             }
-        }.takeIf { it.isNotEmpty() }
+        }
+        val consumed = encoded.size - source.available()
+        if (!encoded.isWhitespace(consumed, encoded.size)) return null
+        rings.takeIf { it.isNotEmpty() }
     } finally {
         Arrays.fill(encoded, 0)
     }
@@ -126,11 +127,6 @@ private fun ByteArray.isSinglePrivateKeyArmor(): Boolean {
     if (indexOf(begin, first + begin.size) >= 0) return false
     val last = indexOf(end, first + begin.size)
     if (last < 0 || indexOf(end, last + end.size) >= 0) return false
-    // BC treats any line-leading dash as EOF. Make the accepted footer the first terminator it can
-    // encounter, so parser EOF proves consumption through the footer checked below.
-    for (index in first + begin.size until last) {
-        if (this[index] == '-'.code.toByte() && this[index - 1] == '\n'.code.toByte()) return false
-    }
     return isWhitespace(last + end.size, size)
 }
 

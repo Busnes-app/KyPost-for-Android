@@ -109,14 +109,19 @@ class SecretKeyRingMergeTest {
     }
 
     @Test
-    fun refusesAnEarlyDashTerminatorBeforeTheExpectedFooter() {
-        val malformed = TestPgpPrivateKey.ARMORED_PRIVATE.replace(
-            "-----END PGP PRIVATE KEY BLOCK-----",
-            "-early-end\ninvalid unconsumed material\n-----END PGP PRIVATE KEY BLOCK-----",
-        )
+    fun refusesEveryEarlyDashTerminatorBeforeTheExpectedFooter() {
+        listOf("", "  ", "\t", "\u000c", "\u000b").forEach { indent ->
+            listOf("\n", "\r").forEach { newline ->
+                val malformed = TestPgpPrivateKey.ARMORED_PRIVATE.replace(
+                    "-----END PGP PRIVATE KEY BLOCK-----",
+                    "$indent-early-end${newline}invalid unconsumed material$newline" +
+                        "-----END PGP PRIVATE KEY BLOCK-----",
+                )
 
-        assertNull(mergeSecretKeyRings(current, malformed.toCharArray()))
-        assertNull(mergeSecretKeyRings(malformed.toByteArray(), previous))
+                assertNull("previous: indent=${indent.length}, newline=${newline.codePointAt(0)}", mergeSecretKeyRings(current, malformed.toCharArray()))
+                assertNull("current: indent=${indent.length}, newline=${newline.codePointAt(0)}", mergeSecretKeyRings(malformed.toByteArray(), previous))
+            }
+        }
     }
 
     @Test
