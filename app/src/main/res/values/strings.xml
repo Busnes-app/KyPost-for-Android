@@ -143,6 +143,9 @@
     <string name="attachment_saved">Saved %1$s to Downloads</string>
     <string name="attachment_save_failed">Couldn\'t save %1$s</string>
     <string name="attachment_open_with">Open attachment with</string>
+    <string name="email_pgp_attachments_omitted">Some attachments in this message are too large to show on this device. Open it in webmail to get them.</string>
+    <string name="email_pgp_attachments_label">Decrypted attachments — tap to open</string>
+    <string name="email_pgp_attachments_label_hold_to_save">Decrypted attachments — tap to open, hold to save</string>
     <string name="attachment_too_many_open">Too many attachments are still open. Close one and try again.</string>
     <string name="forward_fetching_attachments">Fetching attachments to forward…</string>
     <plurals name="forward_attachments_failed">

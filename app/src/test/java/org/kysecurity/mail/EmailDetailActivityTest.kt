@@ -823,4 +823,10 @@ class EmailDetailActivityTest {
         assertTrue(blocked, !blocked.contains("srcset"))
         assertTrue(blocked, !blocked.contains("tracker"))
     }
+
+    @Test
+    fun decryptedAttachmentNotice_onlyWhenSomethingWasDropped() {
+        assertNull(decryptedAttachmentNotice(omitted = false))
+        assertEquals(R.string.email_pgp_attachments_omitted, decryptedAttachmentNotice(omitted = true))
+    }
 }
