@@ -116,3 +116,9 @@ The original plan below remains a historical implementation recipe. The followin
 - Ruling: for a matching fingerprint, retain a nonempty historical private packet with the current public metadata, without running any incoming KDF during merge. The same fingerprint identifies the same key; history preservation does not require testing attacker-supplied password derivation. Cost: re-enrollment will not silently repair a corrupt nonempty historical packet for the same fingerprint; that requires explicit recovery rather than risking key loss or unbounded allocation.
 
 - Ruling: apply one narrowly scoped follow-up for the new allocation blocker and re-review it, despite the skill's one-wave stopping guideline. This is an authorized reversible correctness fix, and handing off a known avoidable key-import OOM would leave the task unfinished. No broader second review/fix wave.
+
+## PR instrumentation follow-up
+
+PR #109's first CI matrix exposed a test-order failure reproduced locally: the new reader Activity fixture retained `MailRuntime` after scenario teardown, and subsequent database-wipe tests left that cached DAO closed. Commit `cf43e5a` releases the mail graph in fixture teardown and documents its ownership; production code is unchanged.
+
+The ordered six-test reproduction now passes. Full Play and F-Droid instrumentation on API 36 each completed 240 cases with zero failures/errors and four existing device-precondition skips (one AuthGateKeyTest and three BiometricUnlockVaultTest cases). The initial F-Droid run hit a separate embedded-pane lock assertion; both its isolated retry and a full-suite retry passed without changes. That transient failure is recorded, not claimed fixed. Full CI across API 31/34/36 and independent review remain PR gates.
