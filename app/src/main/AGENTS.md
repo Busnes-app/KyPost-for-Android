@@ -111,7 +111,9 @@ Owns production Android app code and resources.
   successful current-first merge. Only `NotEnrolled` permits a current-only seal; cancellation,
   open failure, a lost opened session, or merge refusal must leave the old vault and server state
   unchanged. A successful seal wipes both plaintext arrays and clears `EnrollmentSession` before
-  cache deletion or the enrollment report.
+  cache deletion or the enrollment report. Both enrollment biometric operations are owned by the
+  live Activity: destruction explicitly resolves a pending open or seal exactly once, and a late
+  callback from the destroyed Activity cannot write the session or vault.
   Hostile Location Protection destroys the envelope and is the mode in which none of this exists.
   `pgpRowMarker` marks inbox rows for the two states that yield nothing readable (🔒 client-protected,
   ⚠ decrypt failed) and deliberately leaves server-decrypted rows unmarked — those open normally, so
