@@ -43,6 +43,31 @@ internal object MemoryBudget {
      *  which held both in full — a guaranteed 2x on every message. */
     const val PGP_PLAINTEXT_PEAK_BYTES = 3L * PGP_PLAINTEXT_BYTES / 2L
 
+    /** One armored secret-key collection admitted during enrollment. Secret keys are normally a
+     *  few KiB; raise this only with a streaming parser/serializer upgrade. */
+    const val PGP_SECRET_KEY_INPUT_BYTES = 256 * 1024
+
+    /** A previously merged vault must remain admissible on the next rotation. */
+    const val PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES = 384 * 1024
+
+    /** The accumulated armored collection after rotation. This is a refusal limit: historical
+     *  keys are never dropped to fit it. */
+    const val PGP_SECRET_KEY_OUTPUT_BYTES = 384 * 1024
+
+    /** A collection may contain this many primary identities before enrollment refuses it. */
+    const val PGP_SECRET_KEY_RING_COUNT = 32
+
+    /** Enrollment is separate from reading. At peak it holds both caller inputs, the UTF-8
+     *  encoder's two temporary copies, parsed packet storage conservatively charged at both input
+     *  caps, and the bounded output backing plus its final copy. */
+    const val PGP_ENROLLMENT_PEAK_BYTES =
+        PGP_SECRET_KEY_INPUT_BYTES +
+            2 * PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES +
+            2 * PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES +
+            PGP_SECRET_KEY_INPUT_BYTES +
+            PGP_SECRET_KEY_PREVIOUS_INPUT_BYTES +
+            2 * PGP_SECRET_KEY_OUTPUT_BYTES
+
     /** Attachment parts kept out of one decrypted message, decoded, for the life of the detail
      *  screen. Bounded by [PgpMimeReader], which drops parts past this rather than truncating one. */
     const val DECRYPTED_ATTACHMENT_BYTES = 4L * 1024 * 1024

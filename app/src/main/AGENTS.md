@@ -99,6 +99,13 @@ Owns production Android app code and resources.
   decrypts client-protected messages locally. So `CLIENT_PROTECTED` no longer means "cannot be read
   here": it means "not readable here **unless** this device is enrolled and unlocked". Webmail
   remains the fallback for every device that is not.
+  A key rotation merges the newly enrolled secret-key collection first, then every retired primary
+  identity; a matching primary also recovers any historical subkey absent from the new collection.
+  Invalid, empty, oversized, or over-count material fails the entire merge, preserving the old
+  vault rather than sealing a partial history. `MemoryBudget` owns the input, output, ring-count,
+  and separate enrollment-peak ceilings. Secret-key consumers parse packet order through
+  `orderedSecretKeyRings`; Bouncy Castle's collection iterator returns map order, which cannot
+  choose the current ring for signing or own-public-key derivation.
   Hostile Location Protection destroys the envelope and is the mode in which none of this exists.
   `pgpRowMarker` marks inbox rows for the two states that yield nothing readable (🔒 client-protected,
   ⚠ decrypt failed) and deliberately leaves server-decrypted rows unmarked — those open normally, so
@@ -389,6 +396,8 @@ Owns production Android app code and resources.
   the Activity only picks views. Room schema changes need a matching `MigrationTest` case in
   `app/src/androidTest/`; migrations may set SQLite column defaults without the entity declaring
   `@ColumnInfo(defaultValue=…)`, since Room only validates a default when the entity side has one.
+- `pgp/SecretKeyRingMergeTest` proves current-first signing, retired-key decryption, same-primary
+  subkey retention, idempotence, invalid-input refusal, and every enrollment limit on the JVM.
 
 # Child DOX Index
 
