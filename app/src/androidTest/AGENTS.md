@@ -10,6 +10,9 @@ Owns Android instrumentation tests executed on emulator/device.
 
 - Use instrumentation tests for integration checks that require Android runtime.
 - Keep assertions focused on user-visible behavior and Android context wiring.
+- Activity fixtures must release runtime graphs they initialize after their scenarios close.
+  A cached `MailRuntime` repository retains its DAO across later database-wipe tests; invalidate
+  that graph in teardown while leaving `DataRuntime` and its open database owned by the suite.
 
 # Work Guidance
 

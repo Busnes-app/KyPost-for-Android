@@ -6,15 +6,24 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.kysecurity.mail.EmailDetailActivity
+import org.kysecurity.mail.mail.MailRuntime
 
 @RunWith(AndroidJUnit4::class)
 class ReadOutcomeActivityTest {
+    @After
+    fun releaseTheMailGraph() {
+        // Scenario closes the Activity, but MailRuntime outlives it. Later wipe tests close
+        // its DAO's database; leave them no cached repository pointing at that old handle.
+        MailRuntime.invalidate()
+    }
+
     @Test
     fun acceptedAttachmentsSurviveDeliveryAndAreWipedOnDestroyWhileFinishingRejectsThem() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
