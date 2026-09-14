@@ -61,14 +61,22 @@ class ComposeEncryptedDraftHandoffTest {
         }
     }
 
-    @Test fun savedAndOpenedDraftFinishesAndClearsCache() {
+    @Test fun savedAndOpenedDraftKeepsTheOnlyLocalCopy() {
         launch().use { scenario ->
             scenario.onActivity { activity ->
                 var opened = false
                 activity.completeDraftHandoff(DraftSaveOutcome.Saved) { opened = true; true }
                 assertTrue(opened)
-                assertTrue(activity.isFinishing)
-                assertNull(ComposeDraftCache.take())
+                assertFalse(activity.isFinishing)
+                assertNotNull(activity.restoredDraftForTest)
+                val consent = activity.getString(org.kysecurity.mail.R.string.compose_handoff_encrypted_body)
+                assertTrue(consent.contains("From and To"))
+                assertTrue(consent.contains("server"))
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                assertEquals("Private subject", activity.restoredDraftForTest!!.subject)
+                assertArrayEquals(byteArrayOf(1, 2, 3), activity.restoredDraftForTest!!.attachments.single().bytes)
             }
         }
     }

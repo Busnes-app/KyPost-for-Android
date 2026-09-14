@@ -1035,6 +1035,18 @@ class RelayMailSourceTest {
     }
 
     @Test
+    fun encryptedDraftRejectsUnacknowledgedSuccessResponses() {
+        for (body in listOf("{\"ok\":false}", "{}", "not JSON", "{\"ok\":\"true\"}")) {
+            val calls = BodyRecordingCallFactory { request -> jsonResponse(request, body) }
+            val source = RelayMailSource(
+                pairingProvider = { testPairing() }, cursorProvider = FakeMailCursorProvider(), callFactory = calls,
+            )
+            assertTrue("unacknowledged 200 accepted: $body",
+                source.saveClientEncryptedDraft(ClientEncryptedDraft("a@example.com", "MIME")) is MailOutcome.UpstreamFailure)
+        }
+    }
+
+    @Test
     fun saveDraft_omitsPgpFlags() {
         val callFactory = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true}""") }
         val source = RelayMailSource(

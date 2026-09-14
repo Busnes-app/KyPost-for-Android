@@ -185,7 +185,7 @@
     <string name="compose_handoff_dialog_body">This composition won\'t be transferred to webmail. Open webmail and recreate it there. Your current fields and attachments will remain here when you return.</string>
     <string name="compose_send_needs_webmail">This account\'s PGP key is held only by your browser, so this app can\'t encrypt or sign. Use “Continue in webmail” to send it protected.</string>
     <string name="compose_handoff_dialog_confirm">Open webmail</string>
-    <string name="compose_handoff_encrypted_body">Save an encrypted copy of this draft, then open webmail to continue. Only your account key can open the saved copy.</string>
+    <string name="compose_handoff_encrypted_body">Save an encrypted copy, then open webmail. Message content, Cc/Bcc and attachments are encrypted to your account key. The server can see the From and To addresses and date. Your composition stays here.</string>
     <string name="compose_handoff_saving">Encrypting and saving draft…</string>
     <string name="compose_handoff_refused">Could not confirm this account can save an encrypted draft. Try again.</string>
     <string name="compose_handoff_needs_recipient">Add a To recipient before saving this draft.</string>

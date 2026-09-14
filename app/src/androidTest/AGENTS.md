@@ -10,8 +10,8 @@ Owns Android instrumentation tests executed on emulator/device.
 
 - Use instrumentation tests for integration checks that require Android runtime.
 - Keep assertions focused on user-visible behavior and Android context wiring.
-- `ComposeEncryptedDraftHandoffTest` verifies that failed saves and browser launches retain the
-  composition and attachments; only saved-and-opened handoff finishes and clears its cache.
+- `ComposeEncryptedDraftHandoffTest` verifies that saves and browser launches retain the composition
+  and attachments on both success and failure, and that consent names visible address metadata.
 - Activity fixtures must release runtime graphs they initialize after their scenarios close.
   A cached `MailRuntime` repository retains its DAO across later database-wipe tests; invalidate
   that graph in teardown while leaving `DataRuntime` and its open database owned by the suite.

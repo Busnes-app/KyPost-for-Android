@@ -900,17 +900,15 @@ class ComposeActivity : LockedActivity() {
         sendMenuItem?.isEnabled = !handoffOnlyAccount
     }
 
-    /** Kept internal so device tests exercise the real failure/finish/cache behavior. */
+    /** Kept internal so device tests exercise the real failure/browser/cache behavior. */
     internal fun completeDraftHandoff(outcome: DraftSaveOutcome, openTarget: () -> Boolean) {
         activeDialog?.dismiss()
         activeDialog = null
         finishHandoffAttempt()
         if (outcome == DraftSaveOutcome.Saved) {
-            if (openTarget()) {
-                sendSucceeded = true
-                ComposeDraftCache.clear()
-                finish()
-            } else Toast.makeText(this, R.string.compose_handoff_no_handler, Toast.LENGTH_LONG).show()
+            // ponytail: keep the local copy until the relay supports verified ciphertext readback;
+            // an ordinary acknowledgement cannot justify automatic discard.
+            if (!openTarget()) Toast.makeText(this, R.string.compose_handoff_no_handler, Toast.LENGTH_LONG).show()
         } else if (outcome != DraftSaveOutcome.Cancelled) {
             val message = when (outcome) {
                 DraftSaveOutcome.NoRecipient -> getString(R.string.compose_handoff_needs_recipient)

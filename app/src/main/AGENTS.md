@@ -55,8 +55,10 @@ Owns production Android app code and resources.
   locally unsealed account key through `ClientEncryptedDraftSaver`; the relay receives only `to`
   and `pgpDraft`. Protected To/Cc/Bcc/Subject, body and attachments travel inside the ciphertext;
   the outer MIME has To and a placeholder Subject, with no Cc/Bcc. Bootstrap keys and recipient
-  discovery are not inputs to self-encryption. The composer closes only after save and browser
-  launch succeed; cancellation or either failure retains the fields and attachments. A modal
+  discovery are not inputs to self-encryption. Consent names the exposed From/To/date metadata.
+  The encrypted transport requires JSON `ok:true`, but this is not a receipt proving ciphertext
+  was stored by an older relay. The composer therefore stays available even after save and browser
+  launch succeed; only the user's normal discard/send action removes it. A modal
   prevents edits during saving, and Activity destruction cancels its vault prompt.
   Unenrolled devices open webmail without transferring any composition; unknown custody refuses
   the operation. Compose never calls the plaintext `saveDraft` transport. Retry after a successful
