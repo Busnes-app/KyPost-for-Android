@@ -180,9 +180,11 @@ internal class EncryptedMessageReader(
         val verdict = signatureStateFor(decrypted.signature, payload.signerKeys, localKeys)
         return ReadOutcome.Decrypted(
             body,
-            // Only here, where the bytes were decrypted: a signed-only message with nothing to check
-            // stays NONE because "could not check" and "not signed" are different claims.
-            if (decrypted.signature is RawSignature.Absent) PgpSignatureState.UNSIGNED else verdict,
+            // ponytail: nested MIME signatures are detected, not verified. Verify their exact
+            // signed-part bytes before assigning any signer verdict to those wrappers.
+            if (decrypted.signature is RawSignature.Absent && !body.hasDetachedSignature) {
+                PgpSignatureState.UNSIGNED
+            } else verdict,
             payload.resolvedSender,
         )
     }
