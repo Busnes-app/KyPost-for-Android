@@ -24,9 +24,11 @@ class KeywordSettings(context: Context) {
         if (keywords.isEmpty()) return
         // Labels describe the user's mail: never persist them to this plaintext file in hostile mode.
         if (hostileLocationSettings.isEnabled()) return
+        // The All tab is app-owned; a relay label spelt the same must not become a second one.
         val cleaned = keywords.asSequence()
             .map { it.trim() }
             .filter { it.isNotBlank() && it.length <= MAX_KEYWORD_LENGTH }
+            .filterNot { it.equals(KeywordTabs.ALL, ignoreCase = true) }
             .toSet()
         if (cleaned.isEmpty()) return
         // LinkedHashSet: insertion-ordered, so takeLast() drops the oldest entries.
@@ -48,6 +50,13 @@ class KeywordSettings(context: Context) {
         prefs.edit().putString(KEY_KEYWORD_ORDER, JSONArray(ordered).toString()).apply()
     }
 
+    /** Its own key, not `keyword_visible_All`: that namespace is fed by unvalidated relay labels. */
+    fun isAllTabVisible(): Boolean = prefs.getBoolean(KEY_ALL_TAB_VISIBLE, true)
+
+    fun setAllTabVisible(visible: Boolean) {
+        prefs.edit().putBoolean(KEY_ALL_TAB_VISIBLE, visible).apply()
+    }
+
     fun isKeywordVisible(keyword: String): Boolean = prefs.getBoolean(keyForVisibility(keyword), true)
 
     fun setKeywordVisible(keyword: String, visible: Boolean) {
@@ -64,6 +73,7 @@ class KeywordSettings(context: Context) {
         const val PREFS_NAME = "org.kysecurity.mail.keyword_settings"
         private const val KEY_ALL_KEYWORDS = "all_keywords"
         private const val KEY_KEYWORD_ORDER = "keyword_order"
+        private const val KEY_ALL_TAB_VISIBLE = "all_tab_visible"
 
         /** Long enough for any real mail label, short enough that the widest possible chip still
          *  measures cheaply. */

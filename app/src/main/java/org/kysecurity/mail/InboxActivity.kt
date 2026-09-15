@@ -439,7 +439,7 @@ class InboxActivity : LockedActivity() {
         val discoveredThisBatch = KeywordTabs.buildTabs(emails).drop(1).toSet()
         keywordSettings.rememberKeywords(discoveredThisBatch)
         val allowedKeywords = keywordSettings.getOrderedKeywords().filter(keywordSettings::isKeywordVisible)
-        val tabs = KeywordTabs.visibleTabs(keywordSettings.isKeywordVisible(KeywordTabs.ALL), allowedKeywords)
+        val tabs = KeywordTabs.visibleTabs(keywordSettings.isAllTabVisible(), allowedKeywords)
 
         val current = mutableListOf<String>()
         for (index in 0 until keywordChips.childCount) {

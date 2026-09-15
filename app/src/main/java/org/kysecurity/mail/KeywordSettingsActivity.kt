@@ -35,8 +35,8 @@ class KeywordSettingsActivity : LockedActivity() {
             text = KeywordTabs.ALL
             textSize = 15f
             minHeight = dpToPx(48)
-            isChecked = keywordSettings.isKeywordVisible(KeywordTabs.ALL)
-            setOnCheckedChangeListener { _, checked -> keywordSettings.setKeywordVisible(KeywordTabs.ALL, checked) }
+            isChecked = keywordSettings.isAllTabVisible()
+            setOnCheckedChangeListener { _, checked -> keywordSettings.setAllTabVisible(checked) }
         }
         applyCheckBoxTheme(this, allTab)
         container.addViewSpaced(allTab, bottomDp = 4)
