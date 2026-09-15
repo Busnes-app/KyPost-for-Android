@@ -97,6 +97,23 @@ class MemoryBudgetTest {
         assertEquals(MemoryBudget.FORWARD_ATTACHMENT_BYTES, MemoryBudget.FORWARD_ATTACHMENT_PEAK_BYTES)
     }
 
+    /** The v3 import is its own term, beside the legacy one rather than replacing it, so legacy
+     *  enrollment capacity cannot shrink by accident. Both fit the heap together. */
+    @Test
+    fun keyringImportCountsEveryTermAndFitsBesideLegacyEnrollment() {
+        assertEquals(
+            3L * MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES + 9L * MemoryBudget.PGP_KEYRING_JSON_BYTES,
+            MemoryBudget.PGP_KEYRING_IMPORT_PEAK_BYTES.toLong(),
+        )
+        assertTrue(MemoryBudget.PGP_KEYRING_IMPORT_PEAK_BYTES + MemoryBudget.PGP_ENROLLMENT_PEAK_BYTES <= MemoryBudget.ASSUMED_HEAP_BYTES)
+        assertEquals(128 * 1024, MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES)
+        assertEquals(128 * 1024, MemoryBudget.PGP_KEYRING_JSON_BYTES)
+        assertTrue(
+            "a legacy envelope holding the largest admitted key must still parse",
+            MemoryBudget.PGP_DEVICE_ENVELOPE_LEGACY_BYTES > (MemoryBudget.PGP_SECRET_KEY_INPUT_BYTES + 16) * 4 / 3,
+        )
+    }
+
     @Test
     fun enrollmentScenarioFitsTheAssumedHeapAndCountsEveryTerm() {
         assertEquals(

@@ -195,7 +195,9 @@ internal class EnrollmentCeremony(
     private suspend fun openAndSeal(envelopeJson: String) {
         emit(EnrollmentUiState.Opening)
 
-        val fields = parseDeviceEnvelope(envelopeJson)
+        // Live enrollment is legacy-only until the server publishes capability, generation and
+        // acknowledgement contracts; a v3 envelope is malformed here, not opened under v2.
+        val fields = parseDeviceEnvelope(envelopeJson, setOf(ENVELOPE_VERSION_LEGACY))
         if (fields == null) {
             failAndDestroy(FailureReason.ENVELOPE_MALFORMED)
             return
@@ -203,7 +205,7 @@ internal class EnrollmentCeremony(
 
         // The AAD comes from this device's id and the checked fingerprint — never from the envelope.
         val aad = runCatching {
-            deviceEnvelopeAad(requireNotNull(deviceId), requireNotNull(fingerprint))
+            deviceEnvelopeAad(fields.version, requireNotNull(deviceId), requireNotNull(fingerprint))
         }.getOrNull()
         if (aad == null) {
             failAndDestroy(FailureReason.ENVELOPE_MALFORMED)
