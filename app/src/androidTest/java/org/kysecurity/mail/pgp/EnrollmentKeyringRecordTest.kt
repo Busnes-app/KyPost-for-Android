@@ -37,6 +37,14 @@ class EnrollmentKeyringRecordTest {
         assertTrue("an unknown format byte fails closed", runCatching { vault.stored() }.isFailure)
     }
 
+    /** The instrumentation copy of the shared fixture must not drift from the pinned one. */
+    @Test
+    fun theFixtureCopyIsTheServersBytes() {
+        val bytes = requireNotNull(javaClass.classLoader!!.getResourceAsStream("kypost-server/pgp-keyring-v1.json")).use { it.readBytes() }
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        assertEquals("bba7d8fde4206be91e57a4953b3b56ff915ecb24f9a0f581b7098bdc6dfcb7cc", digest)
+    }
+
     /** Enrolled for this device's own reading and signing, and nothing the legacy report may claim. */
     @Test
     fun aKeyringRecordProbesAsEnrolledLocallyOnly() {

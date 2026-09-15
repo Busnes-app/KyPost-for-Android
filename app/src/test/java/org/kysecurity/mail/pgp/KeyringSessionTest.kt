@@ -32,6 +32,12 @@ class KeyringSessionTest {
             val ok = result as? DecryptResult.Ok ?: throw AssertionError("$field: $result")
             assertEquals(field, historicalPlaintext, String(ok.plaintext, Charsets.UTF_8))
         }
+        // The hidden recipient is not the active member, whose encryption subkey is tried first:
+        // the pass above went through a failed candidate before the retained member opened it.
+        val parsed = requireNotNull(parsePgpKeyring(ringBytes, active))
+        EnrollmentSession.putKeyring(PgpKeyring(parsed.original, 2, parsed.activeFingerprint, parsed.keyFingerprints, listOf(parsed.active)))
+        val hidden = fixture["hiddenCiphertext"]!!.jsonPrimitive.content
+        assertTrue(EnrollmentSession.withDecryptionKeys { PgpDecryptor.decrypt(it, hidden, emptyList()) } is DecryptResult.Failed)
     }
 
     @Test

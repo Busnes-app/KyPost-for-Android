@@ -384,6 +384,9 @@ class DeviceEnrollmentActivity : LockedActivity() {
  *  previous record in place. */
 internal fun commitSeal(vault: EnrollmentVault, authenticated: Cipher, plaintext: ByteArray, kind: VaultRecordKind): SealOutcome =
     runCatching {
+        // The format byte selects the parser, so a keyring record binds it into the tag; legacy
+        // records predate this and stay AAD-free.
+        if (kind == VaultRecordKind.KEYRING) authenticated.updateAAD(byteArrayOf(kind.recordVersion))
         val ciphertext = authenticated.doFinal(plaintext)
         if (vault.store(authenticated.iv, ciphertext, kind)) SealOutcome.Sealed
         else SealOutcome.Failed("The sealed key could not be stored")

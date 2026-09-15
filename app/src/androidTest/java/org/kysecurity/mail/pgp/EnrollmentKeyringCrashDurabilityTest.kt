@@ -64,7 +64,10 @@ class EnrollmentKeyringCrashDurabilityTest {
         val record = vault.stored() ?: throw AssertionError("the keyring record did not survive the crash")
         assertEquals(VaultRecordKind.KEYRING, record.kind)
         val plaintext = Cipher.getInstance("AES/GCM/NoPadding")
-            .apply { init(Cipher.DECRYPT_MODE, testKey, GCMParameterSpec(128, record.iv)) }
+            .apply {
+                init(Cipher.DECRYPT_MODE, testKey, GCMParameterSpec(128, record.iv))
+                updateAAD(byteArrayOf(record.kind.recordVersion))
+            }
             .doFinal(record.ciphertext)
         assertArrayEquals(ringBytes, plaintext)
 

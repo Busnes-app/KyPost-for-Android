@@ -53,7 +53,11 @@ unlock() {
 boot_id() { adb shell cat /proc/sys/kernel/random/boot_id | tr -d '\r'; }
 
 require_root() {
-  adb root > /dev/null
+  # adbd is briefly unreachable after a crash reboot; one refused connection is not "no root".
+  for _ in 1 2 3 4 5 6; do
+    adb root > /dev/null 2>&1 && break
+    sleep 3
+  done
   adb wait-for-device
   if [ "$(adb shell id -u | tr -d '\r')" != "0" ]; then
     echo "adb root did not take; a non-rootable image cannot crash the kernel" >&2
@@ -88,6 +92,11 @@ cycle() {
 }
 
 ./gradlew -q :app:installPlayDebug :app:installPlayDebugAndroidTest
+# A clean reboot makes the installs themselves durable: the package manager persists its
+# settings on a delay that sync-and-wait does not reliably cover, and a crash that loses the
+# test APK reports INSTRUMENTATION_FAILED instead of testing the vault.
+adb reboot
+sleep 5
 wait_for_boot
 unlock
 cycle "$LEGACY#phase1SealsAKnownRecord" "$LEGACY#phase2ReadsItBackAfterTheCrash"

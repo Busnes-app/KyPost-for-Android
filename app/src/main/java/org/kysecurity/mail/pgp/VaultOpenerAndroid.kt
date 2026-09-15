@@ -125,6 +125,7 @@ internal class AndroidVaultOpener(
                             }
                             val outcome = runCatching {
                                 // GCM tag failure = wrong key for this ciphertext: re-enrol.
+                                if (ready.kind == VaultRecordKind.KEYRING) authenticated.updateAAD(byteArrayOf(ready.kind.recordVersion))
                                 val plaintext = authenticated.doFinal(ciphertext)
                                 val installed = try {
                                     // The record's own format byte decides the parser; a keyring

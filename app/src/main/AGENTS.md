@@ -200,9 +200,14 @@ Owns production Android app code and resources.
   the AAD's active fingerprint, then open the previous vault to establish replacement safety,
   then seal the original bytes as a KEYRING record, then install the session from those committed
   bytes, then `onLocalComplete`; any acknowledgement caller hangs off that callback and nothing
-  earlier. Identical bytes replay without resealing; any other previous material — a different
-  ring or legacy armor — is `RefusedIncomparable` and kept, because equal inventories prove
-  nothing about certifications or revocations and the replacement contract is not shipped. A
+  earlier. Identical bytes replay without resealing only when a KEYRING record is on disk, read
+  through the unauthenticated `sealedKind` probe: a held session proves nothing about the disk,
+  since teardown and key invalidation delete the record without clearing the session, so a held
+  ring with no record behind it is sealed like a fresh import. Any other previous material — a
+  different ring or legacy armor — is `RefusedIncomparable` and kept, because equal inventories
+  prove nothing about certifications or revocations and the replacement contract is not shipped.
+  A keyring record binds its format byte into the GCM tag as AAD on seal and open; legacy records
+  predate that and stay AAD-free. A
   legacy ceremony over a held keyring refuses the merge (`withLegacyArmor` is null) and leaves the
   record. `probeEnrollment` reports a keyring record as `ENROLLED_KEYRING`: `isEnrolled()` for this
   device's own reading, signing and settings row, but `legacyReportValue()` false, so

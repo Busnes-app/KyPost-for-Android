@@ -28,13 +28,18 @@ internal sealed class KeyringImportOutcome {
  * the AAD committed to) before the vault or session is touched; establish that replacing the
  * previous record is safe; seal and durably store the original bytes; only then install the
  * session from the bytes that were committed and call [onLocalComplete]. A future acknowledgement
- * runs from that callback and nowhere earlier. Every other exit leaves the previous record and
+ * runs from that callback and nowhere earlier. [KeyringImportOutcome.Replayed] is claimed only when
+ * identical bytes are held and a keyring record is on disk. Every other exit leaves the previous record and
  * session exactly as they were.
  */
 internal suspend fun importKeyring(
     plaintext: ByteArray,
     expectedActiveFingerprint: String,
     previousVault: VaultOpener,
+    /** The kind of the record on disk right now, read without authentication, or null when there
+     *  is none. A held session is not proof of a sealed record: teardown and key invalidation
+     *  remove the record without clearing the session. */
+    sealedKind: () -> VaultRecordKind?,
     sealer: VaultSealer,
     onLocalComplete: () -> Unit,
 ): KeyringImportOutcome {
@@ -52,9 +57,18 @@ internal suspend fun importKeyring(
         // only the identical bytes are known to be the same ring.
         val identical = EnrollmentSession.withKeyring { it.original.contentEquals(ring.original) } ?: false
         if (!identical) return ring.dropWith(KeyringImportOutcome.RefusedIncomparable)
-        ring.wipe()
-        onLocalComplete()
-        return KeyringImportOutcome.Replayed
+        when (sealedKind()) {
+            // Durable already: nothing to write, and completion is idempotent.
+            VaultRecordKind.KEYRING -> {
+                ring.wipe()
+                onLocalComplete()
+                return KeyringImportOutcome.Replayed
+            }
+            // The disk holds something else under this session; the disk decides.
+            VaultRecordKind.LEGACY_ARMOR -> return ring.dropWith(KeyringImportOutcome.RefusedIncomparable)
+            // Held in memory with no record behind it: seal it now, like a fresh import.
+            null -> Unit
+        }
     }
 
     return when (val sealed = sealer.seal(ring.original, VaultRecordKind.KEYRING)) {

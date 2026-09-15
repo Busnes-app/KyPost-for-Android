@@ -34,8 +34,38 @@ class KeyringImportTest {
 
     private fun opener(outcome: OpenOutcome, key: String? = null) = FakeVaultOpener(outcome, key)
 
-    private suspend fun import(bytes: ByteArray = ringBytes, expected: String = active, opener: VaultOpener) =
-        importKeyring(bytes, expected, opener, sealer) { events += "complete" }
+    private suspend fun import(
+        bytes: ByteArray = ringBytes,
+        expected: String = active,
+        opener: VaultOpener,
+        sealed: VaultRecordKind? = null,
+    ) = importKeyring(bytes, expected, opener, { sealed }, sealer) { events += "complete" }
+
+    /** Teardown and key invalidation delete the record without clearing the session, so a held
+     *  ring proves nothing about the disk; only a sealed keyring record makes a replay. */
+    @Test
+    fun aHeldRingWithNoRecordBehindItIsSealedNotReplayed() = runBlocking {
+        EnrollmentSession.putKeyring(requireNotNull(parsePgpKeyring(ringBytes, active)))
+        sealer.onSeal = { events += "seal(held=${EnrollmentSession.isHeld()})" }
+
+        val outcome = import(opener = opener(OpenOutcome.NotEnrolled), sealed = null)
+
+        assertEquals(KeyringImportOutcome.Imported, outcome)
+        assertEquals(listOf(VaultRecordKind.KEYRING), sealer.kinds)
+        assertEquals(listOf("seal(held=true)", "complete"), events)
+        assertArrayEquals(ringBytes, sealer.received.single())
+    }
+
+    @Test
+    fun aHeldRingOverALegacyRecordIsRefused() = runBlocking {
+        EnrollmentSession.putKeyring(requireNotNull(parsePgpKeyring(ringBytes, active)))
+
+        val outcome = import(opener = opener(OpenOutcome.NotEnrolled), sealed = VaultRecordKind.LEGACY_ARMOR)
+
+        assertEquals(KeyringImportOutcome.RefusedIncomparable, outcome)
+        assertTrue(sealer.received.isEmpty())
+        assertTrue(events.isEmpty())
+    }
 
     @Test
     fun aFreshImportSealsThenInstallsThenCompletes() = runBlocking {
@@ -91,7 +121,7 @@ class KeyringImportTest {
     fun theExactSameBytesReplayWithoutResealing() = runBlocking {
         EnrollmentSession.putKeyring(requireNotNull(parsePgpKeyring(ringBytes, active)))
 
-        val outcome = import(opener = opener(OpenOutcome.Opened))
+        val outcome = import(opener = opener(OpenOutcome.Opened), sealed = VaultRecordKind.KEYRING)
 
         assertEquals(KeyringImportOutcome.Replayed, outcome)
         assertTrue(sealer.received.isEmpty())
@@ -103,7 +133,7 @@ class KeyringImportTest {
     fun aDifferentRingIsRefusedAndThePreviousOneKept() = runBlocking {
         EnrollmentSession.putKeyring(requireNotNull(parsePgpKeyring(ringBytes, active)))
 
-        val outcome = import(bytes = laterRingBytes, opener = opener(OpenOutcome.Opened))
+        val outcome = import(bytes = laterRingBytes, opener = opener(OpenOutcome.Opened), sealed = VaultRecordKind.KEYRING)
 
         assertEquals(KeyringImportOutcome.RefusedIncomparable, outcome)
         assertTrue(sealer.received.isEmpty())
