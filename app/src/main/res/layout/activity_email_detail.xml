@@ -110,13 +110,23 @@
             android:breakStrategy="balanced"
             android:textSize="14sp"
             android:textColor="#666666"
-            android:layout_marginBottom="16dp" />
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:id="@+id/emailRecipients"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:breakStrategy="balanced"
+            android:textSize="14sp"
+            android:textColor="#666666"
+            android:visibility="gone" />
 
         <View
             android:id="@+id/emailDivider"
             android:layout_width="match_parent"
             android:layout_height="1dp"
             android:background="#cccccc"
+            android:layout_marginTop="12dp"
             android:layout_marginBottom="12dp" />
 
         <TextView

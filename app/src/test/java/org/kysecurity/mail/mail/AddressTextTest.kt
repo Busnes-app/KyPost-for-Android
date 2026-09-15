@@ -31,6 +31,25 @@ class AddressTextTest {
     }
 
     @Test
+    fun displayTextFlattensLineBreaksThatWouldForgeALabelledLine() {
+        assertEquals(
+            "\"Alice Cc: ceo@example.com\" <a@example.com>",
+            displayHeaderText("\"Alice\r\nCc: ceo@example.com\" <a@example.com>"),
+        )
+    }
+
+    @Test
+    fun displayTextFlattensUnicodeLineAndParagraphSeparators() {
+        assertEquals("Alice Cc: ceo@example.com", displayHeaderText("Alice\u2028Cc: ceo@example.com"))
+        assertEquals("Alice Cc: ceo@example.com", displayHeaderText("Alice\u2029Cc: ceo@example.com"))
+    }
+
+    @Test
+    fun displayTextDropsBidiOverrides() {
+        assertEquals("moc.elpmaxe@a", displayHeaderText("\u202Emoc.elpmaxe@a\u202C"))
+    }
+
+    @Test
     fun valueWithNoAddressYieldsEmpty() {
         assertEquals("", addressFromHeader("Unknown sender"))
         assertEquals("", addressFromHeader(""))
