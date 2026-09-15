@@ -38,6 +38,20 @@ class EmailDetailRecipientsTest {
         }
     }
 
+    /** A display name is sender-controlled; a line break inside it must not forge a Cc: line. */
+    @Test
+    fun aLineBreakInADisplayNameCannotForgeASecondLabelledLine() {
+        launch().use { scenario ->
+            scenario.onActivity { activity ->
+                activity.showRecipients(listOf("\"Alice\nCc: ceo@example.com\" <a@example.com>"), emptyList())
+
+                val view = activity.findViewById<TextView>(R.id.emailRecipients)
+                assertFalse(view.text.contains('\n'))
+                assertEquals("To: \"Alice Cc: ceo@example.com\" <a@example.com>", view.text.toString())
+            }
+        }
+    }
+
     @Test
     fun aRowWithoutRecipientsShowsNoEmptyLabel() {
         launch().use { scenario ->

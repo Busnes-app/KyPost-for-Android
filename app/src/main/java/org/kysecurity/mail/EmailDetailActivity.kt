@@ -17,6 +17,7 @@ import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import org.kysecurity.mail.mail.AttachmentInfo
 import org.kysecurity.mail.mail.MailMessageBody
+import org.kysecurity.mail.mail.displayHeaderText
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRepository
 import org.kysecurity.mail.mail.MailRuntime
@@ -120,10 +121,10 @@ class EmailDetailActivity : LockedActivity() {
     /** Hidden rather than blank when the row carries no recipients: an empty "To:" reads as a bug. */
     @androidx.annotation.VisibleForTesting
     internal fun showRecipients(to: List<String>, cc: List<String>) {
-        val lines = listOfNotNull(
-            to.takeIf { it.isNotEmpty() }?.let { getString(R.string.email_to_line, it.joinToString(", ")) },
-            cc.takeIf { it.isNotEmpty() }?.let { getString(R.string.email_cc_line, it.joinToString(", ")) },
-        )
+        fun line(label: Int, addresses: List<String>): String? =
+            addresses.map(::displayHeaderText).filter { it.isNotEmpty() }
+                .takeIf { it.isNotEmpty() }?.let { getString(label, it.joinToString(", ")) }
+        val lines = listOfNotNull(line(R.string.email_to_line, to), line(R.string.email_cc_line, cc))
         recipientsView.text = lines.joinToString("\n")
         recipientsView.visibility = if (lines.isEmpty()) View.GONE else View.VISIBLE
     }
@@ -181,7 +182,7 @@ class EmailDetailActivity : LockedActivity() {
         val loading = findViewById<ProgressBar>(R.id.emailBodyLoading)
 
         subjectView.text = emailSubject
-        fromView.text = getString(R.string.email_from, emailSender)
+        fromView.text = getString(R.string.email_from, displayHeaderText(emailSender))
 
         mailRepository = MailRuntime.graph(this).repository
 
@@ -671,7 +672,7 @@ class EmailDetailActivity : LockedActivity() {
                 pgpSignatureState = verdict
                 // Show the mailbox the verdict is ABOUT, not the sender-written header beside it.
                 if (verdict != PgpSignatureState.NONE && outcome.resolvedSender.isNotBlank()) {
-                    fromView.text = getString(R.string.email_from, outcome.resolvedSender)
+                    fromView.text = getString(R.string.email_from, displayHeaderText(outcome.resolvedSender))
                 }
                 val omission = decryptedAttachmentNotice(outcome.body.attachmentsOmitted)
                     ?.let { getString(it) }
