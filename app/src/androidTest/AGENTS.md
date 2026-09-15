@@ -27,8 +27,13 @@ Owns Android instrumentation tests executed on emulator/device.
 # Verification
 
 - Run connected Android tests when instrumentation changes are made.
-- `EnrollmentVaultReadFailureTest` injects a recoverable lazy preference failure while retaining
-  the real stored ciphertext, then checks the Android opener and recovery. `ReadOutcomeActivityTest`
+- `EnrollmentVaultReadFailureTest` injects a recoverable lazy preference failure over a legacy
+  preference record, then checks the Android opener, the key guard, and recovery.
+  `EnrollmentVaultTest` covers the file record: fault injection makes the pending path a directory
+  so a replacement fails before the rename, then proves the previous record and key survive; a
+  successful replacement is re-read by a fresh instance in the same process, not across a process
+  boundary. `DeviceEnrollmentSealLifecycleTest` recreates the Activity while the seal prompt is
+  visible and proves cancellation keeps the previous record. `ReadOutcomeActivityTest`
   checks accepted and rejected attachment ownership through the real renderer and confirms that
   unchecked signature notices remain visible without a resolved sender. Both Activity tests
   require an unlocked app; the vault opener also requires a secure device lock screen.
