@@ -117,6 +117,9 @@ class ComposeActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun mirroredBodyHtmlForTest(): String = mirroredBodyHtml
 
+    @androidx.annotation.VisibleForTesting
+    internal fun discardPromptCountForTest(): Int = discardPromptCount
+
     private val bodyMirror = object : Runnable {
         override fun run() {
             bodyEditor.exportHtml { mirroredBodyHtml = it }
@@ -138,6 +141,12 @@ class ComposeActivity : LockedActivity() {
     /** The currently shown pickup-fallback/webmail-handoff dialog, if any — dismissed in
      *  [onDestroy] so it does not outlive the Activity's window. */
     private var activeDialog: AlertDialog? = null
+
+    /** Its own field: the PGP and handoff dialogs own [activeDialog], and a back press must not
+     *  orphan one of those mid-flight. */
+    private var discardDialog: AlertDialog? = null
+    private var discardPending = false
+    private var discardPromptCount = 0
 
     /** Encrypt/Sign as a restored draft left them, until [applyRestoredPgpToggles] can apply them. */
     private var restoredPgpToggles: Pair<Boolean, Boolean>? = null
@@ -960,22 +969,41 @@ class ComposeActivity : LockedActivity() {
         sign = signChip.isChecked,
     )
 
-    /** Back on a finishing Activity drops the draft in [onStop]; typed mail must not go in silence. */
+    /** Back on a finishing Activity drops the draft in [onStop]; typed mail must not go in silence.
+     *  The mirror decides first, as in [onStop]: the async export only upgrades a blank mirror, and
+     *  an export that never lands prompts rather than finishes. A needless prompt costs one tap; a
+     *  wrong finish costs the message. */
     private fun confirmDiscard() {
-        if (activeDialog?.isShowing == true) return
-        bodyEditor.exportHtml { html ->
-            if (isDestroyed) return@exportHtml
-            if (!currentDraft(html).hasContent()) {
-                finish()
-                return@exportHtml
-            }
-            activeDialog = AlertDialog.Builder(this)
-                .setTitle(R.string.compose_discard_title)
-                .setMessage(R.string.compose_discard_body)
-                .setNegativeButton(R.string.compose_discard_keep, null)
-                .setPositiveButton(R.string.compose_discard_confirm) { _, _ -> finish() }
-                .create().showSecurely()
+        if (discardPending || discardDialog?.isShowing == true) return
+        if (currentDraft(mirroredBodyHtml).hasContent()) {
+            showDiscardPrompt()
+            return
         }
+        discardPending = true
+        mainHandler.postDelayed(discardFallback, DISCARD_EXPORT_TIMEOUT_MS)
+        bodyEditor.exportHtml { html ->
+            mainHandler.removeCallbacks(discardFallback)
+            if (!discardPending) return@exportHtml
+            discardPending = false
+            if (isFinishing || isDestroyed) return@exportHtml
+            if (currentDraft(html.ifBlank { mirroredBodyHtml }).hasContent()) showDiscardPrompt() else finish()
+        }
+    }
+
+    private val discardFallback = Runnable {
+        if (!discardPending) return@Runnable
+        discardPending = false
+        if (!isFinishing && !isDestroyed) showDiscardPrompt()
+    }
+
+    private fun showDiscardPrompt() {
+        discardPromptCount++
+        discardDialog = AlertDialog.Builder(this)
+            .setTitle(R.string.compose_discard_title)
+            .setMessage(R.string.compose_discard_body)
+            .setNegativeButton(R.string.compose_discard_keep, null)
+            .setPositiveButton(R.string.compose_discard_confirm) { _, _ -> finish() }
+            .create().showSecurely()
     }
 
     override fun onDestroy() {
@@ -990,6 +1018,8 @@ class ComposeActivity : LockedActivity() {
         ioExecutor.shutdownNow()
         // Dismiss rather than leave a shown AlertDialog referencing a destroyed Activity's window.
         activeDialog?.dismiss()
+        discardDialog?.dismiss()
+        mainHandler.removeCallbacks(discardFallback)
     }
 
     companion object {
@@ -1005,6 +1035,9 @@ class ComposeActivity : LockedActivity() {
 
         /** The mirror's cadence, and so the ceiling on how much typing a sudden teardown costs. */
         private const val BODY_MIRROR_INTERVAL_MS = 2_000L
+
+        /** How long a back press waits for the editor's export before it prompts regardless. */
+        private const val DISCARD_EXPORT_TIMEOUT_MS = 1_000L
 
         /** Mirror of the backend maxMailAttachmentBytes (25 MB total decoded). Named in
          *  [MemoryBudget] rather than here, because what this admits decides what a send costs —

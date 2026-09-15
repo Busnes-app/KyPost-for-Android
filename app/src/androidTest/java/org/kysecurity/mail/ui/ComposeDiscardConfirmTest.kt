@@ -30,10 +30,10 @@ class ComposeDiscardConfirmTest {
         ComposeDraftCache.take()
     }
 
+    /** No wait for the editor: back lands before its first export, and the mirror must decide. */
     @Test
     fun backWithTypedMailAsksFirst_andKeepEditingStays() {
         ActivityScenario.launch<ComposeActivity>(composeIntent().putExtra(ComposeActivity.EXTRA_BODY, BODY)).use { scenario ->
-            awaitMirroredBody(scenario)
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
 
             awaitDialog()
@@ -50,6 +50,23 @@ class ComposeDiscardConfirmTest {
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
 
             awaitDialog()
+            onView(withText(R.string.compose_discard_confirm)).inRoot(isDialog()).perform(click())
+
+            awaitState(scenario, Lifecycle.State.DESTROYED)
+        }
+    }
+
+    /** Two presses inside the export window must raise one prompt, and Discard must still work. */
+    @Test
+    fun aDoubleBackPressRaisesOnePromptAndDiscardStillFinishes() {
+        ActivityScenario.launch<ComposeActivity>(composeIntent().putExtra(ComposeActivity.EXTRA_BODY, BODY)).use { scenario ->
+            scenario.onActivity {
+                it.onBackPressedDispatcher.onBackPressed()
+                it.onBackPressedDispatcher.onBackPressed()
+            }
+
+            awaitDialog()
+            scenario.onActivity { assertEquals(1, it.discardPromptCountForTest()) }
             onView(withText(R.string.compose_discard_confirm)).inRoot(isDialog()).perform(click())
 
             awaitState(scenario, Lifecycle.State.DESTROYED)
@@ -88,17 +105,6 @@ class ComposeDiscardConfirmTest {
         val deadline = System.currentTimeMillis() + TIMEOUT_MS
         while (System.currentTimeMillis() < deadline && scenario.state != state) Thread.sleep(POLL_INTERVAL_MS)
         assertEquals(state, scenario.state)
-    }
-
-    private fun awaitMirroredBody(scenario: ActivityScenario<ComposeActivity>) {
-        val deadline = System.currentTimeMillis() + TIMEOUT_MS
-        while (System.currentTimeMillis() < deadline) {
-            val mirrored = arrayOfNulls<String>(1)
-            scenario.onActivity { mirrored[0] = it.mirroredBodyHtmlForTest() }
-            if (mirrored[0].orEmpty().contains(BODY)) return
-            Thread.sleep(POLL_INTERVAL_MS)
-        }
-        throw AssertionError("the editor never mirrored its body within ${TIMEOUT_MS}ms")
     }
 
     private companion object {
