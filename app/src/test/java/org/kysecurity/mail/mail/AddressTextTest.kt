@@ -39,6 +39,12 @@ class AddressTextTest {
     }
 
     @Test
+    fun displayTextFlattensUnicodeLineAndParagraphSeparators() {
+        assertEquals("Alice Cc: ceo@example.com", displayHeaderText("Alice\u2028Cc: ceo@example.com"))
+        assertEquals("Alice Cc: ceo@example.com", displayHeaderText("Alice\u2029Cc: ceo@example.com"))
+    }
+
+    @Test
     fun displayTextDropsBidiOverrides() {
         assertEquals("moc.elpmaxe@a", displayHeaderText("\u202Emoc.elpmaxe@a\u202C"))
     }
