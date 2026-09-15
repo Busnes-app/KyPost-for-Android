@@ -124,14 +124,34 @@ Owns production Android app code and resources.
   after decoder EOF; Bouncy Castle accepts several whitespace-prefixed dash terminators, so a
   hand-written approximation of its footer grammar is not sufficient.
   Re-enrollment opens that existing vault through the live enrollment Activity and seals only a
-  successful current-first merge. `EnrollmentVault.stored()` returns null only when both envelope
-  fields are absent; incomplete/corrupt records and read errors propagate to `AndroidVaultOpener`
-  as `Failed`. Only `NotEnrolled` permits a current-only seal; cancellation,
+  successful current-first merge. `EnrollmentVault.stored()` returns null only when no record exists
+  in either format; incomplete/corrupt/oversized records and read errors propagate to
+  `AndroidVaultOpener` as `Failed`. Only `NotEnrolled` permits a current-only seal; cancellation,
   open failure, a lost opened session, or merge refusal must leave the old vault and server state
   unchanged. A successful seal wipes both plaintext arrays and clears `EnrollmentSession` before
   cache deletion or the enrollment report. Both enrollment biometric operations are owned by the
   live Activity: destruction explicitly resolves a pending open or seal exactly once, and a late
   callback from the destroyed Activity cannot write the session or vault.
+  The sealed record is one file, `files/device_envelope.bin` (version byte, IV, ciphertext),
+  replaced by writing `device_envelope.bin.new`, syncing it, renaming over the old record, and
+  then fsyncing the directory: a rename is metadata, and without the directory sync an unclean
+  shutdown inside the ext4 commit window reverts it to the previous record after the ceremony has
+  already acknowledged enrollment (`scripts/vault-crash-check.sh` reproduced exactly that).
+  `EnrollmentVault.store` reports false on any failure and leaves the previous record and key
+  untouched; `commitSeal` maps that to `SealOutcome.Failed`, so `Sealed` means durable. androidx
+  `AtomicFile` is not used because its `finishWrite` logs a failed sync or rename instead of
+  reporting it. Vaults sealed before this format live in the `device_envelope_secure` encrypted
+  preference file: they are read in place, never rewritten on unlock, and retired only after a
+  replacement file is on disk. `destroy` removes the file, its pending sibling, and the legacy
+  store. `ensureKey` regenerates freely when no record exists. While a record exists it regenerates
+  only over a Keystore alias whose absence is corroborated: three `containsAlias` reads with the
+  encrypted-prefs backoff all answer absent, and `keystoreAnswers()` (a master-key round trip)
+  proves the Keystore is answering rather than briefly unwell. That is what removing the lock
+  screen leaves behind, and the record such a key sealed can never open again, so it is cleared
+  first. A present key that will not inspect or no longer matches its spec, an uncorroborated
+  absence, or a store that cannot be read, fails closed while a record exists: only "Remove from
+  this device" may discard it. The one unavoidable loss is a legacy preference keyset `openEncryptedPrefs` proves
+  unrecoverable; that record was already unopenable.
   Hostile Location Protection destroys the envelope and is the mode in which none of this exists.
   `pgpRowMarker` marks inbox rows for the two states that yield nothing readable (🔒 client-protected,
   ⚠ decrypt failed) and deliberately leaves server-decrypted rows unmarked — those open normally, so

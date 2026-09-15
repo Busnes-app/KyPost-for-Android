@@ -30,6 +30,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import javax.crypto.Cipher
 import kotlin.coroutines.resume
 
 /** The ceremony's screen: renders [EnrollmentUiState] and owns the Activity-bound prompt. */
@@ -92,8 +93,9 @@ class DeviceEnrollmentActivity : LockedActivity() {
                 ok to if (ok) vault.sealCipher() else null
             }
             if (!ensured) {
-                // Also false when key generation failed outright, so this is generic rather than "no lock screen".
-                return SealOutcome.Failed("The device key could not be created")
+                // Also false when key generation failed or an existing record's key is unusable, so
+                // this is generic rather than "no lock screen".
+                return SealOutcome.Failed("The device key could not be prepared")
             }
             if (cipher == null) {
                 return SealOutcome.Failed("The vault cipher could not be created")
@@ -137,12 +139,7 @@ class DeviceEnrollmentActivity : LockedActivity() {
                             // Post-shutdown the right outcome is a cancel: Failed would tear down the agreement key.
                             try {
                                 sealExecutor.execute {
-                                    val outcome = runCatching {
-                                        val ciphertext = authenticated.doFinal(plaintext)
-                                        vault.store(authenticated.iv, ciphertext)
-                                        SealOutcome.Sealed
-                                    }.getOrElse { SealOutcome.Failed(it.message ?: "The seal failed") }
-                                    resolveSeal(continuation, outcome)
+                                    resolveSeal(continuation, commitSeal(vault, authenticated, plaintext))
                                 }
                             } catch (e: RejectedExecutionException) {
                                 resolveSeal(continuation, SealOutcome.Cancelled)
@@ -275,6 +272,9 @@ class DeviceEnrollmentActivity : LockedActivity() {
     internal suspend fun openPreviousVaultForTest(): OpenOutcome = vaultOpener.open()
 
     @VisibleForTesting
+    internal suspend fun sealForTest(plaintext: ByteArray): SealOutcome = vaultSealer.seal(plaintext)
+
+    @VisibleForTesting
     internal fun hasPendingVaultPromptForTest(): Boolean = vaultOpener.hasPendingPromptForTest()
 
     private fun render(scope: CoroutineScope, state: EnrollmentUiState, idle: Boolean) {
@@ -378,3 +378,13 @@ class DeviceEnrollmentActivity : LockedActivity() {
         FailureReason.SEAL_FAILED -> R.string.enrollment_failed_generic
     }
 }
+
+/** The only step that touches storage, after authentication. [SealOutcome.Sealed] means the
+ *  record is durable; a write that did not complete reports [SealOutcome.Failed] and leaves the
+ *  previous record in place. */
+internal fun commitSeal(vault: EnrollmentVault, authenticated: Cipher, plaintext: ByteArray): SealOutcome =
+    runCatching {
+        val ciphertext = authenticated.doFinal(plaintext)
+        if (vault.store(authenticated.iv, ciphertext)) SealOutcome.Sealed
+        else SealOutcome.Failed("The sealed key could not be stored")
+    }.getOrElse { SealOutcome.Failed(it.message ?: "The seal failed") }

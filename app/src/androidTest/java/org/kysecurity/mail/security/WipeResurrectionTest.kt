@@ -375,6 +375,10 @@ class WipeResurrectionTest {
             "sealed envelope survived the wipe",
             org.kysecurity.mail.pgp.EnrollmentVault(context).hasBlob(),
         )
+        assertFalse(
+            "sealed record file survived the wipe",
+            java.io.File(context.filesDir, org.kysecurity.mail.pgp.EnrollmentVault.RECORD_FILE).exists(),
+        )
     }
 
     /** Two Keystore aliases had no teardown at all and no comment saying why, so a wipe reported
