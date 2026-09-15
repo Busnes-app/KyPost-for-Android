@@ -19,6 +19,16 @@ class KeywordTabsTest {
     }
 
     @Test
+    fun visibleTabs_putsAllFirst_whenShown() {
+        assertEquals(listOf("All", "Finance"), KeywordTabs.visibleTabs(showAll = true, keywords = listOf("Finance")))
+    }
+
+    @Test
+    fun visibleTabs_omitsAll_whenHidden() {
+        assertEquals(listOf("Finance"), KeywordTabs.visibleTabs(showAll = false, keywords = listOf("Finance")))
+    }
+
+    @Test
     fun filterEmails_returnsOnlyMatchingKeyword() {
         val emails = listOf(
             Email(id = "1", subject = "A", sender = "a", preview = "p", keywords = setOf("Finance")),
