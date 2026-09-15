@@ -133,7 +133,10 @@ Owns production Android app code and resources.
   live Activity: destruction explicitly resolves a pending open or seal exactly once, and a late
   callback from the destroyed Activity cannot write the session or vault.
   The sealed record is one file, `files/device_envelope.bin` (version byte, IV, ciphertext),
-  replaced by writing `device_envelope.bin.new`, syncing it, and renaming over the old record.
+  replaced by writing `device_envelope.bin.new`, syncing it, renaming over the old record, and
+  then fsyncing the directory: a rename is metadata, and without the directory sync an unclean
+  shutdown inside the ext4 commit window reverts it to the previous record after the ceremony has
+  already acknowledged enrollment (`scripts/vault-crash-check.sh` reproduced exactly that).
   `EnrollmentVault.store` reports false on any failure and leaves the previous record and key
   untouched; `commitSeal` maps that to `SealOutcome.Failed`, so `Sealed` means durable. androidx
   `AtomicFile` is not used because its `finishWrite` logs a failed sync or rename instead of

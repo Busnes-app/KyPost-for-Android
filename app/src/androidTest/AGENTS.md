@@ -31,9 +31,12 @@ Owns Android instrumentation tests executed on emulator/device.
   preference record, then checks the Android opener, the key guard, and recovery.
   `EnrollmentVaultTest` covers the file record: fault injection makes the pending path a directory
   so a replacement fails before the rename, then proves the previous record and key survive; a
-  successful replacement is re-read by a fresh instance in the same process, not across a process
-  boundary. `DeviceEnrollmentSealLifecycleTest` recreates the Activity while the seal prompt is
-  visible and proves cancellation keeps the previous record. `ReadOutcomeActivityTest`
+  successful replacement is re-read by a fresh instance in the same process.
+  `EnrollmentVaultCrashDurabilityTest` is two phases around a real kernel crash, driven only by
+  `scripts/vault-crash-check.sh` on a rootable emulator with the CI PIN; it is selected by method
+  name and is not meaningful inside the ordinary suite. `DeviceEnrollmentSealLifecycleTest`
+  recreates the Activity while the seal prompt is visible and proves cancellation keeps the
+  previous record. `ReadOutcomeActivityTest`
   checks accepted and rejected attachment ownership through the real renderer and confirms that
   unchecked signature notices remain visible without a resolved sender. Both Activity tests
   require an unlocked app; the vault opener also requires a secure device lock screen.

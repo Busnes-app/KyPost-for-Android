@@ -8,6 +8,8 @@ import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
 import android.security.keystore.KeyProperties
+import android.system.Os
+import android.system.OsConstants
 import android.util.Base64
 import android.util.Log
 import org.kysecurity.mail.MemoryBudget
@@ -167,10 +169,12 @@ internal class EnrollmentVault(
     }.getOrNull()
 
     /**
-     * True only once the complete record is synced to disk and renamed into place. False leaves
-     * whatever was stored before — file or legacy preferences — and the vault key untouched.
-     * androidx `AtomicFile` is not used because its `finishWrite` logs a failed sync or rename
-     * instead of reporting it.
+     * True only once the complete record is synced to disk, renamed into place, and the rename
+     * itself is synced: a rename is directory metadata, and until the directory is fsynced an
+     * unclean shutdown can revert it to the previous record while the ceremony has already told
+     * the server this device is enrolled. False leaves whatever was stored before — file or legacy
+     * preferences — and the vault key untouched. androidx `AtomicFile` is not used because its
+     * `finishWrite` logs a failed sync or rename instead of reporting it.
      */
     fun store(iv: ByteArray, ciphertext: ByteArray): Boolean {
         if (iv.size != IV_BYTES || ciphertext.size !in GCM_TAG_BYTES..CIPHERTEXT_MAX_BYTES) {
@@ -193,12 +197,24 @@ internal class EnrollmentVault(
                 StandardCopyOption.ATOMIC_MOVE,
                 StandardCopyOption.REPLACE_EXISTING,
             )
+            syncDirectory(recordFile.parentFile!!)
         }.onFailure {
             Log.e("EnrollmentVault", "Could not store the sealed record", it)
             runCatching { Files.deleteIfExists(pendingFile.toPath()) }
         }.isSuccess
         if (written) retireLegacyRecord()
         return written
+    }
+
+    /** `java.io` cannot open a directory, so this goes through the libc bindings; a failed fsync
+     *  throws `ErrnoException` and counts as a failed store. */
+    private fun syncDirectory(dir: File) {
+        val fd = Os.open(dir.path, OsConstants.O_RDONLY, 0)
+        try {
+            Os.fsync(fd)
+        } finally {
+            Os.close(fd)
+        }
     }
 
     /** Best effort: the file is authoritative once it exists, so a surviving legacy copy is stale,
