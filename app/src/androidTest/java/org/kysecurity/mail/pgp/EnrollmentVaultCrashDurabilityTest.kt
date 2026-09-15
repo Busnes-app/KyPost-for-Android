@@ -37,7 +37,7 @@ class EnrollmentVaultCrashDurabilityTest {
     fun phase1SealsAKnownRecord() {
         vault.destroy()
         assertTrue(vault.store(ByteArray(12) { 0x55 }, ByteArray(48) { 0x66 }))
-        assertArrayEquals(ByteArray(48) { 0x66 }, vault.stored()!!.second)
+        assertArrayEquals(ByteArray(48) { 0x66 }, vault.stored()!!.ciphertext)
     }
 
     @Test

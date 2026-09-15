@@ -2,6 +2,7 @@ package org.kysecurity.mail.pgp
 
 import org.kysecurity.mail.mail.ClientEncryptedDelivery
 import org.kysecurity.mail.mail.ClientEncryptedMessage
+import org.bouncycastle.openpgp.PGPSecretKeyRing
 import org.kysecurity.mail.mail.MailDraft
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailSendOutcome
@@ -130,9 +131,9 @@ internal class ClientEncryptedSender(
             fields.bcc.forEach { add(listOf(it)) }
         }
 
-        // Scoped to withKey so the key stays a wipeable CharArray; null means the app locked meanwhile.
-        val ciphertexts = EnrollmentSession.withKey { privateKey ->
-            encryptAll(privateKey, sign, protectedContent, groups, keys, fields, from, date, boundaryToken)
+        // Scoped to withSigner: the explicit active signer, never a historical member; null means the app locked meanwhile.
+        val ciphertexts = EnrollmentSession.withSigner { signer ->
+            encryptAll(signer, sign, protectedContent, groups, keys, fields, from, date, boundaryToken)
         } ?: return ClientSendOutcome.NotEnrolled
         val (deliveries, sentCopyArmored) = when (ciphertexts) {
             is EncryptedBundle.Ok -> ciphertexts.deliveries to ciphertexts.sentCopy
@@ -209,7 +210,7 @@ internal class ClientEncryptedSender(
 
     @Suppress("LongParameterList")
     private fun encryptAll(
-        privateKey: CharArray,
+        signer: PGPSecretKeyRing?,
         sign: Boolean,
         protectedContent: ByteArray,
         groups: List<List<String>>,
@@ -219,7 +220,8 @@ internal class ClientEncryptedSender(
         date: String,
         boundaryToken: () -> String,
     ): EncryptedBundle {
-        val signingKey = privateKey.takeIf { sign }
+        if (sign && signer == null) return EncryptedBundle.Failed("the signing key is unusable")
+        val signingKey = signer.takeIf { sign }
         val deliveries = groups.map { recipients ->
             val keys = recipients.mapNotNull { byAddress[it.lowercase()]?.publicKey }
             val encrypted = PgpEncryptor.encrypt(protectedContent, keys, signingKey)
@@ -239,7 +241,7 @@ internal class ClientEncryptedSender(
         // Encrypted to the public half of the key we just unsealed, never to anything the server
         // supplied. A hostile server handing back "your" public key would otherwise get a readable
         // copy of every message sent, with nothing on screen looking any different.
-        val ownKey = PgpEncryptor.ownPublicKey(privateKey)
+        val ownKey = signer?.let { PgpEncryptor.ownPublicKey(it) }
             ?: return EncryptedBundle.Failed("could not derive this account's own key")
         val sentCopy = PgpEncryptor.encrypt(protectedContent, listOf(ownKey), signingKey)
         if (sentCopy !is EncryptResult.Ok) {

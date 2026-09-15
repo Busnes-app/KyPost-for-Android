@@ -32,7 +32,6 @@ private const val KEY_CT = "envelope_ct"
 private const val ABSENCE_RECHECKS = 2
 private const val ABSENCE_RECHECK_BACKOFF_MS = 120L
 
-private const val RECORD_VERSION: Byte = 1
 private const val IV_BYTES = 12
 private const val GCM_TAG_BYTES = 16
 
@@ -44,6 +43,13 @@ private const val RECORD_MAX_BYTES = 1 + IV_BYTES + CIPHERTEXT_MAX_BYTES
 /** NO_WRAP base64 grows 3 bytes to 4 characters, rounded up to a whole quantum. */
 private const val LEGACY_CT_MAX_CHARS = (CIPHERTEXT_MAX_BYTES + 2) / 3 * 4
 private const val LEGACY_IV_MAX_CHARS = (IV_BYTES + 2) / 3 * 4
+
+/** A sealed record as read back. Not a `data class`: equality over the arrays would be identity.
+ *  Destructures as `(iv, ciphertext)` for the callers that predate [kind]. */
+internal class StoredRecord(val iv: ByteArray, val ciphertext: ByteArray, val kind: VaultRecordKind) {
+    operator fun component1() = iv
+    operator fun component2() = ciphertext
+}
 
 /**
  * AES-256-GCM Keystore key. DEVICE_CREDENTIAL is allowed so it survives a biometric change.
@@ -176,13 +182,13 @@ internal class EnrollmentVault(
      * preferences — and the vault key untouched. androidx `AtomicFile` is not used because its
      * `finishWrite` logs a failed sync or rename instead of reporting it.
      */
-    fun store(iv: ByteArray, ciphertext: ByteArray): Boolean {
+    fun store(iv: ByteArray, ciphertext: ByteArray, kind: VaultRecordKind = VaultRecordKind.LEGACY_ARMOR): Boolean {
         if (iv.size != IV_BYTES || ciphertext.size !in GCM_TAG_BYTES..CIPHERTEXT_MAX_BYTES) {
             Log.e("EnrollmentVault", "Refusing to store a malformed record")
             return false
         }
         val record = ByteArray(1 + IV_BYTES + ciphertext.size).also {
-            it[0] = RECORD_VERSION
+            it[0] = kind.recordVersion
             iv.copyInto(it, 1)
             ciphertext.copyInto(it, 1 + IV_BYTES)
         }
@@ -231,7 +237,7 @@ internal class EnrollmentVault(
      *  authorize a current-only enrollment seal over a recoverable historical vault. Background
      *  probes catch failures at their own boundary; the opener maps them to OpenOutcome.Failed.
      *  Reading never rewrites: a legacy record stays where it is until [store] replaces it. */
-    fun stored(): Pair<ByteArray, ByteArray>? {
+    fun stored(): StoredRecord? {
         if (recordFile.exists()) return parseRecord()
         if (!legacyFile.exists()) return null
         val iv = prefs.getString(KEY_IV, null)
@@ -242,15 +248,18 @@ internal class EnrollmentVault(
         val decodedIv = Base64.decode(iv, Base64.NO_WRAP)
         val decodedCt = Base64.decode(ct, Base64.NO_WRAP)
         check(decodedIv.size == IV_BYTES && decodedCt.size >= GCM_TAG_BYTES) { "Invalid enrollment vault" }
-        return decodedIv to decodedCt
+        // Preference records predate the format byte and only ever held armor.
+        return StoredRecord(decodedIv, decodedCt, VaultRecordKind.LEGACY_ARMOR)
     }
 
-    private fun parseRecord(): Pair<ByteArray, ByteArray> {
+    private fun parseRecord(): StoredRecord {
         val length = recordFile.length()
         check(length in RECORD_MIN_BYTES..RECORD_MAX_BYTES) { "Invalid enrollment vault" }
         val record = recordFile.readBytes()
-        check(record.size.toLong() == length && record[0] == RECORD_VERSION) { "Invalid enrollment vault" }
-        return record.copyOfRange(1, 1 + IV_BYTES) to record.copyOfRange(1 + IV_BYTES, record.size)
+        check(record.size.toLong() == length) { "Invalid enrollment vault" }
+        val kind = VaultRecordKind.entries.firstOrNull { it.recordVersion == record[0] }
+        checkNotNull(kind) { "Invalid enrollment vault" }
+        return StoredRecord(record.copyOfRange(1, 1 + IV_BYTES), record.copyOfRange(1 + IV_BYTES, record.size), kind)
     }
 
     fun hasBlob(): Boolean = runCatching {

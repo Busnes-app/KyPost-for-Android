@@ -112,13 +112,13 @@ class EnrollmentVaultTest {
         writeLegacy(ByteArray(12) { 5 }, ByteArray(48) { 6 })
 
         assertTrue(vault.hasBlob())
-        assertArrayEquals(ByteArray(48) { 6 }, vault.stored()!!.second)
+        assertArrayEquals(ByteArray(48) { 6 }, vault.stored()!!.ciphertext)
         assertFalse("reading must not migrate", recordFile.exists())
         assertTrue(legacyFile.exists())
 
         assertTrue(vault.store(ByteArray(12) { 7 }, ByteArray(48) { 8 }))
 
-        assertArrayEquals(ByteArray(48) { 8 }, EnrollmentVault(context).stored()!!.second)
+        assertArrayEquals(ByteArray(48) { 8 }, EnrollmentVault(context).stored()!!.ciphertext)
         assertFalse("the legacy copy is retired once the file is durable", legacyFile.exists())
     }
 
@@ -132,7 +132,7 @@ class EnrollmentVaultTest {
         assertFalse(vault.ensureKey())
 
         assertFalse("the mismatched key was replaced", vaultKeyInfo().isUserAuthenticationRequired)
-        assertArrayEquals(ByteArray(40) { 2 }, vault.stored()!!.second)
+        assertArrayEquals(ByteArray(40) { 2 }, vault.stored()!!.ciphertext)
         assertTrue(vault.hasBlob())
 
         vault.destroy()
@@ -162,7 +162,7 @@ class EnrollmentVaultTest {
     fun malformedRecordsFailClosed() {
         vault.ensureKey()
         val tooShort = ByteArray(1 + 12 + 15) { 1 }
-        val wrongVersion = ByteArray(1 + 12 + 16) { 1 }.also { it[0] = 2 }
+        val wrongVersion = ByteArray(1 + 12 + 16) { 1 }.also { it[0] = 3 }
         val tooLong = ByteArray(1 + 12 + 384 * 1024 + 17) { 1 }
         for (bytes in listOf(tooShort, wrongVersion, tooLong)) {
             recordFile.writeBytes(bytes)
@@ -182,7 +182,7 @@ class EnrollmentVaultTest {
         val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
         val plaintext = ByteArray(64) { 3 }
 
-        assertEquals(SealOutcome.Sealed, commitSeal(vault, encryptor(key), plaintext))
+        assertEquals(SealOutcome.Sealed, commitSeal(vault, encryptor(key), plaintext, VaultRecordKind.LEGACY_ARMOR))
         val (iv, ct) = EnrollmentVault(context).stored()!!
         val opened = Cipher.getInstance("AES/GCM/NoPadding")
             .apply { init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv)) }
@@ -190,8 +190,8 @@ class EnrollmentVaultTest {
         assertArrayEquals(plaintext, opened)
 
         assertTrue(pendingFile.mkdir())
-        assertTrue(commitSeal(vault, encryptor(key), ByteArray(64) { 4 }) is SealOutcome.Failed)
-        assertArrayEquals(ct, EnrollmentVault(context).stored()!!.second)
+        assertTrue(commitSeal(vault, encryptor(key), ByteArray(64) { 4 }, VaultRecordKind.LEGACY_ARMOR) is SealOutcome.Failed)
+        assertArrayEquals(ct, EnrollmentVault(context).stored()!!.ciphertext)
     }
 
     private fun encryptor(key: SecretKey): Cipher =
