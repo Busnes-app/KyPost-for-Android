@@ -15,6 +15,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.addCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.chip.Chip
@@ -197,6 +198,7 @@ class ComposeActivity : LockedActivity() {
             findViewById(R.id.composeDetailsDivider3),
         )
         messageDivider = findViewById(R.id.composeMessageDivider)
+        onBackPressedDispatcher.addCallback(this) { confirmDiscard() }
 
         pgpChips = findViewById(R.id.composePgpChips)
         encryptChip = findViewById(R.id.composeEncryptChip)
@@ -935,23 +937,7 @@ class ComposeActivity : LockedActivity() {
             return
         }
         if (sendSucceeded) return
-        val to = toInput.commaJoinedRecipients()
-        val cc = ccInput.commaJoinedRecipients()
-        val bcc = bccInput.commaJoinedRecipients()
-        val subject = subjectField.text.toString()
-        val currentAttachments = attachments.toList()
-        val encrypt = encryptChip.isChecked
-        val sign = signChip.isChecked
-        val snapshot = CachedDraft(
-            to = to,
-            cc = cc,
-            bcc = bcc,
-            subject = subject,
-            bodyHtml = mirroredBodyHtml,
-            attachments = currentAttachments,
-            encrypt = encrypt,
-            sign = sign,
-        )
+        val snapshot = currentDraft(mirroredBodyHtml)
         // Synchronously, from the mirror: everything after this line is best effort.
         ComposeDraftCache.save(snapshot)
         // The upgrade to the very last keystrokes, when the export still lands in time. Still
@@ -960,6 +946,35 @@ class ComposeActivity : LockedActivity() {
         bodyEditor.exportHtml { html ->
             if (isDestroyed) return@exportHtml
             ComposeDraftCache.save(snapshot.copy(bodyHtml = html))
+        }
+    }
+
+    private fun currentDraft(bodyHtml: String) = CachedDraft(
+        to = toInput.commaJoinedRecipients(),
+        cc = ccInput.commaJoinedRecipients(),
+        bcc = bccInput.commaJoinedRecipients(),
+        subject = subjectField.text.toString(),
+        bodyHtml = bodyHtml,
+        attachments = attachments.toList(),
+        encrypt = encryptChip.isChecked,
+        sign = signChip.isChecked,
+    )
+
+    /** Back on a finishing Activity drops the draft in [onStop]; typed mail must not go in silence. */
+    private fun confirmDiscard() {
+        if (activeDialog?.isShowing == true) return
+        bodyEditor.exportHtml { html ->
+            if (isDestroyed) return@exportHtml
+            if (!currentDraft(html).hasContent()) {
+                finish()
+                return@exportHtml
+            }
+            activeDialog = AlertDialog.Builder(this)
+                .setTitle(R.string.compose_discard_title)
+                .setMessage(R.string.compose_discard_body)
+                .setNegativeButton(R.string.compose_discard_keep, null)
+                .setPositiveButton(R.string.compose_discard_confirm) { _, _ -> finish() }
+                .create().showSecurely()
         }
     }
 
