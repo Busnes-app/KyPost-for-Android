@@ -26,6 +26,10 @@ private const val ANDROID_KEYSTORE = "AndroidKeyStore"
 private const val KEY_IV = "envelope_iv"
 private const val KEY_CT = "envelope_ct"
 
+/** Same shape as the encrypted-prefs opener: three reads in all before absence counts. */
+private const val ABSENCE_RECHECKS = 2
+private const val ABSENCE_RECHECK_BACKOFF_MS = 120L
+
 private const val RECORD_VERSION: Byte = 1
 private const val IV_BYTES = 12
 private const val GCM_TAG_BYTES = 16
@@ -47,7 +51,11 @@ private const val LEGACY_IV_MAX_CHARS = (IV_BYTES + 2) / 3 * 4
  * previous complete record readable. Vaults written before this format live in the encrypted
  * preference file; they are read in place and retired only after a replacement is on disk.
  */
-internal class EnrollmentVault(context: Context) {
+internal class EnrollmentVault(
+    context: Context,
+    /** Test seam only: a Keystore that lies about alias presence is the fault [ensureKey] guards. */
+    private val keyStore: () -> KeyStore = { KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) } },
+) {
 
     private val appContext = context.applicationContext
     private val prefs: SharedPreferences by lazy { buildPrefs() }
@@ -61,27 +69,42 @@ internal class EnrollmentVault(context: Context) {
      * False when the device has no secure lock screen — the envelope's protection *is* that screen.
      *
      * A key the Keystore confirms absent (the OS deletes it when the lock screen is removed) can
-     * never open a record again, so regenerating discards that dead record. A key that is present
+     * never open a record again, so regenerating discards that dead record. While a record exists,
+     * "confirms" means [absenceCorroborated]: one negative read is not proof. A key that is present
      * but unusable — it will not inspect, or no longer matches [generate]'s spec — might still open
      * the record, so while any record exists, or the store cannot be read, this fails closed rather
      * than regenerate over it. Only "Remove from this device" may discard such a record.
      */
     fun ensureKey(): Boolean {
-        when (keyState()) {
-            KeyState.MATCHES -> return true
-            KeyState.ABSENT -> Unit
-            KeyState.UNUSABLE -> {
-                val previous = runCatching { stored() }.getOrElse {
-                    Log.e("EnrollmentVault", "Vault store unreadable; not regenerating the key over it", it)
-                    return false
-                }
-                if (previous != null) {
-                    Log.e("EnrollmentVault", "Vault key unusable while a sealed record exists; refusing to regenerate")
-                    return false
-                }
+        val state = keyState()
+        if (state == KeyState.MATCHES) return true
+        val previous = runCatching { stored() }.getOrElse {
+            Log.e("EnrollmentVault", "Vault store unreadable; not regenerating the key over it", it)
+            return false
+        }
+        if (previous != null) {
+            if (state == KeyState.UNUSABLE) {
+                Log.e("EnrollmentVault", "Vault key unusable while a sealed record exists; refusing to regenerate")
+                return false
+            }
+            if (!absenceCorroborated()) {
+                Log.e("EnrollmentVault", "Vault key absence not corroborated; keeping the sealed record")
+                return false
             }
         }
         return generate(strongBox = true) || generate(strongBox = false)
+    }
+
+    /** AndroidKeyStore is routinely unavailable for a few hundred milliseconds around boot, and a
+     *  "no such alias" answer from that window looks like a removed lock screen. Re-read under the
+     *  same backoff `openEncryptedPrefs` uses, then require the Keystore to prove it is answering
+     *  by round-tripping the master key every encrypted store in this app is sealed under. */
+    private fun absenceCorroborated(): Boolean {
+        repeat(ABSENCE_RECHECKS) {
+            Thread.sleep(ABSENCE_RECHECK_BACKOFF_MS)
+            if (keyState() != KeyState.ABSENT) return false
+        }
+        return org.kysecurity.mail.security.keystoreAnswers()
     }
 
     /** [KeyState.MATCHES] only when a key exists AND still carries every property [generate]
@@ -251,8 +274,6 @@ internal class EnrollmentVault(context: Context) {
     }
 
     internal fun secretKey(): SecretKey = keyStore().getKey(ALIAS, null) as SecretKey
-
-    private fun keyStore(): KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
 
     /** Resets the store if the Tink keyset is undecryptable; failing closed reads as "not enrolled".
      *  A legacy record under a keyset nothing can open again was already unrecoverable. */

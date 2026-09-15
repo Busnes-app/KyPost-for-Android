@@ -140,11 +140,14 @@ Owns production Android app code and resources.
   reporting it. Vaults sealed before this format live in the `device_envelope_secure` encrypted
   preference file: they are read in place, never rewritten on unlock, and retired only after a
   replacement file is on disk. `destroy` removes the file, its pending sibling, and the legacy
-  store. `ensureKey` regenerates only over a Keystore alias confirmed absent (what removing the
-  lock screen does; the record it sealed can never open again and is cleared first) or when no
-  record exists. A present key that will not inspect or no longer matches its spec, or a store that
-  cannot be read, fails closed while a record exists: only "Remove from this device" may discard
-  it. The one unavoidable loss is a legacy preference keyset `openEncryptedPrefs` proves
+  store. `ensureKey` regenerates freely when no record exists. While a record exists it regenerates
+  only over a Keystore alias whose absence is corroborated: three `containsAlias` reads with the
+  encrypted-prefs backoff all answer absent, and `keystoreAnswers()` (a master-key round trip)
+  proves the Keystore is answering rather than briefly unwell. That is what removing the lock
+  screen leaves behind, and the record such a key sealed can never open again, so it is cleared
+  first. A present key that will not inspect or no longer matches its spec, an uncorroborated
+  absence, or a store that cannot be read, fails closed while a record exists: only "Remove from
+  this device" may discard it. The one unavoidable loss is a legacy preference keyset `openEncryptedPrefs` proves
   unrecoverable; that record was already unopenable.
   Hostile Location Protection destroys the envelope and is the mode in which none of this exists.
   `pgpRowMarker` marks inbox rows for the two states that yield nothing readable (🔒 client-protected,

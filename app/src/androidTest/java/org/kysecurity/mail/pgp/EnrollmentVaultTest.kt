@@ -140,6 +140,24 @@ class EnrollmentVaultTest {
         assertTrue(vaultKeyInfo().isUserAuthenticationRequired)
     }
 
+    /** One negative `containsAlias` is a transient Keystore fault until proven otherwise. Clearing on
+     *  it would delete the only copy of the merged secret-key collection. */
+    @Test
+    fun aTransientAbsentAliasDoesNotClearTheRecord() {
+        assertTrue(vault.ensureKey())
+        vault.store(ByteArray(12) { 1 }, ByteArray(40) { 2 })
+        val lying = lyingKeyStore(lies = 1)
+        val flaky = EnrollmentVault(context) { lying }
+
+        assertFalse("an uncorroborated absence must not mint a key", flaky.ensureKey())
+
+        assertTrue(recordFile.exists())
+        val (iv, ct) = EnrollmentVault(context).stored()!!
+        assertArrayEquals(ByteArray(12) { 1 }, iv)
+        assertArrayEquals(ByteArray(40) { 2 }, ct)
+        assertTrue("the real key is untouched", vault.ensureKey())
+    }
+
     @Test
     fun malformedRecordsFailClosed() {
         vault.ensureKey()

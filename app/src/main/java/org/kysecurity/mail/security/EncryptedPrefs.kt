@@ -132,6 +132,11 @@ private fun masterKeyState(): MasterKeyState = runCatching {
     MasterKeyState.UNKNOWN
 }
 
+/** Positive evidence the Keystore is answering: its master key seals and opens a probe. Callers
+ *  about to delete something on the strength of a "no such alias" answer need this, because an
+ *  unwell Keystore and an absent key look the same from one read. */
+internal fun keystoreAnswers(): Boolean = masterKeyState() == MasterKeyState.WORKING
+
 private const val GCM_TAG_BITS = 128
 
 /** The master key's own scheme, AES256_GCM with randomized encryption: no IV may be supplied. */
