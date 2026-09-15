@@ -8,15 +8,16 @@ cd "$(dirname "$0")/.."
 
 PKG=org.kysecurity.mail
 RUNNER="$PKG.test/androidx.test.runner.AndroidJUnitRunner"
-CLASS=org.kysecurity.mail.pgp.EnrollmentVaultCrashDurabilityTest
+LEGACY=org.kysecurity.mail.pgp.EnrollmentVaultCrashDurabilityTest
+KEYRING=org.kysecurity.mail.pgp.EnrollmentKeyringCrashDurabilityTest
 # Override only to exercise this script's own reboot check (point it at /dev/null and the run
 # must fail); a trigger that does not reboot the device never yields a pass.
 TRIGGER="${VAULT_CRASH_TRIGGER:-/proc/sysrq-trigger}"
 WORK="$(mktemp -d)"
 
 phase() {
-  local out="$WORK/$1.txt"
-  adb shell am instrument -w -e crashCheck true -e class "$CLASS#$1" "$RUNNER" > "$out" 2>&1 || true
+  local out="$WORK/${1##*#}.txt"
+  adb shell am instrument -w -e crashCheck true -e class "$1" "$RUNNER" > "$out" 2>&1 || true
   if ! grep -q "OK (1 test)" "$out"; then
     echo "$1 failed:" >&2
     cat "$out" >&2
@@ -51,32 +52,52 @@ unlock() {
 
 boot_id() { adb shell cat /proc/sys/kernel/random/boot_id | tr -d '\r'; }
 
-./gradlew -q :app:installPlayDebug :app:installPlayDebugAndroidTest
-wait_for_boot
-unlock
-adb root > /dev/null
-adb wait-for-device
-if [ "$(adb shell id -u | tr -d '\r')" != "0" ]; then
-  echo "adb root did not take; a non-rootable image cannot crash the kernel" >&2
-  exit 1
-fi
-# Flush the installs themselves and outlast the ext4 commit interval, so the only write still in
-# the journal window when the kernel dies is the record the vault claims durable.
-adb shell sync
-sleep 8
-phase phase1SealsAKnownRecord
+require_root() {
+  # adbd is briefly unreachable after a crash reboot; one refused connection is not "no root".
+  for _ in 1 2 3 4 5 6; do
+    adb root > /dev/null 2>&1 && break
+    sleep 3
+  done
+  adb wait-for-device
+  if [ "$(adb shell id -u | tr -d '\r')" != "0" ]; then
+    echo "adb root did not take; a non-rootable image cannot crash the kernel" >&2
+    exit 1
+  fi
+}
 
-before="$(boot_id)"
-echo "crashing the kernel"
-# The shell dies with the kernel, so this exit status means nothing; the boot id below is the
-# post-condition. Without it a trigger that silently does nothing turns this proof into a tautology.
-adb shell "echo b > $TRIGGER" || true
+# One record kind per cycle: both phase-one tests write the same vault file, so each pair needs
+# its own crash. Flush first and outlast the ext4 commit interval, so the only write still in the
+# journal window when the kernel dies is the record the vault claims durable.
+cycle() {
+  require_root
+  adb shell sync
+  sleep 8
+  phase "$1"
+
+  local before after
+  before="$(boot_id)"
+  echo "crashing the kernel"
+  # The shell dies with the kernel, so this exit status means nothing; the boot id below is the
+  # post-condition. Without it a trigger that silently does nothing turns this proof into a tautology.
+  adb shell "echo b > $TRIGGER" || true
+  sleep 5
+  wait_for_boot
+  after="$(boot_id)"
+  if [ -z "$before" ] || [ "$before" = "$after" ]; then
+    echo "the device did not reboot (boot_id $before before, $after after); no crash was exercised" >&2
+    exit 1
+  fi
+  unlock
+  phase "$2"
+}
+
+./gradlew -q :app:installPlayDebug :app:installPlayDebugAndroidTest
+# A clean reboot makes the installs themselves durable: the package manager persists its
+# settings on a delay that sync-and-wait does not reliably cover, and a crash that loses the
+# test APK reports INSTRUMENTATION_FAILED instead of testing the vault.
+adb reboot
 sleep 5
 wait_for_boot
-after="$(boot_id)"
-if [ -z "$before" ] || [ "$before" = "$after" ]; then
-  echo "the device did not reboot (boot_id $before before, $after after); no crash was exercised" >&2
-  exit 1
-fi
 unlock
-phase phase2ReadsItBackAfterTheCrash
+cycle "$LEGACY#phase1SealsAKnownRecord" "$LEGACY#phase2ReadsItBackAfterTheCrash"
+cycle "$KEYRING#phase1SealsAKeyringRecord" "$KEYRING#phase2ReopensDecryptsHistoryAndSignsAfterTheCrash"

@@ -68,10 +68,24 @@ internal object PgpDecryptor {
         armoredMessage: String,
         /** From the address book, never the key inside the message; empty means unverifiable. */
         signerPublicKeys: List<String>,
+    ): DecryptResult = decrypt(
+        {
+            armoredPrivateKey.useArmoredStream { keyStream ->
+                PGPSecretKeyRingCollection(PGPUtil.getDecoderStream(keyStream), BcKeyFingerprintCalculator())
+            }
+        },
+        armoredMessage,
+        signerPublicKeys,
+    )
+
+    /** Every private key that may decrypt, from a keyring's members or parsed legacy armor. The
+     *  provider runs inside this call's failure handling, so an unparseable key is a [DecryptResult.Failed]. */
+    fun decrypt(
+        secretKeys: () -> PGPSecretKeyRingCollection,
+        armoredMessage: String,
+        signerPublicKeys: List<String>,
     ): DecryptResult = runCatching {
-        val secretKeys = armoredPrivateKey.useArmoredStream { keyStream ->
-            PGPSecretKeyRingCollection(PGPUtil.getDecoderStream(keyStream), BcKeyFingerprintCalculator())
-        }
+        val secretKeys = secretKeys()
 
         val factory = org.bouncycastle.openpgp.jcajce.JcaPGPObjectFactory(
             PGPUtil.getDecoderStream(armoredMessage.byteInputStream(Charsets.UTF_8)),
@@ -89,15 +103,32 @@ internal object PgpDecryptor {
             val pked = item as? PGPPublicKeyEncryptedData ?: continue
             // PGPSecretKeyRingCollection has no KeyIdentifier overload, so the id is routed through
             // the non-deprecated accessor; it returns the same long as the deprecated getKeyID().
-            val secretKey = secretKeys.getSecretKey(pked.keyIdentifier.keyId) ?: continue
-            // Empty passphrase: the armored key came out of the device envelope already
-            // unwrapped. A key that still needs one is not a key this device can use.
-            val privateKey = secretKey.extractPrivateKey(
-                BcPBESecretKeyDecryptorBuilder(BcPGPDigestCalculatorProvider()).build(CharArray(0)),
-            )
-            clear = pked.getDataStream(BcPublicKeyDataDecryptorFactory(privateKey))
-            encrypted = pked
-            break
+            val keyId = pked.keyIdentifier.keyId
+            // A hidden recipient (key id 0) names nobody: every encryption-capable private key on
+            // this device is a candidate, historical members included, and a wrong one is skipped.
+            val hidden = keyId == 0L
+            val candidates = if (hidden) {
+                secretKeys.keyRings.asSequence().flatMap { it.secretKeys.asSequence() }
+                    .filter { it.publicKey.isEncryptionKey }.toList()
+            } else {
+                listOfNotNull(secretKeys.getSecretKey(keyId))
+            }
+            for (secretKey in candidates) {
+                // Empty passphrase: the armored key came out of the device envelope already
+                // unwrapped. A key that still needs one is not a key this device can use.
+                val privateKey = secretKey.extractPrivateKey(
+                    BcPBESecretKeyDecryptorBuilder(BcPGPDigestCalculatorProvider()).build(CharArray(0)),
+                )
+                val stream = if (hidden) {
+                    runCatching { pked.getDataStream(BcPublicKeyDataDecryptorFactory(privateKey)) }.getOrNull() ?: continue
+                } else {
+                    pked.getDataStream(BcPublicKeyDataDecryptorFactory(privateKey))
+                }
+                clear = stream
+                encrypted = pked
+                break
+            }
+            if (clear != null) break
         }
         if (clear == null || encrypted == null) {
             return DecryptResult.Failed("this message is not encrypted to a key on this device")

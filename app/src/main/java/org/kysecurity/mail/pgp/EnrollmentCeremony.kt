@@ -288,7 +288,7 @@ internal class EnrollmentCeremony(
         var toSeal: ByteArray? = null
         try {
             toSeal = if (previousExpected) {
-                EnrollmentSession.withKey { previous -> mergeSecretKeyRings(plaintext, previous) }
+                EnrollmentSession.withLegacyArmor { previous -> mergeSecretKeyRings(plaintext, previous) }
             } else {
                 plaintext
             }
@@ -298,7 +298,7 @@ internal class EnrollmentCeremony(
             }
 
             // NonCancellable around this call only: a cancel here would zero plaintext mid-read on the sealer.
-            when (withContext(NonCancellable) { sealer.seal(toSeal) }) {
+            when (withContext(NonCancellable) { sealer.seal(toSeal, VaultRecordKind.LEGACY_ARMOR) }) {
                 is SealOutcome.Sealed -> {
                     // Sealed and durable by now; zero before cache deletion or report's network round trip.
                     plaintext.fill(0)

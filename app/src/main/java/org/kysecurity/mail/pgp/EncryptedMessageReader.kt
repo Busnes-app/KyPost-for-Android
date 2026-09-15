@@ -153,10 +153,10 @@ internal class EncryptedMessageReader(
             )
         }
 
-        // The key never leaves the holder's CharArray: withKey scopes it to this one call. Null
+        // The keys never leave the holder: withDecryptionKeys scopes them to this one call. Null
         // means the app locked between the check above and here, which is NeedsUnlock, not a
         // decryption failure.
-        val result = EnrollmentSession.withKey { key ->
+        val result = EnrollmentSession.withDecryptionKeys { key ->
             PgpDecryptor.decrypt(key, payload.encryptedPayload, offeredKeys)
         } ?: return ReadOutcome.NeedsUnlock
 
