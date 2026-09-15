@@ -69,6 +69,7 @@ class EmailDetailActivity : LockedActivity() {
     private lateinit var pgpText: TextView
     private lateinit var subjectView: TextView
     private lateinit var fromView: TextView
+    private lateinit var recipientsView: TextView
     private lateinit var btnOpenInWebmail: Button
     private lateinit var btnDecryptHere: Button
     private lateinit var btnRetryPayload: Button
@@ -116,6 +117,17 @@ class EmailDetailActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun markReadSubmitCountForTest(): Int = markReadSubmitCount
 
+    /** Hidden rather than blank when the row carries no recipients: an empty "To:" reads as a bug. */
+    @androidx.annotation.VisibleForTesting
+    internal fun showRecipients(to: List<String>, cc: List<String>) {
+        val lines = listOfNotNull(
+            to.takeIf { it.isNotEmpty() }?.let { getString(R.string.email_to_line, it.joinToString(", ")) },
+            cc.takeIf { it.isNotEmpty() }?.let { getString(R.string.email_cc_line, it.joinToString(", ")) },
+        )
+        recipientsView.text = lines.joinToString("\n")
+        recipientsView.visibility = if (lines.isEmpty()) View.GONE else View.VISIBLE
+    }
+
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
         savedInstanceState?.let { state ->
             markReadSubmitted = state.getBoolean(STATE_MARK_READ_SUBMITTED, false)
@@ -150,6 +162,7 @@ class EmailDetailActivity : LockedActivity() {
 
         subjectView = findViewById(R.id.emailSubject)
         fromView = findViewById(R.id.emailFrom)
+        recipientsView = findViewById(R.id.emailRecipients)
         webView = findViewById(R.id.emailWebView)
         plainTextScroll = findViewById(R.id.emailPlainTextScroll)
         plainTextView = findViewById(R.id.emailPlainText)
@@ -376,6 +389,7 @@ class EmailDetailActivity : LockedActivity() {
             if (content != null) {
                 toRecipients = content.toAddresses
                 ccRecipients = content.ccAddresses
+                showRecipients(toRecipients, ccRecipients)
             }
         }
     }

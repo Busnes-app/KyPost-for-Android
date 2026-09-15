@@ -57,6 +57,8 @@
 
     <string name="email_title">Email</string>
     <string name="email_from">From: %1$s</string>
+    <string name="email_to_line">To: %1$s</string>
+    <string name="email_cc_line">Cc: %1$s</string>
     <!-- Subject line prefixed by its PGP and attachment markers. Ordered, so a locale that
          reads right-to-left can put them where they belong. -->
     <string name="email_row_subject_marked">%1$s %2$s</string>
