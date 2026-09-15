@@ -439,17 +439,19 @@ class InboxActivity : LockedActivity() {
         val discoveredThisBatch = KeywordTabs.buildTabs(emails).drop(1).toSet()
         keywordSettings.rememberKeywords(discoveredThisBatch)
         val allowedKeywords = keywordSettings.getOrderedKeywords().filter(keywordSettings::isKeywordVisible)
-        val tabs = listOf(KeywordTabs.ALL) + allowedKeywords
+        val tabs = KeywordTabs.visibleTabs(keywordSettings.isAllTabVisible(), allowedKeywords)
 
         val current = mutableListOf<String>()
         for (index in 0 until keywordChips.childCount) {
             current.add((keywordChips.getChildAt(index) as? Chip)?.text?.toString().orEmpty())
         }
-        if (tabs != current) {
+        val checked = keywordChips.findViewById<Chip?>(keywordChips.checkedChipId)?.text?.toString()
+        // With All hidden there may be no tab at all; then All is still the right filter, unchipped.
+        if (!tabs.contains(selectedTab)) {
+            selectedTab = tabs.firstOrNull() ?: KeywordTabs.ALL
+        }
+        if (tabs != current || (tabs.isNotEmpty() && checked != selectedTab)) {
             keywordChips.removeAllViews()
-            if (!tabs.contains(selectedTab)) {
-                selectedTab = KeywordTabs.ALL
-            }
             tabs.forEach { keyword ->
                 val chip = Chip(this).apply {
                     text = keyword

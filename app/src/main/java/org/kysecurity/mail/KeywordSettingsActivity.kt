@@ -31,6 +31,16 @@ class KeywordSettingsActivity : LockedActivity() {
         }
         container.addViewSpaced(intro, bottomDp = 16)
 
+        val allTab = CheckBox(this).apply {
+            text = KeywordTabs.ALL
+            textSize = 15f
+            minHeight = dpToPx(48)
+            isChecked = keywordSettings.isAllTabVisible()
+            setOnCheckedChangeListener { _, checked -> keywordSettings.setAllTabVisible(checked) }
+        }
+        applyCheckBoxTheme(this, allTab)
+        container.addViewSpaced(allTab, bottomDp = 4)
+
         val allKeywords = keywordSettings.getOrderedKeywords().toMutableList()
         if (allKeywords.isEmpty()) {
             val emptyView = TextView(this).apply {

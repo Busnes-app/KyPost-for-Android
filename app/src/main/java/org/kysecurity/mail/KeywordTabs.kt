@@ -12,6 +12,10 @@ object KeywordTabs {
         return listOf(ALL) + keywords
     }
 
+    /** The inbox's tab strip: All first unless the user hid it, then the visible keywords. */
+    fun visibleTabs(showAll: Boolean, keywords: List<String>): List<String> =
+        (if (showAll) listOf(ALL) else emptyList()) + keywords
+
     fun filterEmails(emails: List<Email>, selectedTab: String): List<Email> {
         if (selectedTab == ALL) {
             return emails
