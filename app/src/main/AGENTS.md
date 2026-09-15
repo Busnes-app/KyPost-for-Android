@@ -152,6 +152,33 @@ Owns production Android app code and resources.
   absence, or a store that cannot be read, fails closed while a record exists: only "Remove from
   this device" may discard it. The one unavoidable loss is a legacy preference keyset `openEncryptedPrefs` proves
   unrecoverable; that record was already unopenable.
+  Device envelopes carry an explicit version that `parseDeviceEnvelope` reads once and threads
+  through `DeviceEnvelopeFields`: the HKDF info and AAD prefix are both `kypost-device-envelope/v<n>`
+  from that field, so a v3 envelope can never be reopened under the v2 domain. Callers pass the
+  versions they admit; `EnrollmentCeremony` admits only `ENVELOPE_VERSION_LEGACY` until the server
+  publishes capability, generation and acknowledgement contracts, so a v3 envelope is
+  `ENVELOPE_MALFORMED` there rather than opened. v2 parsing is byte-compatible with what shipped
+  (a quoted version string still opens; the on-curve check stays with the Keystore agreement).
+  v3 is checked before any key work: the serialized envelope is at most
+  `MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES` of UTF-8 (measured without copying), exactly the
+  five fields, canonical padded standard base64, a 65-byte uncompressed point that is on P-256 and
+  not the identity, a 12-byte IV, and a ciphertext longer than its 16-byte tag. The v3 AAD binds
+  the device ID unchanged (nonempty, at most 65,535 UTF-8 bytes, lengths in bytes) and a
+  40- or 64-digit uppercase fingerprint supplied by the caller, never read from the envelope.
+  `pgp/PgpKeyring.kt` parses `kypost-pgp-keyring-v1` plaintext into a validated holder without
+  touching the vault or session: at most `PGP_KEYRING_JSON_BYTES`, strict UTF-8, no duplicate JSON
+  keys (kotlinx keeps the last silently, so `jsonHasDuplicateKeys` scans first), exactly the five
+  ring fields and two-or-three member fields, a positive safe-integer generation, fingerprints
+  compared case-insensitively and reported uppercase, at most 16 members and 256 inventory
+  entries. Each member is one unprotected private ring whose primary fingerprint matches its
+  entry, checked from the packet header before any extraction so no attacker-chosen passphrase KDF
+  runs, with every subkey bound by the primary; the fingerprints derived from all packets must
+  equal the declared inventory exactly, and exactly one member is the active one. Historical
+  members stay for decryption and are not signers. The holder keeps the original plaintext bytes
+  and each member's armor for later sealing and wipes those on `wipe()`; the JSON String, element
+  tree and Bouncy Castle packet objects cannot be zeroed and are documented as transient.
+  `PGP_KEYRING_IMPORT_PEAK_BYTES` accounts for that import beside, not instead of, the legacy
+  enrollment peak. Legacy armor keeps its own parser and limits.
   Hostile Location Protection destroys the envelope and is the mode in which none of this exists.
   `pgpRowMarker` marks inbox rows for the two states that yield nothing readable (🔒 client-protected,
   ⚠ decrypt failed) and deliberately leaves server-decrypted rows unmarked — those open normally, so

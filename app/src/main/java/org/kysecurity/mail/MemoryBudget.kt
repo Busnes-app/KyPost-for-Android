@@ -72,6 +72,40 @@ internal object MemoryBudget {
             2 * PGP_SECRET_KEY_OUTPUT_BYTES +
             PGP_SECRET_KEY_STREAM_BUFFER_BYTES
 
+    /** A legacy (v2) device envelope, serialized: one armored key at [PGP_SECRET_KEY_INPUT_BYTES]
+     *  plus its GCM tag, base64-expanded, plus JSON framing. Derived so raising the key cap moves
+     *  this with it rather than silently shrinking what enrollment admits. */
+    const val PGP_DEVICE_ENVELOPE_LEGACY_BYTES = (PGP_SECRET_KEY_INPUT_BYTES + 16 + 2) / 3 * 4 + 1024
+
+    /** A v3 device envelope, serialized: the server's 128 KiB cap on the UTF-8 form, applied
+     *  before any base64 work. */
+    const val PGP_DEVICE_ENVELOPE_V3_BYTES = 128 * 1024
+
+    /** `kypost-pgp-keyring-v1` plaintext, bounded before JSON or OpenPGP work. Reader capacity is
+     *  broader than storage admission: base64 expansion inside the envelope cap keeps stored rings
+     *  below 96 KiB. */
+    const val PGP_KEYRING_JSON_BYTES = 128 * 1024
+
+    /** A ring lists at most this many primary keys, and this many primary+subkey fingerprints. */
+    const val PGP_KEYRING_PRIMARY_COUNT = 16
+    const val PGP_KEYRING_FINGERPRINT_COUNT = 256
+
+    /** Importing a v3 ring, at peak: the serialized envelope as a String (two bytes per char) and
+     *  its decoded ciphertext; the plaintext bytes, their String copy, and the JSON element tree
+     *  charged at another String; the per-member armor copies handed to the OpenPGP parser and
+     *  the parsed packets, each charged at the plaintext cap; and the previous sealed bundle held
+     *  beside the new one while replacement is established. Legacy enrollment keeps
+     *  [PGP_ENROLLMENT_PEAK_BYTES] untouched. */
+    const val PGP_KEYRING_IMPORT_PEAK_BYTES =
+        2 * PGP_DEVICE_ENVELOPE_V3_BYTES +
+            PGP_DEVICE_ENVELOPE_V3_BYTES +
+            PGP_KEYRING_JSON_BYTES +
+            2 * PGP_KEYRING_JSON_BYTES +
+            2 * PGP_KEYRING_JSON_BYTES +
+            PGP_KEYRING_JSON_BYTES +
+            PGP_KEYRING_JSON_BYTES +
+            2 * PGP_KEYRING_JSON_BYTES
+
     /** A sender chooses the MIME part count; cap retained attachment objects as well as bytes. */
     const val DECRYPTED_ATTACHMENT_PART_COUNT = 50
 

@@ -5,18 +5,27 @@ import java.nio.ByteOrder
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import org.bouncycastle.asn1.x9.ECNamedCurveTable
+import org.kysecurity.mail.MemoryBudget
 import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.Mac
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
 
-/** HKDF info. Moves with the version tag and AAD prefix; changing one strands every device. */
-private const val ENVELOPE_INFO = "kypost-device-envelope/v2"
-private const val ENVELOPE_VERSION = "2"
+/** HKDF info and AAD prefix, per version. Changing either strands every device on that version. */
+private const val ENVELOPE_DOMAIN_PREFIX = "kypost-device-envelope/v"
 private const val ENVELOPE_ALG = "ECDH-P256+HKDF-SHA256+A256GCM"
 private const val GCM_TAG_BITS = 128
 private const val TAG = "DeviceEnvelope"
+
+/** One armored private key, sealed by the browser's legacy path. Live enrollment accepts only this. */
+internal const val ENVELOPE_VERSION_LEGACY = 2
+
+/** The complete `kypost-pgp-keyring-v1` ring. Framing is prepared here; nothing dispatches it yet. */
+internal const val ENVELOPE_VERSION_KEYRING = 3
+
+internal fun envelopeDomain(version: Int): String = "$ENVELOPE_DOMAIN_PREFIX$version"
 
 /** HKDF-SHA256 (RFC 5869), extract-then-expand. Built from [Mac] rather than pulled in as a
  *  dependency: this app adds none for crypto. */
@@ -46,33 +55,96 @@ internal fun hkdfSha256(ikm: ByteArray, salt: ByteArray, info: ByteArray, length
     return out
 }
 
-/** Not a `data class`: generated equals over [ByteArray] would be identity, not structural. */
-internal class DeviceEnvelopeFields(val epk: ByteArray, val iv: ByteArray, val ct: ByteArray)
+/** Not a `data class`: generated equals over [ByteArray] would be identity, not structural. The
+ *  version is parsed once and travels with the fields, so the opener cannot be pointed at a
+ *  different domain than the one the envelope declared. */
+internal class DeviceEnvelopeFields(val version: Int, val epk: ByteArray, val iv: ByteArray, val ct: ByteArray)
 
-/** Null for anything malformed or unsupported; the caller re-runs the ceremony, never retries. */
-internal fun parseDeviceEnvelope(json: String): DeviceEnvelopeFields? = runCatching {
+/**
+ * Null for anything malformed or unsupported; the caller re-runs the ceremony, never retries.
+ * [allowedVersions] is the caller's dispatch policy: live enrollment passes only the legacy
+ * version, so a v3 envelope is rejected there rather than opened under the wrong domain.
+ */
+internal fun parseDeviceEnvelope(json: String, allowedVersions: Set<Int>): DeviceEnvelopeFields? = runCatching {
+    // A String's UTF-8 length is at least its char count, so this bounds the parse without
+    // measuring; the exact v3 limit is applied below once the version is known.
+    if (json.length > MemoryBudget.PGP_DEVICE_ENVELOPE_LEGACY_BYTES) return null
     val o = Json.parseToJsonElement(json).jsonObject
-    if (o["v"]?.jsonPrimitive?.content != ENVELOPE_VERSION) return null
+    val v = o["v"]?.jsonPrimitive ?: return null
+    val version = when {
+        // The legacy parser compared content only, so a quoted "2" has always opened; kept.
+        v.content == ENVELOPE_VERSION_LEGACY.toString() -> ENVELOPE_VERSION_LEGACY
+        !v.isString && v.content == ENVELOPE_VERSION_KEYRING.toString() -> ENVELOPE_VERSION_KEYRING
+        else -> return null
+    }
+    if (version !in allowedVersions) return null
     if (o["alg"]?.jsonPrimitive?.content != ENVELOPE_ALG) return null
-    val decoder = Base64.getDecoder()
-    val epk = decoder.decode(o.getValue("epk").jsonPrimitive.content)
-    val iv = decoder.decode(o.getValue("iv").jsonPrimitive.content)
-    val ct = decoder.decode(o.getValue("ct").jsonPrimitive.content)
+    if (version == ENVELOPE_VERSION_KEYRING) {
+        if (o.keys != ENVELOPE_KEYS) return null
+        if (utf8Length(json) > MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES) return null
+    }
+    val epk = strictBase64(o.getValue("epk").jsonPrimitive.let { if (it.isString) it.content else return null })
+    val iv = strictBase64(o.getValue("iv").jsonPrimitive.let { if (it.isString) it.content else return null })
+    val ct = strictBase64(o.getValue("ct").jsonPrimitive.let { if (it.isString) it.content else return null })
     // Match the browser, which requires exactly 65 bytes with an 0x04 prefix before it will import
-    // the point. Rejecting compressed markers, the point at infinity and trailing junk here means
-    // the ECDH layer is not the only thing standing between an attacker-supplied blob and the key.
-    if (epk.size != 65 || epk[0] != 0x04.toByte()) return null
-    if (iv.size != 12 || ct.size <= GCM_TAG_BITS / 8) return null
-    DeviceEnvelopeFields(epk = epk, iv = iv, ct = ct)
+    // the point. For the legacy version the Keystore agreement (`EnrollmentKeyStore.isOnCurve`)
+    // is where an off-curve point dies; v3 is checked here as well, so the framing stands on its
+    // own before any ECDH layer sees the point.
+    if (epk == null || epk.size != 65 || epk[0] != 0x04.toByte()) return null
+    if (version == ENVELOPE_VERSION_KEYRING && !isP256Point(epk)) return null
+    if (iv == null || iv.size != 12) return null
+    if (ct == null || ct.size <= GCM_TAG_BITS / 8) return null
+    DeviceEnvelopeFields(version = version, epk = epk, iv = iv, ct = ct)
 }.getOrNull()
 
-/** `info || uint16BE(len(deviceId)) || deviceId || uint16BE(len(fingerprint)) || fingerprint` */
-internal fun deviceEnvelopeAad(deviceId: String, pgpFingerprint: String): ByteArray {
+private val ENVELOPE_KEYS = setOf("v", "alg", "epk", "iv", "ct")
+
+/** Standard alphabet, padded, canonical: `java.util.Base64` alone accepts missing padding and
+ *  non-zero trailing bits, both of which let two encodings name one ciphertext. */
+internal fun strictBase64(text: String): ByteArray? {
+    if (text.isEmpty() || text.length % 4 != 0) return null
+    val bytes = runCatching { Base64.getDecoder().decode(text) }.getOrNull() ?: return null
+    return bytes.takeIf { Base64.getEncoder().encodeToString(it) == text }
+}
+
+private fun isP256Point(encoded: ByteArray): Boolean = runCatching {
+    val point = ECNamedCurveTable.getByName("secp256r1").curve.decodePoint(encoded)
+    !point.isInfinity && point.isValid
+}.getOrDefault(false)
+
+/** UTF-8 byte length without encoding: the bound has to hold before any copy is made. */
+internal fun utf8Length(text: String): Long {
+    var bytes = 0L
+    var i = 0
+    while (i < text.length) {
+        val cp = text.codePointAt(i)
+        bytes += when {
+            cp < 0x80 -> 1
+            cp < 0x800 -> 2
+            cp < 0x10000 -> 3
+            else -> 4
+        }
+        i += Character.charCount(cp)
+    }
+    return bytes
+}
+
+/** `domain || uint16BE(len(deviceId)) || deviceId || uint16BE(len(fingerprint)) || fingerprint`
+ *
+ *  The device ID goes in unchanged: no trimming, normalization or case folding. The fingerprint
+ *  is uppercase hex without whitespace; v3 additionally requires a full 40- or 64-digit
+ *  fingerprint, the only lengths a validated active key can have. */
+internal fun deviceEnvelopeAad(version: Int, deviceId: String, pgpFingerprint: String): ByteArray {
+    require(version == ENVELOPE_VERSION_LEGACY || version == ENVELOPE_VERSION_KEYRING) { "unsupported envelope version" }
+    require(deviceId.isNotEmpty()) { "deviceId must not be empty" }
     val fingerprint = pgpFingerprint.uppercase().filterNot { it.isWhitespace() }
     require(fingerprint.isNotEmpty() && fingerprint.all { it in "0123456789ABCDEF" }) {
         "pgpFingerprint must be hex; got '${pgpFingerprint.take(24)}'"
     }
-    val info = ENVELOPE_INFO.toByteArray(Charsets.UTF_8)
+    if (version == ENVELOPE_VERSION_KEYRING) {
+        require(fingerprint.length == 40 || fingerprint.length == 64) { "a v3 fingerprint is 40 or 64 hex digits" }
+    }
+    val info = envelopeDomain(version).toByteArray(Charsets.UTF_8)
     val id = deviceId.toByteArray(Charsets.UTF_8)
     val fp = fingerprint.toByteArray(Charsets.UTF_8)
     require(id.size <= 0xFFFF && fp.size <= 0xFFFF) { "AAD field too long to length-prefix" }
@@ -86,7 +158,8 @@ internal fun deviceEnvelopeAad(deviceId: String, pgpFingerprint: String): ByteAr
         .array()
 }
 
-/** Null means hostile or stale, never a retry. [ownRawPublicKey] is the HKDF salt. */
+/** Null means hostile or stale, never a retry. [ownRawPublicKey] is the HKDF salt. The domain
+ *  comes from the parsed version: a v3 envelope is never reopened as v2. */
 internal fun openDeviceEnvelope(
     sharedSecret: ByteArray,
     ownRawPublicKey: ByteArray,
@@ -95,7 +168,7 @@ internal fun openDeviceEnvelope(
 ): ByteArray? {
     var key: ByteArray? = null
     return try {
-        key = hkdfSha256(sharedSecret, ownRawPublicKey, ENVELOPE_INFO.toByteArray(Charsets.UTF_8), 32)
+        key = hkdfSha256(sharedSecret, ownRawPublicKey, envelopeDomain(fields.version).toByteArray(Charsets.UTF_8), 32)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS, fields.iv))
         cipher.updateAAD(aad)

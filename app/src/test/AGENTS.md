@@ -15,6 +15,14 @@ Owns JVM unit tests for app logic that can run without device/emulator.
   re-probe enrollment after cached bootstrap reads.
 - Reader data-image tests cover aggregate literal/CID limits in both image modes, including
   malformed-source and srcset bypasses; budget tests retain at least 4 MiB read headroom.
+- `src/test/resources/kypost-server/` holds fixtures copied unchanged from KyPost-Server at the
+  commit named in its `PROVENANCE.md`; `FixtureProvenanceTest` pins their SHA-256 and every scalar
+  in them is public test data. `DeviceEnvelopeTest` pins ECDH, HKDF, AAD and ciphertext for both
+  envelope versions against those vectors with Bouncy Castle point arithmetic, never a production
+  sealer, and drives every v3 framing rejection. `PgpKeyringTest` parses the shared ring, decrypts
+  both historical fixtures (one with a hidden recipient) through an independent Bouncy Castle
+  path, and builds each negative member from the fixture keys (protected packet, public-only,
+  two rings in one entry, grafted subkey, stripped subkey) rather than from generated keys.
 - Lifecycle-owned plaintext tests use pure holders such as `OwnedAttachmentSave`; prove admission,
   source cleanup isolation, and wiping without an emulator or timing-dependent threads.
   `ReadOutcomeDeliveryTest` queues the worker and consumer independently to prove completed

@@ -29,7 +29,7 @@ internal fun sealEnvelope(
             javax.crypto.spec.SecretKeySpec(key, "AES"),
             javax.crypto.spec.GCMParameterSpec(128, iv),
         )
-        updateAAD(deviceEnvelopeAad(deviceId, aadFingerprint))
+        updateAAD(deviceEnvelopeAad(ENVELOPE_VERSION_LEGACY, deviceId, aadFingerprint))
     }
     val ct = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
     val b64 = java.util.Base64.getEncoder()

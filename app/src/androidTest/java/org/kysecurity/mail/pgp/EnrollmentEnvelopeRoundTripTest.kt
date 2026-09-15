@@ -65,7 +65,7 @@ class EnrollmentEnvelopeRoundTripTest {
         val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
         val ct = Cipher.getInstance("AES/GCM/NoPadding").run {
             init(Cipher.ENCRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(128, iv))
-            updateAAD(deviceEnvelopeAad(deviceId, fingerprint))
+            updateAAD(deviceEnvelopeAad(ENVELOPE_VERSION_LEGACY, deviceId, fingerprint))
             doFinal(plaintext)
         }
         val w = (ephemeral.public as ECPublicKey).w
@@ -84,7 +84,7 @@ class EnrollmentEnvelopeRoundTripTest {
         val plaintext = "-----BEGIN PGP PRIVATE KEY BLOCK-----".toByteArray(Charsets.UTF_8)
         val envelope = sealAsBrowserWould(devicePoint, "dev-1", "164D 5B83 4E7F E927", plaintext)
 
-        val fields = requireNotNull(parseDeviceEnvelope(envelope))
+        val fields = requireNotNull(parseDeviceEnvelope(envelope, setOf(ENVELOPE_VERSION_LEGACY)))
         val shared = requireNotNull(EnrollmentKeyStore.sharedSecret(fields.epk))
         val opened = openDeviceEnvelope(
             sharedSecret = shared,
@@ -92,7 +92,7 @@ class EnrollmentEnvelopeRoundTripTest {
             fields = fields,
             // Space-grouped on the way in, exactly as PgpFingerprint.compute emits it. If
             // deviceEnvelopeAad stopped normalising, this would fail here rather than in the field.
-            aad = deviceEnvelopeAad("dev-1", "164D 5B83 4E7F E927"),
+            aad = deviceEnvelopeAad(ENVELOPE_VERSION_LEGACY, "dev-1", "164D 5B83 4E7F E927"),
         )
 
         assertArrayEquals(plaintext, opened)
@@ -106,11 +106,11 @@ class EnrollmentEnvelopeRoundTripTest {
         val devicePoint = requireNotNull(EnrollmentKeyStore.rawPublicKey())
         val envelope = sealAsBrowserWould(devicePoint, "someone-else", "164D5B834E7FE927", ByteArray(64))
 
-        val fields = requireNotNull(parseDeviceEnvelope(envelope))
+        val fields = requireNotNull(parseDeviceEnvelope(envelope, setOf(ENVELOPE_VERSION_LEGACY)))
         val shared = requireNotNull(EnrollmentKeyStore.sharedSecret(fields.epk))
 
         assertNull(
-            openDeviceEnvelope(shared, devicePoint, fields, deviceEnvelopeAad("dev-1", "164D5B834E7FE927")),
+            openDeviceEnvelope(shared, devicePoint, fields, deviceEnvelopeAad(ENVELOPE_VERSION_LEGACY, "dev-1", "164D5B834E7FE927")),
         )
     }
 
