@@ -66,7 +66,7 @@ internal sealed class SealOutcome {
 
 /** The re-seal, behind an interface because `BiometricPrompt` is Activity-bound. */
 internal interface VaultSealer {
-    suspend fun seal(plaintext: ByteArray): SealOutcome
+    suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind): SealOutcome
 }
 
 /** The locally cached plaintext of mail the server decrypted; enrolling is what drops it. */

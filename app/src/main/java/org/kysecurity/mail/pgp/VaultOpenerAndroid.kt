@@ -61,7 +61,7 @@ internal class AndroidVaultOpener(
     private sealed class VaultUnlock {
         /** Not a `data class`: `ciphertext` would be compared by identity behind a structural-looking
          *  `equals`. Nothing compares these. */
-        class Ready(val cipher: Cipher, val ciphertext: ByteArray) : VaultUnlock()
+        class Ready(val cipher: Cipher, val ciphertext: ByteArray, val kind: VaultRecordKind) : VaultUnlock()
         data class Blocked(val outcome: OpenOutcome) : VaultUnlock()
     }
 
@@ -82,19 +82,21 @@ internal class AndroidVaultOpener(
                     OpenOutcome.Failed(activity.getString(R.string.email_pgp_unseal_failed)),
                 )
             }
-            val (iv, ciphertext) = stored
+            val record = stored
                 ?: return@withContext VaultUnlock.Blocked(OpenOutcome.NotEnrolled)
             // A stored blob this key cannot open is Failed, never NotEnrolled — different advice.
-            val cipher = vault.openCipher(iv)
+            val cipher = vault.openCipher(record.iv)
                 ?: return@withContext VaultUnlock.Blocked(
                     OpenOutcome.Failed(activity.getString(R.string.email_pgp_unseal_failed)),
                 )
-            VaultUnlock.Ready(cipher, ciphertext)
+            VaultUnlock.Ready(cipher, record.ciphertext, record.kind)
         }
-        val (cipher, ciphertext) = when (unlock) {
+        val ready = when (unlock) {
             is VaultUnlock.Blocked -> return unlock.outcome
-            is VaultUnlock.Ready -> unlock.cipher to unlock.ciphertext
+            is VaultUnlock.Ready -> unlock
         }
+        val cipher = ready.cipher
+        val ciphertext = ready.ciphertext
 
         return withContext(Dispatchers.Main) {
             suspendCancellableCoroutine { cont ->
@@ -123,14 +125,17 @@ internal class AndroidVaultOpener(
                             }
                             val outcome = runCatching {
                                 // GCM tag failure = wrong key for this ciphertext: re-enrol.
+                                if (ready.kind == VaultRecordKind.KEYRING) authenticated.updateAAD(byteArrayOf(ready.kind.recordVersion))
                                 val plaintext = authenticated.doFinal(ciphertext)
-                                try {
-                                    // putUtf8: a String copy of the private key could not be zeroed.
-                                    EnrollmentSession.putUtf8(plaintext)
+                                val installed = try {
+                                    // The record's own format byte decides the parser; a keyring
+                                    // that no longer validates installs nothing.
+                                    installOpenedMaterial(ready.kind, plaintext)
                                 } finally {
                                     plaintext.fill(0)
                                 }
-                                OpenOutcome.Opened
+                                if (installed) OpenOutcome.Opened
+                                else OpenOutcome.Failed(activity.getString(R.string.email_pgp_unseal_failed))
                             }.getOrElse {
                                 OpenOutcome.Failed(activity.getString(R.string.email_pgp_unseal_failed))
                             }

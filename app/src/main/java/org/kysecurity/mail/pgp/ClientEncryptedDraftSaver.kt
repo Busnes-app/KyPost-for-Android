@@ -51,8 +51,8 @@ internal class ClientEncryptedDraftSaver(
             }
         }
         val encrypted = withContext(Dispatchers.Default) {
-            EnrollmentSession.withKey { privateKey ->
-                val ownKey = PgpEncryptor.ownPublicKey(privateKey) ?: return@withKey null
+            EnrollmentSession.withSigner { signer ->
+                val ownKey = signer?.let { PgpEncryptor.ownPublicKey(it) } ?: return@withSigner null
                 val content = buildProtectedContent(
                     contentType = if (draft.mode.equals("plain", true)) "text/plain; charset=utf-8" else "text/html; charset=utf-8",
                     body = draft.body, subject = draft.subject,
@@ -60,8 +60,8 @@ internal class ClientEncryptedDraftSaver(
                     attachments = draft.attachments.map { OutgoingMimeAttachment(it.name, it.mimeType, it.bytes) },
                 ).toByteArray(Charsets.UTF_8)
                 try {
-                    val result = PgpEncryptor.encrypt(content, listOf(ownKey), privateKey)
-                    if (result !is EncryptResult.Ok) return@withKey null
+                    val result = PgpEncryptor.encrypt(content, listOf(ownKey), signer)
+                    if (result !is EncryptResult.Ok) return@withSigner null
                     ClientEncryptedDraft(
                         fields.to.joinToString(", "),
                         wrapAsPgpMime(
