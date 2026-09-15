@@ -166,7 +166,15 @@ internal class FakeVaultSealer(
     /** The caller's array itself, kept by reference so a test can assert it was zeroed in place. */
     val handedArrays = mutableListOf<ByteArray>()
 
-    override suspend fun seal(plaintext: ByteArray): SealOutcome {
+    /** The record kind each seal declared. */
+    val kinds = mutableListOf<VaultRecordKind>()
+
+    /** Runs at the moment of sealing, so a test can observe what is (not yet) installed. */
+    var onSeal: () -> Unit = {}
+
+    override suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind): SealOutcome {
+        kinds += kind
+        onSeal()
         received += plaintext.copyOf()
         handedArrays += plaintext
         failure?.let { throw it }

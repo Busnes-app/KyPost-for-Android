@@ -41,7 +41,7 @@ internal fun enrollmentRowFor(
 
     // Local, and both unsafe to withhold.
     status == EnrollmentStatus.KEY_INVALIDATED -> EnrollmentRow.KeyInvalidated
-    status == EnrollmentStatus.ENROLLED -> EnrollmentRow.Enrolled
+    status.isEnrolled() -> EnrollmentRow.Enrolled
 
     else -> when (identity) {
         is IdentityCheck.ServerHeld -> EnrollmentRow.ServerHeldKey

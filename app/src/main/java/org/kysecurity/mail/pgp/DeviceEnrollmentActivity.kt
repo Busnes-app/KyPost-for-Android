@@ -84,7 +84,7 @@ class DeviceEnrollmentActivity : LockedActivity() {
 
     /** An anonymous object because `VaultSealer` is internal and a public class cannot widen it. */
     private val vaultSealer = object : VaultSealer {
-        override suspend fun seal(plaintext: ByteArray): SealOutcome {
+        override suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind): SealOutcome {
             val vault = EnrollmentVault(applicationContext)
 
             // Off main: ensureKey() is a slow Keystore round trip. The prompt itself must stay on main.
@@ -139,7 +139,7 @@ class DeviceEnrollmentActivity : LockedActivity() {
                             // Post-shutdown the right outcome is a cancel: Failed would tear down the agreement key.
                             try {
                                 sealExecutor.execute {
-                                    resolveSeal(continuation, commitSeal(vault, authenticated, plaintext))
+                                    resolveSeal(continuation, commitSeal(vault, authenticated, plaintext, kind))
                                 }
                             } catch (e: RejectedExecutionException) {
                                 resolveSeal(continuation, SealOutcome.Cancelled)
@@ -272,7 +272,7 @@ class DeviceEnrollmentActivity : LockedActivity() {
     internal suspend fun openPreviousVaultForTest(): OpenOutcome = vaultOpener.open()
 
     @VisibleForTesting
-    internal suspend fun sealForTest(plaintext: ByteArray): SealOutcome = vaultSealer.seal(plaintext)
+    internal suspend fun sealForTest(plaintext: ByteArray): SealOutcome = vaultSealer.seal(plaintext, VaultRecordKind.LEGACY_ARMOR)
 
     @VisibleForTesting
     internal fun hasPendingVaultPromptForTest(): Boolean = vaultOpener.hasPendingPromptForTest()
@@ -382,9 +382,9 @@ class DeviceEnrollmentActivity : LockedActivity() {
 /** The only step that touches storage, after authentication. [SealOutcome.Sealed] means the
  *  record is durable; a write that did not complete reports [SealOutcome.Failed] and leaves the
  *  previous record in place. */
-internal fun commitSeal(vault: EnrollmentVault, authenticated: Cipher, plaintext: ByteArray): SealOutcome =
+internal fun commitSeal(vault: EnrollmentVault, authenticated: Cipher, plaintext: ByteArray, kind: VaultRecordKind): SealOutcome =
     runCatching {
         val ciphertext = authenticated.doFinal(plaintext)
-        if (vault.store(authenticated.iv, ciphertext)) SealOutcome.Sealed
+        if (vault.store(authenticated.iv, ciphertext, kind)) SealOutcome.Sealed
         else SealOutcome.Failed("The sealed key could not be stored")
     }.getOrElse { SealOutcome.Failed(it.message ?: "The seal failed") }

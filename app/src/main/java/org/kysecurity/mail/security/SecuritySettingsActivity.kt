@@ -37,6 +37,7 @@ import org.kysecurity.mail.pgp.IdentityCheck
 import org.kysecurity.mail.pgp.enrollmentRowFor
 import org.kysecurity.mail.pgp.hasSecureLockScreen
 import org.kysecurity.mail.pgp.openWebmail
+import org.kysecurity.mail.pgp.isEnrolled
 import org.kysecurity.mail.pgp.probeEnrollment
 import org.kysecurity.mail.pgp.webmailHomeUrl
 import org.kysecurity.mail.push.PushRuntime
@@ -361,7 +362,7 @@ class SecuritySettingsActivity : LockedActivity() {
             }
             // SecurityWork, like the reads above: this pairing read is several decrypts plus AES.
             val statusDecides = status == EnrollmentStatus.KEY_INVALIDATED ||
-                status == EnrollmentStatus.ENROLLED
+                status.isEnrolled()
             val identity = if (paired && !hostileLocation && lockScreen && !statusDecides) {
                 withContext(SecurityWork) { AndroidIdentitySource(activity).check() }
             } else {

@@ -23,6 +23,13 @@ Owns JVM unit tests for app logic that can run without device/emulator.
   both historical fixtures (one with a hidden recipient) through an independent Bouncy Castle
   path, and builds each negative member from the fixture keys (protected packet, public-only,
   two rings in one entry, grafted subkey, stripped subkey) rather than from generated keys.
+  `KeyringImportTest` drives `importKeyring` against the fake opener and sealer with an event
+  transcript, proving the seal precedes the session install and completion, and that invalid
+  rings, failed or cancelled seals, unopenable previous vaults, and incomparable previous
+  material (a later generation, or legacy armor) touch nothing. `KeyringSessionTest` proves the
+  session's scoped accessors: every member decrypts including a hidden recipient, only the active
+  member signs and is the self-encryption target, legacy accessors see no keyring, and
+  `installOpenedMaterial` installs by declared kind only.
 - Lifecycle-owned plaintext tests use pure holders such as `OwnedAttachmentSave`; prove admission,
   source cleanup isolation, and wiping without an emulator or timing-dependent threads.
   `ReadOutcomeDeliveryTest` queues the worker and consumer independently to prove completed

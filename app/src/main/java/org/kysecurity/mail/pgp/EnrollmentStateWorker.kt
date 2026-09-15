@@ -63,7 +63,7 @@ internal class EnrollmentStateWorker(
             return Result.success()
         }
 
-        val enrolled = probeEnrollment(EnrollmentVault(applicationContext)).isEnrolled()
+        val enrolled = probeEnrollment(EnrollmentVault(applicationContext)).legacyReportValue()
 
         // The pinned factory, as every client carrying the device credential uses; the default is unpinned.
         val clients = EnrollmentClients(callFactory = pinnedPairingCallFactory(applicationContext))
