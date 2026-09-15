@@ -36,12 +36,30 @@ class PgpKeyringTest {
     private val fixture = SharedFixtures.keyring()
     private val ring = fixture["ring"]!!.jsonObject
     private val ringBytes = ring.toString().toByteArray(Charsets.UTF_8)
+    private val active = ring["activeFingerprint"]!!.jsonPrimitive.content
+
+    /** Every test supplies the fingerprint the AAD would have committed to; the default is the
+     *  fixture's own active key. */
+    private fun parse(bytes: ByteArray, expectedActive: String = active): PgpKeyring? =
+        parsePgpKeyring(bytes, expectedActive)
+
+    /** A self-consistent ring under someone else's fingerprint is not this account's ring. */
+    @Test
+    fun theActiveKeyMustBeTheOneTheAadCommittedTo() {
+        assertNotNull(parsePgpKeyring(ringBytes, active))
+        assertNotNull("normalised like the AAD", parsePgpKeyring(ringBytes, active.lowercase().chunked(4).joinToString(" ")))
+        assertNull(parsePgpKeyring(ringBytes, "A".repeat(40)))
+        assertNull("a historical member is not the committed key", parsePgpKeyring(ringBytes, ring["keys"]!!.jsonArray[1].jsonObject.string("fingerprint")))
+        assertNull("a subkey is not the committed key", parsePgpKeyring(ringBytes, "F8FF743DD85DDE3D427E8BA25CA9134FFE0FF9F4"))
+        assertNull("malformed expectation", parsePgpKeyring(ringBytes, "not-a-fingerprint"))
+        assertNull("empty expectation", parsePgpKeyring(ringBytes, ""))
+    }
 
     // ---- The shared fixture parses, and Bouncy Castle opens both historical ciphertexts. ----
 
     @Test
     fun theSharedRingParsesCompletely() {
-        val parsed = requireNotNull(parsePgpKeyring(ringBytes))
+        val parsed = requireNotNull(parse(ringBytes))
 
         assertEquals(2L, parsed.materialGeneration)
         assertEquals("5F117951610CAF01500FA059CDE63F0EBEC934A2", parsed.activeFingerprint)
@@ -58,13 +76,13 @@ class PgpKeyringTest {
     @Test
     fun theV3VectorPlaintextIsTheSameRing() {
         val plaintext = SharedFixtures.deviceEnvelope()["vectors"]!!.jsonArray[1].jsonObject["plaintext"]!!.jsonPrimitive.content
-        val parsed = requireNotNull(parsePgpKeyring(plaintext.toByteArray(Charsets.UTF_8)))
-        assertEquals(requireNotNull(parsePgpKeyring(ringBytes)).keyFingerprints, parsed.keyFingerprints)
+        val parsed = requireNotNull(parse(plaintext.toByteArray(Charsets.UTF_8)))
+        assertEquals(requireNotNull(parse(ringBytes)).keyFingerprints, parsed.keyFingerprints)
     }
 
     @Test
     fun historicalMailDecryptsWithARetainedMemberIncludingAHiddenRecipient() {
-        val parsed = requireNotNull(parsePgpKeyring(ringBytes))
+        val parsed = requireNotNull(parse(ringBytes))
         val expected = fixture["plaintext"]!!.jsonPrimitive.content
 
         assertEquals(expected, decrypt(parsed, fixture["ciphertext"]!!.jsonPrimitive.content))
@@ -76,7 +94,7 @@ class PgpKeyringTest {
 
     @Test
     fun wipeZeroesTheBytesTheHolderOwns() {
-        val parsed = requireNotNull(parsePgpKeyring(ringBytes))
+        val parsed = requireNotNull(parse(ringBytes))
         parsed.wipe()
         assertTrue(parsed.original.all { it == 0.toByte() })
         assertTrue(parsed.members.all { m -> m.armor.all { it == 0.toByte() } })
@@ -90,7 +108,7 @@ class PgpKeyringTest {
             "activeFingerprint" to JsonPrimitive(ring.string("activeFingerprint").lowercase()),
             "keyFingerprints" to JsonArray(ring["keyFingerprints"]!!.jsonArray.map { JsonPrimitive(it.jsonPrimitive.content.lowercase()) }),
         )
-        val parsed = requireNotNull(parsePgpKeyring(lowered))
+        val parsed = requireNotNull(parse(lowered))
         assertEquals("5F117951610CAF01500FA059CDE63F0EBEC934A2", parsed.activeFingerprint)
         assertTrue(parsed.keyFingerprints.all { it == it.uppercase() })
     }
@@ -98,66 +116,68 @@ class PgpKeyringTest {
     @Test
     fun anOptionalRevocationCertificateIsPreservedVerbatim() {
         val cert = "-----BEGIN PGP PUBLIC KEY BLOCK-----\nComment: revocation\n-----END PGP PUBLIC KEY BLOCK-----\n"
-        val parsed = requireNotNull(parsePgpKeyring(editMember(0, "revocationCertificate" to JsonPrimitive(cert))))
+        val parsed = requireNotNull(parse(editMember(0, "revocationCertificate" to JsonPrimitive(cert))))
         assertEquals(cert, parsed.members[0].revocationCertificate)
-        assertNull(parsePgpKeyring(editMember(0, "revocationCertificate" to JsonPrimitive(""))))
-        assertNull(parsePgpKeyring(editMember(0, "revocationCertificate" to JsonPrimitive(1))))
+        assertNull(parse(editMember(0, "revocationCertificate" to JsonPrimitive(""))))
+        assertNull(parse(editMember(0, "revocationCertificate" to JsonPrimitive(1))))
     }
 
     @Test
     fun rejectsWrongFormatFieldsAndTypes() {
-        assertNull("format", parsePgpKeyring(edit("format" to JsonPrimitive("kypost-pgp-keyring-v2"))))
-        assertNull("extra top-level key", parsePgpKeyring(edit("comment" to JsonPrimitive("x"))))
-        assertNull("missing key", parsePgpKeyring(JsonObject(ring - "keyFingerprints").toString().toByteArray()))
-        assertNull("inventory not an array", parsePgpKeyring(edit("keyFingerprints" to JsonPrimitive("x"))))
-        assertNull("keys not an array", parsePgpKeyring(edit("keys" to JsonPrimitive("x"))))
-        assertNull("member not an object", parsePgpKeyring(edit("keys" to JsonArray(listOf(JsonPrimitive("x"))))))
-        assertNull("active not a string", parsePgpKeyring(edit("activeFingerprint" to JsonPrimitive(1))))
-        assertNull("active not hex", parsePgpKeyring(edit("activeFingerprint" to JsonPrimitive("Z".repeat(40)))))
-        assertNull("active wrong length", parsePgpKeyring(edit("activeFingerprint" to JsonPrimitive("A".repeat(39)))))
-        assertNull("array root", parsePgpKeyring("[]".toByteArray()))
-        assertNull("empty", parsePgpKeyring(ByteArray(0)))
-        assertNull("not json", parsePgpKeyring("ring".toByteArray()))
+        assertNull("format", parse(edit("format" to JsonPrimitive("kypost-pgp-keyring-v2"))))
+        assertNull("extra top-level key", parse(edit("comment" to JsonPrimitive("x"))))
+        assertNull("missing key", parse(JsonObject(ring - "keyFingerprints").toString().toByteArray()))
+        assertNull("inventory not an array", parse(edit("keyFingerprints" to JsonPrimitive("x"))))
+        assertNull("keys not an array", parse(edit("keys" to JsonPrimitive("x"))))
+        assertNull("member not an object", parse(edit("keys" to JsonArray(listOf(JsonPrimitive("x"))))))
+        assertNull("active not a string", parse(edit("activeFingerprint" to JsonPrimitive(1))))
+        assertNull("active not hex", parse(edit("activeFingerprint" to JsonPrimitive("Z".repeat(40)))))
+        assertNull("active wrong length", parse(edit("activeFingerprint" to JsonPrimitive("A".repeat(39)))))
+        assertNull("array root", parse("[]".toByteArray()))
+        assertNull("empty", parse(ByteArray(0)))
+        assertNull("not json", parse("ring".toByteArray()))
     }
 
     @Test
     fun rejectsEveryUnsafeGeneration() {
         for (bad in listOf("0", "-1", "2.0", "1e3", "9007199254740992", "\"2\"", "true", "null")) {
-            assertNull("materialGeneration $bad", parsePgpKeyring(rawEdit("\"materialGeneration\":2", "\"materialGeneration\":$bad")))
+            assertNull("materialGeneration $bad", parse(rawEdit("\"materialGeneration\":2", "\"materialGeneration\":$bad")))
         }
-        assertEquals(9007199254740991L, parsePgpKeyring(rawEdit("\"materialGeneration\":2", "\"materialGeneration\":9007199254740991"))!!.materialGeneration)
-        assertEquals(1L, parsePgpKeyring(rawEdit("\"materialGeneration\":2", "\"materialGeneration\":1"))!!.materialGeneration)
+        assertEquals(9007199254740991L, parse(rawEdit("\"materialGeneration\":2", "\"materialGeneration\":9007199254740991"))!!.materialGeneration)
+        assertEquals(1L, parse(rawEdit("\"materialGeneration\":2", "\"materialGeneration\":1"))!!.materialGeneration)
     }
 
     @Test
     fun rejectsAnInventoryThatDoesNotMatchThePackets() {
         val inventory = ring["keyFingerprints"]!!.jsonArray
-        assertNull("missing subkey", parsePgpKeyring(edit("keyFingerprints" to JsonArray(inventory.drop(1)))))
-        assertNull("extra fingerprint", parsePgpKeyring(edit("keyFingerprints" to JsonArray(inventory + JsonPrimitive("A".repeat(40))))))
-        assertNull("duplicate after case normalization", parsePgpKeyring(edit("keyFingerprints" to JsonArray(inventory + JsonPrimitive(inventory[0].jsonPrimitive.content.lowercase())))))
-        assertNull("empty inventory", parsePgpKeyring(edit("keyFingerprints" to JsonArray(emptyList()))))
-        assertNull("non-string entry", parsePgpKeyring(edit("keyFingerprints" to JsonArray(inventory + JsonPrimitive(1)))))
-        assertNull("over 256 entries", parsePgpKeyring(edit("keyFingerprints" to JsonArray(inventory + (1..253).map { JsonPrimitive("%040X".format(it)) }))))
+        assertNull("missing subkey", parse(edit("keyFingerprints" to JsonArray(inventory.drop(1)))))
+        assertNull("extra fingerprint", parse(edit("keyFingerprints" to JsonArray(inventory + JsonPrimitive("A".repeat(40))))))
+        assertNull("duplicate after case normalization", parse(edit("keyFingerprints" to JsonArray(inventory + JsonPrimitive(inventory[0].jsonPrimitive.content.lowercase())))))
+        assertNull("empty inventory", parse(edit("keyFingerprints" to JsonArray(emptyList()))))
+        assertNull("non-string entry", parse(edit("keyFingerprints" to JsonArray(inventory + JsonPrimitive(1)))))
+        assertNull("over 256 entries", parse(edit("keyFingerprints" to JsonArray(inventory + (1..253).map { JsonPrimitive("%040X".format(it)) }))))
     }
 
     @Test
     fun rejectsAnActiveMemberThatIsMissingOrAmbiguous() {
         val historical = ring["keys"]!!.jsonArray[1].jsonObject.string("fingerprint")
-        assertNotNull("any member may be active", parsePgpKeyring(edit("activeFingerprint" to JsonPrimitive(historical))))
-        assertNull("active is a subkey", parsePgpKeyring(edit("activeFingerprint" to JsonPrimitive("F8FF743DD85DDE3D427E8BA25CA9134FFE0FF9F4"))))
-        assertNull("active absent", parsePgpKeyring(edit("activeFingerprint" to JsonPrimitive("A".repeat(40)))))
+        assertNotNull("any member may be active", parse(edit("activeFingerprint" to JsonPrimitive(historical)), historical))
+        val subkey = "F8FF743DD85DDE3D427E8BA25CA9134FFE0FF9F4"
+        assertNull("active is a subkey", parse(edit("activeFingerprint" to JsonPrimitive(subkey)), subkey))
+        val absent = "A".repeat(40)
+        assertNull("active absent", parse(edit("activeFingerprint" to JsonPrimitive(absent)), absent))
         val members = ring["keys"]!!.jsonArray
-        assertNull("duplicate member", parsePgpKeyring(edit("keys" to JsonArray(members + members[0]))))
-        assertNull("no members", parsePgpKeyring(edit("keys" to JsonArray(emptyList()))))
-        assertNull("over 16 members", parsePgpKeyring(edit("keys" to JsonArray(List(17) { members[0] }))))
+        assertNull("duplicate member", parse(edit("keys" to JsonArray(members + members[0]))))
+        assertNull("no members", parse(edit("keys" to JsonArray(emptyList()))))
+        assertNull("over 16 members", parse(edit("keys" to JsonArray(List(17) { members[0] }))))
     }
 
     @Test
     fun rejectsDuplicateJsonKeysThatKotlinxWouldMerge() {
         val duplicated = rawEdit("\"materialGeneration\":2", "\"materialGeneration\":7,\"materialGeneration\":2")
-        assertNull(parsePgpKeyring(duplicated))
+        assertNull(parse(duplicated))
         val duplicatedMember = rawEdit("\"privateKey\":", "\"fingerprint\":\"A\",\"privateKey\":")
-        assertNull(parsePgpKeyring(duplicatedMember))
+        assertNull(parse(duplicatedMember))
     }
 
     @Test
@@ -170,15 +190,15 @@ class PgpKeyringTest {
         assertTrue("an escaped key spelling would merge unseen", jsonHasDuplicateKeys("""{"a":1,"\u0061":2}"""))
         assertTrue("no accepted key is ever escaped", jsonHasDuplicateKeys("""{"\"":1}"""))
         assertTrue("malformed counts as unsafe", jsonHasDuplicateKeys("""{"a":"unterminated"""))
-        assertNull(parsePgpKeyring(rawEdit("\"format\":", "\"\\u0066ormat\":\"x\",\"format\":")))
+        assertNull(parse(rawEdit("\"format\":", "\"\\u0066ormat\":\"x\",\"format\":")))
     }
 
     @Test
     fun rejectsMalformedUtf8AndOversizedPlaintext() {
-        assertNull(parsePgpKeyring(ringBytes + byteArrayOf(0xFF.toByte())))
-        assertNull(parsePgpKeyring(byteArrayOf(0xC0.toByte(), 0x80.toByte()) + ringBytes))
+        assertNull(parse(ringBytes + byteArrayOf(0xFF.toByte())))
+        assertNull(parse(byteArrayOf(0xC0.toByte(), 0x80.toByte()) + ringBytes))
         val padded = ring.toString().dropLast(1) + " ".repeat(128 * 1024) + "}"
-        assertNull(parsePgpKeyring(padded.toByteArray(Charsets.UTF_8)))
+        assertNull(parse(padded.toByteArray(Charsets.UTF_8)))
         assertNull(decodeStrictUtf8(byteArrayOf(0xED.toByte(), 0xA0.toByte(), 0x80.toByte())))
     }
 
@@ -193,14 +213,14 @@ class PgpKeyringTest {
                 JsonObject(members[1] + ("fingerprint" to members[0]["fingerprint"]!!)),
             ),
         )
-        assertNull(parsePgpKeyring(edit("keys" to swapped)))
+        assertNull(parse(edit("keys" to swapped)))
     }
 
     @Test
     fun rejectsPublicOnlyMaterial() {
         val secret = memberRing(0)
         val public = PGPPublicKeyRing(secret.publicKeys.asSequence().toList())
-        assertNull(parsePgpKeyring(editMember(0, "privateKey" to JsonPrimitive(armor(public)))))
+        assertNull(parse(editMember(0, "privateKey" to JsonPrimitive(armor(public)))))
     }
 
     @Test
@@ -209,7 +229,7 @@ class PgpKeyringTest {
             ArmoredOutputStream(out).use { armor -> memberRing(0).encode(armor); memberRing(1).encode(armor) }
             out.toString(Charsets.UTF_8.name())
         }
-        assertNull(parsePgpKeyring(editMember(0, "privateKey" to JsonPrimitive(both))))
+        assertNull(parse(editMember(0, "privateKey" to JsonPrimitive(both))))
     }
 
     /** Checked from the packet header, so no attacker-chosen passphrase KDF ever runs. */
@@ -219,7 +239,7 @@ class PgpKeyringTest {
         val encryptor = BcPBESecretKeyEncryptorBuilder(SymmetricKeyAlgorithmTags.AES_256, BcPGPDigestCalculatorProvider().get(org.bouncycastle.bcpg.HashAlgorithmTags.SHA256))
             .build("hunter2".toCharArray())
         val protected = PGPSecretKeyRing.copyWithNewPassword(secret, null, encryptor)
-        assertNull(parsePgpKeyring(editMember(0, "privateKey" to JsonPrimitive(armor(protected)))))
+        assertNull(parse(editMember(0, "privateKey" to JsonPrimitive(armor(protected)))))
     }
 
     @Test
@@ -227,7 +247,7 @@ class PgpKeyringTest {
         val a = memberRing(0)
         val foreignSubkey = memberRing(1).secretKeys.asSequence().first { !it.isMasterKey }
         val grafted = PGPSecretKeyRing.insertSecretKey(a, foreignSubkey)
-        assertNull(parsePgpKeyring(editMember(0, "privateKey" to JsonPrimitive(armor(grafted)))))
+        assertNull(parse(editMember(0, "privateKey" to JsonPrimitive(armor(grafted)))))
     }
 
     @Test
@@ -237,7 +257,7 @@ class PgpKeyringTest {
         val stripped = PGPSecretKeyRing.removeSecretKey(a, subkey)
         // The public half survives as an extra public key; the ring is no longer complete.
         val withPublicOnlySubkey = PGPSecretKeyRing.insertOrReplacePublicKey(stripped, subkey.publicKey)
-        assertNull(parsePgpKeyring(editMember(0, "privateKey" to JsonPrimitive(armor(withPublicOnlySubkey)))))
+        assertNull(parse(editMember(0, "privateKey" to JsonPrimitive(armor(withPublicOnlySubkey)))))
     }
 
     // ---- helpers ----
@@ -260,7 +280,7 @@ class PgpKeyringTest {
     }
 
     private fun memberRing(index: Int): PGPSecretKeyRing =
-        requireNotNull(parsePgpKeyring(ringBytes)).members[index].ring
+        requireNotNull(parse(ringBytes)).members[index].ring
 
     private fun armor(ring: PGPSecretKeyRing): String = ByteArrayOutputStream().use { out ->
         ArmoredOutputStream(out).use { ring.encode(it) }

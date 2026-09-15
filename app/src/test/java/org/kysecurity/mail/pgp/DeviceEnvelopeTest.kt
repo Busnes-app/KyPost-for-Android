@@ -164,6 +164,11 @@ class DeviceEnvelopeTest {
         val json = v3Vector()["envelope"].toString()
         val padded = json.dropLast(1) + " ".repeat(128 * 1024 - json.length + 2) + "}"
         assertNull(parseDeviceEnvelope(padded, allVersions))
+        // A v3-only caller is bounded at the v3 cap before the parse, not at the legacy cap.
+        assertNull(parseDeviceEnvelope(padded, setOf(ENVELOPE_VERSION_KEYRING)))
+        assertTrue(padded.length < org.kysecurity.mail.MemoryBudget.PGP_DEVICE_ENVELOPE_LEGACY_BYTES)
+        assertNotNull(parseDeviceEnvelope(json, setOf(ENVELOPE_VERSION_KEYRING)))
+        assertNull(parseDeviceEnvelope(json, emptySet()))
         val multibyte = json.dropLast(1) + "," + "\"" + "試".repeat(43 * 1024) + "\":1}"
         assertTrue(multibyte.length < 128 * 1024)
         assertNull(parseDeviceEnvelope(multibyte, allVersions))

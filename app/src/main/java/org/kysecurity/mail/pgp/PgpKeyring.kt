@@ -60,13 +60,18 @@ internal class PgpKeyring(
 }
 
 /**
- * Null for anything that is not a complete, self-consistent ring. Every check runs on the
- * caller's temporary copy; nothing here touches the vault or the session. In order: the plaintext
- * bound, strict UTF-8, duplicate JSON keys, exact field set and types, the inventory and its
- * counts, then each member's packets — one unprotected private ring per entry whose derived
- * fingerprints, taken together, are exactly the inventory.
+ * Null for anything that is not a complete, self-consistent ring whose active key is
+ * [expectedActiveFingerprint] — the fingerprint the caller committed to in the envelope AAD,
+ * normalised the same way. Self-consistency alone is not enough: every AAD input is public, so a
+ * ring that merely agrees with itself could name any active key its author controls. Every check
+ * runs on the caller's temporary copy; nothing here touches the vault or the session. In order:
+ * the plaintext bound, strict UTF-8, duplicate JSON keys, exact field set and types, the
+ * inventory and its counts, then each member's packets — one unprotected private ring per entry
+ * whose derived fingerprints, taken together, are exactly the inventory.
  */
-internal fun parsePgpKeyring(plaintext: ByteArray): PgpKeyring? = runCatching {
+internal fun parsePgpKeyring(plaintext: ByteArray, expectedActiveFingerprint: String): PgpKeyring? = runCatching {
+    val expected = expectedActiveFingerprint.uppercase().filterNot { it.isWhitespace() }
+    if (!FINGERPRINT.matches(expected)) return null
     if (plaintext.isEmpty() || plaintext.size > MemoryBudget.PGP_KEYRING_JSON_BYTES) return null
     val text = decodeStrictUtf8(plaintext) ?: return null
     if (jsonHasDuplicateKeys(text)) return null
@@ -80,6 +85,7 @@ internal fun parsePgpKeyring(plaintext: ByteArray): PgpKeyring? = runCatching {
     if (materialGeneration !in 1..MAX_SAFE_GENERATION) return null
 
     val activeFingerprint = root.fingerprint("activeFingerprint") ?: return null
+    if (activeFingerprint != expected) return null
     val inventory = root["keyFingerprints"]?.jsonArray ?: return null
     if (inventory.isEmpty() || inventory.size > MemoryBudget.PGP_KEYRING_FINGERPRINT_COUNT) return null
     val declared = HashSet<String>()

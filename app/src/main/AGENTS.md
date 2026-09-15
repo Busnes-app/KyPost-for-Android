@@ -159,7 +159,9 @@ Owns production Android app code and resources.
   publishes capability, generation and acknowledgement contracts, so a v3 envelope is
   `ENVELOPE_MALFORMED` there rather than opened. v2 parsing is byte-compatible with what shipped
   (a quoted version string still opens; the on-curve check stays with the Keystore agreement).
-  v3 is checked before any key work: the serialized envelope is at most
+  The pre-parse bound is the largest cap among the versions the caller admits, so a v3-only
+  caller never hands the JSON parser more than the v3 cap. v3 is checked before any key work:
+  the serialized envelope is at most
   `MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES` of UTF-8 (measured without copying), exactly the
   five fields, canonical padded standard base64, a 65-byte uncompressed point that is on P-256 and
   not the identity, a 12-byte IV, and a ciphertext longer than its 16-byte tag. The v3 AAD binds
@@ -173,7 +175,10 @@ Owns production Android app code and resources.
   entries. Each member is one unprotected private ring whose primary fingerprint matches its
   entry, checked from the packet header before any extraction so no attacker-chosen passphrase KDF
   runs, with every subkey bound by the primary; the fingerprints derived from all packets must
-  equal the declared inventory exactly, and exactly one member is the active one. Historical
+  equal the declared inventory exactly, and exactly one member is the active one. The caller
+  passes the active fingerprint it committed to in the AAD and the ring must name that same key:
+  every AAD input is public, so a self-consistent ring alone could name any active key its author
+  controls. Historical
   members stay for decryption and are not signers. The holder keeps the original plaintext bytes
   and each member's armor for later sealing and wipes those on `wipe()`; the JSON String, element
   tree and Bouncy Castle packet objects cannot be zeroed and are documented as transient.

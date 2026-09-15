@@ -67,8 +67,14 @@ internal class DeviceEnvelopeFields(val version: Int, val epk: ByteArray, val iv
  */
 internal fun parseDeviceEnvelope(json: String, allowedVersions: Set<Int>): DeviceEnvelopeFields? = runCatching {
     // A String's UTF-8 length is at least its char count, so this bounds the parse without
-    // measuring; the exact v3 limit is applied below once the version is known.
-    if (json.length > MemoryBudget.PGP_DEVICE_ENVELOPE_LEGACY_BYTES) return null
+    // measuring, at the largest cap among the versions this caller admits; a v3-only caller never
+    // hands the parser more than the v3 cap. The exact v3 limit is re-applied below once the
+    // version is known, for callers that admit both.
+    val parseBound = allowedVersions.maxOf {
+        if (it == ENVELOPE_VERSION_KEYRING) MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES
+        else MemoryBudget.PGP_DEVICE_ENVELOPE_LEGACY_BYTES
+    }
+    if (json.length > parseBound) return null
     val o = Json.parseToJsonElement(json).jsonObject
     val v = o["v"]?.jsonPrimitive ?: return null
     val version = when {
