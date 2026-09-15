@@ -213,6 +213,10 @@
     <string name="compose_pgp_not_paired">This device isn\'t paired with a KyPost server.</string>
     <string name="compose_send_success">Email sent successfully</string>
     <string name="compose_draft_restored">Restored your unsent message</string>
+    <string name="compose_discard_title">Discard this message?</string>
+    <string name="compose_discard_body">It has not been sent, and KyPost keeps no copy.</string>
+    <string name="compose_discard_confirm">Discard</string>
+    <string name="compose_discard_keep">Keep editing</string>
     <string name="address_book_search_hint">Search contacts</string>
     <string name="address_book_action_to">TO</string>
     <string name="address_book_action_cc">CC</string>
