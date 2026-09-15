@@ -11,6 +11,7 @@ import org.bouncycastle.openpgp.PGPLiteralDataGenerator
 import org.bouncycastle.openpgp.PGPPublicKey
 import org.bouncycastle.openpgp.PGPPublicKeyRing
 import org.bouncycastle.openpgp.PGPPublicKeyRingCollection
+import org.bouncycastle.openpgp.PGPSecretKeyRing
 import org.bouncycastle.openpgp.PGPSignature
 import org.bouncycastle.openpgp.PGPSignatureGenerator
 import org.bouncycastle.openpgp.PGPUtil
@@ -33,14 +34,30 @@ internal sealed class EncryptResult {
 /** Bc* operators, never Jce*: Android's stripped "BC" JCE provider makes the Jce path differ. */
 internal object PgpEncryptor {
 
+    /** Legacy armor: the first (current) ring signs. A key that will not parse is unusable, never
+     *  silently unsigned. */
+    fun encrypt(
+        plaintext: ByteArray,
+        recipientPublicKeys: List<String>,
+        /** Armored private key to sign with, or null to encrypt without signing. A [CharArray]
+         *  for the same reason [PgpDecryptor.decrypt]'s is. */
+        armoredSigningKey: CharArray?,
+    ): EncryptResult {
+        val ring = armoredSigningKey?.let { armor ->
+            runCatching { armor.useArmoredStream(::orderedSecretKeyRings)?.firstOrNull() }.getOrNull()
+                ?: return EncryptResult.Failed("the signing key is unusable")
+        }
+        return encrypt(plaintext, recipientPublicKeys, ring)
+    }
+
     fun encrypt(
         plaintext: ByteArray,
         /** Armored recipient public keys. Empty is refused rather than producing a message nobody
          *  can open. */
         recipientPublicKeys: List<String>,
-        /** Armored private key to sign with, or null to encrypt without signing. A [CharArray]
-         *  for the same reason [PgpDecryptor.decrypt]'s is. */
-        armoredSigningKey: CharArray?,
+        /** The one ring that signs, or null to encrypt without signing. Only this ring's own
+         *  signing key is considered: a historical member is never a fallback. */
+        signingRing: PGPSecretKeyRing?,
     ): EncryptResult = runCatching {
         if (plaintext.size > MAX_DECRYPTED_PLAINTEXT_BYTES) {
             return EncryptResult.Failed("this message is too large to encrypt")
@@ -63,7 +80,7 @@ internal object PgpEncryptor {
         )
         encryptionKeys.forEach { generator.addMethod(BcPublicKeyKeyEncryptionMethodGenerator(it)) }
 
-        val signer = armoredSigningKey?.let {
+        val signer = signingRing?.let {
             signatureGeneratorFor(it) ?: return EncryptResult.Failed("the signing key is unusable")
         }
 
@@ -98,10 +115,13 @@ internal object PgpEncryptor {
         EncryptResult.Ok(out.toString(Charsets.UTF_8.name()))
     }.getOrElse { EncryptResult.Failed(it.message ?: "could not encrypt this message") }
 
-    /** Derived from the private key, never fetched; the whole ring, since only the subkey encrypts. */
+    /** Legacy armor: the first (current) ring. */
     fun ownPublicKey(armoredPrivateKey: CharArray): String? = runCatching {
-        val ring = armoredPrivateKey.useArmoredStream(::orderedSecretKeyRings)?.firstOrNull() ?: return null
+        armoredPrivateKey.useArmoredStream(::orderedSecretKeyRings)?.firstOrNull()?.let { ownPublicKey(it) }
+    }.getOrNull()
 
+    /** Derived from the private key, never fetched; the whole ring, since only the subkey encrypts. */
+    fun ownPublicKey(ring: PGPSecretKeyRing): String? = runCatching {
         val out = ByteArrayOutputStream()
         ArmoredOutputStream(out).use { armoredOut ->
             PGPPublicKeyRing(ring.publicKeys.asSequence().toList()).encode(armoredOut)
@@ -129,12 +149,11 @@ internal object PgpEncryptor {
         return nowMillis > creationTime.time + validSeconds * 1000L
     }
 
-    /** Empty passphrase: the armored key came out of the device envelope already unwrapped. */
-    private fun signatureGeneratorFor(armoredPrivateKey: CharArray): PGPSignatureGenerator? = runCatching {
-        val secretKey = armoredPrivateKey.useArmoredStream(::orderedSecretKeyRings)
-            ?.asSequence().orEmpty()
-            .flatMap { ring -> ring.secretKeys.asSequence() }
-            .firstOrNull { it.isSigningKey }
+    /** Empty passphrase: the key came out of the device envelope already unwrapped. A revoked or
+     *  expired signing key is unusable, not a reason to look elsewhere. */
+    private fun signatureGeneratorFor(ring: PGPSecretKeyRing): PGPSignatureGenerator? = runCatching {
+        val secretKey = ring.secretKeys.asSequence()
+            .firstOrNull { it.isSigningKey && !it.publicKey.hasRevocation() && !it.publicKey.hasExpired() }
             ?: return null
 
         val privateKey = secretKey.extractPrivateKey(

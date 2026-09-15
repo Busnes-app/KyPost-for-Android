@@ -33,7 +33,7 @@ class PgpEncryptorKeyValidationTest {
     fun healthyKeyStillEncrypts() {
         val ring = ringGenerator("Bob <bob@example.invalid>").generatePublicKeyRing()
 
-        val result = PgpEncryptor.encrypt("x".toByteArray(), listOf(armor(ring.encoded)), null)
+        val result = PgpEncryptor.encrypt("x".toByteArray(), listOf(armor(ring.encoded)), null as CharArray?)
 
         assertTrue("a well-formed recipient key must still encrypt: $result", result is EncryptResult.Ok)
     }
@@ -63,7 +63,7 @@ class PgpEncryptorKeyValidationTest {
             revokedRing.publicKeys.asSequence().first { !it.isMasterKey }.hasRevocation(),
         )
 
-        val result = PgpEncryptor.encrypt("x".toByteArray(), listOf(armor(revokedRing.encoded)), null)
+        val result = PgpEncryptor.encrypt("x".toByteArray(), listOf(armor(revokedRing.encoded)), null as CharArray?)
 
         // Not "encryption must fail": this fixture's RSA primary is itself encryption-capable and
         // unrevoked, so falling back to it is correct and the recipient can still read the message.
@@ -98,7 +98,7 @@ class PgpEncryptorKeyValidationTest {
             PGPPublicKey.addCertification(subPub, sigGen.generateCertification(primaryPub, subPub)),
         )
 
-        val result = PgpEncryptor.encrypt("x".toByteArray(), listOf(armor(revokedRing.encoded)), null)
+        val result = PgpEncryptor.encrypt("x".toByteArray(), listOf(armor(revokedRing.encoded)), null as CharArray?)
 
         assertTrue(
             "no unrevoked encryption key remains, so the send must fail: $result",
@@ -112,7 +112,7 @@ class PgpEncryptorKeyValidationTest {
         val eve = ringGenerator("Eve <eve@example.invalid>").generatePublicKeyRing()
         val twoRings = armor(bob.encoded + eve.encoded)
 
-        val result = PgpEncryptor.encrypt("x".toByteArray(), listOf(twoRings), null)
+        val result = PgpEncryptor.encrypt("x".toByteArray(), listOf(twoRings), null as CharArray?)
 
         assertTrue(
             "a blob holding more than one key ring is ambiguous and must be refused: $result",
@@ -132,7 +132,7 @@ class PgpEncryptorKeyValidationTest {
             eveSecret.publicKeys.asSequence().first { !it.isMasterKey },
         )
 
-        val result = PgpEncryptor.encrypt("x".toByteArray(), listOf(armor(grafted.encoded)), null)
+        val result = PgpEncryptor.encrypt("x".toByteArray(), listOf(armor(grafted.encoded)), null as CharArray?)
 
         assertTrue(
             "a subkey bound by a foreign signature must be refused: $result",

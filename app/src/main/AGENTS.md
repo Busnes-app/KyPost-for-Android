@@ -184,6 +184,35 @@ Owns production Android app code and resources.
   tree and Bouncy Castle packet objects cannot be zeroed and are documented as transient.
   `PGP_KEYRING_IMPORT_PEAK_BYTES` accounts for that import beside, not instead of, the legacy
   enrollment peak. Legacy armor keeps its own parser and limits.
+  The sealed record carries its plaintext kind as its format byte (`VaultRecordKind`: 1 legacy
+  armor, 2 keyring); preference records are legacy by definition, and an unknown byte fails
+  closed. Nothing inspects plaintext to choose a parser: `installOpenedMaterial` installs by the
+  declared kind, and a keyring record that no longer validates installs nothing and opens as
+  `Failed`. `EnrollmentSession` holds one thing at a time — legacy armor as a wipeable
+  `CharArray`, or one validated `PgpKeyring` — and exposes only scoped access: `withDecryptionKeys`
+  (every member, so history and hidden recipients decrypt), `withSigner` (the explicit active
+  member, or a legacy collection's first ring; null means unusable and callers must fail, never
+  substitute a historical member), `withLegacyArmor` (legacy only, for the merge) and
+  `withKeyring`. There is no raw accessor, so a keyring can never reach the armor parser.
+  `PgpDecryptor` tries every encryption-capable key for a hidden (zero) recipient key id;
+  `PgpEncryptor` signs only with the given ring's own unrevoked, unexpired signing key.
+  `importKeyring` is the local v3 import, pure and transport-free: validate the whole ring against
+  the AAD's active fingerprint, then open the previous vault to establish replacement safety,
+  then seal the original bytes as a KEYRING record, then install the session from those committed
+  bytes, then `onLocalComplete`; any acknowledgement caller hangs off that callback and nothing
+  earlier. Identical bytes replay without resealing only when a KEYRING record is on disk, read
+  through the unauthenticated `sealedKind` probe: a held session proves nothing about the disk,
+  since teardown and key invalidation delete the record without clearing the session, so a held
+  ring with no record behind it is sealed like a fresh import. Any other previous material — a
+  different ring or legacy armor — is `RefusedIncomparable` and kept, because equal inventories
+  prove nothing about certifications or revocations and the replacement contract is not shipped.
+  A keyring record binds its format byte into the GCM tag as AAD on seal and open; legacy records
+  predate that and stay AAD-free. A
+  legacy ceremony over a held keyring refuses the merge (`withLegacyArmor` is null) and leaves the
+  record. `probeEnrollment` reports a keyring record as `ENROLLED_KEYRING`: `isEnrolled()` for this
+  device's own reading, signing and settings row, but `legacyReportValue()` false, so
+  `EnrollmentStateWorker` never acknowledges a prepared keyring as v2 enrollment; the server has no
+  field for it yet. Production never dispatches a v3 envelope; only tests reach `importKeyring`.
   Hostile Location Protection destroys the envelope and is the mode in which none of this exists.
   `pgpRowMarker` marks inbox rows for the two states that yield nothing readable (🔒 client-protected,
   ⚠ decrypt failed) and deliberately leaves server-decrypted rows unmarked — those open normally, so

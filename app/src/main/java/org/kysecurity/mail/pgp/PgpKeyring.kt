@@ -69,9 +69,18 @@ internal class PgpKeyring(
  * inventory and its counts, then each member's packets — one unprotected private ring per entry
  * whose derived fingerprints, taken together, are exactly the inventory.
  */
-internal fun parsePgpKeyring(plaintext: ByteArray, expectedActiveFingerprint: String): PgpKeyring? = runCatching {
+internal fun parsePgpKeyring(plaintext: ByteArray, expectedActiveFingerprint: String): PgpKeyring? {
     val expected = expectedActiveFingerprint.uppercase().filterNot { it.isWhitespace() }
     if (!FINGERPRINT.matches(expected)) return null
+    return parseRing(plaintext, expected)
+}
+
+/** For bytes this device sealed after [parsePgpKeyring] validated them: the sealed plaintext is
+ *  authenticated under the vault key, so the ring's own active key is the committed one. Never
+ *  for material arriving from outside. */
+internal fun reopenPgpKeyring(plaintext: ByteArray): PgpKeyring? = parseRing(plaintext, expected = null)
+
+private fun parseRing(plaintext: ByteArray, expected: String?): PgpKeyring? = runCatching {
     if (plaintext.isEmpty() || plaintext.size > MemoryBudget.PGP_KEYRING_JSON_BYTES) return null
     val text = decodeStrictUtf8(plaintext) ?: return null
     if (jsonHasDuplicateKeys(text)) return null
@@ -85,7 +94,7 @@ internal fun parsePgpKeyring(plaintext: ByteArray, expectedActiveFingerprint: St
     if (materialGeneration !in 1..MAX_SAFE_GENERATION) return null
 
     val activeFingerprint = root.fingerprint("activeFingerprint") ?: return null
-    if (activeFingerprint != expected) return null
+    if (expected != null && activeFingerprint != expected) return null
     val inventory = root["keyFingerprints"]?.jsonArray ?: return null
     if (inventory.isEmpty() || inventory.size > MemoryBudget.PGP_KEYRING_FINGERPRINT_COUNT) return null
     val declared = HashSet<String>()

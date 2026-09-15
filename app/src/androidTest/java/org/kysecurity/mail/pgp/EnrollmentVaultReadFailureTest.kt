@@ -59,7 +59,7 @@ class EnrollmentVaultReadFailureTest {
         } finally {
             unavailable.set(false)
         }
-        assertArrayEquals(historical, vault.stored()!!.second)
+        assertArrayEquals(historical, vault.stored()!!.ciphertext)
         assertTrue(vault.hasBlob())
     }
 
