@@ -16,7 +16,11 @@ class KeywordSettings(context: Context) {
             val array = JSONArray(prefs.getString(KEY_KEYWORD_ORDER, "[]"))
             List(array.length()) { array.getString(it) }
         }.getOrDefault(emptyList())
-        return (saved.filter { it in all } + all.sortedBy { it.lowercase() }).distinct()
+        // Filtered on read as well as on write: an install that stored the label before the
+        // write-side filter existed must not keep a relay-made All chip.
+        return (saved.filter { it in all } + all.sortedBy { it.lowercase() })
+            .filterNot { it.isAllTab() }
+            .distinct()
     }
 
     /** Bounded both ways: keywords are unvalidated relay input rendered as un-recycled Chips. */
@@ -28,7 +32,7 @@ class KeywordSettings(context: Context) {
         val cleaned = keywords.asSequence()
             .map { it.trim() }
             .filter { it.isNotBlank() && it.length <= MAX_KEYWORD_LENGTH }
-            .filterNot { it.equals(KeywordTabs.ALL, ignoreCase = true) }
+            .filterNot { it.isAllTab() }
             .toSet()
         if (cleaned.isEmpty()) return
         // LinkedHashSet: insertion-ordered, so takeLast() drops the oldest entries.
@@ -68,6 +72,8 @@ class KeywordSettings(context: Context) {
     }
 
     private fun keyForVisibility(keyword: String): String = "keyword_visible_$keyword"
+
+    private fun String.isAllTab(): Boolean = equals(KeywordTabs.ALL, ignoreCase = true)
 
     companion object {
         const val PREFS_NAME = "org.kysecurity.mail.keyword_settings"

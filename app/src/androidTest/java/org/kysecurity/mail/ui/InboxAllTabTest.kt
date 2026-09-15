@@ -1,5 +1,6 @@
 package org.kysecurity.mail.ui
 
+import android.content.Context
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -10,6 +11,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Before
 import org.junit.Test
+import org.json.JSONArray
 import org.junit.runner.RunWith
 import org.kysecurity.mail.InboxActivity
 import org.kysecurity.mail.KeywordSettings
@@ -30,8 +32,10 @@ class InboxAllTabTest {
         keywordSettings.setAllTabVisible(false)
     }
 
+    /** rememberKeywords rewrites both stored lists from the filtered read, dropping a seeded All. */
     @After
     fun restoreDefaults() {
+        keywordSettings.rememberKeywords(setOf(TAB_KEYWORD))
         keywordSettings.setAllTabVisible(true)
         keywordSettings.setKeywordVisible(TAB_KEYWORD, false)
     }
@@ -55,6 +59,26 @@ class InboxAllTabTest {
         keywordSettings.rememberKeywords(setOf(KeywordTabs.ALL, "all"))
 
         assertFalse(keywordSettings.getOrderedKeywords().any { it.equals(KeywordTabs.ALL, ignoreCase = true) })
+        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val chips = activity.findViewById<ChipGroup>(R.id.keywordChipGroup)
+                val labels = (0 until chips.childCount).map { (chips.getChildAt(it) as Chip).text.toString() }
+
+                assertEquals(listOf(TAB_KEYWORD), labels)
+            }
+        }
+    }
+
+    /** An install that stored the label before the write-side filter existed. */
+    @Test
+    fun aLabelSpeltAllStoredBeforeTheFilterIsIgnoredOnRead() {
+        InstrumentationRegistry.getInstrumentation().targetContext
+            .getSharedPreferences(KeywordSettings.PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putStringSet("all_keywords", setOf(KeywordTabs.ALL, TAB_KEYWORD))
+            .putString("keyword_order", JSONArray(listOf(KeywordTabs.ALL, TAB_KEYWORD)).toString())
+            .commit()
+
+        assertEquals(listOf(TAB_KEYWORD), keywordSettings.getOrderedKeywords())
         ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val chips = activity.findViewById<ChipGroup>(R.id.keywordChipGroup)
