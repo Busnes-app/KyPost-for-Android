@@ -38,6 +38,17 @@ internal fun enrollmentReportOutcome(
         is EnrollmentCallResult.Envelope -> EnrollmentReportOutcome.GIVE_UP
     }
 
+/** Whether a report attempt spends the teardown marker: only when the correction landed, or no
+ *  device row remains to correct. Transient results keep it even past the attempt ceiling, which
+ *  [enrollmentReportOutcome] deliberately folds into GIVE_UP: the worker is re-enqueued on every
+ *  unlock, and with no record on disk the same "not enrolled" stays truthful however long it waits. */
+internal fun teardownReportSpent(result: EnrollmentCallResult): Boolean = when (result) {
+    is EnrollmentCallResult.Ok, is EnrollmentCallResult.Unauthorized, is EnrollmentCallResult.NotFound -> true
+    is EnrollmentCallResult.RateLimited, is EnrollmentCallResult.Failed -> false
+    // NotEnrolled cannot be refused, and this route never returns an envelope; nothing to keep waiting for.
+    is EnrollmentCallResult.Conflict, is EnrollmentCallResult.Envelope -> true
+}
+
 /** Reports enrollment state durably; offline is expected, so it retries rather than drops. */
 internal class EnrollmentStateWorker(
     context: Context,
@@ -73,10 +84,8 @@ internal class EnrollmentStateWorker(
         // The pinned factory, as every client carrying the device credential uses; the default is unpinned.
         val clients = EnrollmentClients(callFactory = pinnedPairingCallFactory(applicationContext))
         val result = clients.reportState(pairing.serverUrl, deviceId, deviceSecret, report)
-        val outcome = enrollmentReportOutcome(result, runAttemptCount)
-        // The teardown has been spoken for, or can never be: only a retry keeps the marker.
-        if (tornDown && outcome != EnrollmentReportOutcome.RETRY) vault.clearTeardownReport()
-        return when (outcome) {
+        if (tornDown && teardownReportSpent(result)) vault.clearTeardownReport()
+        return when (enrollmentReportOutcome(result, runAttemptCount)) {
             EnrollmentReportOutcome.DONE -> Result.success()
             EnrollmentReportOutcome.RETRY -> Result.retry()
             EnrollmentReportOutcome.GIVE_UP -> Result.failure()

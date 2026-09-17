@@ -229,7 +229,9 @@ Owns production Android app code and resources.
   record has no stored acknowledgement. `NotEnrolled` makes the server forget its delivery record,
   so the worker sends it only on a proven loss: `KEY_INVALIDATED` (the Keystore's own verdict) or
   `NO_BLOB` with the teardown marker `EnrollmentTeardown.destroy` leaves in the same preferences
-  (`markTeardownReport`; `store` clears it, the worker clears it once the report is spoken for,
+  (`markTeardownReport`; `store` clears it, the worker clears it only when the report landed or no
+  device row remains (`teardownReportSpent`: Ok, Unauthorized, NotFound), never on a transient
+  failure even past the attempt ceiling,
   and the account-scoped purge clears it because a dropped pairing has no device row to correct;
   `clearKeyringAck` removes only the two acknowledgement keys so key regeneration and `destroy`
   leave the marker alone).

@@ -21,8 +21,10 @@ class EnrollmentKeyringRecordTest {
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val vault = EnrollmentVault(context)
 
-    @Before fun clean() { vault.destroy() }
-    @After fun cleanup() { vault.destroy() }
+    // The teardown marker survives destroy() by design and an earlier class's teardown leaves it
+    // behind, so this class's isolation clears it explicitly.
+    @Before fun clean() { vault.destroy(); vault.clearTeardownReport() }
+    @After fun cleanup() { vault.destroy(); vault.clearTeardownReport() }
 
     @Test
     fun theKindRoundTripsAndDefaultsToLegacy() {

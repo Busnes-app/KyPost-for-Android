@@ -71,6 +71,22 @@ class EnrollmentReportOutcomeTest {
         )
     }
 
+    /** The teardown marker asks for a "not enrolled" that makes the server drop its delivery
+     *  record. It is spent only when the correction landed or no device row remains to correct.
+     *  An exhausted attempt budget is still transient: the worker is re-enqueued on every unlock
+     *  and the same report stays truthful however long it waits. */
+    @Test
+    fun theTeardownMarkerIsSpentOnlyByALandedOrImpossibleReport() {
+        assertEquals(true, teardownReportSpent(EnrollmentCallResult.Ok))
+        assertEquals(true, teardownReportSpent(EnrollmentCallResult.Unauthorized))
+        assertEquals(true, teardownReportSpent(EnrollmentCallResult.NotFound))
+        assertEquals(false, teardownReportSpent(EnrollmentCallResult.Failed("offline")))
+        assertEquals(false, teardownReportSpent(EnrollmentCallResult.RateLimited(42L)))
+        // The same transient results at the ceiling are GIVE_UP for retry purposes, not spent.
+        assertEquals(EnrollmentReportOutcome.GIVE_UP, enrollmentReportOutcome(EnrollmentCallResult.Failed("offline"), MAX_REPORT_ATTEMPTS))
+        assertEquals(false, teardownReportSpent(EnrollmentCallResult.Failed("offline")))
+    }
+
     /** 404 on this route means the device row is gone — deregistered, or the account deleted. */
     @Test
     fun aMissingDeviceRowIsDoneNotARetry() {
