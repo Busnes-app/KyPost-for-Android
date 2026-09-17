@@ -40,6 +40,9 @@ class SettingsActivity : LockedActivity() {
         findViewById<Button>(R.id.settingsAbout).setOnClickListener {
             showAboutDialog(this)
         }
+        findViewById<Button>(R.id.settingsPrivacy).setOnClickListener {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(getString(R.string.settings_privacy_url))))
+        }
         findViewById<Button>(R.id.settingsSupport).setOnClickListener {
             val supportUrl = supportUrlForFlavor(BuildConfig.FLAVOR)
             if (supportUrl == null) {
@@ -69,6 +72,7 @@ class SettingsActivity : LockedActivity() {
             R.id.settingsPairing,
             R.id.settingsPgp,
             R.id.settingsAbout,
+            R.id.settingsPrivacy,
             R.id.settingsSupport,
         ).forEach { applyGhostButtonTheme(this, findViewById<Button>(it)) }
         listOf(
@@ -78,6 +82,7 @@ class SettingsActivity : LockedActivity() {
             R.id.settingsPairingBody,
             R.id.settingsPgpBody,
             R.id.settingsAboutBody,
+            R.id.settingsPrivacyBody,
             R.id.settingsSupportBody,
         ).forEach { findViewById<TextView>(it).setTextColor(Color.parseColor(palette.ink)) }
     }

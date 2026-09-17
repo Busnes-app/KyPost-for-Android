@@ -88,6 +88,8 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   One-time purchases are consumed so they can be repeated. Subscriptions are acknowledged,
   displayed as active instead of being offered again, and link to Google Play for management or
   cancellation. Never render purchase options until both INAPP and SUBS ownership queries succeed.
+- Settings links to the canonical KyPost privacy policy at
+  `https://www.kypost.org/privacy.html`, immediately before the final Support KyPost action.
 - Contact autocomplete (ContactAutocomplete.md): `ComposeActivity`'s TO/CC/BCC fields are
   `RecipientInputView`s backed by `ContactDao.search` (name/email substring match, debounced
   150ms, top 5 shown). The address-book icon on the TO row opens `AddressBookSheet`

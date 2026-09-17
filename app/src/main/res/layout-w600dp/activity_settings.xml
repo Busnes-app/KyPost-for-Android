@@ -108,6 +108,19 @@
                 android:text="@string/settings_about_body" />
 
             <Button
+                android:id="@+id/settingsPrivacy"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_privacy" />
+
+            <TextView
+                android:id="@+id/settingsPrivacyBody"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:text="@string/settings_privacy_body" />
+
+            <Button
                 android:id="@+id/settingsSupport"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
