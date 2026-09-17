@@ -83,10 +83,10 @@ internal class AndroidEnrollmentTransport(context: Context) : EnrollmentTranspor
         clients.fetchEnvelope(p.serverUrl, p.deviceId!!, p.deviceSecret!!)
     }
 
-    override suspend fun reportEnrolled(enrolled: Boolean): EnrollmentCallResult =
+    override suspend fun report(report: EnrollmentReport): EnrollmentCallResult =
         withContext(Dispatchers.IO) {
             val p = pairing() ?: return@withContext EnrollmentCallResult.Unauthorized
-            clients.reportState(p.serverUrl, p.deviceId!!, p.deviceSecret!!, enrolled)
+            clients.reportState(p.serverUrl, p.deviceId!!, p.deviceSecret!!, report)
         }
 
     override fun enqueueDurableReport() = EnrollmentStateWorker.enqueue(appContext)

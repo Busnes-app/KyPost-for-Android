@@ -42,8 +42,12 @@ internal suspend fun importKeyring(
     sealedKind: () -> VaultRecordKind?,
     sealer: VaultSealer,
     onLocalComplete: () -> Unit,
+    /** The parsed ring against what the caller was told to expect (the server's delivery record).
+     *  False is [KeyringImportOutcome.InvalidRing]: nothing is touched. */
+    validate: (PgpKeyring) -> Boolean = { true },
 ): KeyringImportOutcome {
     val ring = parsePgpKeyring(plaintext, expectedActiveFingerprint) ?: return KeyringImportOutcome.InvalidRing
+    if (!validate(ring)) return ring.dropWith(KeyringImportOutcome.InvalidRing)
 
     val previousHeld = EnrollmentSession.isHeld() || when (val opened = previousVault.open()) {
         OpenOutcome.Opened -> true
@@ -71,7 +75,8 @@ internal suspend fun importKeyring(
         }
     }
 
-    return when (val sealed = sealer.seal(ring.original, VaultRecordKind.KEYRING)) {
+    val ack = EnrollmentReport.Keyring(ring.materialGeneration, ring.activeFingerprint)
+    return when (val sealed = sealer.seal(ring.original, VaultRecordKind.KEYRING, ack)) {
         SealOutcome.Sealed -> {
             EnrollmentSession.putKeyring(ring)
             onLocalComplete()

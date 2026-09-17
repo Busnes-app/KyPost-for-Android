@@ -6,8 +6,12 @@ import android.content.Context
 internal object EnrollmentTeardown {
     fun destroy(context: Context): List<String> {
         val failed = mutableListOf<String>()
-        failed += EnrollmentVault(context).destroy()
+        val vault = EnrollmentVault(context)
+        failed += vault.destroy()
         if (!EnrollmentKeyStore.deleteKeyPair()) failed += "deleteAgreementKey"
+        // After destroy, which clears the same store. This is the one signal that lets the worker
+        // tell the server "not enrolled"; an ordinary probe never may.
+        if (!vault.markTeardownReport()) failed += "markTeardown"
         return failed
     }
 

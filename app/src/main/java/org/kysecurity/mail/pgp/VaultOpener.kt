@@ -29,4 +29,9 @@ internal sealed class OpenOutcome {
 internal interface VaultOpener {
     /** On [OpenOutcome.Opened], and only then, the opened material is in [EnrollmentSession]. */
     suspend fun open(): OpenOutcome
+
+    /** The kind of the record on disk, read without authentication; null when there is none.
+     *  Throws when the record cannot be read, so a caller never seals over a record it could
+     *  not classify. */
+    fun sealedKind(): VaultRecordKind?
 }

@@ -610,6 +610,8 @@
 
     <!-- Failures. A closed set of local strings: no server-supplied text is ever shown here, so
          an adversarial server cannot pick which of these the user reads. -->
+    <string name="enrollment_failed_keyring_rejected">The keys sent to this device don\'t match what your account says it sent, or they can\'t replace the keys already on this device. Nothing was saved. Start again from your browser to try once more.</string>
+    <string name="enrollment_failed_acknowledgement_refused">Your account\'s encryption keys changed while this device was being set up. The keys were saved on this device, but your account no longer accepts them, so this device can\'t send encrypted mail yet. Start again from your browser to enroll it with the current keys.</string>
     <string name="enrollment_failed_generic">Something went wrong setting up this device. Nothing was saved. You can try again.</string>
     <string name="enrollment_failed_unauthorized">Your server didn\'t accept this device. Re-pair it from the pairing screen, then try again.</string>
     <string name="enrollment_failed_rate_limited">Your server is asking this device to slow down. Try again in a few minutes.</string>

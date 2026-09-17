@@ -3,8 +3,11 @@ package org.kysecurity.mail.pgp
 internal class FakeVaultOpener(
     var outcome: OpenOutcome = OpenOutcome.Opened,
     var keyToHold: String? = TestPgpPrivateKey.ARMORED_PRIVATE,
+    /** What is on disk, read without authentication; null when nothing. */
+    var kindOnDisk: VaultRecordKind? = null,
 ) : VaultOpener {
     var opened = 0
+    override fun sealedKind(): VaultRecordKind? = kindOnDisk
     override suspend fun open(): OpenOutcome {
         opened++
         if (outcome is OpenOutcome.Opened) keyToHold?.let { EnrollmentSession.put(it.toCharArray()) }

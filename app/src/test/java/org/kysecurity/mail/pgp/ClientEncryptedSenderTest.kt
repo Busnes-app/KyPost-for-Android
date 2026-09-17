@@ -39,6 +39,36 @@ class ClientEncryptedSenderTest {
         mapOf(address to listOf(LocalSignerKey(TestPgpPrivateKey.ARMORED_PUBLIC, confirmed))),
     )
 
+    /** A converted account's send is refused unless it names the generation the device holds
+     *  (KyPost-Server #210), so the held keyring's generation rides on the message. */
+    @Test
+    fun aHeldKeyringSendsItsMaterialGeneration() = runBlocking {
+        val ring = SharedFixtures.keyring()["ring"]!!.let { kotlinx.serialization.json.Json.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), it) }
+        EnrollmentSession.putKeyring(requireNotNull(parsePgpKeyring(ring.toByteArray(Charsets.UTF_8), "5F117951610CAF01500FA059CDE63F0EBEC934A2")))
+        val transport = FakeClientEncryptedTransport()
+
+        val result = sender(
+            resolver = FakeRecipientKeyResolver(resolvedAll(listOf("alice@example.invalid"), TestPgpPrivateKey.ARMORED_PUBLIC)),
+            transport = transport,
+        ).send(draft(), sign = false)
+
+        assertTrue("expected Sent, got $result", result is ClientSendOutcome.Sent)
+        assertEquals(2L, transport.sent.single().materialGeneration)
+    }
+
+    /** Legacy armor has no generation, and a legacy account ignores the field. */
+    @Test
+    fun legacyArmorSendsNoMaterialGeneration() = runBlocking {
+        val transport = FakeClientEncryptedTransport()
+
+        sender(
+            resolver = FakeRecipientKeyResolver(resolvedAll(listOf("alice@example.invalid"), TestPgpPrivateKey.ARMORED_PUBLIC)),
+            transport = transport,
+        ).send(draft(), sign = false)
+
+        assertNull(transport.sent.single().materialGeneration)
+    }
+
     /** One shared ciphertext would put each BCC recipient's key id in a packet everyone can read. */
     @Test
     fun toAndCcShareDeliveryZeroAndEachBccGetsItsOwn() = runBlocking {

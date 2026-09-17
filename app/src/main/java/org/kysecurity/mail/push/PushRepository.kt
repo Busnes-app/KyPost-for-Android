@@ -227,6 +227,9 @@ class PushRepository(
         }
         // Every process-static holder at once via the registry, not by name — enumeration missed one.
         step("enrollment") { org.kysecurity.mail.pgp.EnrollmentTeardown.destroy(context).isEmpty() }
+        // The teardown above asks the worker to tell the server "not enrolled". With the pairing
+        // gone there is no device row to correct, and the marker must not speak for the next one.
+        step("enrollmentTeardownMarker") { org.kysecurity.mail.pgp.EnrollmentVault(context).clearTeardownReport() }
         step("processMemory") { org.kysecurity.mail.InMemoryPlaintext.clearAll().isEmpty() }
 
         if (residue.isNotEmpty()) {

@@ -84,7 +84,7 @@ class DeviceEnrollmentActivity : LockedActivity() {
 
     /** An anonymous object because `VaultSealer` is internal and a public class cannot widen it. */
     private val vaultSealer = object : VaultSealer {
-        override suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind): SealOutcome {
+        override suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind, ack: EnrollmentReport.Keyring?): SealOutcome {
             val vault = EnrollmentVault(applicationContext)
 
             // Off main: ensureKey() is a slow Keystore round trip. The prompt itself must stay on main.
@@ -139,7 +139,7 @@ class DeviceEnrollmentActivity : LockedActivity() {
                             // Post-shutdown the right outcome is a cancel: Failed would tear down the agreement key.
                             try {
                                 sealExecutor.execute {
-                                    resolveSeal(continuation, commitSeal(vault, authenticated, plaintext, kind))
+                                    resolveSeal(continuation, commitSeal(vault, authenticated, plaintext, kind, ack))
                                 }
                             } catch (e: RejectedExecutionException) {
                                 resolveSeal(continuation, SealOutcome.Cancelled)
@@ -376,18 +376,29 @@ class DeviceEnrollmentActivity : LockedActivity() {
         FailureReason.PUBLISH_REJECTED -> R.string.enrollment_failed_generic
         FailureReason.ENVELOPE_MALFORMED -> R.string.enrollment_failed_generic
         FailureReason.SEAL_FAILED -> R.string.enrollment_failed_generic
+        FailureReason.KEYRING_REJECTED -> R.string.enrollment_failed_keyring_rejected
+        FailureReason.ACKNOWLEDGEMENT_REFUSED -> R.string.enrollment_failed_acknowledgement_refused
     }
 }
 
 /** The only step that touches storage, after authentication. [SealOutcome.Sealed] means the
  *  record is durable; a write that did not complete reports [SealOutcome.Failed] and leaves the
  *  previous record in place. */
-internal fun commitSeal(vault: EnrollmentVault, authenticated: Cipher, plaintext: ByteArray, kind: VaultRecordKind): SealOutcome =
+internal fun commitSeal(
+    vault: EnrollmentVault,
+    authenticated: Cipher,
+    plaintext: ByteArray,
+    kind: VaultRecordKind,
+    ack: EnrollmentReport.Keyring? = null,
+): SealOutcome =
     runCatching {
         // The format byte selects the parser, so a keyring record binds it into the tag; legacy
         // records predate this and stay AAD-free.
         if (kind == VaultRecordKind.KEYRING) authenticated.updateAAD(byteArrayOf(kind.recordVersion))
         val ciphertext = authenticated.doFinal(plaintext)
-        if (vault.store(authenticated.iv, ciphertext, kind)) SealOutcome.Sealed
-        else SealOutcome.Failed("The sealed key could not be stored")
+        if (!vault.store(authenticated.iv, ciphertext, kind)) return SealOutcome.Failed("The sealed key could not be stored")
+        // The record is durable at this point. A lost acknowledgement only silences the worker's
+        // restatement; the ceremony still acknowledges directly, and re-enrolling repairs the rest.
+        if (ack != null && !vault.storeKeyringAck(ack)) android.util.Log.w("DeviceEnrollment", "Acknowledgement not stored")
+        SealOutcome.Sealed
     }.getOrElse { SealOutcome.Failed(it.message ?: "The seal failed") }

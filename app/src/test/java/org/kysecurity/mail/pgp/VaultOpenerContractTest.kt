@@ -12,6 +12,7 @@ class VaultOpenerContractTest {
     @After fun cleanup() = EnrollmentSession.clear()
 
     private class FakeOpener(private val outcome: OpenOutcome, private val key: String? = null) : VaultOpener {
+        override fun sealedKind(): VaultRecordKind? = null
         override suspend fun open(): OpenOutcome {
             if (key != null) EnrollmentSession.put(key.toCharArray())
             return outcome
