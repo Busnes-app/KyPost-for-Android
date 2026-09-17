@@ -29,7 +29,13 @@ Owns JVM unit tests for app logic that can run without device/emulator.
   material (a later generation, or legacy armor) touch nothing. `KeyringSessionTest` proves the
   session's scoped accessors: every member decrypts including a hidden recipient, only the active
   member signs and is the self-encryption target, legacy accessors see no keyring, and
-  `installOpenedMaterial` installs by declared kind only.
+  `installOpenedMaterial` installs by declared kind only. `EnrollmentCeremonyKeyringTest` seals the
+  shared ring under the v3 domain with the fake ports (a real P-256 point as `epk`, since v3 framing
+  rejects an off-curve one) and proves the live path: import and a `Keyring` acknowledgement on a
+  matching delivery record, `KEYRING_REJECTED` with nothing sealed when generation, members or
+  inventory differ, `ENVELOPE_MALFORMED` without a v3 delivery record, no durable retry after 409,
+  and the untouched legacy path. `EnrollmentClientsTest` pins the wire bodies: `envelopeVersions`
+  on publish, delivery metadata on fetch, and the three acknowledgement shapes.
 - Lifecycle-owned plaintext tests use pure holders such as `OwnedAttachmentSave`; prove admission,
   source cleanup isolation, and wiping without an emulator or timing-dependent threads.
   `ReadOutcomeDeliveryTest` queues the worker and consumer independently to prove completed

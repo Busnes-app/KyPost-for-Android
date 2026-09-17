@@ -33,12 +33,14 @@ internal class DeviceEnrollmentViewModel(application: Application) : AndroidView
         keys = AndroidEnrollmentKeys,
         // A proxy, not the Activity: the ViewModel outlives it. With none installed, seal() is Cancelled.
         sealer = object : VaultSealer {
-            override suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind): SealOutcome =
-                activitySealer?.seal(plaintext, kind) ?: SealOutcome.Cancelled
+            override suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind, ack: EnrollmentReport.Keyring?): SealOutcome =
+                activitySealer?.seal(plaintext, kind, ack) ?: SealOutcome.Cancelled
         },
         previousVault = object : VaultOpener {
             override suspend fun open(): OpenOutcome =
                 activityOpener?.open() ?: OpenOutcome.Cancelled
+
+            override fun sealedKind(): VaultRecordKind? = activityOpener?.sealedKind()
         },
         mailCache = RoomDecryptedMailCache(application),
         clock = SystemEnrollmentClock,

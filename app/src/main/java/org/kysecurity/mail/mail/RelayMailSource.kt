@@ -28,6 +28,15 @@ private const val HEADER_RETRY_AFTER = "Retry-After"
 /** The JSON field, not the error prose — the prose is user-facing copy and may be reworded. */
 private const val CLIENT_SIDE_NEEDED_MARKER = "clientSideNeeded"
 
+/** /api/mail/send-pgp on a converted account, KyPost-Server #210. Both mean the same thing to
+ *  a device: what it holds is no longer the account's current material. */
+private const val PGP_STATE_CHANGED_MARKER = "pgpStateChanged"
+private const val REENROLLMENT_REQUIRED_MARKER = "reenrollmentRequired"
+internal const val PGP_STATE_CHANGED_MESSAGE =
+    "Your account's encryption keys changed since this device was set up. Enroll this device again in Security settings, then send again."
+internal const val REENROLLMENT_REQUIRED_MESSAGE =
+    "This device holds older encryption keys. Enroll it again in Security settings before sending."
+
 /** Not a `data class`: the generated equals/hashCode would be identity-over-[ByteArray]. */
 private class DownloadResponse(
     val code: Int,
@@ -245,6 +254,7 @@ class RelayMailSource(
                 },
                 sentCopy = message.sentCopy,
                 sentCopyEncrypted = true,
+                materialGeneration = message.materialGeneration,
             ),
         )
         val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
@@ -390,6 +400,10 @@ class RelayMailSource(
         409 -> when {
             rawBody.contains(CLIENT_SIDE_NEEDED_MARKER, ignoreCase = true) ->
                 MailOutcome.ClientSideNeeded(rawBody)
+            rawBody.contains(REENROLLMENT_REQUIRED_MARKER, ignoreCase = true) ->
+                MailOutcome.BadRequest(REENROLLMENT_REQUIRED_MESSAGE)
+            rawBody.contains(PGP_STATE_CHANGED_MARKER, ignoreCase = true) ->
+                MailOutcome.BadRequest(PGP_STATE_CHANGED_MESSAGE)
             else -> {
                 val parsed = runCatching { json.decodeFromString<RelayPickupFallbackDto>(rawBody) }.getOrNull()
                 if (parsed != null && parsed.keylessRecipients.isNotEmpty()) {

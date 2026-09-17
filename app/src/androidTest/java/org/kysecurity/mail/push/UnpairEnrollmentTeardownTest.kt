@@ -38,4 +38,20 @@ class UnpairEnrollmentTeardownTest {
         assertFalse("vault key survived the unpair", ks.containsAlias(EnrollmentVault.ALIAS))
         assertFalse("sealed envelope survived the unpair", EnrollmentVault(context).hasBlob())
     }
+
+    /** The teardown marker asks the worker to tell the server "not enrolled". With the pairing
+     *  gone there is no device row to correct, and a marker that survived would be sent for the
+     *  next pairing's device row, making the server forget a delivery it holds for that device. */
+    @Test
+    fun clearingThePairingDropsTheTeardownMarker(): Unit = runBlocking {
+        val repo = PushRuntime.graph(context).repository
+        repo.savePairing(pairing)
+        val vault = EnrollmentVault(context)
+        vault.ensureKey()
+        vault.store(ByteArray(12), ByteArray(48))
+
+        repo.clearPairing()
+
+        assertFalse("teardown marker survived the unpair", vault.teardownReportPending())
+    }
 }

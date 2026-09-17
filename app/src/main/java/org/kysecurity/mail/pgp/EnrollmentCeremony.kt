@@ -125,6 +125,7 @@ internal class EnrollmentCeremony(
             is EnrollmentCallResult.NotFound,
             is EnrollmentCallResult.Failed,
             is EnrollmentCallResult.Envelope,
+            is EnrollmentCallResult.Conflict,
             -> return failAndDestroy(FailureReason.PUBLISH_REJECTED)
         }
 
@@ -166,7 +167,7 @@ internal class EnrollmentCeremony(
 
             when (val result = transport.fetchEnvelope()) {
                 is EnrollmentCallResult.Envelope -> {
-                    openAndSeal(result.envelope)
+                    openAndSeal(result.envelope, result.delivery)
                     return
                 }
                 // 401 is the one polling answer that cannot improve: the credential this device
@@ -177,6 +178,7 @@ internal class EnrollmentCeremony(
                 is EnrollmentCallResult.RateLimited,
                 is EnrollmentCallResult.Failed,
                 is EnrollmentCallResult.Ok,
+                is EnrollmentCallResult.Conflict,
                 -> Unit
             }
 
@@ -192,15 +194,21 @@ internal class EnrollmentCeremony(
         emit(EnrollmentUiState.Failed(reason))
     }
 
-    private suspend fun openAndSeal(envelopeJson: String) {
+    private suspend fun openAndSeal(envelopeJson: String, delivery: DeliveryMetadata?) {
         emit(EnrollmentUiState.Opening)
 
-        // Live enrollment is legacy-only until the server publishes capability, generation and
-        // acknowledgement contracts; a v3 envelope is malformed here, not opened under v2.
-        val fields = parseDeviceEnvelope(envelopeJson, setOf(ENVELOPE_VERSION_LEGACY))
+        val fields = parseDeviceEnvelope(envelopeJson, setOf(ENVELOPE_VERSION_LEGACY, ENVELOPE_VERSION_KEYRING))
         if (fields == null) {
             failAndDestroy(FailureReason.ENVELOPE_MALFORMED)
             return
+        }
+
+        // A v3 envelope is validated against the delivery the server recorded (KyPost-Server #210).
+        // Without that record there is nothing to validate against, so it is not opened at all.
+        val expected = if (fields.version == ENVELOPE_VERSION_KEYRING) {
+            keyringDelivery(delivery) ?: run { failAndDestroy(FailureReason.ENVELOPE_MALFORMED); return }
+        } else {
+            null
         }
 
         // The AAD comes from this device's id and the checked fingerprint — never from the envelope.
@@ -240,7 +248,7 @@ internal class EnrollmentCeremony(
         }
 
         try {
-            sealAndReport(plaintext)
+            if (expected != null) importAndReport(plaintext, expected) else sealAndReport(plaintext)
         } finally {
             // The armored private key, zeroed in place on every path out — including the throw the
             // sealer is not supposed to produce. It never enters EnrollmentSession: that holder has
@@ -319,10 +327,70 @@ internal class EnrollmentCeremony(
         }
     }
 
-    /** Tells the server this device is enrolled. A failed report is not a failed enrollment. */
-    private suspend fun report() {
-        if (transport.reportEnrolled(true) !is EnrollmentCallResult.Ok) {
-            transport.enqueueDurableReport()
+    /** The values a keyring delivery must carry; null is a record this client cannot validate against. */
+    private class KeyringDelivery(val generation: Long, val members: Set<String>, val inventory: Set<String>)
+
+    private fun keyringDelivery(delivery: DeliveryMetadata?): KeyringDelivery? {
+        if (delivery == null || delivery.version != ENVELOPE_VERSION_KEYRING) return null
+        val generation = delivery.materialGeneration ?: return null
+        val members = delivery.primaryFingerprints ?: return null
+        val inventory = delivery.keyFingerprints ?: return null
+        if (!delivery.fingerprint.equals(requireNotNull(fingerprint), ignoreCase = true)) return null
+        return KeyringDelivery(generation, members.map { it.uppercase() }.toSet(), inventory.map { it.uppercase() }.toSet())
+    }
+
+    private suspend fun importAndReport(plaintext: ByteArray, expected: KeyringDelivery) {
+        emit(EnrollmentUiState.AwaitingAuth)
+        if (!hasSecureLockScreen()) {
+            failAndDestroy(FailureReason.NO_SECURE_LOCK_SCREEN)
+            return
+        }
+
+        val outcome = try {
+            withContext(NonCancellable) {
+                importKeyring(
+                    plaintext = plaintext,
+                    expectedActiveFingerprint = requireNotNull(fingerprint),
+                    previousVault = previousVault,
+                    sealedKind = { previousVault.sealedKind() },
+                    sealer = sealer,
+                    onLocalComplete = {},
+                    validate = { ring ->
+                        ring.materialGeneration == expected.generation &&
+                            ring.members.map { it.fingerprint.uppercase() }.toSet() == expected.members &&
+                            ring.keyFingerprints.map { it.uppercase() }.toSet() == expected.inventory
+                    },
+                )
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            KeyringImportOutcome.Failed("The existing vault could not be read")
+        }
+        when (outcome) {
+            KeyringImportOutcome.Imported, KeyringImportOutcome.Replayed -> {
+                plaintext.fill(0)
+                mailCache.clearServerDecryptedBodies()
+                val ack = EnrollmentSession.withKeyring { EnrollmentReport.Keyring(it.materialGeneration, it.activeFingerprint) }
+                if (ack == null) failAndDestroy(FailureReason.SEAL_FAILED) else report(ack)
+            }
+            KeyringImportOutcome.InvalidRing, KeyringImportOutcome.RefusedIncomparable ->
+                failAndDestroy(FailureReason.KEYRING_REJECTED)
+            KeyringImportOutcome.Cancelled -> emit(EnrollmentUiState.ReadyToFinish)
+            KeyringImportOutcome.NoSecureLockScreen -> failAndDestroy(FailureReason.NO_SECURE_LOCK_SCREEN)
+            is KeyringImportOutcome.Failed -> failAndDestroy(FailureReason.SEAL_FAILED)
+        }
+    }
+
+    /** Tells the server what this device holds. A dropped report is not a failed enrollment and
+     *  is retried durably. A refused one (409) is final: the server compared the claim with what
+     *  it delivered and would not record this device as enrolled, and the same claim cannot
+     *  become true by repeating it. The record stays sealed; the screen says to enroll again. */
+    private suspend fun report(report: EnrollmentReport = EnrollmentReport.Legacy) {
+        when (transport.report(report)) {
+            is EnrollmentCallResult.Ok -> Unit
+            is EnrollmentCallResult.Conflict -> return failAndDestroy(FailureReason.ACKNOWLEDGEMENT_REFUSED)
+            else -> transport.enqueueDurableReport()
         }
         teardown()
         emit(EnrollmentUiState.Enrolled)

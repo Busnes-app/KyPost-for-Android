@@ -139,6 +139,8 @@ data class RelayClientEncryptedRequestDto(
     val deliveries: List<RelayClientEncryptedDeliveryDto> = emptyList(),
     val sentCopy: String = "",
     val sentCopyEncrypted: Boolean = false,
+    /** Omitted when null: a legacy account must not see a made-up generation. */
+    val materialGeneration: Long? = null,
 )
 
 /** Outgoing attachment wire shape accepted by /api/mail/send and /api/mail/draft. */

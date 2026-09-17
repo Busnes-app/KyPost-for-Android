@@ -39,7 +39,7 @@ class KeyringImportTest {
         expected: String = active,
         opener: VaultOpener,
         sealed: VaultRecordKind? = null,
-    ) = importKeyring(bytes, expected, opener, { sealed }, sealer) { events += "complete" }
+    ) = importKeyring(bytes, expected, opener, { sealed }, sealer, onLocalComplete = { events += "complete" })
 
     /** Teardown and key invalidation delete the record without clearing the session, so a held
      *  ring proves nothing about the disk; only a sealed keyring record makes a replay. */

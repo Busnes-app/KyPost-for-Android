@@ -155,9 +155,8 @@ Owns production Android app code and resources.
   Device envelopes carry an explicit version that `parseDeviceEnvelope` reads once and threads
   through `DeviceEnvelopeFields`: the HKDF info and AAD prefix are both `kypost-device-envelope/v<n>`
   from that field, so a v3 envelope can never be reopened under the v2 domain. Callers pass the
-  versions they admit; `EnrollmentCeremony` admits only `ENVELOPE_VERSION_LEGACY` until the server
-  publishes capability, generation and acknowledgement contracts, so a v3 envelope is
-  `ENVELOPE_MALFORMED` there rather than opened. v2 parsing is byte-compatible with what shipped
+  versions they admit; `EnrollmentCeremony` admits both, and a v3 envelope is opened only
+  against the delivery record the server returned beside it. v2 parsing is byte-compatible with what shipped
   (a quoted version string still opens; the on-curve check stays with the Keystore agreement).
   The pre-parse bound is the largest cap among the versions the caller admits, so a v3-only
   caller never hands the JSON parser more than the v3 cap. v3 is checked before any key work:
@@ -210,9 +209,40 @@ Owns production Android app code and resources.
   predate that and stay AAD-free. A
   legacy ceremony over a held keyring refuses the merge (`withLegacyArmor` is null) and leaves the
   record. `probeEnrollment` reports a keyring record as `ENROLLED_KEYRING`: `isEnrolled()` for this
-  device's own reading, signing and settings row, but `legacyReportValue()` false, so
-  `EnrollmentStateWorker` never acknowledges a prepared keyring as v2 enrollment; the server has no
-  field for it yet. Production never dispatches a v3 envelope; only tests reach `importKeyring`.
+  device's own reading, signing and settings row.
+  **Live v3 (KyPost-Server #201, #210, #212).** `EnrollmentClients.publishKey` advertises
+  `envelopeVersions: [2, 3]`; omitting the list resets the server's claim to `[2]` and the browser
+  then refuses to seal v3, so never drop it. The envelope fetch carries `DeliveryMetadata`
+  (`version`, `fingerprint`, `materialGeneration`, the keyring's `primaryFingerprints` and
+  `keyFingerprints`), absent only from a server older than #210. The ceremony opens a v3 envelope
+  only with a v3 delivery record whose fingerprint is the checked identity, and `importKeyring`'s
+  `validate` rejects a ring whose generation, member set or inventory differs from that record
+  (`KEYRING_REJECTED`, nothing sealed). Every acknowledgement is an `EnrollmentReport`:
+  `NotEnrolled` (which also makes the server forget its delivery record), `Legacy` (the bare
+  boolean; a converted account refuses it with 409), or `Keyring(materialGeneration, fingerprint)`
+  sent with `envelopeVersion: 3`. The server matches a keyring acknowledgement against the
+  delivery it recorded for this device, so a bare boolean is never sent for a keyring record and
+  a 409 (`EnrollmentCallResult.Conflict`) is never retried. The sealer stores the acknowledgement
+  beside a keyring record (`EnrollmentVault.storeKeyringAck`, plain preferences: both values are
+  what the owner's device listing shows); `store` and `destroy` clear it, and
+  `enrollmentReportFor` gives the worker `Keyring` from it, or null (say nothing) when a keyring
+  record has no stored acknowledgement. `NotEnrolled` makes the server forget its delivery record,
+  so the worker sends it only on a proven loss: `KEY_INVALIDATED` (the Keystore's own verdict) or
+  `NO_BLOB` with the teardown marker `EnrollmentTeardown.destroy` leaves in the same preferences
+  (`markTeardownReport`; `store` clears it, the worker clears it only when the report landed or no
+  device row remains (`teardownReportSpent`: Ok, Unauthorized, NotFound), never on a transient
+  failure even past the attempt ceiling,
+  and the account-scoped purge clears it because a dropped pairing has no device row to correct;
+  `clearKeyringAck` removes only the two acknowledgement keys so key regeneration and `destroy`
+  leave the marker alone).
+  `NO_KEY` (the catch-all probe exception) and an ordinary `NO_BLOB` say nothing: the worker runs
+  on every unlock, and a device awaiting its first delivery looks exactly like `NO_BLOB`. A 409 on
+  the ceremony's own acknowledgement is `ACKNOWLEDGEMENT_REFUSED`, a terminal failure whose copy
+  says the record was saved but the account moved on; it is never `Enrolled` and never retried.
+  `ClientEncryptedMessage.materialGeneration` is the held keyring's generation (null for legacy
+  armor) and rides on `/api/mail/send-pgp`; the relay maps 409 `reenrollmentRequired` and
+  `pgpStateChanged` to messages that say to enroll the device again. Still gated server-side:
+  replacing a different ring already on the device (`RefusedIncomparable`), ring merging, readback.
   Hostile Location Protection destroys the envelope and is the mode in which none of this exists.
   `pgpRowMarker` marks inbox rows for the two states that yield nothing readable (🔒 client-protected,
   ⚠ decrypt failed) and deliberately leaves server-decrypted rows unmarked — those open normally, so

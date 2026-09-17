@@ -26,7 +26,7 @@ internal interface EnrollmentTransport {
 
     suspend fun fetchEnvelope(): EnrollmentCallResult
 
-    suspend fun reportEnrolled(enrolled: Boolean): EnrollmentCallResult
+    suspend fun report(report: EnrollmentReport): EnrollmentCallResult
 
     /** Hands the report to [EnrollmentStateWorker], which re-probes live state and retries. Called
      *  when the direct report failed and the device is nonetheless enrolled. */
@@ -66,7 +66,8 @@ internal sealed class SealOutcome {
 
 /** The re-seal, behind an interface because `BiometricPrompt` is Activity-bound. */
 internal interface VaultSealer {
-    suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind): SealOutcome
+    /** [ack] is stored beside a keyring record once it is durable, for the worker's restatement. */
+    suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind, ack: EnrollmentReport.Keyring? = null): SealOutcome
 }
 
 /** The locally cached plaintext of mail the server decrypted; enrolling is what drops it. */

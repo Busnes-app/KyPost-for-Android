@@ -28,7 +28,7 @@ class EnrollmentCeremonyExitTest {
         ports.ceremony().run()
 
         assertEquals(EnrollmentUiState.Enrolled, ports.states.last())
-        assertEquals(listOf(true), ports.transport.reported)
+        assertEquals(listOf(EnrollmentReport.Legacy), ports.transport.reported)
         assertEquals("the agreement key is spent on success too", 1, ports.keys.deleteCalls)
         assertEquals("no durable fallback was needed", 0, ports.transport.durableReports)
     }
