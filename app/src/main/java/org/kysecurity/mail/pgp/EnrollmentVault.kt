@@ -29,6 +29,7 @@ private const val KEY_IV = "envelope_iv"
 private const val KEY_CT = "envelope_ct"
 private const val ACK_GENERATION = "ack_generation"
 private const val ACK_FINGERPRINT = "ack_fingerprint"
+private const val TEARDOWN_REPORT = "teardown_report"
 
 /** Same shape as the encrypted-prefs opener: three reads in all before absence counts. */
 private const val ABSENCE_RECHECKS = 2
@@ -233,9 +234,14 @@ internal class EnrollmentVault(
         return EnrollmentReport.Keyring(ackPrefs.getLong(ACK_GENERATION, 0L), fingerprint)
     }
 
-    private fun clearKeyringAck() {
-        ackPrefs.edit().clear().commit()
-    }
+    /** False on a failed write, which `commit()` reports without throwing. */
+    private fun clearKeyringAck(): Boolean = ackPrefs.edit().clear().commit()
+
+    /** Set by `EnrollmentTeardown` after [destroy], read by the worker. [store] clears it: a new
+     *  record is a new enrollment and the old teardown no longer describes the device. */
+    fun markTeardownReport(): Boolean = ackPrefs.edit().putBoolean(TEARDOWN_REPORT, true).commit()
+    fun teardownReportPending(): Boolean = ackPrefs.getBoolean(TEARDOWN_REPORT, false)
+    fun clearTeardownReport(): Boolean = ackPrefs.edit().remove(TEARDOWN_REPORT).commit()
 
     /** `java.io` cannot open a directory, so this goes through the libc bindings; a failed fsync
      *  throws `ErrnoException` and counts as a failed store. */
@@ -308,7 +314,7 @@ internal class EnrollmentVault(
             Files.deleteIfExists(pendingFile.toPath())
         }.onFailure { Log.e("EnrollmentVault", "Could not delete the sealed record", it) }
         if (recordFile.exists() || pendingFile.exists()) failed += "deleteRecordFile"
-        runCatching { clearKeyringAck() }.onFailure { failed += "clearAck" }
+        if (!runCatching { clearKeyringAck() }.getOrDefault(false)) failed += "clearAck"
         if (legacyFile.exists()) {
             runCatching { prefs.edit().clear().commit() }
                 .onFailure { failed += "clearBlob"; Log.e("EnrollmentVault", "Could not clear the blob", it) }

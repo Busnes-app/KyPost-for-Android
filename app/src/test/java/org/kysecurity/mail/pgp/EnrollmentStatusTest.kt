@@ -26,9 +26,23 @@ class EnrollmentStatusTest {
         val ack = EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = "5F117951610CAF01500FA059CDE63F0EBEC934A2")
         assertEquals(EnrollmentReport.Legacy, enrollmentReportFor(EnrollmentStatus.ENROLLED, ack = null))
         assertEquals(ack, enrollmentReportFor(EnrollmentStatus.ENROLLED_KEYRING, ack))
-        for (other in listOf(EnrollmentStatus.NO_KEY, EnrollmentStatus.KEY_INVALIDATED, EnrollmentStatus.NO_BLOB)) {
-            assertEquals(other.name, EnrollmentReport.NotEnrolled, enrollmentReportFor(other, ack))
-        }
+        assertEquals(EnrollmentReport.NotEnrolled, enrollmentReportFor(EnrollmentStatus.KEY_INVALIDATED, ack))
+    }
+
+    /** `NotEnrolled` makes the server forget the delivery it recorded for this device, so it is
+     *  sent only on a proven loss: the Keystore's own invalidation verdict, or a deliberate
+     *  teardown. A probe that merely threw (`NO_KEY`) or found no record on an ordinary unlock
+     *  (`NO_BLOB`, which is also what a device awaiting its first delivery looks like) says nothing. */
+    @Test
+    fun anUnprovenProbeReportsNothing() {
+        assertEquals(null, enrollmentReportFor(EnrollmentStatus.NO_KEY, ack = null))
+        assertEquals(null, enrollmentReportFor(EnrollmentStatus.NO_BLOB, ack = null))
+        assertEquals(null, enrollmentReportFor(EnrollmentStatus.NO_KEY, ack = null, tornDown = true))
+    }
+
+    @Test
+    fun aDeliberateTeardownReportsNotEnrolled() {
+        assertEquals(EnrollmentReport.NotEnrolled, enrollmentReportFor(EnrollmentStatus.NO_BLOB, ack = null, tornDown = true))
     }
 
     /** A keyring record whose acknowledgement values are missing has nothing truthful to say:

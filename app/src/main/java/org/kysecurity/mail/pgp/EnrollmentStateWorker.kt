@@ -66,13 +66,17 @@ internal class EnrollmentStateWorker(
         }
 
         val vault = EnrollmentVault(applicationContext)
-        val report = enrollmentReportFor(probeEnrollment(vault), vault.keyringAck())
+        val tornDown = vault.teardownReportPending()
+        val report = enrollmentReportFor(probeEnrollment(vault), vault.keyringAck(), tornDown)
             ?: return Result.success()
 
         // The pinned factory, as every client carrying the device credential uses; the default is unpinned.
         val clients = EnrollmentClients(callFactory = pinnedPairingCallFactory(applicationContext))
         val result = clients.reportState(pairing.serverUrl, deviceId, deviceSecret, report)
-        return when (enrollmentReportOutcome(result, runAttemptCount)) {
+        val outcome = enrollmentReportOutcome(result, runAttemptCount)
+        // The teardown has been spoken for, or can never be: only a retry keeps the marker.
+        if (tornDown && outcome != EnrollmentReportOutcome.RETRY) vault.clearTeardownReport()
+        return when (outcome) {
             EnrollmentReportOutcome.DONE -> Result.success()
             EnrollmentReportOutcome.RETRY -> Result.retry()
             EnrollmentReportOutcome.GIVE_UP -> Result.failure()

@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -77,5 +78,24 @@ class EnrollmentKeyringRecordTest {
         vault.storeKeyringAck(ack)
         assertTrue(vault.destroy().isEmpty())
         assertNull("destroy removes it", vault.keyringAck())
+    }
+
+    /** A deliberate teardown is the one thing that may tell the server "not enrolled"; the marker
+     *  survives until the worker has said it, and a new record supersedes it. */
+    @Test
+    fun theTeardownMarkerOutlivesDestroyAndDiesWithANewRecord() {
+        assertTrue("the emulator needs a secure lock screen", vault.ensureKey())
+        assertFalse(vault.teardownReportPending())
+
+        EnrollmentTeardown.destroy(context)
+        assertTrue("set by the teardown, after destroy cleared the store", vault.teardownReportPending())
+
+        assertTrue(vault.ensureKey())
+        vault.store(ByteArray(12) { 7 }, ByteArray(48) { 9 }, VaultRecordKind.KEYRING)
+        assertFalse("a new record is a new enrollment", vault.teardownReportPending())
+
+        EnrollmentTeardown.destroy(context)
+        assertTrue(vault.clearTeardownReport())
+        assertFalse(vault.teardownReportPending())
     }
 }

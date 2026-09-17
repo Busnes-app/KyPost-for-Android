@@ -377,6 +377,7 @@ class DeviceEnrollmentActivity : LockedActivity() {
         FailureReason.ENVELOPE_MALFORMED -> R.string.enrollment_failed_generic
         FailureReason.SEAL_FAILED -> R.string.enrollment_failed_generic
         FailureReason.KEYRING_REJECTED -> R.string.enrollment_failed_keyring_rejected
+        FailureReason.ACKNOWLEDGEMENT_REFUSED -> R.string.enrollment_failed_acknowledgement_refused
     }
 }
 

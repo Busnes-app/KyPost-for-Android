@@ -120,16 +120,18 @@ class EnrollmentCeremonyKeyringTest {
     }
 
     /** The import is durable before the acknowledgement; a refused acknowledgement means the
-     *  account moved on, and repeating the same claim cannot help. The send gate reports that. */
+     *  account moved on. Repeating the same claim cannot help, so nothing is queued, and the
+     *  screen must not say it worked: the server refused to record this device as enrolled. */
     @Test
-    fun aRefusedAcknowledgementIsNotRetriedDurably() = runBlocking {
+    fun aRefusedAcknowledgementIsATerminalFailureWithoutRetry() = runBlocking {
         val ports = ports(reportResult = EnrollmentCallResult.Conflict)
 
         ports.ceremony().run()
 
-        assertEquals(EnrollmentUiState.Enrolled, ports.states.last())
-        assertEquals(listOf(VaultRecordKind.KEYRING), ports.sealer.kinds)
+        assertEquals(EnrollmentUiState.Failed(FailureReason.ACKNOWLEDGEMENT_REFUSED), ports.states.last())
+        assertEquals("the record is durable; the copy must not claim otherwise", listOf(VaultRecordKind.KEYRING), ports.sealer.kinds)
         assertEquals(0, ports.transport.durableReports)
+        assertEquals(1, ports.keys.deleteCalls)
     }
 
     @Test

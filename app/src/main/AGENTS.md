@@ -226,7 +226,14 @@ Owns production Android app code and resources.
   beside a keyring record (`EnrollmentVault.storeKeyringAck`, plain preferences: both values are
   what the owner's device listing shows); `store` and `destroy` clear it, and
   `enrollmentReportFor` gives the worker `Keyring` from it, or null (say nothing) when a keyring
-  record has no stored acknowledgement — never `false`, which would wipe the server's record.
+  record has no stored acknowledgement. `NotEnrolled` makes the server forget its delivery record,
+  so the worker sends it only on a proven loss: `KEY_INVALIDATED` (the Keystore's own verdict) or
+  `NO_BLOB` with the teardown marker `EnrollmentTeardown.destroy` leaves in the same preferences
+  (`markTeardownReport`; `store` clears it, the worker clears it once the report is spoken for).
+  `NO_KEY` (the catch-all probe exception) and an ordinary `NO_BLOB` say nothing: the worker runs
+  on every unlock, and a device awaiting its first delivery looks exactly like `NO_BLOB`. A 409 on
+  the ceremony's own acknowledgement is `ACKNOWLEDGEMENT_REFUSED`, a terminal failure whose copy
+  says the record was saved but the account moved on; it is never `Enrolled` and never retried.
   `ClientEncryptedMessage.materialGeneration` is the held keyring's generation (null for legacy
   armor) and rides on `/api/mail/send-pgp`; the relay maps 409 `reenrollmentRequired` and
   `pgpStateChanged` to messages that say to enroll the device again. Still gated server-side:

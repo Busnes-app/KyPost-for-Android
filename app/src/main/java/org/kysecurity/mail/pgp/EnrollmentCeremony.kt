@@ -382,11 +382,14 @@ internal class EnrollmentCeremony(
         }
     }
 
-    /** Tells the server what this device holds. A failed report is not a failed enrollment; a
-     *  refused one (409) is final, since the same claim cannot become true by repeating it. */
+    /** Tells the server what this device holds. A dropped report is not a failed enrollment and
+     *  is retried durably. A refused one (409) is final: the server compared the claim with what
+     *  it delivered and would not record this device as enrolled, and the same claim cannot
+     *  become true by repeating it. The record stays sealed; the screen says to enroll again. */
     private suspend fun report(report: EnrollmentReport = EnrollmentReport.Legacy) {
         when (transport.report(report)) {
-            is EnrollmentCallResult.Ok, is EnrollmentCallResult.Conflict -> Unit
+            is EnrollmentCallResult.Ok -> Unit
+            is EnrollmentCallResult.Conflict -> return failAndDestroy(FailureReason.ACKNOWLEDGEMENT_REFUSED)
             else -> transport.enqueueDurableReport()
         }
         teardown()
