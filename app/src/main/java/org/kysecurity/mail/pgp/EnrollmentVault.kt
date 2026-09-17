@@ -215,10 +215,13 @@ internal class EnrollmentVault(
             Log.e("EnrollmentVault", "Could not store the sealed record", it)
             runCatching { Files.deleteIfExists(pendingFile.toPath()) }
         }.isSuccess
-        // A new record is a new delivery; whatever was acknowledged for the old one is no longer true.
+        // A new record is a new delivery: whatever was acknowledged for the old one is no longer
+        // true, and a pending teardown no longer describes the device. This is the one event that
+        // supersedes the teardown marker; key regeneration and destroy leave it alone.
         if (written) {
             retireLegacyRecord()
             clearKeyringAck()
+            clearTeardownReport()
         }
         return written
     }
@@ -234,11 +237,15 @@ internal class EnrollmentVault(
         return EnrollmentReport.Keyring(ackPrefs.getLong(ACK_GENERATION, 0L), fingerprint)
     }
 
-    /** False on a failed write, which `commit()` reports without throwing. */
-    private fun clearKeyringAck(): Boolean = ackPrefs.edit().clear().commit()
+    /** Only the acknowledgement keys, never the whole store: the teardown marker shares the file
+     *  and must survive [destroy] and key regeneration. False on a failed write, which `commit()`
+     *  reports without throwing. */
+    private fun clearKeyringAck(): Boolean =
+        ackPrefs.edit().remove(ACK_GENERATION).remove(ACK_FINGERPRINT).commit()
 
     /** Set by `EnrollmentTeardown` after [destroy], read by the worker. [store] clears it: a new
-     *  record is a new enrollment and the old teardown no longer describes the device. */
+     *  record is a new enrollment and the old teardown no longer describes the device. Dropping
+     *  the pairing clears it too, since there is then no device row it could correct. */
     fun markTeardownReport(): Boolean = ackPrefs.edit().putBoolean(TEARDOWN_REPORT, true).commit()
     fun teardownReportPending(): Boolean = ackPrefs.getBoolean(TEARDOWN_REPORT, false)
     fun clearTeardownReport(): Boolean = ackPrefs.edit().remove(TEARDOWN_REPORT).commit()

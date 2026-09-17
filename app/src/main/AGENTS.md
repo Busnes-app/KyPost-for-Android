@@ -229,7 +229,10 @@ Owns production Android app code and resources.
   record has no stored acknowledgement. `NotEnrolled` makes the server forget its delivery record,
   so the worker sends it only on a proven loss: `KEY_INVALIDATED` (the Keystore's own verdict) or
   `NO_BLOB` with the teardown marker `EnrollmentTeardown.destroy` leaves in the same preferences
-  (`markTeardownReport`; `store` clears it, the worker clears it once the report is spoken for).
+  (`markTeardownReport`; `store` clears it, the worker clears it once the report is spoken for,
+  and the account-scoped purge clears it because a dropped pairing has no device row to correct;
+  `clearKeyringAck` removes only the two acknowledgement keys so key regeneration and `destroy`
+  leave the marker alone).
   `NO_KEY` (the catch-all probe exception) and an ordinary `NO_BLOB` say nothing: the worker runs
   on every unlock, and a device awaiting its first delivery looks exactly like `NO_BLOB`. A 409 on
   the ceremony's own acknowledgement is `ACKNOWLEDGEMENT_REFUSED`, a terminal failure whose copy

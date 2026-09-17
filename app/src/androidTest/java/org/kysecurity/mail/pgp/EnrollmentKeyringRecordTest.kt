@@ -90,6 +90,13 @@ class EnrollmentKeyringRecordTest {
         EnrollmentTeardown.destroy(context)
         assertTrue("set by the teardown, after destroy cleared the store", vault.teardownReportPending())
 
+        // The next ceremony regenerates the vault key before it seals anything; a seal the user
+        // then cancels must not have silently dropped the pending "not enrolled".
+        assertTrue(vault.ensureKey())
+        assertTrue("regenerating the key keeps the marker", vault.teardownReportPending())
+        assertTrue(vault.destroy().isEmpty())
+        assertTrue("destroy keeps the marker: the teardown sets it after destroy", vault.teardownReportPending())
+
         assertTrue(vault.ensureKey())
         vault.store(ByteArray(12) { 7 }, ByteArray(48) { 9 }, VaultRecordKind.KEYRING)
         assertFalse("a new record is a new enrollment", vault.teardownReportPending())
