@@ -13,6 +13,7 @@ import android.widget.AutoCompleteTextView
 import android.widget.BaseAdapter
 import android.widget.Filter
 import android.widget.Filterable
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -36,7 +37,7 @@ class RecipientInputView @JvmOverloads constructor(
 
     private val labelView: TextView
     private val field: AutoCompleteTextView
-    private val bookButton: View
+    private val bookButton: ImageButton
     private val chipGroup: ChipGroup
     private val recipients = mutableListOf<String>()
 
@@ -130,6 +131,7 @@ class RecipientInputView @JvmOverloads constructor(
     fun commaJoinedRecipients(): String = recipients.joinToString(",")
 
     fun applyTheme() {
+        applyIconButtonTheme(context, bookButton)
         for (i in 0 until chipGroup.childCount) {
             (chipGroup.getChildAt(i) as? Chip)?.let { applyPillChipTheme(context, it) }
         }

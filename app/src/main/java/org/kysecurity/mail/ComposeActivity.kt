@@ -396,8 +396,7 @@ class ComposeActivity : LockedActivity() {
     }
 
     private fun applySendMenuItemTheme() {
-        val accent = Color.parseColor(getStoredThemePalette(this).accent)
-        sendMenuItem?.icon?.mutate()?.setTint(readableOn(accent))
+        sendMenuItem?.icon?.mutate()?.setTint(Color.parseColor(getStoredThemePalette(this).inkStrong))
     }
 
     private fun openAddressBook() {
