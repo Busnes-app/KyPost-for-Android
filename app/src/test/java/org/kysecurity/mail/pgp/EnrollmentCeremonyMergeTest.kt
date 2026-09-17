@@ -84,7 +84,7 @@ class EnrollmentCeremonyMergeTest {
         ports.ceremony().run()
 
         assertEquals(1, ringCount(ports.sealer.received.single()))
-        assertEquals(listOf(true), ports.transport.reported)
+        assertEquals(listOf(EnrollmentReport.Legacy), ports.transport.reported)
     }
 
     @Test
@@ -129,7 +129,7 @@ class EnrollmentCeremonyMergeTest {
         val retry = ports(previous)
         retry.ceremony().run()
         val merged = retry.sealer.received.single().toString(Charsets.UTF_8).toCharArray()
-        assertEquals(listOf(true), retry.transport.reported)
+        assertEquals(listOf(EnrollmentReport.Legacy), retry.transport.reported)
         assertTrue(PgpDecryptor.decrypt(merged, TestPgpPrivateKey.ARMORED_MESSAGE, emptyList()) is DecryptResult.Ok)
     }
 

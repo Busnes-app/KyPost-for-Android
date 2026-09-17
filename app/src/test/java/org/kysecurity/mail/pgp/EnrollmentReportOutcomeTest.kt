@@ -61,6 +61,16 @@ class EnrollmentReportOutcomeTest {
         assertEquals(EnrollmentReportOutcome.DONE, enrollmentReportOutcome(EnrollmentCallResult.Ok))
     }
 
+    /** 409 means the server compared the claim with what it delivered and refused; the claim
+     *  cannot become true by repeating it, and every attempt spends device-auth budget. */
+    @Test
+    fun aRefusedAcknowledgementGivesUp() {
+        assertEquals(
+            EnrollmentReportOutcome.GIVE_UP,
+            enrollmentReportOutcome(EnrollmentCallResult.Conflict),
+        )
+    }
+
     /** 404 on this route means the device row is gone — deregistered, or the account deleted. */
     @Test
     fun aMissingDeviceRowIsDoneNotARetry() {

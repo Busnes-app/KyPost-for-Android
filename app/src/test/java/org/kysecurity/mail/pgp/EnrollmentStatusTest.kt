@@ -18,13 +18,24 @@ class EnrollmentStatusTest {
         }
     }
 
+    /** The worker's report is derived from the probe plus the stored acknowledgement. A keyring
+     *  record is never restated as the bare boolean: on a converted account that is refused, and
+     *  on any account it would claim v2 enrollment that does not exist. */
     @Test
-    fun onlyLegacyEnrollmentReachesTheLegacyReport() {
-        assertTrue(EnrollmentStatus.ENROLLED.legacyReportValue())
-        assertFalse("a prepared keyring must not be acknowledged as v2 enrollment", EnrollmentStatus.ENROLLED_KEYRING.legacyReportValue())
+    fun theReportFollowsTheRecordKind() {
+        val ack = EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = "5F117951610CAF01500FA059CDE63F0EBEC934A2")
+        assertEquals(EnrollmentReport.Legacy, enrollmentReportFor(EnrollmentStatus.ENROLLED, ack = null))
+        assertEquals(ack, enrollmentReportFor(EnrollmentStatus.ENROLLED_KEYRING, ack))
         for (other in listOf(EnrollmentStatus.NO_KEY, EnrollmentStatus.KEY_INVALIDATED, EnrollmentStatus.NO_BLOB)) {
-            assertFalse(other.name, other.legacyReportValue())
+            assertEquals(other.name, EnrollmentReport.NotEnrolled, enrollmentReportFor(other, ack))
         }
+    }
+
+    /** A keyring record whose acknowledgement values are missing has nothing truthful to say:
+     *  neither true (unprovable) nor false (which would wipe the server's delivery record). */
+    @Test
+    fun aKeyringWithoutStoredAcknowledgementReportsNothing() {
+        assertEquals(null, enrollmentReportFor(EnrollmentStatus.ENROLLED_KEYRING, ack = null))
     }
 
     @Test

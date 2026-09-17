@@ -26,7 +26,7 @@ internal interface EnrollmentTransport {
 
     suspend fun fetchEnvelope(): EnrollmentCallResult
 
-    suspend fun reportEnrolled(enrolled: Boolean): EnrollmentCallResult
+    suspend fun report(report: EnrollmentReport): EnrollmentCallResult
 
     /** Hands the report to [EnrollmentStateWorker], which re-probes live state and retries. Called
      *  when the direct report failed and the device is nonetheless enrolled. */

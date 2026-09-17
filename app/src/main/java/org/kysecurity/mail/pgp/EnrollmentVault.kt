@@ -27,6 +27,8 @@ import javax.crypto.spec.GCMParameterSpec
 private const val ANDROID_KEYSTORE = "AndroidKeyStore"
 private const val KEY_IV = "envelope_iv"
 private const val KEY_CT = "envelope_ct"
+private const val ACK_GENERATION = "ack_generation"
+private const val ACK_FINGERPRINT = "ack_fingerprint"
 
 /** Same shape as the encrypted-prefs opener: three reads in all before absence counts. */
 private const val ABSENCE_RECHECKS = 2
@@ -70,6 +72,10 @@ internal class EnrollmentVault(
     private val recordFile = File(appContext.filesDir, RECORD_FILE)
     private val pendingFile = File(appContext.filesDir, "$RECORD_FILE.new")
     private val legacyFile = File(File(appContext.dataDir, "shared_prefs"), "$PREFS_FILE.xml")
+
+    /** Plain preferences: the generation and fingerprint are what the server lists on the owner's
+     *  device page, not secrets. A tampered value only makes the acknowledgement fail closed. */
+    private val ackPrefs: SharedPreferences by lazy { appContext.getSharedPreferences(ACK_PREFS_FILE, Context.MODE_PRIVATE) }
 
     private enum class KeyState { MATCHES, ABSENT, UNUSABLE }
 
@@ -208,8 +214,27 @@ internal class EnrollmentVault(
             Log.e("EnrollmentVault", "Could not store the sealed record", it)
             runCatching { Files.deleteIfExists(pendingFile.toPath()) }
         }.isSuccess
-        if (written) retireLegacyRecord()
+        // A new record is a new delivery; whatever was acknowledged for the old one is no longer true.
+        if (written) {
+            retireLegacyRecord()
+            clearKeyringAck()
+        }
         return written
+    }
+
+    /** Stored after the keyring record it describes, so the worker can restate the acknowledgement
+     *  without opening the vault. */
+    fun storeKeyringAck(ack: EnrollmentReport.Keyring): Boolean =
+        ackPrefs.edit().putLong(ACK_GENERATION, ack.materialGeneration).putString(ACK_FINGERPRINT, ack.fingerprint).commit()
+
+    fun keyringAck(): EnrollmentReport.Keyring? {
+        val fingerprint = ackPrefs.getString(ACK_FINGERPRINT, null) ?: return null
+        if (!ackPrefs.contains(ACK_GENERATION)) return null
+        return EnrollmentReport.Keyring(ackPrefs.getLong(ACK_GENERATION, 0L), fingerprint)
+    }
+
+    private fun clearKeyringAck() {
+        ackPrefs.edit().clear().commit()
     }
 
     /** `java.io` cannot open a directory, so this goes through the libc bindings; a failed fsync
@@ -270,6 +295,7 @@ internal class EnrollmentVault(
     private fun clearRecords() {
         Files.deleteIfExists(recordFile.toPath())
         Files.deleteIfExists(pendingFile.toPath())
+        clearKeyringAck()
         if (legacyFile.exists()) check(prefs.edit().clear().commit()) { "legacy record not cleared" }
     }
 
@@ -282,6 +308,7 @@ internal class EnrollmentVault(
             Files.deleteIfExists(pendingFile.toPath())
         }.onFailure { Log.e("EnrollmentVault", "Could not delete the sealed record", it) }
         if (recordFile.exists() || pendingFile.exists()) failed += "deleteRecordFile"
+        runCatching { clearKeyringAck() }.onFailure { failed += "clearAck" }
         if (legacyFile.exists()) {
             runCatching { prefs.edit().clear().commit() }
                 .onFailure { failed += "clearBlob"; Log.e("EnrollmentVault", "Could not clear the blob", it) }
@@ -315,5 +342,6 @@ internal class EnrollmentVault(
         const val ALIAS = "kypost_device_envelope_seal"
         const val PREFS_FILE = "device_envelope_secure"
         const val RECORD_FILE = "device_envelope.bin"
+        const val ACK_PREFS_FILE = "device_envelope_ack"
     }
 }

@@ -31,6 +31,8 @@ internal fun enrollmentReportOutcome(
             if (runAttemptCount >= MAX_REPORT_ATTEMPTS) EnrollmentReportOutcome.GIVE_UP
             else EnrollmentReportOutcome.RETRY
         is EnrollmentCallResult.Unauthorized, is EnrollmentCallResult.NotFound -> EnrollmentReportOutcome.GIVE_UP
+        // The server compared the claim with its delivery record and refused; repeating it cannot help.
+        is EnrollmentCallResult.Conflict -> EnrollmentReportOutcome.GIVE_UP
         // Only fetchEnvelope produces this; reportState cannot. Not a retry: a response this route
         // has no way to send means the client is talking to something that is not this API.
         is EnrollmentCallResult.Envelope -> EnrollmentReportOutcome.GIVE_UP
@@ -63,11 +65,13 @@ internal class EnrollmentStateWorker(
             return Result.success()
         }
 
-        val enrolled = probeEnrollment(EnrollmentVault(applicationContext)).legacyReportValue()
+        val vault = EnrollmentVault(applicationContext)
+        val report = enrollmentReportFor(probeEnrollment(vault), vault.keyringAck())
+            ?: return Result.success()
 
         // The pinned factory, as every client carrying the device credential uses; the default is unpinned.
         val clients = EnrollmentClients(callFactory = pinnedPairingCallFactory(applicationContext))
-        val result = clients.reportState(pairing.serverUrl, deviceId, deviceSecret, enrolled)
+        val result = clients.reportState(pairing.serverUrl, deviceId, deviceSecret, report)
         return when (enrollmentReportOutcome(result, runAttemptCount)) {
             EnrollmentReportOutcome.DONE -> Result.success()
             EnrollmentReportOutcome.RETRY -> Result.retry()

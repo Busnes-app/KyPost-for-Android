@@ -115,7 +115,7 @@ internal class FakeEnrollmentTransport(
     var reportResult: EnrollmentCallResult = EnrollmentCallResult.Ok,
 ) : EnrollmentTransport {
     val publishedKeys = mutableListOf<String>()
-    val reported = mutableListOf<Boolean>()
+    val reported = mutableListOf<EnrollmentReport>()
     var fetchCalls = 0
         private set
     var durableReports = 0
@@ -133,8 +133,8 @@ internal class FakeEnrollmentTransport(
         return if (fetchResults.isEmpty()) fetchWhenExhausted else fetchResults.removeAt(0)
     }
 
-    override suspend fun reportEnrolled(enrolled: Boolean): EnrollmentCallResult {
-        reported += enrolled
+    override suspend fun report(report: EnrollmentReport): EnrollmentCallResult {
+        reported += report
         return reportResult
     }
 

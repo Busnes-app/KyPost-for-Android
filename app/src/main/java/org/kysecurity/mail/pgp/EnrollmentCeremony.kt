@@ -125,6 +125,7 @@ internal class EnrollmentCeremony(
             is EnrollmentCallResult.NotFound,
             is EnrollmentCallResult.Failed,
             is EnrollmentCallResult.Envelope,
+            is EnrollmentCallResult.Conflict,
             -> return failAndDestroy(FailureReason.PUBLISH_REJECTED)
         }
 
@@ -177,6 +178,7 @@ internal class EnrollmentCeremony(
                 is EnrollmentCallResult.RateLimited,
                 is EnrollmentCallResult.Failed,
                 is EnrollmentCallResult.Ok,
+                is EnrollmentCallResult.Conflict,
                 -> Unit
             }
 
@@ -321,7 +323,7 @@ internal class EnrollmentCeremony(
 
     /** Tells the server this device is enrolled. A failed report is not a failed enrollment. */
     private suspend fun report() {
-        if (transport.reportEnrolled(true) !is EnrollmentCallResult.Ok) {
+        if (transport.report(EnrollmentReport.Legacy) !is EnrollmentCallResult.Ok) {
             transport.enqueueDurableReport()
         }
         teardown()

@@ -26,6 +26,105 @@ class EnrollmentClientsTest {
         assertTrue("the key must actually be sent: $body", body.contains("\"publicKey\":\"BASE64KEY\""))
     }
 
+    /** Omitting the list resets the claim to [2], after which the browser refuses to seal v3.
+     *  Server E2E_PGP.md: "Only advertise v3 after native complete-ring persistence checks pass",
+     *  which #112, #115 and #116 did. */
+    @Test
+    fun publishKey_advertisesVersions2And3() = runBlocking {
+        val factory = FakeCallFactory { req -> response(req, """{"ok":true}""", 200) }
+
+        EnrollmentClients(callFactory = factory).publishKey("https://relay.example.com", "d", "s", "K")
+
+        val body = okio.Buffer().also { factory.requests.single().body!!.writeTo(it) }.readUtf8()
+        assertTrue(body, body.contains("\"envelopeVersions\":[2,3]"))
+    }
+
+    /** The delivery metadata the server records beside the envelope; the ceremony validates the
+     *  ring it opens against exactly these values. */
+    @Test
+    fun fetchEnvelope_carriesTheDeliveryMetadata() = runBlocking {
+        val factory = FakeCallFactory { req ->
+            response(
+                req,
+                """{"slot":"device:dev-1","envelope":"ENV","version":3,"fingerprint":"5F117951610CAF01500FA059CDE63F0EBEC934A2",
+                   "materialGeneration":2,"pgpRevision":7,
+                   "keyring":{"version":1,"materialGeneration":2,"primaryFingerprints":["A","B"],"keyFingerprints":["A","B","C"]},
+                   "publicKey":"-----BEGIN PGP PUBLIC KEY BLOCK-----"}""",
+                200,
+            )
+        }
+
+        val result = EnrollmentClients(callFactory = factory).fetchEnvelope("https://relay.example.com", "d", "s")
+
+        assertEquals(
+            EnrollmentCallResult.Envelope(
+                "ENV",
+                DeliveryMetadata(
+                    version = 3,
+                    fingerprint = "5F117951610CAF01500FA059CDE63F0EBEC934A2",
+                    materialGeneration = 2L,
+                    primaryFingerprints = listOf("A", "B"),
+                    keyFingerprints = listOf("A", "B", "C"),
+                ),
+            ),
+            result,
+        )
+    }
+
+    /** A legacy delivery has no generation and a null keyring; the fields are absent, not zero. */
+    @Test
+    fun fetchEnvelope_legacyDeliveryHasNoGeneration() = runBlocking {
+        val factory = FakeCallFactory { req ->
+            response(req, """{"envelope":"ENV","version":2,"fingerprint":"AB","pgpRevision":1,"keyring":null,"publicKey":""}""", 200)
+        }
+
+        val result = EnrollmentClients(callFactory = factory).fetchEnvelope("https://relay.example.com", "d", "s")
+
+        assertEquals(EnrollmentCallResult.Envelope("ENV", DeliveryMetadata(2, "AB", null, null, null)), result)
+    }
+
+    @Test
+    fun reportState_keyringAcknowledgementNamesVersionGenerationAndFingerprint() = runBlocking {
+        val factory = FakeCallFactory { req -> response(req, """{"ok":true}""", 200) }
+
+        EnrollmentClients(callFactory = factory).reportState(
+            "https://relay.example.com", "d", "s",
+            EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = "5F117951610CAF01500FA059CDE63F0EBEC934A2"),
+        )
+
+        val body = okio.Buffer().also { factory.requests.single().body!!.writeTo(it) }.readUtf8()
+        assertEquals(
+            """{"encryptionEnrolled":true,"envelopeVersion":3,"materialGeneration":2,"fingerprint":"5F117951610CAF01500FA059CDE63F0EBEC934A2"}""",
+            body,
+        )
+    }
+
+    /** A bare true is what a legacy account accepts; a converted one refuses it with 409. The
+     *  three metadata fields go together, so none of them may leak into the legacy body. */
+    @Test
+    fun reportState_legacyBodyIsTheBareBoolean() = runBlocking {
+        val factory = FakeCallFactory { req -> response(req, """{"ok":true}""", 200) }
+
+        EnrollmentClients(callFactory = factory).reportState("https://relay.example.com", "d", "s", EnrollmentReport.Legacy)
+
+        val body = okio.Buffer().also { factory.requests.single().body!!.writeTo(it) }.readUtf8()
+        assertEquals("""{"encryptionEnrolled":true}""", body)
+    }
+
+    /** The server records nothing on 409 and returns the current values; the same claim cannot
+     *  become true later, so this is its own result rather than a retryable failure. */
+    @Test
+    fun reportState_mapsConflict() = runBlocking {
+        val factory = FakeCallFactory { req ->
+            response(req, """{"error":"...","pgpStateChanged":true,"materialGeneration":3,"fingerprint":"AB"}""", 409)
+        }
+
+        assertEquals(
+            EnrollmentCallResult.Conflict,
+            EnrollmentClients(callFactory = factory).reportState("https://relay.example.com", "d", "s", EnrollmentReport.Legacy),
+        )
+    }
+
     /** No slot parameter exists on this route — the server builds it from the verified credential.
      *  A client that invented one would be coding against a contract that does not exist. */
     @Test
@@ -74,7 +173,7 @@ class EnrollmentClientsTest {
         val factory = FakeCallFactory { req -> response(req, """{"ok":true}""", 200) }
         val clients = EnrollmentClients(callFactory = factory)
 
-        clients.reportState("https://relay.example.com", "dev-1", "secret-1", enrolled = false)
+        clients.reportState("https://relay.example.com", "dev-1", "secret-1", EnrollmentReport.NotEnrolled)
 
         val sent = factory.requests.single()
         assertEquals("https://relay.example.com/api/pgp/device/enrollment-state", sent.url.toString())
@@ -92,7 +191,7 @@ class EnrollmentClientsTest {
 
         assertEquals(
             EnrollmentCallResult.RateLimited(42L),
-            EnrollmentClients(callFactory = factory).reportState("https://relay.example.com", "d", "s", true),
+            EnrollmentClients(callFactory = factory).reportState("https://relay.example.com", "d", "s", EnrollmentReport.Legacy),
         )
     }
 
@@ -102,7 +201,7 @@ class EnrollmentClientsTest {
 
         assertEquals(
             EnrollmentCallResult.Unauthorized,
-            EnrollmentClients(callFactory = factory).reportState("https://relay.example.com", "d", "s", true),
+            EnrollmentClients(callFactory = factory).reportState("https://relay.example.com", "d", "s", EnrollmentReport.Legacy),
         )
     }
 
@@ -113,7 +212,7 @@ class EnrollmentClientsTest {
         val factory = FakeCallFactory { req -> response(req, """{"ok":true}""", 200) }
 
         val result = EnrollmentClients(callFactory = factory)
-            .reportState("http://relay.example.com", "d", "s", true)
+            .reportState("http://relay.example.com", "d", "s", EnrollmentReport.Legacy)
 
         assertTrue(result is EnrollmentCallResult.Failed)
         assertTrue("no request may be sent", factory.requests.isEmpty())

@@ -5,7 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -55,6 +55,27 @@ class EnrollmentKeyringRecordTest {
 
         assertEquals(EnrollmentStatus.ENROLLED_KEYRING, status)
         assertTrue(status.isEnrolled())
-        assertFalse("the v2 acknowledgement must stay false for a prepared keyring", status.legacyReportValue())
+        assertNull("no stored acknowledgement: nothing may be reported", enrollmentReportFor(status, vault.keyringAck()))
+    }
+
+    /** The values the worker acknowledges live beside the record and die with it: a record
+     *  replaced or destroyed must not leave a stale acknowledgement for a ring no longer held. */
+    @Test
+    fun theAcknowledgementIsStoredWithTheRecordAndClearedWithIt() {
+        assertTrue("the emulator needs a secure lock screen", vault.ensureKey())
+        val ack = EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = "5F117951610CAF01500FA059CDE63F0EBEC934A2")
+
+        vault.store(ByteArray(12) { 7 }, ByteArray(48) { 9 }, VaultRecordKind.KEYRING)
+        assertNull("a bare store carries no acknowledgement", vault.keyringAck())
+        assertTrue(vault.storeKeyringAck(ack))
+        assertEquals(ack, vault.keyringAck())
+        assertEquals(ack, enrollmentReportFor(probeEnrollment(vault), vault.keyringAck()))
+
+        vault.store(ByteArray(12) { 8 }, ByteArray(48) { 9 }, VaultRecordKind.LEGACY_ARMOR)
+        assertNull("replacing the record drops the acknowledgement", vault.keyringAck())
+
+        vault.storeKeyringAck(ack)
+        assertTrue(vault.destroy().isEmpty())
+        assertNull("destroy removes it", vault.keyringAck())
     }
 }
