@@ -111,6 +111,7 @@ class EnrollmentCeremonyMergeTest {
     fun transientPreviousVaultFailureRefusesSealingAndCanRetryWithTheHistoricalKey() = runBlocking {
         var unavailable = true
         val previous = object : VaultOpener {
+            override fun sealedKind(): VaultRecordKind? = VaultRecordKind.LEGACY_ARMOR
             override suspend fun open(): OpenOutcome {
                 if (unavailable) throw org.kysecurity.mail.security.EncryptedStoreUnavailableException(
                     "device_envelope_secure", IllegalStateException("transient test failure"),

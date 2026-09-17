@@ -76,13 +76,13 @@ class ClientEncryptedDraftSaverTest {
     }
 
     @Test fun missingAddressOrRecipientDoesNotPromptOrUpload() = runBlocking {
-        val opener = object : VaultOpener { override suspend fun open(): OpenOutcome = error("must not prompt") }
+        val opener = object : VaultOpener { override fun sealedKind(): VaultRecordKind? = null; override suspend fun open(): OpenOutcome = error("must not prompt") }
         assertEquals(DraftSaveOutcome.NoAccountAddress, ClientEncryptedDraftSaver(opener, " ") { error("upload") }.save(draft))
         assertEquals(DraftSaveOutcome.NoRecipient, ClientEncryptedDraftSaver(opener, "me@example.invalid") { error("upload") }.save(draft.copy(to = " , ")))
     }
 
     @Test fun lostSessionAndInvalidKeyNeverUpload() = runBlocking {
-        val opener = object : VaultOpener { override suspend fun open() = OpenOutcome.Opened }
+        val opener = object : VaultOpener { override fun sealedKind(): VaultRecordKind? = null; override suspend fun open() = OpenOutcome.Opened }
         val saver = ClientEncryptedDraftSaver(opener, "me@example.invalid") { error("must not upload") }
         assertEquals(DraftSaveOutcome.NotEnrolled, saver.save(draft))
         EnrollmentSession.put("invalid".toCharArray())
@@ -102,7 +102,7 @@ class ClientEncryptedDraftSaverTest {
     }
 
     @Test fun unexpectedUnlockAndTransportFailuresStayRecoverable() = runBlocking {
-        val opener = object : VaultOpener { override suspend fun open(): OpenOutcome = error("storage unavailable") }
+        val opener = object : VaultOpener { override fun sealedKind(): VaultRecordKind? = null; override suspend fun open(): OpenOutcome = error("storage unavailable") }
         assertEquals(DraftSaveOutcome.UnsealFailed,
             ClientEncryptedDraftSaver(opener, "me@example.invalid") { error("upload") }.save(draft))
         assertTrue(ClientEncryptedDraftSaver(FakeVaultOpener(), "me@example.invalid") {
@@ -112,13 +112,13 @@ class ClientEncryptedDraftSaverTest {
 
     @Test fun heldKeyNeedsNoNewPrompt() = runBlocking {
         EnrollmentSession.put(TestPgpPrivateKey.ARMORED_PRIVATE.toCharArray())
-        val opener = object : VaultOpener { override suspend fun open(): OpenOutcome = error("already unlocked") }
+        val opener = object : VaultOpener { override fun sealedKind(): VaultRecordKind? = null; override suspend fun open(): OpenOutcome = error("already unlocked") }
         assertEquals(DraftSaveOutcome.Saved,
             ClientEncryptedDraftSaver(opener, "me@example.invalid") { MailOutcome.Success(Unit) }.save(draft))
     }
 
     @Test fun cancellationPropagatesWithoutUpload() = runBlocking {
-        val opener = object : VaultOpener { override suspend fun open(): OpenOutcome = throw CancellationException() }
+        val opener = object : VaultOpener { override fun sealedKind(): VaultRecordKind? = null; override suspend fun open(): OpenOutcome = throw CancellationException() }
         try {
             ClientEncryptedDraftSaver(opener, "me@example.invalid") { error("upload") }.save(draft)
             fail("cancellation swallowed")

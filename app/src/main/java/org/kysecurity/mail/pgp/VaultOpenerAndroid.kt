@@ -65,6 +65,8 @@ internal class AndroidVaultOpener(
         data class Blocked(val outcome: OpenOutcome) : VaultUnlock()
     }
 
+    override fun sealedKind(): VaultRecordKind? = vault().stored()?.kind
+
     override suspend fun open(): OpenOutcome {
         // Blocking Keystore/disk work; the Main hop is explicit — the caller builds this from IO.
         val unlock = withContext(Dispatchers.IO) {

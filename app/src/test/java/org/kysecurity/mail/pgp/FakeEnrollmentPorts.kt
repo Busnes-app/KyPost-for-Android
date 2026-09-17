@@ -13,13 +13,20 @@ internal fun sealEnvelope(
     deviceId: String = "dev-1",
     aadFingerprint: String = FAKE_FINGERPRINT,
     plaintext: String = FAKE_PLAINTEXT,
+    version: Int = ENVELOPE_VERSION_LEGACY,
 ): String {
     val sharedSecret = requireNotNull(keys.sharedSecretResult)
-    val ephemeral = ByteArray(65).also { it[0] = 0x04; for (i in 1..64) it[i] = 0x44 }
+    // v3 framing rejects an off-curve point before any ECDH runs, so the ephemeral point is a
+    // real one (the generator); the fake keys ignore it when deriving the shared secret.
+    val ephemeral = if (version == ENVELOPE_VERSION_KEYRING) {
+        org.bouncycastle.asn1.x9.ECNamedCurveTable.getByName("secp256r1").g.getEncoded(false)
+    } else {
+        ByteArray(65).also { it[0] = 0x04; for (i in 1..64) it[i] = 0x44 }
+    }
     val key = hkdfSha256(
         ikm = sharedSecret,
         salt = keys.keystorePoint,
-        info = "kypost-device-envelope/v2".toByteArray(Charsets.UTF_8),
+        info = envelopeDomain(version).toByteArray(Charsets.UTF_8),
         length = 32,
     )
     val iv = ByteArray(12) { 0x55 }
@@ -29,12 +36,12 @@ internal fun sealEnvelope(
             javax.crypto.spec.SecretKeySpec(key, "AES"),
             javax.crypto.spec.GCMParameterSpec(128, iv),
         )
-        updateAAD(deviceEnvelopeAad(ENVELOPE_VERSION_LEGACY, deviceId, aadFingerprint))
+        updateAAD(deviceEnvelopeAad(version, deviceId, aadFingerprint))
     }
     val ct = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
     val b64 = java.util.Base64.getEncoder()
     return """
-        {"v":"2","alg":"ECDH-P256+HKDF-SHA256+A256GCM",
+        {"v":${if (version == ENVELOPE_VERSION_LEGACY) "\"2\"" else "$version"},"alg":"ECDH-P256+HKDF-SHA256+A256GCM",
          "epk":"${b64.encodeToString(ephemeral)}",
          "iv":"${b64.encodeToString(iv)}",
          "ct":"${b64.encodeToString(ct)}"}
@@ -169,11 +176,15 @@ internal class FakeVaultSealer(
     /** The record kind each seal declared. */
     val kinds = mutableListOf<VaultRecordKind>()
 
+    /** The acknowledgement each seal asked to store beside the record (null for legacy). */
+    val acks = mutableListOf<EnrollmentReport.Keyring?>()
+
     /** Runs at the moment of sealing, so a test can observe what is (not yet) installed. */
     var onSeal: () -> Unit = {}
 
-    override suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind): SealOutcome {
+    override suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind, ack: EnrollmentReport.Keyring?): SealOutcome {
         kinds += kind
+        acks += ack
         onSeal()
         received += plaintext.copyOf()
         handedArrays += plaintext
