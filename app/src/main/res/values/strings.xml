@@ -38,6 +38,9 @@
     <string name="settings_pairing_body">Push pairing and notification transport</string>
     <string name="settings_pgp_body">Show or scan PGP key QR codes</string>
     <string name="settings_about_body">Version and license</string>
+    <string name="settings_privacy">Privacy policy</string>
+    <string name="settings_privacy_body">Read how KyPost handles data</string>
+    <string name="settings_privacy_url" translatable="false">https://www.kypost.org/privacy.html</string>
     <string name="settings_support">Support KyPost</string>
     <string name="settings_support_body">Leave a tip or subscribe to support development</string>
     <string name="tip_title">Support KyPost</string>
