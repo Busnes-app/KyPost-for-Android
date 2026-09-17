@@ -39,7 +39,8 @@ Owns Android instrumentation tests executed on emulator/device.
   ring under a fixed test-only AES key, then after boot reopens it from storage alone, decrypts
   both historical fixtures and signs with the active member; `src/androidTest/resources/` carries
   that fixture copy. `EnrollmentKeyringRecordTest` pins the record format byte and that a keyring
-  record probes as enrolled locally with a false legacy report value. `DeviceEnrollmentSealLifecycleTest`
+  record probes as enrolled locally, reports nothing without a stored acknowledgement, and that
+  the acknowledgement stored beside a keyring record is dropped when the record is replaced or destroyed. `DeviceEnrollmentSealLifecycleTest`
   recreates the Activity while the seal prompt is visible and proves cancellation keeps the
   previous record. `ReadOutcomeActivityTest`
   checks accepted and rejected attachment ownership through the real renderer and confirms that
