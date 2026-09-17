@@ -1101,6 +1101,60 @@ class RelayMailSourceTest {
         assertEquals(OUTER_PLACEHOLDER_SUBJECT, sent.subject)
     }
 
+    private fun clientEncrypted(materialGeneration: Long? = null) = ClientEncryptedMessage(
+        from = "me@example.com",
+        to = listOf("alice@example.com"),
+        cc = emptyList(),
+        bcc = emptyList(),
+        deliveries = listOf(ClientEncryptedDelivery(listOf("alice@example.com"), "MIME")),
+        sentCopy = "SENT",
+        materialGeneration = materialGeneration,
+    )
+
+    /** KyPost-Server #210: a converted account requires the generation; a legacy one must not see
+     *  a made-up value, so the field is absent rather than zero. */
+    @Test
+    fun sendClientEncrypted_sendsTheMaterialGenerationOnlyWhenHeld() {
+        val callFactory = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true,"sentSaved":true,"warning":""}""") }
+        val source = RelayMailSource(pairingProvider = { testPairing() }, cursorProvider = FakeMailCursorProvider(), callFactory = callFactory)
+
+        source.sendClientEncrypted(clientEncrypted(materialGeneration = 2L))
+        source.sendClientEncrypted(clientEncrypted(materialGeneration = null))
+
+        assertTrue(callFactory.bodies[0], callFactory.bodies[0].contains("\"materialGeneration\":2"))
+        assertFalse(callFactory.bodies[1], callFactory.bodies[1].contains("materialGeneration"))
+    }
+
+    /** The account's keys moved on since this device enrolled. Only re-enrolling helps; the user
+     *  is told that rather than "Conflicting request". */
+    @Test
+    fun sendClientEncrypted_409PgpStateChanged_tellsTheUserToEnrollAgain() {
+        val body = """{"error":"the account's key material changed; reload and send again","pgpStateChanged":true,"materialGeneration":3}"""
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body, code = 409) },
+        )
+
+        val outcome = source.sendClientEncrypted(clientEncrypted(materialGeneration = 2L))
+
+        assertEquals(MailOutcome.BadRequest(PGP_STATE_CHANGED_MESSAGE), outcome)
+    }
+
+    @Test
+    fun sendClientEncrypted_409ReenrollmentRequired_tellsTheUserToEnrollAgain() {
+        val body = """{"error":"this device holds retired key material; enroll it again before sending","reenrollmentRequired":true,"materialGeneration":2}"""
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body, code = 409) },
+        )
+
+        val outcome = source.sendClientEncrypted(clientEncrypted(materialGeneration = 2L))
+
+        assertEquals(MailOutcome.BadRequest(REENROLLMENT_REQUIRED_MESSAGE), outcome)
+    }
+
     @Test
     fun sendClientEncrypted_200WithWarning_isSuccessCarryingIt() {
         val body = """{"ok":true,"sentSaved":false,"warning":"1 bcc delivery(s) failed"}"""

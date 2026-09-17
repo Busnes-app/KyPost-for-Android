@@ -175,6 +175,9 @@ data class ClientEncryptedMessage(
      *  deliveries were protecting. */
     val sentCopy: String,
     val mode: String = "html",
+    /** The held keyring's generation; null for legacy armor. A converted account refuses a send
+     *  that does not name its current generation (KyPost-Server #210). */
+    val materialGeneration: Long? = null,
 )
 
 data class MailMessageBody(

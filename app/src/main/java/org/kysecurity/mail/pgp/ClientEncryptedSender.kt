@@ -153,6 +153,7 @@ internal class ClientEncryptedSender(
                     boundaryToken = boundaryToken,
                 ),
                 mode = draft.mode.ifBlank { "html" },
+                materialGeneration = EnrollmentSession.withKeyring { it.materialGeneration },
             ),
         )
         return when (outcome) {
