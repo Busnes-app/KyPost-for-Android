@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import com.google.android.material.navigation.NavigationBarView
 import org.kysecurity.mail.pgp.PgpKeyActivity
 import org.kysecurity.mail.security.LockedActivity
@@ -41,7 +42,11 @@ class SettingsActivity : LockedActivity() {
             showAboutDialog(this)
         }
         findViewById<Button>(R.id.settingsPrivacy).setOnClickListener {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(getString(R.string.settings_privacy_url))))
+            runCatching {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(getString(R.string.settings_privacy_url))))
+            }.onFailure {
+                Toast.makeText(this, R.string.email_link_no_handler, Toast.LENGTH_SHORT).show()
+            }
         }
         findViewById<Button>(R.id.settingsSupport).setOnClickListener {
             val supportUrl = supportUrlForFlavor(BuildConfig.FLAVOR)
