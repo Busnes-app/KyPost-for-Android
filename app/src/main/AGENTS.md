@@ -554,3 +554,7 @@ Owns production Android app code and resources.
 # Child DOX Index
 
 - No child AGENTS.md files.
+
+## Product icon
+
+App/launcher assets use the Busnes.app-site Systems stamp family. Regenerate platform sizes from the matching master in `../Busnes.app-site`; preserve resource names and adaptive foreground safe margins. This asset update does not change native theme defaults.
