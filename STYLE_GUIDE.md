@@ -17,9 +17,9 @@ inventing new design decisions independent of web.
 
 Source of truth for colors: `frontend/src/theme.ts` (web), `AppTheme.swift`
 `AppTheme.palettes` (iOS/macOS), `ThemeManager`/`ThemeController` (Linux, `app/theme/` +
-`core/`), and `AppTheme.kt` `themePalettes` (this app). All four must stay numerically
-identical — if a theme is added or a hex changes on one side, port it to the other three
-the same day. (Swift and QML source code already carry `STYLE_GUIDE.md §N` comments
+`core/`), and `AppTheme.kt` `themePalettes` (this app). Existing shared themes must stay numerically identical. The September 2026 Busnes
+Light/Dark rollout is web-only by user request; native apps retain their existing
+15 palettes and defaults until a separate native theme pass. (Swift and QML source code already carry `STYLE_GUIDE.md §N` comments
 pointing back at this file — keep section numbers stable when editing.)
 
 ## 1. Color system (already shared — keep it that way)
