@@ -565,6 +565,11 @@ Owns production Android app code and resources.
 
 ## Product icon
 
-App/launcher assets use the Busnes.app-site Systems stamp family. Regenerate platform sizes from the matching master in `../Busnes.app-site`; preserve resource names and adaptive foreground safe margins. The Busnes Light/Dark palettes landed alongside it, so the adaptive background
-(`ic_launcher_background.xml`, `#f2efe8`) and the in-app artwork now sit against the same
-cream the default theme uses.
+App/launcher assets use the Busnes.app-site Systems stamp family. Regenerate platform sizes from the matching master in `../Busnes.app-site`; preserve resource names and adaptive foreground safe margins. The adaptive background (`ic_launcher_background.xml`) is `#182326`, matching the badge
+baked into `ic_launcher_foreground` so the badge edge disappears and the launcher shows one
+charcoal field behind the envelope — a cream background left a ring inside the launcher's
+mask, since the foreground is a 64dp badge on a transparent 108dp canvas. Changing it is
+launcher-only: the two adaptive-icon XMLs are its only referents, and the in-app artwork
+(`applyKyPostTopBar`, `activity_tip.xml`) draws `ic_launcher_foreground` directly. At
+`minSdk 31` those XMLs in `mipmap-anydpi` resolve ahead of the per-density
+`ic_launcher*.webp`, which still carry the older cream-ringed composite.
