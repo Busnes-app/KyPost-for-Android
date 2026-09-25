@@ -400,7 +400,15 @@ Owns production Android app code and resources.
   The Inbox freshness label stays centered immediately below those tabs. Before the first
   successful refresh it reads "Not updated yet", so its row never appears empty and the first
   success does not shift the message list.
-- Theme selection is managed in `ThemesActivity` and uses the shared theme name list based on `theme.ts` palettes.
+- Theme selection is managed in `ThemesActivity` and uses the shared theme name list based on
+  `theme.ts` palettes, led by `Busnes Light`/`Busnes Dark` from `busnes-color-theme-handoff.md`.
+  `AppTheme.DEFAULT_THEME` (`Busnes Light`) is the only place the fallback name lives — the
+  stored-name read, the unknown-name fallback and the missing-palette fallback all go through it.
+  An install that never picked a theme moves from `Patina Ky` to `Busnes Light`; an explicit
+  choice is kept, because `getStoredThemeName` only discards names `THEME_OPTIONS` no longer
+  offers. Palette colors are opaque six-digit hex without exception: `blend()` returns
+  `Color.rgb`, so alpha in `line` survives as a fully opaque near-black in
+  `applyEmptyStateBackground`. `ThemePaletteTableTest` holds both rules.
 - `SettingsActivity` is only a hub for existing settings surfaces: Security, Themes, Keywords,
   Pairing, PGP Key, and About. Keep settings logic in the destination screens rather than
   duplicating it in the hub.
@@ -554,3 +562,9 @@ Owns production Android app code and resources.
 # Child DOX Index
 
 - No child AGENTS.md files.
+
+## Product icon
+
+App/launcher assets use the Busnes.app-site Systems stamp family. Regenerate platform sizes from the matching master in `../Busnes.app-site`; preserve resource names and adaptive foreground safe margins. The Busnes Light/Dark palettes landed alongside it, so the adaptive background
+(`ic_launcher_background.xml`, `#f2efe8`) and the in-app artwork now sit against the same
+cream the default theme uses.
