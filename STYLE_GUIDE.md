@@ -17,17 +17,28 @@ inventing new design decisions independent of web.
 
 Source of truth for colors: `frontend/src/theme.ts` (web), `AppTheme.swift`
 `AppTheme.palettes` (iOS/macOS), `ThemeManager`/`ThemeController` (Linux, `app/theme/` +
-`core/`), and `AppTheme.kt` `themePalettes` (this app). Existing shared themes must stay numerically identical. The September 2026 Busnes
-Light/Dark rollout is web-only by user request; native apps retain their existing
-15 palettes and defaults until a separate native theme pass. (Swift and QML source code already carry `STYLE_GUIDE.md §N` comments
+`core/`), and `AppTheme.kt` `themePalettes` (this app). Existing shared themes must stay
+numerically identical. The September 2026 Busnes Light/Dark rollout reached web and this
+app; iOS/macOS and Linux Mobile still carry the 15 older palettes and `Patina Ky` as their
+default until their own pass. (Swift and QML source code already carry `STYLE_GUIDE.md §N` comments
 pointing back at this file — keep section numbers stable when editing.)
 
 ## 1. Color system (already shared — keep it that way)
 
-All four apps already ship the same 15 named themes (`Dark Matter`, `Light Matter`,
+All four apps ship the same 15 named themes (`Dark Matter`, `Light Matter`,
 `Tropics`, `Tropic Night`, `Ocean`, `Coffee`, `White Cliffs`, `Cyber Punk`,
-`Neon Purple`, `Space`, `Sky`, `Forest`, `Sun`, `Patina Ky`, `Polished Ky`), default
-`Patina Ky`. Don't fork this list per-platform.
+`Neon Purple`, `Space`, `Sky`, `Forest`, `Sun`, `Patina Ky`, `Polished Ky`). Don't fork
+this list per-platform.
+
+Ahead of that list, web and Android also offer `Busnes Light` and `Busnes Dark` — the
+cream/charcoal pair with one orange accent from `busnes-color-theme-handoff.md`.
+`Busnes Light` is Android's default (`AppTheme.DEFAULT_THEME`, the single source for the
+fallback name); `Patina Ky` remains the default on iOS/macOS and Linux Mobile. Port the
+pair, and the default, when those platforms take their pass. Android's `line` holds the
+handoff's control border **composited onto `panel`**, not its `rgba()` form: `blend()` in
+`AppTheme.kt` drops alpha, so a translucent `line` would paint the empty-state dashed
+border near-black on cream. The handoff's `buttonText` needs no palette field — it is what
+`readableOn(accent)` already returns on both palettes.
 
 Web's `ThemeVars` has more fields than mobile's `ThemePalette` (16 vs 6). iOS's
 `ThemePalette` sits in between (7 fields: `bg/panel/ink/inkStrong/accent/accentSoft/line`)

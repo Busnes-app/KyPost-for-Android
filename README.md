@@ -10,7 +10,7 @@ KyPost is an Android email client backed by a self-hosted KyPost relay. It shows
 - **Contacts**: A two-way contact sync runs against a self-hosted KyPost server. Open it from the Inbox overflow menu.
 - **PGP**: One screen shows your own PGP public-key QR code and scans another person's, saving that key onto an existing contact. The app also encrypts outgoing mail to a recipient's key, and decrypts client-custody mail on the device once it holds a sealed key envelope — see **Device enrollment** in [SECURITY.md](SECURITY.md). Without that envelope, encrypted mail hands off to webmail instead.
 - **MFA push approval**: Push notifications approve or deny KyPost account logins. An in-app screen does the same when OEM background limits block the action notification.
-- **Themes**: The app shares theme presets with the KyPost web app. The default theme is **Patina Ky**. Select a theme in the Themes screen.
+- **Themes**: The app shares theme presets with the KyPost web app. The default theme is **Busnes Light**; **Busnes Dark** is its charcoal counterpart, and the 15 older presets are still offered. Select a theme in the Themes screen.
 - **Push notifications**: The app shows system notifications and keeps an in-app notification history for new mail. Each user selects a delivery mode (`push` or `pull`).
 
 ## Push notification pairing
