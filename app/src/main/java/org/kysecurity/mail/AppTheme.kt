@@ -25,7 +25,12 @@ import androidx.core.view.WindowInsetsControllerCompat
 
 const val THEME_STORAGE_KEY = "kypost-theme"
 
+/** Fallback when nothing is saved, and when a saved name is no longer offered. */
+const val DEFAULT_THEME = "Busnes Light"
+
 val THEME_OPTIONS = listOf(
+    "Busnes Light",
+    "Busnes Dark",
     "Dark Matter",
     "Light Matter",
     "Tropics",
@@ -69,7 +74,13 @@ const val COLOR_WARNING_ACTION_TEXT = "#fff0b8"
 const val COLOR_SUCCESS_BORDER = "#7bbf7b"
 const val COLOR_SUCCESS_TEXT = "#a5dca5"
 
-private val themePalettes: Map<String, ThemePalette> = mapOf(
+internal val themePalettes: Map<String, ThemePalette> = mapOf(
+    // Busnes cream/charcoal, one orange accent (busnes-color-theme-handoff.md). `line` is the
+    // handoff's control border composited onto `panel` — blend() drops alpha, so a translucent
+    // line would paint applyEmptyStateBackground's dashed border near-black on cream.
+    // Avatar stops run accent -> decorative orange; buttonText falls out of readableOn(accent).
+    "Busnes Light" to ThemePalette("#f8f6f0", "#ffffff", "#566461", "#182326", "#bf3f18", "#cccfcf", "#bf3f18", "#e65124", "#bf3f18"),
+    "Busnes Dark" to ThemePalette("#182326", "#1f2b2e", "#b3bcb8", "#f2efe8", "#f5865f", "#525a5b", "#f5865f", "#f26a3d", "#f5865f"),
     "Dark Matter" to ThemePalette("#1a1a1e", "#252530", "#d4c5e2", "#e8ddf5", "#c29a72", "#404050", "#c29a72", "#9a7450", "#8f6b4a"),
     "Light Matter" to ThemePalette("#f5efe5", "#fff8ee", "#4c3d32", "#2d1f15", "#c29a72", "#c5b29d", "#c29a72", "#9a7450", "#8f6b4a"),
     "Tropics" to ThemePalette("#f4f1eb", "#fffaf0", "#43362d", "#241a14", "#9bc400", "#c4b7a3", "#9bc400", "#7ea100", "#78a100"),
@@ -89,8 +100,8 @@ private val themePalettes: Map<String, ThemePalette> = mapOf(
 
 fun getStoredThemeName(context: Context): String {
     val prefs = context.getSharedPreferences("org.kysecurity.mail.settings", Context.MODE_PRIVATE)
-    val saved = prefs.getString(THEME_STORAGE_KEY, "Patina Ky") ?: "Patina Ky"
-    return if (THEME_OPTIONS.contains(saved)) saved else "Patina Ky"
+    val saved = prefs.getString(THEME_STORAGE_KEY, DEFAULT_THEME) ?: DEFAULT_THEME
+    return if (THEME_OPTIONS.contains(saved)) saved else DEFAULT_THEME
 }
 
 fun saveThemeName(context: Context, themeName: String) {
@@ -103,7 +114,7 @@ fun getStoredThemePalette(context: Context): ThemePalette {
 }
 
 fun themePaletteFor(themeName: String): ThemePalette {
-    return themePalettes[themeName] ?: themePalettes.getValue("Patina Ky")
+    return themePalettes[themeName] ?: themePalettes.getValue(DEFAULT_THEME)
 }
 
 fun applyThemeToActivity(activity: Activity) {
