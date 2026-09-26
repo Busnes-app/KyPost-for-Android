@@ -565,6 +565,10 @@ Owns production Android app code and resources.
 
 ## Product icon
 
+Notification small icons use `drawable/ic_notification`, a white envelope with a transparent
+flap cutout and background. Android renders the alpha mask; an opaque launcher background
+loses its artwork when tinted. Use this drawable for mail, redacted mail, and MFA notifications.
+
 App/launcher assets use the Busnes.app-site Systems stamp family. Regenerate platform sizes from the matching master in `../Busnes.app-site`; preserve resource names and adaptive foreground safe margins. The adaptive background (`ic_launcher_background.xml`) is `#182326`, matching the badge
 baked into `ic_launcher_foreground` so the badge edge disappears and the launcher shows one
 charcoal field behind the envelope — a cream background left a ring inside the launcher's

@@ -130,7 +130,7 @@ object PushNotificationDispatcher : org.kysecurity.mail.ProcessScopedState {
         val redacted = redactedNotification(context, payload)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(PushPayloadParser.title(payload))
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
@@ -169,7 +169,7 @@ object PushNotificationDispatcher : org.kysecurity.mail.ProcessScopedState {
     private fun redactedNotification(context: Context, payload: PushPayload): android.app.Notification {
         val notificationId = uniqueNotificationId("mail-${payload.messageId}")
         return NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(context.getString(R.string.app_name))
             .setContentText(context.getString(R.string.notification_hidden_while_locked))
             .setAutoCancel(true)
@@ -246,7 +246,7 @@ object PushNotificationDispatcher : org.kysecurity.mail.ProcessScopedState {
         )
 
         val notification = NotificationCompat.Builder(context, MFA_CHANNEL_ID)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(
                 context.getString(
                     if (burst) R.string.mfa_notification_burst_title else R.string.mfa_notification_title,
