@@ -81,22 +81,25 @@ private fun parseRfc3339Millis(value: String?): Long? {
 /** Side-effect free so cursor/de-duplication behavior is unit testable. */
 object PullNotificationProcessor {
     data class Prepared(
-        val payloads: List<PushPayload>,
+        val incoming: List<IncomingPush>,
         val nextCursor: Long,
     )
 
+    /** [minCreatedAtEpochMs] drops entries older than it; those without a `createdAt` stay. */
     fun prepare(
         response: PullNotificationsResponse,
         currentCursor: Long,
         nowEpochMs: Long = System.currentTimeMillis(),
+        minCreatedAtEpochMs: Long = 0L,
     ): Prepared {
         val payloads = response.notifications
             .filter { it.seq > currentCursor }
+            .filter { (parseRfc3339Millis(it.createdAt) ?: Long.MAX_VALUE) >= minCreatedAtEpochMs }
             .distinctBy { it.seq }
             .sortedBy { it.seq }
-            .map { it.toPushPayload(nowEpochMs) }
+            .map { IncomingPushRouter.route(it, nowEpochMs) }
         // response.cursor is the highest sequence the server has assigned; never move backwards.
         val nextCursor = maxOf(currentCursor, response.cursor)
-        return Prepared(payloads = payloads, nextCursor = nextCursor)
+        return Prepared(incoming = payloads, nextCursor = nextCursor)
     }
 }

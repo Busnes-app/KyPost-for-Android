@@ -39,11 +39,14 @@ class KyPostFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
+        val graph = PushRuntime.graph(applicationContext)
+        // Any delivery proves the transport is alive, which is what the pull heartbeat waits on.
+        serviceScope.launch { graph.repository.markPushReceived(System.currentTimeMillis()) }
+
         when (val incoming = IncomingPushRouter.route(message.data)) {
             is IncomingPush.Mfa ->
                 PushNotificationDispatcher.showMfaChallenge(applicationContext, incoming.payload)
             is IncomingPush.Mail -> {
-                val graph = PushRuntime.graph(applicationContext)
                 serviceScope.launch { graph.repository.appendPayload(incoming.payload) }
                 PushNotificationDispatcher.show(applicationContext, incoming.payload)
             }

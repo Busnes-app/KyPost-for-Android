@@ -61,8 +61,8 @@ class PullSyncCoordinatorSerializationTest {
                     response(req, oneNotification, 200)
                 },
             ),
-            notifier = { payload -> shown += payload },
-            schedule = {},
+            notifier = { incoming -> shown += (incoming as IncomingPush.Mail).payload },
+            ensurePeriodic = {},
         )
 
         listOf(
@@ -87,7 +87,7 @@ class PullSyncCoordinatorSerializationTest {
                 callFactory = FakeCallFactory { req -> response(req, oneNotification, 200) },
             ),
             notifier = {},
-            schedule = {},
+            ensurePeriodic = {},
         )
 
         listOf(

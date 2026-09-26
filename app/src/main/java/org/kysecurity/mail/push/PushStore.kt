@@ -41,8 +41,11 @@ interface PushStore {
     suspend fun updateTransport(transport: PushTransport?)
     suspend fun updateUnifiedPushRegistration(endpoint: String?, p256dh: String?, auth: String?)
     suspend fun updateSyncState(lastSyncAtEpochMs: Long?, syncError: String?)
+    /** A push arrived over the transport; resets the heartbeat's quiet clock. */
+    suspend fun markPushReceived(nowEpochMs: Long)
 
     suspend fun pullCursor(subscriberId: String): Long
     suspend fun advancePullCursor(subscriberId: String, cursor: Long)
-    suspend fun appendPayload(payload: PushPayload)
+    /** Adds to history; false when [PushPayload.messageId] was already there. */
+    suspend fun appendPayload(payload: PushPayload): Boolean
 }

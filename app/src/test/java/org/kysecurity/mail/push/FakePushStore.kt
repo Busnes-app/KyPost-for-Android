@@ -28,10 +28,13 @@ internal class FakePushStore(
     var leafOnly: Boolean = true
     var cursor: Long = 0L
     val notified = mutableListOf<PushPayload>()
+    /** Message ids [appendPayload] treats as already in history. */
+    val knownMessageIds = mutableSetOf<String>()
 
     override val state: Flow<PushState> get() = backing
 
     fun currentPairing(): PairingData? = backing.value.pairing
+    fun currentDeliveryMode(): DeliveryMode = backing.value.deliveryMode
 
     override fun pairingForAuthenticatedCall(): PairingData? = backing.value.pairing
     override fun currentCredentialState(): PushRepository.PairingCredentialState = credentialState
@@ -90,7 +93,12 @@ internal class FakePushStore(
         this.cursor = maxOf(this.cursor, cursor)
     }
 
-    override suspend fun appendPayload(payload: PushPayload) {
+    override suspend fun markPushReceived(nowEpochMs: Long) {
+        backing.value = backing.value.copy(lastPushReceivedAtEpochMs = nowEpochMs)
+    }
+
+    override suspend fun appendPayload(payload: PushPayload): Boolean {
         events += "append:${payload.messageId}"
+        return knownMessageIds.add(payload.messageId)
     }
 }
