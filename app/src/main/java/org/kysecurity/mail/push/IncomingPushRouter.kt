@@ -21,4 +21,11 @@ object IncomingPushRouter {
     fun route(data: Map<String, String>): IncomingPush? =
         MfaChallengePayloadParser.parse(data)?.let(IncomingPush::Mfa)
             ?: PushPayloadParser.parse(data)?.let(IncomingPush::Mail)
+
+    /** A pulled entry is the same relay message with its `data` map intact, so it takes the same
+     *  MFA-first decision. Mail keeps [PullNotification.toPushPayload]: the entry's title, body
+     *  and `createdAt` are what a bare-content account has. */
+    fun route(notification: PullNotification, nowEpochMs: Long): IncomingPush =
+        notification.data?.let(MfaChallengePayloadParser::parse)?.let(IncomingPush::Mfa)
+            ?: IncomingPush.Mail(notification.toPushPayload(nowEpochMs))
 }
