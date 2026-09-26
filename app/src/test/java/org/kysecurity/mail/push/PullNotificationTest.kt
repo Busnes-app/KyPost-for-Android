@@ -142,7 +142,7 @@ class PullNotificationTest {
             ),
         )
         val prepared = PullNotificationProcessor.prepare(response, currentCursor = 9, nowEpochMs = 1L)
-        assertEquals(listOf("pull-10", "pull-11", "pull-12"), prepared.payloads.map { it.messageId })
+        assertEquals(listOf("pull-10", "pull-11", "pull-12"), prepared.incoming.map { (it as IncomingPush.Mail).payload.messageId })
         assertEquals(12L, prepared.nextCursor)
     }
 
@@ -156,7 +156,7 @@ class PullNotificationTest {
             ),
         )
         val prepared = PullNotificationProcessor.prepare(response, currentCursor = 0, nowEpochMs = 1L)
-        assertEquals(1, prepared.payloads.size)
+        assertEquals(1, prepared.incoming.size)
     }
 
     @Test
@@ -164,8 +164,43 @@ class PullNotificationTest {
         // Server reports a lower cursor than we already have (e.g. stale/no new items).
         val response = PullNotificationsResponse(cursor = 3, notifications = emptyList())
         val prepared = PullNotificationProcessor.prepare(response, currentCursor = 20, nowEpochMs = 1L)
-        assertTrue(prepared.payloads.isEmpty())
+        assertTrue(prepared.incoming.isEmpty())
         assertEquals(20L, prepared.nextCursor)
+    }
+
+    /** Entries older than the floor are dropped but still advance the cursor; undated ones stay. */
+    @Test
+    fun processor_dropsEntriesCreatedBeforeTheFloor_andStillAdvancesTheCursor() {
+        val response = PullNotificationsResponse(
+            cursor = 3,
+            notifications = listOf(
+                PullNotification(seq = 1, title = "old", createdAt = "2026-07-05T00:00:00Z"),
+                PullNotification(seq = 2, title = "fresh", createdAt = "2026-07-05T12:00:00Z"),
+                PullNotification(seq = 3, title = "undated"),
+            ),
+        )
+        val floor = java.time.Instant.parse("2026-07-05T06:00:00Z").toEpochMilli()
+        val prepared = PullNotificationProcessor.prepare(response, currentCursor = 0, nowEpochMs = 1L, minCreatedAtEpochMs = floor)
+        assertEquals(listOf("pull-2", "pull-3"), prepared.incoming.map { (it as IncomingPush.Mail).payload.messageId })
+        assertEquals(3L, prepared.nextCursor)
+    }
+
+    /** A queued MFA challenge takes the same MFA-first decision as a pushed one. */
+    @Test
+    fun processor_routesAnMfaChallengeToTheApprovalPath() {
+        val response = PullNotificationsResponse(
+            cursor = 1,
+            notifications = listOf(
+                PullNotification(
+                    seq = 1,
+                    title = "Sign-in request",
+                    data = mapOf("type" to "mfa_challenge", "challengeId" to "ch-1", "matchDigits" to "42"),
+                ),
+            ),
+        )
+        val prepared = PullNotificationProcessor.prepare(response, currentCursor = 0, nowEpochMs = 1L)
+        val routed = prepared.incoming.single() as IncomingPush.Mfa
+        assertEquals("ch-1", routed.payload.challengeId)
     }
 
     @Test

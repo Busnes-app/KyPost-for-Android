@@ -24,11 +24,14 @@ class PushGraph(context: Context) {
     val pullCoordinator = PullSyncCoordinator(
         repository = repository,
         pullClient = PullNotificationClient(callFactory = pinnedOrFallbackCallFactory),
-        notifier = { payload -> PushNotificationDispatcher.show(appContext, payload) },
-        schedule = { mode ->
-            if (mode == DeliveryMode.PULL) PullScheduler.ensurePeriodic(appContext)
-            else PullScheduler.cancelPeriodic(appContext)
+        // The same two exits a pushed message takes in the messaging services.
+        notifier = { incoming ->
+            when (incoming) {
+                is IncomingPush.Mfa -> PushNotificationDispatcher.showMfaChallenge(appContext, incoming.payload)
+                is IncomingPush.Mail -> PushNotificationDispatcher.show(appContext, incoming.payload)
+            }
         },
+        ensurePeriodic = { PullScheduler.ensurePeriodic(appContext) },
     )
     val syncCoordinator = PushSyncCoordinator(
         repository = repository,

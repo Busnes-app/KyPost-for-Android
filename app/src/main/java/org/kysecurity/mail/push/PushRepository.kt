@@ -22,6 +22,7 @@ import java.io.IOException
 private val Context.pushDataStore by preferencesDataStore(name = "push_state")
 
 private val KEY_LAST_SYNC_AT = longPreferencesKey("sync_last_at")
+private val KEY_LAST_PUSH_AT = longPreferencesKey("push_last_received_at")
 private val KEY_SYNC_ERROR = stringPreferencesKey("sync_error")
 private val KEY_HISTORY_JSON = stringPreferencesKey("history_json")
 private val KEY_DELIVERY_MODE = stringPreferencesKey("delivery_mode")
@@ -255,6 +256,7 @@ class PushRepository(
         context.pushDataStore.edit { prefs ->
             prefs.remove(KEY_SYNC_ERROR)
             prefs.remove(KEY_LAST_SYNC_AT)
+            prefs.remove(KEY_LAST_PUSH_AT)
             // Registration state that belongs to the credential being reset, not to the account.
             prefs.remove(KEY_TRANSPORT)
             prefs.remove(KEY_UNIFIEDPUSH_ENDPOINT)
@@ -269,6 +271,7 @@ class PushRepository(
         inMemoryHistory.value = emptyList()
         context.pushDataStore.edit { prefs ->
             prefs.remove(KEY_LAST_SYNC_AT)
+            prefs.remove(KEY_LAST_PUSH_AT)
             prefs.remove(KEY_SYNC_ERROR)
             prefs.remove(KEY_HISTORY_JSON)
             prefs.remove(KEY_DELIVERY_MODE)
@@ -361,18 +364,29 @@ class PushRepository(
         }
     }
 
-    override suspend fun appendPayload(payload: PushPayload) {
+    override suspend fun markPushReceived(nowEpochMs: Long) {
+        context.pushDataStore.edit { prefs -> prefs[KEY_LAST_PUSH_AT] = nowEpochMs }
+    }
+
+    override suspend fun appendPayload(payload: PushPayload): Boolean {
         if (hostileLocationSettings.isEnabled()) {
-            inMemoryHistory.update { current -> (listOf(payload) + current).distinctBy { it.messageId }.take(HISTORY_LIMIT) }
-            return
+            var isNew = false
+            inMemoryHistory.update { current ->
+                isNew = current.none { it.messageId == payload.messageId }
+                (listOf(payload) + current).distinctBy { it.messageId }.take(HISTORY_LIMIT)
+            }
+            return isNew
         }
+        var isNew = false
         context.pushDataStore.edit { prefs ->
             val current = decodeHistory(prefs[KEY_HISTORY_JSON])
+            isNew = current.none { it.messageId == payload.messageId }
             val updated = (listOf(payload) + current)
                 .distinctBy { it.messageId }
                 .take(HISTORY_LIMIT)
             prefs[KEY_HISTORY_JSON] = json.encodeToString(updated)
         }
+        return isNew
     }
 
     private fun toState(prefs: Preferences, pairing: PairingData?, volatileHistory: List<PushPayload>): PushState {
@@ -382,6 +396,7 @@ class PushRepository(
         return PushState(
             pairing = pairing,
             lastTokenSyncAtEpochMs = prefs[KEY_LAST_SYNC_AT],
+            lastPushReceivedAtEpochMs = prefs[KEY_LAST_PUSH_AT],
             syncError = prefs[KEY_SYNC_ERROR],
             history = history,
             latestPayload = history.firstOrNull(),
@@ -406,6 +421,8 @@ data class PushState(
     val pairing: PairingData?,
     val lastTokenSyncAtEpochMs: Long?,
     val syncError: String?,
+    /** When a push last reached this device over its transport; the heartbeat's quiet clock. */
+    val lastPushReceivedAtEpochMs: Long? = null,
     val latestPayload: PushPayload?,
     val history: List<PushPayload>,
     val deliveryMode: DeliveryMode = DeliveryMode.PUSH,

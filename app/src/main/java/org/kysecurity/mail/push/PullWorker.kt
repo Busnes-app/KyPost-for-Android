@@ -11,7 +11,9 @@ import androidx.work.WorkerParameters
 import org.kysecurity.mail.security.SecurityWipe
 import java.util.concurrent.TimeUnit
 
-/** Baseline poller for App Pull mode: WorkManager periodic at the platform minimum. */
+/** WorkManager periodic at the platform minimum, armed whenever the device is paired. In PULL
+ *  mode every tick polls; in PUSH mode it is the heartbeat, and [PullSyncCoordinator] polls only
+ *  once the transport has been quiet past its threshold. Cancelled by unpair and security wipe. */
 class PullWorker(
     appContext: Context,
     params: WorkerParameters,
@@ -29,7 +31,7 @@ class PullWorker(
         return when (graph.pullCoordinator.pullOnce()) {
             // Transient server/network failure — let WorkManager back off exponentially.
             is PullOutcome.Retry -> Result.retry()
-            // Everything else (pulled, not paired, wrong mode, 400/401) is terminal for this run;
+            // Everything else (pulled, not paired, push healthy, 400/401) is terminal for this run;
             // the next periodic tick re-evaluates. 401 must not tight-loop, so never retry it here.
             else -> Result.success()
         }

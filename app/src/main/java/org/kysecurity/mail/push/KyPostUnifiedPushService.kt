@@ -109,6 +109,11 @@ class KyPostUnifiedPushService : PushService() {
             return
         }
 
+        val graph = PushRuntime.graph(applicationContext)
+        // After the decryption check on purpose: a key mismatch means nothing will ever be readable
+        // on this channel, and the heartbeat polling for it is the recovery.
+        serviceScope.launch { graph.repository.markPushReceived(System.currentTimeMillis()) }
+
         val text = String(message.content, Charsets.UTF_8)
         val data = runCatching {
             json.decodeFromString<Map<String, String>>(text)
@@ -121,7 +126,6 @@ class KyPostUnifiedPushService : PushService() {
             is IncomingPush.Mfa ->
                 PushNotificationDispatcher.showMfaChallenge(applicationContext, incoming.payload)
             is IncomingPush.Mail -> {
-                val graph = PushRuntime.graph(applicationContext)
                 serviceScope.launch { graph.repository.appendPayload(incoming.payload) }
                 PushNotificationDispatcher.show(applicationContext, incoming.payload)
             }
