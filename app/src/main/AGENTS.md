@@ -48,6 +48,9 @@ Owns production Android app code and resources.
   `REVIEW_PAIRING_USERNAME` flag names a disposable account or a trailing-`*` username prefix;
   this is not a second mobile auth mode. Normal builds hide its entry button; build the Play
   review artifact with `-PenableReviewPairing=true` to expose it.
+- `signon/KyIdentitySignOnClient` is the pure-JVM client for KyIdentity sign-in: `GET /api/auth/sso-config`, then
+  `POST /api/auth/native/signon {idToken}`, which answers like `review-pairing` (a `kypost://native-pair` deep link
+  fed to the ordinary parser). It holds no Android classes and never logs or stringifies the ID token.
 - `mail/RelayMailSource` calls relay endpoints over OkHttp with device-id/device-secret headers.
   `mail/MailRepository` writes results into the Room cache (`data/AppDatabase`,
   `EmailDao.replaceFolderSnapshot`) and is what `InboxActivity`/`EmailDetailActivity`/
