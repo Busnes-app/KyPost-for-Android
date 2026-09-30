@@ -16,6 +16,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.kysecurity.mail.PinPosture
 import org.kysecurity.mail.R
 import org.kysecurity.mail.applyPrimaryButtonTheme
@@ -37,18 +38,12 @@ class KyIdentitySignOnActivity : LockedActivity() {
     private lateinit var button: Button
     private lateinit var status: TextView
     private lateinit var serverField: EditText
-    private var pendingConfig: SignOnConfig? = null
+    private var pending: Pair<String, SignOnConfig>? = null
 
     private val chooseAccount = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val account = accountFrom(result.data?.extras)
-        val config = pendingConfig
-        when {
-            account != null && config != null -> requestToken(account, config)
-            // Nothing visible or chosen: let KyAuth open its own pairing.
-            AccountManager.get(this).getAccountsByType(AuthenticatorPin.ACCOUNT_TYPE).isEmpty() && config != null ->
-                addKyAuthAccount(config)
-            else -> button.isEnabled = true
-        }
+        val account = if (result.resultCode == RESULT_OK) accountFrom(result.data?.extras) else null
+        val (server, config) = pending ?: return@registerForActivityResult
+        if (account != null) requestToken(account, server, config) else setWorking(false)
     }
 
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
@@ -81,22 +76,27 @@ class KyIdentitySignOnActivity : LockedActivity() {
             return
         }
         val server = serverField.text.toString().trim()
-        button.isEnabled = false
+        setWorking(true)
         status.text = ""
         lifecycleScope.launch {
             val client = KyIdentitySignOnClient(pairingHttpClient(PinPosture.TofuWindow, 15_000))
             when (val cfg = client.config(server)) {
-                is SignOnConfigResult.Unavailable -> { status.text = cfg.reason; button.isEnabled = true }
-                is SignOnConfigResult.Ready -> pickAccount(cfg.config)
+                is SignOnConfigResult.Unavailable -> { status.text = cfg.reason; setWorking(false) }
+                is SignOnConfigResult.Ready -> pickAccount(server, cfg.config)
             }
         }
     }
 
-    private fun pickAccount(config: SignOnConfig) {
-        pendingConfig = config
+    private fun setWorking(working: Boolean) {
+        button.isEnabled = !working
+        serverField.isEnabled = !working
+    }
+
+    private fun pickAccount(server: String, config: SignOnConfig) {
+        pending = server to config
         val accounts = AccountManager.get(this).getAccountsByType(AuthenticatorPin.ACCOUNT_TYPE)
         if (accounts.size == 1) {
-            requestToken(accounts[0], config)
+            requestToken(accounts[0], server, config)
             return
         }
         chooseAccount.launch(
@@ -104,27 +104,16 @@ class KyIdentitySignOnActivity : LockedActivity() {
         )
     }
 
-    private fun addKyAuthAccount(config: SignOnConfig) {
-        AccountManager.get(this).addAccount(
-            AuthenticatorPin.ACCOUNT_TYPE, null, null, null, this,
-            { future: AccountManagerFuture<Bundle> ->
-                val account = runCatching { accountFrom(future.result) }.getOrNull()
-                if (account != null) requestToken(account, config) else button.isEnabled = true
-            },
-            null,
-        )
-    }
-
-    private fun requestToken(account: Account, config: SignOnConfig) {
+    private fun requestToken(account: Account, server: String, config: SignOnConfig) {
         val am = AccountManager.get(this)
         val issuer = am.getUserData(account, "server_url")?.trimEnd('/')
-        if (issuer != config.issuerUrl) {
+        if (canonicalOrigin(issuer) != canonicalOrigin(config.issuerUrl)) {
             status.text = getString(
                 R.string.kyidentity_signon_issuer_mismatch,
                 hostOf(config.issuerUrl),
                 issuer?.let(::hostOf) ?: getString(R.string.kyidentity_signon_other_server),
             )
-            button.isEnabled = true
+            setWorking(false)
             return
         }
         lifecycleScope.launch {
@@ -135,37 +124,42 @@ class KyIdentitySignOnActivity : LockedActivity() {
                 }
             }
             token.onFailure { e ->
-                button.isEnabled = true
+                setWorking(false)
                 when (e) {
                     is OperationCanceledException -> Unit
-                    is AuthenticatorException -> status.text = e.message ?: getString(R.string.kyidentity_signon_refused)
+                    is AuthenticatorException -> status.text = e.message?.lineSequence()?.first()?.take(200)?.ifBlank { null } ?: getString(R.string.kyidentity_signon_refused)
                     else -> status.text = getString(R.string.kyidentity_signon_token_failed)
                 }
             }.onSuccess { idToken ->
                 if (idToken.isNullOrBlank()) {
                     status.setText(R.string.kyidentity_signon_no_token)
-                    button.isEnabled = true
+                    setWorking(false)
                 } else {
-                    exchange(idToken)
+                    exchange(server, idToken)
                 }
             }
         }
     }
 
-    private suspend fun exchange(idToken: String) {
+    private suspend fun exchange(server: String, idToken: String) {
         val result = KyIdentitySignOnClient(pairingHttpClient(PinPosture.TofuWindow, 15_000))
-            .signOn(serverField.text.toString().trim(), idToken)
-        button.isEnabled = true
+            .signOn(server, idToken)
+        setWorking(false)
         when (result) {
             is PairingParseResult.Error -> Toast.makeText(this, result.reason, Toast.LENGTH_LONG).show()
             is PairingParseResult.Success -> {
                 startActivity(Intent(this, PushPairingActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
                     data = android.net.Uri.parse(pairingDeepLink(result.pairing))
                 })
                 finish()
             }
         }
     }
+
+    /** scheme://host:port/path, normalised by OkHttp; null when it is not an http(s) URL. */
+    private fun canonicalOrigin(url: String?): String? =
+        url?.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}:${it.port}${it.encodedPath.trimEnd('/')}" }
 
     private fun hostOf(url: String): String = android.net.Uri.parse(url).host ?: url
 }

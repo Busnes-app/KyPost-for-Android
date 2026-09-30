@@ -144,6 +144,7 @@ class PushPairingActivity : LockedActivity() {
         applyPrimaryButtonTheme(this, btnScanQr)
         applyPrimaryButtonTheme(this, btnPasswordPairing)
         applyPrimaryButtonTheme(this, btnKyIdentitySignOn)
+        btnKyIdentitySignOn.visibility = if (AuthenticatorPin.trustedAuthenticator(this)) View.VISIBLE else View.GONE
         applyPillChipTheme(this, chipUseUnifiedPush)
         applyPillChipTheme(this, chipUseFirebase)
         applyEmptyStateBackground(this, historyEmptyText)
