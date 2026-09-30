@@ -10,10 +10,12 @@ import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import org.kysecurity.mail.executeSync
 import org.kysecurity.mail.push.NativePairingDeepLinkParser
 import org.kysecurity.mail.push.PairingParseResult
 import org.kysecurity.mail.push.pairingEndpoint
+import org.kysecurity.mail.push.pairingUrlHost
 
 data class SignOnConfig(val issuerUrl: String, val clientId: String)
 
@@ -55,10 +57,11 @@ class KyIdentitySignOnClient(
             ?: return SignOnConfigResult.Unavailable("Server URL must use https")
         val request = Request.Builder().url(endpoint).get().build()
         val result = withContext(Dispatchers.IO) {
-            callFactory.executeSync(request) { response -> response.code to response.body?.string().orEmpty() }
+            callFactory.executeSync(request, ::readBounded)
         }
         val (code, raw) = result.getOrNull()
             ?: return SignOnConfigResult.Unavailable(result.exceptionOrNull()?.message ?: "Could not reach the server")
+        if (code == 404) return SignOnConfigResult.Unavailable("This server does not use KyIdentity sign-in")
         if (code != 200) return SignOnConfigResult.Unavailable("Could not read the server's sign-in settings ($code)")
         val body = runCatching { json.decodeFromString<SsoConfigResponse>(raw) }.getOrNull()
             ?: return SignOnConfigResult.Unavailable("The server returned an unreadable sign-in configuration")
@@ -76,14 +79,14 @@ class KyIdentitySignOnClient(
             .post(json.encodeToString(SignOnRequest(idToken)).toRequestBody("application/json".toMediaType()))
             .build()
         val result = withContext(Dispatchers.IO) {
-            callFactory.executeSync(request) { response -> response.code to response.body?.string().orEmpty() }
+            callFactory.executeSync(request, ::readBounded)
         }
         val (code, raw) = result.getOrNull()
             ?: return PairingParseResult.Error(result.exceptionOrNull()?.message ?: "Could not reach the server")
         if (code != 200) {
             val host = endpoint.host
             val message = when (code) {
-                403 -> raw.trim().ifBlank { "KyIdentity sign-in was refused" }
+                403 -> refusalText(raw)
                 429 -> "Too many attempts. Try again later"
                 503 -> "$host is not set up for KyIdentity sign-in or pairing"
                 else -> "Could not sign in to $host ($code)"
@@ -95,6 +98,26 @@ class KyIdentitySignOnClient(
         if (!body.configured || body.deepLink.isBlank()) {
             return PairingParseResult.Error(body.configurationError.ifBlank { "Pairing is not configured on the server" })
         }
-        return NativePairingDeepLinkParser.parse(body.deepLink)
+        val parsed = NativePairingDeepLinkParser.parse(body.deepLink)
+        if (parsed is PairingParseResult.Success && pairingUrlHost(parsed.pairing.serverUrl) != endpoint.host) {
+            return PairingParseResult.Error("The server returned a pairing link for a different host")
+        }
+        return parsed
     }
+}
+
+private const val MAX_ERROR_BYTES = 4L * 1024
+private const val MAX_REFUSAL_CHARS = 200
+private const val REFUSED = "KyIdentity sign-in was refused"
+
+/** Failure bodies reach a Toast, so they are read bounded. */
+private fun readBounded(response: Response): Pair<Int, String> {
+    val body = if (response.code == 200) response.body?.string() else response.peekBody(MAX_ERROR_BYTES).string()
+    return response.code to body.orEmpty()
+}
+
+/** The relay's 403 wording when it is plain text; anything else (a proxy's HTML page) is not ours. */
+private fun refusalText(raw: String): String {
+    if ('<' in raw) return REFUSED
+    return raw.trim().lineSequence().first().take(MAX_REFUSAL_CHARS).ifBlank { REFUSED }
 }

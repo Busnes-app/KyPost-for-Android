@@ -55,6 +55,30 @@ class KyIdentitySignOnClientTest {
     }
 
     @Test
+    fun signOn_refusalTextIsSanitised() = runBlocking {
+        suspend fun at(body: String) = (KyIdentitySignOnClient(FakeCallFactory { req -> response(req, body, 403) }).signOn(server, "t") as PairingParseResult.Error).reason
+        assertEquals("KyIdentity sign-in was refused", at("<html><body>Blocked by WAF</body></html>"))
+        val long = "Access denied: this token was already used." + "x".repeat(300) + "\n" + "y".repeat(10 * 1024)
+        val msg = at(long)
+        assertTrue(msg.length <= 200)
+        assertTrue(msg.startsWith("Access denied: this token was already used."))
+    }
+
+    @Test
+    fun signOn_rejectsLinkForOtherHost() = runBlocking {
+        val link = "kypost://native-pair?sub=s1&srv=https%3A%2F%2Fevil.example.net&reg=https%3A%2F%2Fevil.example.net%2Fapi%2Fnotifications%2Fnative%2Fregister&pt=tok"
+        val factory = FakeCallFactory { req -> response(req, """{"configured":true,"deepLink":"$link"}""", 200) }
+        val r = KyIdentitySignOnClient(factory).signOn(server, "t") as PairingParseResult.Error
+        assertTrue(r.reason.contains("different host"))
+    }
+
+    @Test
+    fun config_404_meansNoSignOn() = runBlocking {
+        val r = KyIdentitySignOnClient(FakeCallFactory { req -> response(req, "", 404) }).config(server) as SignOnConfigResult.Unavailable
+        assertEquals("This server does not use KyIdentity sign-in", r.reason)
+    }
+
+    @Test
     fun dtos_redact() {
         assertEquals("SignOnRequest(redacted)", SignOnRequest("secret").toString())
     }
