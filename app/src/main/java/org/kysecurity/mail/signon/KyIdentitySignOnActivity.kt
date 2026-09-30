@@ -79,7 +79,7 @@ class KyIdentitySignOnActivity : LockedActivity() {
             status.setText(R.string.kyidentity_signon_no_authenticator)
             return
         }
-        val server = typedRelayUrl(serverField.text.toString())
+        val server = serverField.text.toString().trim()
         setWorking(true)
         status.text = ""
         lifecycleScope.launch {
@@ -121,12 +121,18 @@ class KyIdentitySignOnActivity : LockedActivity() {
             setWorking(false)
             return
         }
+        val origin = relayOrigin(server)
+        if (origin == null) {
+            status.setText(R.string.kyidentity_signon_server_https)
+            setWorking(false)
+            return
+        }
         // App scope: the app lock may destroy this activity while KyAuth's prompt is up.
         val app = application as KyPostApp
         app.appScope.launch {
             val token = runCatching {
                 am.getAuthToken(
-                    account, config.clientId, Bundle().apply { putString(KyIdentitySignOn.OPTION_ORIGIN, server) },
+                    account, config.clientId, Bundle().apply { putString(KyIdentitySignOn.OPTION_ORIGIN, origin) },
                     this@KyIdentitySignOnActivity, null, null,
                 )
                     .result.getString(AccountManager.KEY_AUTHTOKEN)
