@@ -9,6 +9,11 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
 
+    <!-- Package visibility: AuthenticatorPin reads KyAuth's signing certificate. -->
+    <queries>
+        <package android:name="org.kysecurity.authenticator" />
+    </queries>
+
     <application
         android:name=".KyPostApp"
         android:allowBackup="false"
