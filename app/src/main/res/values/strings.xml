@@ -664,5 +664,6 @@
     <string name="kyidentity_signon_refused">KyAuth refused the sign-in.</string>
     <string name="kyidentity_signon_token_failed">Could not get a sign-in token from KyAuth.</string>
     <string name="kyidentity_signon_no_token">KyAuth returned no token.</string>
+    <string name="kyidentity_signon_no_account">No KyIdentity sign-in account on this phone. Enable sign-in for this phone on the KyIdentity devices page, then pair KyAuth again.</string>
     <string name="kyidentity_signon_other_server">another server</string>
 </resources>

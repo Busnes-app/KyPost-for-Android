@@ -38,6 +38,7 @@ import java.text.DateFormat
 import java.util.Date
 import org.kysecurity.mail.signon.AuthenticatorPin
 import org.kysecurity.mail.signon.KyIdentitySignOnActivity
+import org.kysecurity.mail.signon.PendingPairingLink
 import org.kysecurity.mail.security.LockedActivity
 import org.kysecurity.mail.security.showSecurely
 
@@ -144,7 +145,9 @@ class PushPairingActivity : LockedActivity() {
         applyPrimaryButtonTheme(this, btnScanQr)
         applyPrimaryButtonTheme(this, btnPasswordPairing)
         applyPrimaryButtonTheme(this, btnKyIdentitySignOn)
-        btnKyIdentitySignOn.visibility = if (AuthenticatorPin.trustedAuthenticator(this)) View.VISIBLE else View.GONE
+        btnKyIdentitySignOn.visibility = if (signOnAvailable()) View.VISIBLE else View.GONE
+        // A sign-on finished while the app lock had destroyed its activity; the host dialog still applies.
+        PendingPairingLink.take()?.let(::confirmAndApplyPairing)
         applyPillChipTheme(this, chipUseUnifiedPush)
         applyPillChipTheme(this, chipUseFirebase)
         applyEmptyStateBackground(this, historyEmptyText)
@@ -162,13 +165,16 @@ class PushPairingActivity : LockedActivity() {
         intent.data = null
     }
 
+    /** KyAuth pins only the play applicationId, so the other flavors would be refused anyway. */
+    private fun signOnAvailable() =
+        BuildConfig.APPLICATION_ID == "org.kysecurity.mail" && AuthenticatorPin.trustedAuthenticator(this)
+
     private fun initViews() {
         historyList = findViewById(R.id.pushPairingHistoryList)
         btnScanQr = findViewById(R.id.btnScanQr)
         btnPasswordPairing = findViewById(R.id.btnPasswordPairing)
         btnPasswordPairing.visibility = if (BuildConfig.ENABLE_REVIEW_PAIRING) View.VISIBLE else View.GONE
         btnKyIdentitySignOn = findViewById(R.id.btnKyIdentitySignOn)
-        btnKyIdentitySignOn.visibility = if (AuthenticatorPin.trustedAuthenticator(this)) View.VISIBLE else View.GONE
         statusText = findViewById(R.id.pushPairingStatus)
         serverUrlText = findViewById(R.id.pushPairingServerUrl)
         subscriberText = findViewById(R.id.pushPairingSubscriber)

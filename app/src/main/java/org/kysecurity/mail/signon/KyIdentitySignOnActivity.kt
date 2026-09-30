@@ -10,13 +10,12 @@ import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import org.kysecurity.mail.KyPostApp
 import org.kysecurity.mail.PinPosture
 import org.kysecurity.mail.R
 import org.kysecurity.mail.applyPrimaryButtonTheme
@@ -25,7 +24,6 @@ import org.kysecurity.mail.applyTopInsetWithHeader
 import org.kysecurity.mail.pairingHttpClient
 import org.kysecurity.mail.push.PairingParseResult
 import org.kysecurity.mail.push.PushPairingActivity
-import org.kysecurity.mail.push.pairingDeepLink
 import org.kysecurity.mail.security.LockedActivity
 
 /**
@@ -39,11 +37,17 @@ class KyIdentitySignOnActivity : LockedActivity() {
     private lateinit var status: TextView
     private lateinit var serverField: EditText
     private var pending: Pair<String, SignOnConfig>? = null
+    private var chooserHadNoAccounts = false
 
     private val chooseAccount = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val account = if (result.resultCode == RESULT_OK) accountFrom(result.data?.extras) else null
         val (server, config) = pending ?: return@registerForActivityResult
-        if (account != null) requestToken(account, server, config) else setWorking(false)
+        if (account != null) {
+            requestToken(account, server, config)
+        } else {
+            setWorking(false)
+            if (chooserHadNoAccounts) status.setText(R.string.kyidentity_signon_no_account)
+        }
     }
 
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
@@ -99,6 +103,7 @@ class KyIdentitySignOnActivity : LockedActivity() {
             requestToken(accounts[0], server, config)
             return
         }
+        chooserHadNoAccounts = accounts.isEmpty()
         chooseAccount.launch(
             AccountManager.newChooseAccountIntent(null, null, arrayOf(AuthenticatorPin.ACCOUNT_TYPE), null, null, null, null),
         )
@@ -107,59 +112,57 @@ class KyIdentitySignOnActivity : LockedActivity() {
     private fun requestToken(account: Account, server: String, config: SignOnConfig) {
         val am = AccountManager.get(this)
         val issuer = am.getUserData(account, "server_url")?.trimEnd('/')
-        if (canonicalOrigin(issuer) != canonicalOrigin(config.issuerUrl)) {
+        if (!sameIssuer(issuer, config.issuerUrl)) {
             status.text = getString(
                 R.string.kyidentity_signon_issuer_mismatch,
-                hostOf(config.issuerUrl),
-                issuer?.let(::hostOf) ?: getString(R.string.kyidentity_signon_other_server),
+                canonicalOrigin(config.issuerUrl) ?: config.issuerUrl,
+                canonicalOrigin(issuer) ?: getString(R.string.kyidentity_signon_other_server),
             )
             setWorking(false)
             return
         }
-        lifecycleScope.launch {
-            val token = withContext(Dispatchers.IO) {
-                runCatching {
-                    am.getAuthToken(account, config.clientId, null, this@KyIdentitySignOnActivity, null, null)
-                        .result.getString(AccountManager.KEY_AUTHTOKEN)
-                }
+        // App scope: the app lock may destroy this activity while KyAuth's prompt is up.
+        val app = application as KyPostApp
+        app.appScope.launch {
+            val token = runCatching {
+                am.getAuthToken(account, config.clientId, null, this@KyIdentitySignOnActivity, null, null)
+                    .result.getString(AccountManager.KEY_AUTHTOKEN)
             }
             token.onFailure { e ->
-                setWorking(false)
                 when (e) {
-                    is OperationCanceledException -> Unit
-                    is AuthenticatorException -> status.text = e.message?.lineSequence()?.first()?.take(200)?.ifBlank { null } ?: getString(R.string.kyidentity_signon_refused)
-                    else -> status.text = getString(R.string.kyidentity_signon_token_failed)
+                    is OperationCanceledException -> finishWorking(null)
+                    is AuthenticatorException, is UnsupportedOperationException, is IllegalArgumentException ->
+                        finishWorking(e.message?.lineSequence()?.first()?.take(200)?.ifBlank { null }
+                            ?: getString(R.string.kyidentity_signon_refused))
+                    else -> finishWorking(getString(R.string.kyidentity_signon_token_failed))
                 }
             }.onSuccess { idToken ->
-                if (idToken.isNullOrBlank()) {
-                    status.setText(R.string.kyidentity_signon_no_token)
-                    setWorking(false)
-                } else {
-                    exchange(server, idToken)
-                }
+                if (idToken.isNullOrBlank()) finishWorking(getString(R.string.kyidentity_signon_no_token))
+                else exchange(server, idToken)
             }
         }
+    }
+
+    /** Re-enables the UI and shows [message]; a no-op when the app lock already destroyed the activity. */
+    private suspend fun finishWorking(message: String?) = withContext(Dispatchers.Main) {
+        if (isDestroyed) return@withContext
+        setWorking(false)
+        if (message != null) status.text = message
     }
 
     private suspend fun exchange(server: String, idToken: String) {
         val result = KyIdentitySignOnClient(pairingHttpClient(PinPosture.TofuWindow, 15_000))
             .signOn(server, idToken)
-        setWorking(false)
         when (result) {
-            is PairingParseResult.Error -> Toast.makeText(this, result.reason, Toast.LENGTH_LONG).show()
-            is PairingParseResult.Success -> {
-                startActivity(Intent(this, PushPairingActivity::class.java).apply {
+            is PairingParseResult.Error -> finishWorking(result.reason)
+            is PairingParseResult.Success -> withContext(Dispatchers.Main) {
+                PendingPairingLink.set(result.pairing)
+                if (isDestroyed) return@withContext
+                startActivity(Intent(this@KyIdentitySignOnActivity, PushPairingActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                    data = android.net.Uri.parse(pairingDeepLink(result.pairing))
                 })
                 finish()
             }
         }
     }
-
-    /** scheme://host:port/path, normalised by OkHttp; null when it is not an http(s) URL. */
-    private fun canonicalOrigin(url: String?): String? =
-        url?.toHttpUrlOrNull()?.let { "${it.scheme}://${it.host}:${it.port}${it.encodedPath.trimEnd('/')}" }
-
-    private fun hostOf(url: String): String = android.net.Uri.parse(url).host ?: url
 }

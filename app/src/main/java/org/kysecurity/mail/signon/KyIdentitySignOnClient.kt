@@ -100,19 +100,20 @@ class KyIdentitySignOnClient(
         }
         val parsed = NativePairingDeepLinkParser.parse(body.deepLink)
         if (parsed is PairingParseResult.Success && pairingUrlHost(parsed.pairing.serverUrl) != endpoint.host) {
-            return PairingParseResult.Error("The server returned a pairing link for a different host")
+            return PairingParseResult.Error("The server returned a pairing link for a different host (${pairingUrlHost(parsed.pairing.serverUrl)}, not ${endpoint.host})")
         }
         return parsed
     }
 }
 
 private const val MAX_ERROR_BYTES = 4L * 1024
+private const val MAX_OK_BYTES = 64L * 1024
 private const val MAX_REFUSAL_CHARS = 200
 private const val REFUSED = "KyIdentity sign-in was refused"
 
-/** Failure bodies reach a Toast, so they are read bounded. */
+/** Every body is read bounded; failure text reaches the screen. */
 private fun readBounded(response: Response): Pair<Int, String> {
-    val body = if (response.code == 200) response.body?.string() else response.peekBody(MAX_ERROR_BYTES).string()
+    val body = response.peekBody(if (response.code == 200) MAX_OK_BYTES else MAX_ERROR_BYTES).string()
     return response.code to body.orEmpty()
 }
 

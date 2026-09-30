@@ -9,7 +9,7 @@ component patterns.
 
 # Pairing paths
 
-- Besides QR/deep link and the review-only password path, "Sign in with KyIdentity" (`signon/`) pairs through KyAuth's `org.kysecurity.identity` account. The button shows only when `AuthenticatorPin.trustedAuthenticator` sees exactly one such authenticator, from `org.kysecurity.authenticator`, with a pinned signing certificate. The flow reads `GET /api/auth/sso-config` (`issuerUrl`, `clientId`), requires the account's `server_url` to match `issuerUrl`, calls `AccountManager.getAuthToken(account, clientId, ...)` (KyAuth prompts and returns a short-lived ID token) and posts it to `POST /api/auth/native/signon`. The reply is the same `kypost://native-pair` deep link the password path gets, so everything after is the normal pairing pipeline. The token is never stored.
+- Besides QR/deep link and the review-only password path, "Sign in with KyIdentity" (`signon/`) pairs through KyAuth's `org.kysecurity.identity` account. The button shows only when `AuthenticatorPin.trustedAuthenticator` sees exactly one such authenticator, from `org.kysecurity.authenticator`, with a pinned signing certificate. The flow reads `GET /api/auth/sso-config` (`issuerUrl`, `clientId`), requires the account's `server_url` to match `issuerUrl`, calls `AccountManager.getAuthToken(account, clientId, ...)` (KyAuth prompts and returns a short-lived ID token) and posts it to `POST /api/auth/native/signon`. The reply is the same `kypost://native-pair` deep link the password path gets, so everything after is the normal pairing pipeline. The token is never stored. KyAuth pins only `org.kysecurity.mail`, so the `github` and `fdroid` flavors are refused until pinned and hide the button.
 
 # Distribution channels
 
