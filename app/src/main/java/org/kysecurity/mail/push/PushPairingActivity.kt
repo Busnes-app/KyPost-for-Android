@@ -36,6 +36,9 @@ import org.kysecurity.mail.getStoredThemePalette
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
+import org.kysecurity.mail.signon.AuthenticatorPin
+import org.kysecurity.mail.signon.KyIdentitySignOnActivity
+import org.kysecurity.mail.signon.PendingPairingLink
 import org.kysecurity.mail.security.LockedActivity
 import org.kysecurity.mail.security.showSecurely
 
@@ -49,6 +52,7 @@ class PushPairingActivity : LockedActivity() {
     private lateinit var btnReconnectServer: Button
     private lateinit var btnScanQr: Button
     private lateinit var btnPasswordPairing: Button
+    private lateinit var btnKyIdentitySignOn: Button
     private lateinit var chipUseUnifiedPush: Chip
     private lateinit var chipUseFirebase: Chip
 
@@ -118,6 +122,7 @@ class PushPairingActivity : LockedActivity() {
         btnReconnectServer.setOnClickListener { confirmAndReconnect() }
         btnScanQr.setOnClickListener { onScanQrClicked() }
         btnPasswordPairing.setOnClickListener { startActivity(Intent(this, PasswordPairingActivity::class.java)) }
+        btnKyIdentitySignOn.setOnClickListener { startActivity(Intent(this, KyIdentitySignOnActivity::class.java)) }
         chipUseUnifiedPush.setOnClickListener { viewModel.switchToUnifiedPush(this) }
         chipUseFirebase.setOnClickListener { viewModel.switchToFirebase() }
 
@@ -139,6 +144,10 @@ class PushPairingActivity : LockedActivity() {
         applyPrimaryButtonTheme(this, btnReconnectServer)
         applyPrimaryButtonTheme(this, btnScanQr)
         applyPrimaryButtonTheme(this, btnPasswordPairing)
+        applyPrimaryButtonTheme(this, btnKyIdentitySignOn)
+        btnKyIdentitySignOn.visibility = if (signOnAvailable()) View.VISIBLE else View.GONE
+        // A sign-on finished while the app lock had destroyed its activity; the host dialog still applies.
+        PendingPairingLink.take()?.let(::confirmAndApplyPairing)
         applyPillChipTheme(this, chipUseUnifiedPush)
         applyPillChipTheme(this, chipUseFirebase)
         applyEmptyStateBackground(this, historyEmptyText)
@@ -156,11 +165,16 @@ class PushPairingActivity : LockedActivity() {
         intent.data = null
     }
 
+    /** KyAuth pins only the play applicationId, so the other flavors would be refused anyway. */
+    private fun signOnAvailable() =
+        BuildConfig.APPLICATION_ID == "org.kysecurity.mail" && AuthenticatorPin.trustedAuthenticator(this)
+
     private fun initViews() {
         historyList = findViewById(R.id.pushPairingHistoryList)
         btnScanQr = findViewById(R.id.btnScanQr)
         btnPasswordPairing = findViewById(R.id.btnPasswordPairing)
         btnPasswordPairing.visibility = if (BuildConfig.ENABLE_REVIEW_PAIRING) View.VISIBLE else View.GONE
+        btnKyIdentitySignOn = findViewById(R.id.btnKyIdentitySignOn)
         statusText = findViewById(R.id.pushPairingStatus)
         serverUrlText = findViewById(R.id.pushPairingServerUrl)
         subscriberText = findViewById(R.id.pushPairingSubscriber)
@@ -228,6 +242,7 @@ class PushPairingActivity : LockedActivity() {
         btnReconnectServer.isEnabled = !state.isWorking && paired
         btnScanQr.isEnabled = !state.isWorking
         btnPasswordPairing.isEnabled = !state.isWorking
+        btnKyIdentitySignOn.isEnabled = !state.isWorking
         chipUseUnifiedPush.isChecked = isUnifiedPush
         chipUseFirebase.isChecked = !isUnifiedPush
         chipUseUnifiedPush.isEnabled = !state.isWorking && paired && !isUnifiedPush
