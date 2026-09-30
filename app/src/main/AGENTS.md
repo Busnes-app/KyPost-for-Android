@@ -52,6 +52,7 @@ Owns production Android app code and resources.
 - `signon/KyIdentitySignOnClient` is the pure-JVM client for KyIdentity sign-in: `GET /api/auth/sso-config`, then
   `POST /api/auth/native/signon {idToken}`, which answers like `review-pairing` (a `kypost://native-pair` deep link
   fed to the ordinary parser). It holds no Android classes and never logs or stringifies the ID token.
+- `signon/KyIdentitySignOnActivity` gets the ID token from KyAuth's AccountManager account (`getAuthToken`, off the main thread), swaps it via the client, and restarts `PushPairingActivity` with `push/pairingDeepLink(pairing)` (shared with `PasswordPairingActivity`) so the ordinary pairing pipeline runs. The token is a local, never stored or logged. The pairing-screen button shows only when `AuthenticatorPin.trustedAuthenticator` holds.
 - `mail/RelayMailSource` calls relay endpoints over OkHttp with device-id/device-secret headers.
   `mail/MailRepository` writes results into the Room cache (`data/AppDatabase`,
   `EmailDao.replaceFolderSnapshot`) and is what `InboxActivity`/`EmailDetailActivity`/

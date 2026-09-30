@@ -2,6 +2,7 @@ package org.kysecurity.mail.push
 
 import java.net.URI
 import java.net.URLDecoder
+import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -195,4 +196,17 @@ internal fun pairingUrl(value: String): HttpUrl? {
 internal fun pairingEndpoint(serverUrl: String, path: String): HttpUrl? {
     val base = pairingUrl(serverUrl) ?: return null
     return base.resolve(base.encodedPath.trimEnd('/') + path)
+}
+
+/** The `kypost://native-pair` link [NativePairingDeepLinkParser] reads back; pure JVM so it is testable. */
+internal fun pairingDeepLink(pairing: PairingData): String {
+    fun enc(v: String) = URLEncoder.encode(v, StandardCharsets.UTF_8.name()).replace("+", "%20")
+    val params = listOfNotNull(
+        "sub" to pairing.subscriberId,
+        "srv" to pairing.serverUrl,
+        "reg" to pairing.registrationUrl,
+        "pt" to pairing.pairingToken,
+        pairing.spkiPin?.let { "pin" to it },
+    )
+    return "kypost://native-pair?" + params.joinToString("&") { (k, v) -> "$k=${enc(v)}" }
 }

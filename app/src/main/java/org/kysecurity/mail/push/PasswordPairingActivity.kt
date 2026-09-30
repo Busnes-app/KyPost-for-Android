@@ -56,14 +56,3 @@ class PasswordPairingActivity : LockedActivity() {
         }
     }
 }
-
-private fun pairingDeepLink(pairing: PairingData): String = android.net.Uri.Builder()
-    .scheme("kypost")
-    .authority("native-pair")
-    .appendQueryParameter("sub", pairing.subscriberId)
-    .appendQueryParameter("srv", pairing.serverUrl)
-    .appendQueryParameter("reg", pairing.registrationUrl)
-    .appendQueryParameter("pt", pairing.pairingToken)
-    .apply { pairing.spkiPin?.let { appendQueryParameter("pin", it) } }
-    .build()
-    .toString()

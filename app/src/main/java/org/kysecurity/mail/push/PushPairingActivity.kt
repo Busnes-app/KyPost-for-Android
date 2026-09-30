@@ -36,6 +36,8 @@ import org.kysecurity.mail.getStoredThemePalette
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
+import org.kysecurity.mail.signon.AuthenticatorPin
+import org.kysecurity.mail.signon.KyIdentitySignOnActivity
 import org.kysecurity.mail.security.LockedActivity
 import org.kysecurity.mail.security.showSecurely
 
@@ -49,6 +51,7 @@ class PushPairingActivity : LockedActivity() {
     private lateinit var btnReconnectServer: Button
     private lateinit var btnScanQr: Button
     private lateinit var btnPasswordPairing: Button
+    private lateinit var btnKyIdentitySignOn: Button
     private lateinit var chipUseUnifiedPush: Chip
     private lateinit var chipUseFirebase: Chip
 
@@ -118,6 +121,7 @@ class PushPairingActivity : LockedActivity() {
         btnReconnectServer.setOnClickListener { confirmAndReconnect() }
         btnScanQr.setOnClickListener { onScanQrClicked() }
         btnPasswordPairing.setOnClickListener { startActivity(Intent(this, PasswordPairingActivity::class.java)) }
+        btnKyIdentitySignOn.setOnClickListener { startActivity(Intent(this, KyIdentitySignOnActivity::class.java)) }
         chipUseUnifiedPush.setOnClickListener { viewModel.switchToUnifiedPush(this) }
         chipUseFirebase.setOnClickListener { viewModel.switchToFirebase() }
 
@@ -139,6 +143,7 @@ class PushPairingActivity : LockedActivity() {
         applyPrimaryButtonTheme(this, btnReconnectServer)
         applyPrimaryButtonTheme(this, btnScanQr)
         applyPrimaryButtonTheme(this, btnPasswordPairing)
+        applyPrimaryButtonTheme(this, btnKyIdentitySignOn)
         applyPillChipTheme(this, chipUseUnifiedPush)
         applyPillChipTheme(this, chipUseFirebase)
         applyEmptyStateBackground(this, historyEmptyText)
@@ -161,6 +166,8 @@ class PushPairingActivity : LockedActivity() {
         btnScanQr = findViewById(R.id.btnScanQr)
         btnPasswordPairing = findViewById(R.id.btnPasswordPairing)
         btnPasswordPairing.visibility = if (BuildConfig.ENABLE_REVIEW_PAIRING) View.VISIBLE else View.GONE
+        btnKyIdentitySignOn = findViewById(R.id.btnKyIdentitySignOn)
+        btnKyIdentitySignOn.visibility = if (AuthenticatorPin.trustedAuthenticator(this)) View.VISIBLE else View.GONE
         statusText = findViewById(R.id.pushPairingStatus)
         serverUrlText = findViewById(R.id.pushPairingServerUrl)
         subscriberText = findViewById(R.id.pushPairingSubscriber)
@@ -228,6 +235,7 @@ class PushPairingActivity : LockedActivity() {
         btnReconnectServer.isEnabled = !state.isWorking && paired
         btnScanQr.isEnabled = !state.isWorking
         btnPasswordPairing.isEnabled = !state.isWorking
+        btnKyIdentitySignOn.isEnabled = !state.isWorking
         chipUseUnifiedPush.isChecked = isUnifiedPush
         chipUseFirebase.isChecked = !isUnifiedPush
         chipUseUnifiedPush.isEnabled = !state.isWorking && paired && !isUnifiedPush

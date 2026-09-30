@@ -138,6 +138,11 @@
             android:exported="false"
             android:windowSoftInputMode="adjustResize" />
 
+        <activity
+            android:name=".signon.KyIdentitySignOnActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Thin, stateless forwarder for kypost://native-pair — see PushPairingLinkActivity
              for why the exported surface is split from PushPairingActivity itself. -->
         <activity
