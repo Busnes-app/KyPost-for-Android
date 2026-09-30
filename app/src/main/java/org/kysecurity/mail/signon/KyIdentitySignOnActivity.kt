@@ -79,7 +79,7 @@ class KyIdentitySignOnActivity : LockedActivity() {
             status.setText(R.string.kyidentity_signon_no_authenticator)
             return
         }
-        val server = serverField.text.toString().trim()
+        val server = typedRelayUrl(serverField.text.toString())
         setWorking(true)
         status.text = ""
         lifecycleScope.launch {
@@ -125,7 +125,10 @@ class KyIdentitySignOnActivity : LockedActivity() {
         val app = application as KyPostApp
         app.appScope.launch {
             val token = runCatching {
-                am.getAuthToken(account, config.clientId, null, this@KyIdentitySignOnActivity, null, null)
+                am.getAuthToken(
+                    account, config.clientId, Bundle().apply { putString(KyIdentitySignOn.OPTION_ORIGIN, server) },
+                    this@KyIdentitySignOnActivity, null, null,
+                )
                     .result.getString(AccountManager.KEY_AUTHTOKEN)
             }
             token.onFailure { e ->
