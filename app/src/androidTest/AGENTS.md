@@ -27,6 +27,14 @@ Owns Android instrumentation tests executed on emulator/device.
 # Verification
 
 - Run connected Android tests when instrumentation changes are made.
+- `NativeMailboxRoundtripTest` is opt-in through the server's native TLS fixture and requires a
+  dedicated disposable emulator with both Play debug APKs installed. The server supplies only
+  synthetic pairing material, a loopback HTTPS origin and a temporary test CA via adb reverse;
+  the test scopes trust to that CA and retains hostname/leaf-pin checks. It exercises real
+  registration, encrypted pairing preferences, native IDs in Room, bodies, labels, attachments,
+  read state, wrong credentials/pins, stale references and ordinary send/Sent. Without fixture
+  arguments it skips; ordinary CI alone does not qualify this cross-repo roundtrip. It clears
+  pairing state and closes its in-memory Room database, so never run it on an operator account.
 - `EnrollmentVaultReadFailureTest` injects a recoverable lazy preference failure over a legacy
   preference record, then checks the Android opener, the key guard, and recovery.
   `EnrollmentVaultTest` covers the file record: fault injection makes the pending path a directory
