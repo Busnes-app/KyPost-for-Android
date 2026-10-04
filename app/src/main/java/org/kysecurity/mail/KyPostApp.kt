@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
 /** Re-reads the delivery mode on every foreground and kicks a pull in "App Pull" mode. */
 class KyPostApp : Application(), DefaultLifecycleObserver {
 
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    internal val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
         super<Application>.onCreate()

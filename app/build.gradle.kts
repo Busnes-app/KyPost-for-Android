@@ -94,6 +94,7 @@ android {
         // FLAG_SECURE is unconditional unless this is overridden, and only the debug type below
         // can override it. See security/SecureWindow.kt for why the escape hatch exists at all.
         buildConfigField("boolean", "ALLOW_SCREENSHOTS", "false")
+        buildConfigField("String", "DEBUG_KYAUTH_CERT", "\"\"")
 
         // res/xml cannot read ${applicationId} the way the manifest can, so the account type is
         // injected as a string resource instead. It MUST track applicationId: AccountManager keys
@@ -219,6 +220,12 @@ android {
             // by the time the configuration cache serializes this block.
             val allowScreenshots = project.findProperty("allowScreenshots") == "true"
             buildConfigField("boolean", "ALLOW_SCREENSHOTS", allowScreenshots.toString())
+            // Extra KyAuth signing-cert SHA-256 for a debug-signed KyAuth; see signon/AuthenticatorPin.
+            val debugKyAuthCert = providers.gradleProperty("kypostDebugKyAuthCert").orNull.orEmpty()
+            require(debugKyAuthCert.isEmpty() || Regex("[0-9a-f]{64}").matches(debugKyAuthCert)) {
+                "kypostDebugKyAuthCert must be exactly 64 lowercase hex characters (a SHA-256 digest)"
+            }
+            buildConfigField("String", "DEBUG_KYAUTH_CERT", "\"$debugKyAuthCert\"")
         }
         release {
             ndk {
