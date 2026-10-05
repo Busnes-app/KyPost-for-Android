@@ -93,6 +93,16 @@ Instrumented tests need a connected device or emulator, **with a secure lock scr
 ./gradlew connectedPlayDebugAndroidTest
 ```
 
+The opt-in `NativeMailboxRoundtripTest` requires a dedicated disposable emulator and
+KyPost-Server's `TestNativeOutboundAPIActualTLSAndPGP/device-android` fixture. Build and
+install both Play debug APKs, then set `KYPOST_NATIVE_ANDROID_TEST_SERIAL` while running
+that server case; see [server qualification instructions](https://github.com/Busnes-app/KyPost-Server/blob/main/docs/TURNKEY_MAIL_PHASE1.md#android-native-mail-runtime-qualification).
+It verifies real pinned HTTPS registration, encrypted pairing preferences, native mail
+IDs through Room, body/label/attachment/read-state sync and ordinary send/Sent. It clears
+pairing state on the test install. Ordinary instrumentation skips it without fixture
+arguments; use only disposable data. PGP enrollment, UI flows, physical-device testing
+and live provider receipt remain separate checks.
+
 ### Release builds
 
 `:app:assembleRelease` **fails without signing material**, and that is deliberate: AGP does not fall back to the debug keystore, so without the guard the build emits an unsigned `app-release-unsigned.apk` on a green run. Add a `keystore.properties` at the repository root (it is gitignored):
