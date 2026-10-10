@@ -119,16 +119,14 @@ class DeviceGroupDeleteTest {
     }
 
     /** The removal is scoped to this app's account type: a stale link pointing at another
-     *  account's group cannot delete it. */
+     *  account's group cannot delete it. The other group is the phone's own (no account): one
+     *  under an account type AccountManager does not know is swept by CP2 itself whenever the
+     *  account list changes, which made this test depend on timing. */
     @Test
     fun aGroupOfAnotherAccountType_survivesRemoval() = runBlocking {
         val foreign = context.contentResolver.insert(
             ContactsContract.Groups.CONTENT_URI,
-            android.content.ContentValues().apply {
-                put(ContactsContract.Groups.ACCOUNT_TYPE, "org.kysecurity.test.foreign")
-                put(ContactsContract.Groups.ACCOUNT_NAME, "foreign")
-                put(ContactsContract.Groups.TITLE, "Foreign Group Probe")
-            },
+            android.content.ContentValues().apply { put(ContactsContract.Groups.TITLE, "Foreign Group Probe") },
         )!!.lastPathSegment!!.toLong()
         try {
             db.groupLinkDao().upsert(org.kysecurity.mail.data.GroupLinkEntity(groupId = "g-stale", androidGroupRowId = foreign))
