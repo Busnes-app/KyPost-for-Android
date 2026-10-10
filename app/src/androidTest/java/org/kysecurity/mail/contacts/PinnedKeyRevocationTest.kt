@@ -33,6 +33,7 @@ import org.kysecurity.mail.pgp.ResolvedRecipientKey
 import org.kysecurity.mail.pgp.RoomLocalSignerKeys
 import org.kysecurity.mail.pgp.VaultOpener
 import org.kysecurity.mail.pgp.VaultRecordKind
+import org.kysecurity.mail.pgp.isPrimaryRevoked
 import org.kysecurity.mail.pgp.signatureStateFor
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -76,7 +77,7 @@ class PinnedKeyRevocationTest {
         ContactDto(uid = uid, fn = "Alice", emails = listOf(ContactFieldDto(value = ALICE)), pgpKey = key)
 
     /** Verified on this device through the QR flow's save, synced, then revoked by its owner. */
-    private suspend fun pinThenSyncRevocation() {
+    private suspend fun pinThenSyncRevocation(): String {
         val uid = repository.queueCreate(alice(key = PUBLIC), verifiedInPerson = true)
         assertTrue(repository.sync() is ContactSyncOutcome.Success)
         val signed = signatureStateFor(RawSignature.Checked(KEY_ID, verified = true), emptyList(), keys())
@@ -84,6 +85,25 @@ class PinnedKeyRevocationTest {
 
         server.seed(alice(uid = uid, key = REVOKED))
         assertTrue(repository.sync() is ContactSyncOutcome.Success)
+        return uid
+    }
+
+    /** The revocation is kept by the sync that delivered it, not by a later lookup: the synced
+     *  contact can be gone before anything reads the pin. */
+    @Test
+    fun theRevocationIsStoredOnThePinByTheSyncThatDeliveredIt() = runBlocking {
+        val uid = pinThenSyncRevocation()
+
+        val stored = db.recipientPinDao().forAddress(ALICE)
+        assertTrue("the pin is revoked straight after the sync", stored.isNotEmpty() && stored.all { isPrimaryRevoked(it.publicKey) })
+
+        server.forget(uid)
+        server.gcHighWater = Long.MAX_VALUE
+        assertTrue(repository.sync() is ContactSyncOutcome.Success)
+        assertEquals(null, db.contactDao().getByUid(uid))
+
+        val verdict = signatureStateFor(RawSignature.Checked(KEY_ID, verified = true), emptyList(), keys())
+        assertNotEquals(PgpSignatureState.VERIFIED_CONFIRMED, verdict)
     }
 
     private suspend fun keys() = RoomLocalSignerKeys { db }.keysFor(ALICE)
