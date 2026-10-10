@@ -10,7 +10,7 @@ class MailGraph(context: Context) {
     private val appContext = context.applicationContext
     private val mailCursorStore = MailCursorStore(appContext)
     private val pairingProvider = { PushRuntime.graph(appContext).repository.pairingForAuthenticatedCall() }
-    private val relaySource: MailSource = RelayMailSource(
+    private val relaySource: MailSource = MailRuntime.sourceForTest ?: RelayMailSource(
         pairingProvider = pairingProvider,
         cursorProvider = mailCursorStore,
         // The one shared pinned-or-refuse factory; a private provider here let mail downgrade.
@@ -27,6 +27,11 @@ class MailGraph(context: Context) {
 
 object MailRuntime {
     private val holder = SingletonGraph(::MailGraph)
+
+    /** Instrumentation only: the source the next graph is built with. Null in production. */
+    @androidx.annotation.VisibleForTesting
+    @Volatile
+    internal var sourceForTest: MailSource? = null
 
     fun graph(context: Context): MailGraph = holder.get(context)
 
