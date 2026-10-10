@@ -1052,6 +1052,21 @@ class MailRepositoryTest {
         assertEquals("unread", repository.cachedEmails("INBOX").single().status)
     }
 
+    /** A failed removal is the inbox's to restore (or to drop, if the account moved on); a cache
+     *  repaint behind its back would override that decision. */
+    @Test
+    fun aFailedRemovalDoesNotAskTheListToRepaint() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val repository = repository(dao, FakeMailSource(actionOutcome = MailOutcome.ServiceUnavailable("down")))
+        var repaints = 0
+        repository.setOverlayListener { repaints++ }
+
+        repository.delete(repository.beginRemoval("42", "INBOX"))
+
+        assertEquals(0, repaints)
+    }
+
     /** A refresh that filtered before the delete landed, and writes after it, must not write the
      *  row back: the removal waits for a refresh write already under way. */
     @Test
