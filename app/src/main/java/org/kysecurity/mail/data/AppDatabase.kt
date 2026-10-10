@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GroupLinkEntity::class,
         ContactSyncStateEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -158,6 +158,13 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                 db.execSQL("DROP TABLE `emails`")
                 db.execSQL("ALTER TABLE `emails_new` RENAME TO `emails`")
+            }
+        }
+
+        /** Every row cached so far came from the window. */
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `emails` ADD COLUMN `inWindow` INTEGER NOT NULL DEFAULT 1")
             }
         }
     }

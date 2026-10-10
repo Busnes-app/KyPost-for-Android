@@ -102,7 +102,16 @@ data class MailFetchResult(
     val isFullWindow: Boolean = false,
     /** Null only for sources that have no cursor to keep (tests, non-relay sources). */
     val checkpoint: MailCheckpoint? = null,
+    /** Pushed below the window, still on the server: keep, never delete. */
+    val agedOutMessageIds: List<String> = emptyList(),
+    /** More new mail than the window holds; the rest is paged from [nextBefore]. */
+    val hasMore: Boolean = false,
+    val nextBefore: String? = null,
 )
+
+/** One `before=` page, newest first. [hasMore] is null when the server ignored `before=` and
+ *  answered with its newest window instead (pre-KyPost-Server #348). */
+data class MailPage(val messages: List<Email>, val hasMore: Boolean?, val nextBefore: String?)
 data class FolderInfo(val path: String, val deletable: Boolean)
 data class FolderListResult(val parent: String, val folders: List<FolderInfo>)
 
@@ -200,6 +209,8 @@ interface MailSource {
     /** [forceFullResync] requests since=0 (full re-fetch reported in delta shape) regardless of
      *  any persisted cursor — the documented self-heal for a missed removal notification. */
     fun fetchInbox(mailbox: String, limit: Int, forceFullResync: Boolean = false): MailOutcome<MailFetchResult>
+    /** Mail older than [before], a list-row id. Metadata only; never moves the cursor. */
+    fun fetchOlder(mailbox: String, limit: Int, before: String): MailOutcome<MailPage>
     fun listFolders(parent: String?): MailOutcome<FolderListResult>
     fun createFolder(parent: String, name: String): MailOutcome<Unit>
     fun renameFolder(folder: String, name: String): MailOutcome<Unit>

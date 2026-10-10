@@ -17,15 +17,52 @@ class MailRepository(
     fun cachedEmails(folder: String): List<Email> = emailDao.getByFolder(folder).map { it.toUiEmail() }
 
     /** [forceFullResync] asks for since=0; the daily self-heal runs regardless of this flag. */
-    fun refreshFolder(folder: String, limit: Int = 50, forceFullResync: Boolean = false): MailOutcome<MailFetchResult> {
-        val outcome = relaySource.fetchInbox(folder, limit, forceFullResync)
-        if (outcome is MailOutcome.Success) {
-            // Order is the whole point: Room first, checkpoint second. Room and DataStore cannot
-            // share a transaction, so a crash between them replays this window — upserts and
-            // deletes are idempotent — whereas the old order dropped it.
-            reconcileFetchResult(emailDao, folder, "relay", outcome.value)
-            commitCheckpoint(folder, outcome.value.checkpoint)
+    fun refreshFolder(folder: String, forceFullResync: Boolean = false): MailOutcome<MailFetchResult> {
+        val outcome = relaySource.fetchInbox(folder, WINDOW_LIMIT, forceFullResync)
+        if (outcome !is MailOutcome.Success) return outcome
+        val result = outcome.value
+        // Fetched before anything is written, so "held" means held before this refresh.
+        val (overflow, overflowFailure) =
+            if (result.isDelta && result.hasMore) fetchOverflow(folder, result.nextBefore) else emptyList<Email>() to null
+        // Nothing from a failed walk is stored, the window included: any row it left would count as
+        // held, and a retry would stop at it and commit past the pages that never arrived.
+        if (overflowFailure != null) return overflowFailure
+        // Window and walk land together for the same reason. Then the checkpoint: Room and
+        // DataStore cannot share a transaction, so a crash between them replays this fetch
+        // (upserts and deletes are idempotent), whereas the other order dropped it.
+        emailDao.inTransaction {
+            reconcileFetchResult(emailDao, folder, "relay", result)
+            reconcileOlderMail(emailDao, folder, "relay", overflow)
         }
+        commitCheckpoint(folder, result.checkpoint)
+        return outcome
+    }
+
+    /** More new mail arrived than the window holds: page down until reaching mail already held. */
+    private fun fetchOverflow(folder: String, from: String?): Pair<List<Email>, MailOutcome<Nothing>?> {
+        val held = emailDao.getIds(folder).toSet()
+        val pages = mutableListOf<Email>()
+        var before = from
+        repeat(MAX_OVERFLOW_PAGES) {
+            val at = before ?: return pages to MailOutcome.UpstreamFailure(OVERFLOW_UNREACHABLE)
+            val page = relaySource.fetchOlder(folder, WINDOW_LIMIT, at)
+            if (page !is MailOutcome.Success) return pages to page.failureOrNull()
+            // This server announced overflow, so a page without hasMore contradicts it.
+            val hasMore = page.value.hasMore ?: return pages to MailOutcome.UpstreamFailure(OVERFLOW_UNREACHABLE)
+            pages += page.value.messages
+            if (!hasMore || page.value.messages.any { it.id in held }) return pages to null
+            before = page.value.nextBefore?.takeIf { it != at }
+        }
+        return pages to null
+    }
+
+    /** One page older than [before] into Room. The caller pages on from [MailPage.nextBefore]. */
+    fun loadOlder(folder: String, before: String): MailOutcome<MailPage> {
+        val outcome = relaySource.fetchOlder(folder, WINDOW_LIMIT, before)
+        if (outcome !is MailOutcome.Success) return outcome
+        // The server ignored before= and sent its newest window, which is not older mail.
+        if (outcome.value.hasMore == null) return MailOutcome.BadRequest(OLDER_MAIL_UNSUPPORTED)
+        reconcileOlderMail(emailDao, folder, "relay", outcome.value.messages)
         return outcome
     }
 
@@ -109,7 +146,9 @@ class MailRepository(
             // A failure stays a failure: the reader tells "the fetch failed" from "the server had
             // no body" to choose between an error and "No message body available."
             if (fetched !is MailOutcome.Success) return fetched
-            emailDao.updateBody(id, folder, fetched.value.html, fetched.value.bodyMode)
+            // An older page carries no PGP flags, so a server-decrypted body cached on such a row
+            // would escape clearServerDecryptedBodies. Out-of-window bodies are fetched per open.
+            if (row.inWindow) emailDao.updateBody(id, folder, fetched.value.html, fetched.value.bodyMode)
             return MailOutcome.Success(fetched.value.copy(toAddresses = to, ccAddresses = cc))
         }
         return MailOutcome.Success(
@@ -145,6 +184,12 @@ internal fun reconcileFetchResult(emailDao: EmailDao, folder: String, mode: Stri
         val existing = emailDao.getById(messageId, folder) ?: return this
         return copy(body = existing.body, bodyMode = bodyMode.ifBlank { existing.bodyMode })
     }
+    // A snapshot is the newest mail. An absent row older than all of it aged out unreported (a
+    // forgotten cursor, an older relay); it still exists, so it leaves the window rather than Room.
+    if (!result.isDelta || result.isFullWindow) {
+        result.messages.mapNotNull { it.atUtc }.minOrNull()
+            ?.let { oldest -> emailDao.markAgedOutBefore(folder, oldest, result.messages.map { it.id }) }
+    }
     if (!result.isDelta) {
         emailDao.replaceFolderSnapshot(folder, result.messages.map { it.toEntity(folder, mode).keepingCachedBody() })
         return
@@ -167,11 +212,41 @@ internal fun reconcileFetchResult(emailDao: EmailDao, folder: String, mode: Stri
         removedIds = result.removedMessageIds,
         // Only a full window can say what is absent; cursor deltas omit unchanged mail and must not prune.
         pruneKeepIds = result.messages.map { it.id }.takeIf { result.isFullWindow },
+        agedOutIds = result.agedOutMessageIds,
     )
 }
 
-private fun <T> MailOutcome<T>.toUnitOutcome(): MailOutcome<Unit> = when (this) {
-    is MailOutcome.Success -> MailOutcome.Success(Unit)
+/** Mail older than the window. A held row keeps what only the window carries (body, attachment
+ *  and PGP flags); a page refreshes just its read state and labels. */
+internal fun reconcileOlderMail(emailDao: EmailDao, folder: String, mode: String, messages: List<Email>) {
+    if (messages.isEmpty()) return
+    emailDao.upsertAll(
+        messages.map { email ->
+            val incoming = email.toEntity(folder, mode)
+            emailDao.getById(email.id, folder)
+                ?.copy(status = incoming.status, label = incoming.label, keywordsJson = incoming.keywordsJson)
+                ?: incoming.copy(inWindow = false)
+        },
+    )
+}
+
+/** One window size for every request: the relay keeps a cursor per `limit`, and a cursor sent
+ *  with another limit is one that window never issued. */
+internal const val WINDOW_LIMIT = 50
+
+/** ponytail: overflow paging stops after this many pages and commits the cursor anyway, leaving
+ *  anything older unlisted. Upgrade path: persist the paging frontier and resume from it. */
+private const val MAX_OVERFLOW_PAGES = 20
+
+private const val OVERFLOW_UNREACHABLE = "The server reported more new mail than it would page"
+
+internal const val OLDER_MAIL_UNSUPPORTED = "This server can't load older mail. Update KyPost Server to use this."
+
+private fun <T> MailOutcome<T>.toUnitOutcome(): MailOutcome<Unit> = failureOrNull() ?: MailOutcome.Success(Unit)
+
+/** A failure carries no value, so it fits any result type. */
+private fun MailOutcome<*>.failureOrNull(): MailOutcome<Nothing>? = when (this) {
+    is MailOutcome.Success -> null
     is MailOutcome.NotConfigured -> this
     is MailOutcome.Unauthorized -> this
     is MailOutcome.ServiceUnavailable -> this

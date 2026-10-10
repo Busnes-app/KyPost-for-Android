@@ -95,6 +95,29 @@ Owns production Android app code and resources.
      locally visible row. `markRead` is deliberately not optimistic: it already runs on `MailBackgroundExecutor`
      and reports nothing, so a pre-emptive local write bought no responsiveness and left the row
      lying about a state the server never reached.
+- **Older mail and reliable deltas (KyPost-Server #348/#349; each part degrades to the old
+  behaviour on a server without it).** Every `/api/inbox` request uses `WINDOW_LIMIT`: the relay
+  keeps one window and cursor per `limit`. `EmailEntity.inWindow` is false for rows older than the
+  window — paged in by "Load older mail" (`MailRepository.loadOlder`, `before=`) or reported
+  `agedOut` — and snapshots prune only `inWindow` rows, so the daily since=0 resync never drops
+  paged-in mail. A snapshot first takes absent rows dated before its oldest row out of the window
+  (they aged out unreported, e.g. under a forgotten cursor); it prunes only absent rows inside its
+  date range. `removed` still deletes any row. A page row is metadata only, so a held row keeps
+  its body and PGP/attachment flags and takes only status and labels. A body opened on an
+  out-of-window row is never cached: a paged row has no `pgpEncrypted`, which is what
+  `clearServerDecryptedBodies` keys on at enrollment. A delta with `hasMore`
+  pages down from `nextBefore` until a page holds an id Room already had, stores those rows, and
+  only then commits the cursor. The window and the walk are written in one Room transaction
+  (`EmailDao.inTransaction`). A failed or contradictory walk (no `nextBefore`, a page without
+  `hasMore`) stores nothing, not even the window, and keeps the old cursor: any stored row would
+  count as held, and a retry after newer mail would stop at it and commit past the gap. `delta: false` answering a
+  cursor is a snapshot. A `before=` answer without `hasMore` is a server that ignored it; it is
+  refused, never stored. Known gaps: the relay tracks deletions only inside its window, so an
+  out-of-window row stays until the user acts on it; such rows are not healed by the daily resync
+  after a UIDVALIDITY reset; encrypted mail stored from a page (older mail, or delta overflow)
+  lacks its PGP flags because the page carries none, so it opens through `/api/mail/body` with no
+  webmail handoff; a row deleted locally while a page is in flight can be written back (no
+  pending-action set yet); overflow paging stops after `MAX_OVERFLOW_PAGES`.
 - **`emails` is keyed on (folder, messageId), not messageId.** The relay's id is an IMAP UID,
   unique only within one mailbox, so INBOX and Archive can both hold `42`; under the old
   single-column key a refresh of either folder overwrote or relocated the other's row, and a
@@ -557,7 +580,7 @@ Owns production Android app code and resources.
 - The email `bodyMode` column is additive and requires `MIGRATION_10_11` plus a migration test when
   the schema contract changes again. `MIGRATION_11_12` re-keys `emails` on (folder, messageId);
   SQLite cannot alter a primary key, so it rebuilds the table and copies rows rather than dropping
-  the cache. `EmailDaoFolderScopeTest` is the authority on that key against real SQL — the JVM fake
+  the cache. `MIGRATION_12_13` adds `inWindow` (default 1: every earlier row came from the window). `EmailDaoFolderScopeTest` is the authority on that key against real SQL — the JVM fake
   in `MailRepositoryTest` mirrors it, and a fake keyed on the id alone reproduces the very bug the
   key exists to prevent.
 - The mail failure contract has JVM regression tests in `MailRepositoryTest`: a failed reconcile
