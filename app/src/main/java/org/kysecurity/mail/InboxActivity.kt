@@ -17,7 +17,9 @@ import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.navigation.NavigationBarView
+import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import org.kysecurity.mail.mail.FolderInfo
@@ -59,6 +61,10 @@ class InboxActivity : LockedActivity() {
      *  at the moment it actually runs, so a test can see the folder that action really used. */
     @androidx.annotation.VisibleForTesting
     internal var rowActionObserverForTest: ((String, String) -> Unit)? = null
+
+    /** Null in production. Called on the main thread once a failed row action has been shown. */
+    @androidx.annotation.VisibleForTesting
+    internal var rowActionFailureShownForTest: (() -> Unit)? = null
     private var lastAppliedThemeName: String = ""
     private var pendingScrollPosition: Int = 0
 
@@ -717,13 +723,39 @@ class InboxActivity : LockedActivity() {
         mutate: (id: String, folder: String) -> MailOutcome<Unit>,
     ) {
         val sourceFolder = email.sourceFolder()
+        val index = allEmails.indexOfFirst { it.id == email.id }
         allEmails = allEmails.filter { it.id != email.id }
         renderFilteredEmails()
-        MailBackgroundExecutor.submitReporting(this, label) {
+        val onFailure = { reason: String -> restoreFailedRow(email, sourceFolder, index, label, reason, mutate) }
+        MailBackgroundExecutor.submitReporting(this, label, onFailure) {
             rowActionObserverForTest?.invoke(email.id, sourceFolder)
             // [mutate] takes the folder as an argument: it has no way to reach for currentFolder.
             mutate(email.id, sourceFolder)
         }
+    }
+
+    /** Puts a row whose action failed back where it was, with Retry. False once this screen is
+     *  gone, so the executor falls back to its toast. */
+    private fun restoreFailedRow(
+        email: Email,
+        sourceFolder: String,
+        index: Int,
+        label: String,
+        reason: String,
+        mutate: (id: String, folder: String) -> MailOutcome<Unit>,
+    ): Boolean {
+        if (isFinishing || isDestroyed) return false
+        if (sourceFolder == currentFolder && allEmails.none { it.id == email.id }) {
+            allEmails = allEmails.toMutableList().apply { add(index.coerceIn(0, size), email) }
+            renderFilteredEmails()
+        }
+        Snackbar.make(recyclerView, getString(R.string.mail_action_failed, label, reason), Snackbar.LENGTH_LONG)
+            .setAction(R.string.action_retry) { submitRowAction(email, label, mutate) }
+            // Above the phone's bottom bar; the w600dp rail runs the full height beside the list.
+            .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
+            .show()
+        rowActionFailureShownForTest?.invoke()
+        return true
     }
 
     @androidx.annotation.VisibleForTesting

@@ -97,6 +97,9 @@ private class FakeMailSource(
 ) : MailSource {
     val actions = mutableListOf<Triple<MailAction, List<String>, String>>()
 
+    /** Runs while the action is "on the wire", so a test can look at the cache mid-flight. */
+    var duringAction: (() -> Unit)? = null
+
     override fun fetchInbox(mailbox: String, limit: Int, forceFullResync: Boolean) = fetchOutcome
 
     override fun performAction(
@@ -106,6 +109,7 @@ private class FakeMailSource(
         targetMailbox: String?,
     ): MailOutcome<MailActionOutcome> {
         actions += Triple(action, messageIds, mailbox)
+        duringAction?.invoke()
         return actionOutcome
     }
 
@@ -786,5 +790,126 @@ class MailRepositoryTest {
 
         assertTrue(repository(dao, source).markRead("42", "INBOX") is MailOutcome.Success)
         assertEquals("read", dao.getById("42", "INBOX")?.status)
+    }
+
+    // --- optimistic display: in memory only, Room keeps confirmed state ---------------------------
+
+    private fun snapshot(vararg ids: String) =
+        MailOutcome.Success(MailFetchResult(tabs = emptyList(), messages = ids.map { email(it, body = null) }))
+
+    @Test
+    fun aRowWithAnActionInFlightIsHiddenEvenFromARefresh() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        dao.put(row("7", "INBOX"))
+        val source = FakeMailSource(fetchOutcome = snapshot("42", "7"))
+        val repository = repository(dao, source)
+        var seen: List<String>? = null
+        source.duringAction = {
+            repository.refreshFolder("INBOX")
+            seen = repository.cachedEmails("INBOX").map { it.id }
+        }
+
+        repository.archive("42", "INBOX")
+
+        assertEquals(listOf("7"), seen)
+    }
+
+    @Test
+    fun aFailedActionShowsTheRowAgain() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource(actionOutcome = MailOutcome.ServiceUnavailable("relay is down"))
+        val repository = repository(dao, source)
+
+        repository.delete("42", "INBOX")
+
+        assertEquals(listOf("42"), repository.cachedEmails("INBOX").map { it.id })
+    }
+
+    /** The refresh read the window before the delete landed and writes after it. An IMAP UID is
+     *  never reused in its mailbox, so that row is stale and must not come back. */
+    @Test
+    fun aRefreshThatReadTheWindowBeforeADeleteDoesNotResurrectIt() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource(fetchOutcome = snapshot("42", "7"))
+        val repository = repository(dao, source)
+
+        repository.delete("42", "INBOX")
+        repository.refreshFolder("INBOX")
+
+        assertEquals(setOf("INBOX" to "7"), dao.rows.keys)
+        assertEquals(listOf("7"), repository.cachedEmails("INBOX").map { it.id })
+    }
+
+    @Test
+    fun aDeltaThatReadTheWindowBeforeADeleteDoesNotResurrectIt() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource(
+            fetchOutcome = MailOutcome.Success(
+                MailFetchResult(tabs = emptyList(), messages = listOf(email("42", body = null)), isDelta = true),
+            ),
+        )
+        val repository = repository(dao, source)
+
+        repository.delete("42", "INBOX")
+        repository.refreshFolder("INBOX")
+
+        assertTrue(dao.rows.isEmpty())
+    }
+
+    @Test
+    fun aRemovalIsScopedToItsFolder() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        dao.put(row("42", "Archive"))
+        val repository = repository(dao, FakeMailSource())
+
+        repository.delete("42", "INBOX")
+
+        assertEquals(listOf("42"), repository.cachedEmails("Archive").map { it.id })
+    }
+
+    /** 3.9: the opened message must not stay bold while the read flag is on the wire. */
+    @Test
+    fun markReadInFlight_showsTheRowReadButLeavesRoomUnconfirmed() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource()
+        val repository = repository(dao, source)
+        var shown: String? = null
+        var stored: String? = null
+        source.duringAction = {
+            shown = repository.cachedEmails("INBOX").single().status
+            stored = dao.getById("42", "INBOX")?.status
+        }
+
+        repository.markRead("42", "INBOX")
+
+        assertEquals("read", shown)
+        assertEquals("unread", stored)
+    }
+
+    /** UIDs are small integers in every account: the next account's INBOX 42 must not stay hidden. */
+    @Test
+    fun aSessionResetForgetsTheProcessWideRemovals() {
+        PendingMailActions.process.removed += "INBOX" to "42"
+
+        org.kysecurity.mail.ProcessState.resetAll()
+
+        assertTrue(PendingMailActions.process.removed.isEmpty())
+    }
+
+    @Test
+    fun markReadFailure_showsTheRowUnreadAgain() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val repository = repository(dao, FakeMailSource(actionOutcome = MailOutcome.ServiceUnavailable("down")))
+
+        repository.markRead("42", "INBOX")
+
+        assertEquals("unread", repository.cachedEmails("INBOX").single().status)
     }
 }

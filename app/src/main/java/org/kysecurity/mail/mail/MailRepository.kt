@@ -1,11 +1,14 @@
 package org.kysecurity.mail.mail
 
 import org.kysecurity.mail.Email
+import org.kysecurity.mail.ProcessScopedState
+import org.kysecurity.mail.ProcessState
 import org.kysecurity.mail.splitAddresses
 import org.kysecurity.mail.data.EmailDao
 import org.kysecurity.mail.data.EmailEntity
 import org.kysecurity.mail.data.toEntity
 import org.kysecurity.mail.data.toUiEmail
+import java.util.concurrent.ConcurrentHashMap
 
 /** The one synchronization boundary: [MailSource] returns facts, this decides when they — and the
  *  checkpoint that skips them next time — become durable. */
@@ -13,18 +16,31 @@ class MailRepository(
     private val emailDao: EmailDao,
     private val relaySource: MailSource,
     private val cursorProvider: MailCursorProvider,
+    pending: PendingMailActions = PendingMailActions(),
 ) {
-    fun cachedEmails(folder: String): List<Email> = emailDao.getByFolder(folder).map { it.toUiEmail() }
+    private val removing = pending.removing
+    private val reading = pending.reading
+    private val removed = pending.removed
+
+    fun cachedEmails(folder: String): List<Email> = emailDao.getByFolder(folder)
+        .filterNot { (folder to it.messageId).let { key -> key in removing || key in removed } }
+        .map { row -> row.toUiEmail().let { if ((folder to it.id) in reading) it.copy(status = "read") else it } }
 
     /** [forceFullResync] asks for since=0; the daily self-heal runs regardless of this flag. */
     fun refreshFolder(folder: String, limit: Int = 50, forceFullResync: Boolean = false): MailOutcome<MailFetchResult> {
         val outcome = relaySource.fetchInbox(folder, limit, forceFullResync)
         if (outcome is MailOutcome.Success) {
+            val result = outcome.value
             // Order is the whole point: Room first, checkpoint second. Room and DataStore cannot
             // share a transaction, so a crash between them replays this window — upserts and
             // deletes are idempotent — whereas the old order dropped it.
-            reconcileFetchResult(emailDao, folder, "relay", outcome.value)
-            commitCheckpoint(folder, outcome.value.checkpoint)
+            reconcileFetchResult(
+                emailDao,
+                folder,
+                "relay",
+                result.copy(messages = result.messages.filterNot { (folder to it.id) in removed }),
+            )
+            commitCheckpoint(folder, result.checkpoint)
         }
         return outcome
     }
@@ -39,13 +55,17 @@ class MailRepository(
         }
     }
 
-    /** Server first, cache second. An optimistic local "read" bought nothing — the caller already
-     *  runs on a background thread and shows the message regardless — and left the row lying about
-     *  a state the server never reached. */
+    /** Server first, Room second; [cachedEmails] shows the row read while the call is in flight. */
     fun markRead(id: String, folder: String): MailOutcome<Unit> {
-        val outcome = relaySource.performAction(MailAction.READ, listOf(id), folder).appliedTo(id)
-        if (outcome is MailOutcome.Success) emailDao.updateStatus(id, folder, "read")
-        return outcome
+        val key = folder to id
+        reading.add(key)
+        try {
+            val outcome = relaySource.performAction(MailAction.READ, listOf(id), folder).appliedTo(id)
+            if (outcome is MailOutcome.Success) emailDao.updateStatus(id, folder, "read")
+            return outcome
+        } finally {
+            reading.remove(key)
+        }
     }
 
     fun archive(id: String, folder: String): MailOutcome<Unit> = mutate(MailAction.ARCHIVE, id, folder)
@@ -58,16 +78,26 @@ class MailRepository(
         mutate(MailAction.MOVE, id, folder, targetFolder)
 
     /** The local row goes only when the relay says this id was processed — the message is gone from
-     *  [folder] either way (deleted, or now living in another mailbox). */
+     *  [folder] either way (deleted, or now living in another mailbox). [cachedEmails] hides it
+     *  while the call is in flight and shows it again if the call fails. */
     private fun mutate(
         action: MailAction,
         id: String,
         folder: String,
         targetFolder: String? = null,
     ): MailOutcome<Unit> {
-        val outcome = relaySource.performAction(action, listOf(id), folder, targetFolder).appliedTo(id)
-        if (outcome is MailOutcome.Success) emailDao.deleteById(id, folder)
-        return outcome
+        val key = folder to id
+        removing.add(key)
+        try {
+            val outcome = relaySource.performAction(action, listOf(id), folder, targetFolder).appliedTo(id)
+            if (outcome is MailOutcome.Success) {
+                removed.add(key)
+                emailDao.deleteById(id, folder)
+            }
+            return outcome
+        } finally {
+            removing.remove(key)
+        }
     }
 
     fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> =
@@ -115,6 +145,30 @@ class MailRepository(
         return MailOutcome.Success(
             MailMessageBody(html = cached.orEmpty(), bodyMode = row.bodyMode, toAddresses = to, ccAddresses = cc),
         )
+    }
+}
+
+/** (folder, id) keys, in memory only: Room holds what the relay confirmed, these hold what the user
+ *  asked for and is waiting on, so the list neither waits on the network nor lies after a failure.
+ *  Session-scoped: the next account's UIDs must not be hidden by this one's removals. */
+class PendingMailActions : ProcessScopedState {
+    val removing: MutableSet<Pair<String, String>> = ConcurrentHashMap.newKeySet()
+    val reading: MutableSet<Pair<String, String>> = ConcurrentHashMap.newKeySet()
+
+    /** Confirmed removals. An IMAP UID is never reused in its mailbox, so a refresh that read the
+     *  window before the removal landed must not write the row back.
+     *  ponytail: one entry per removal until the session ends; a UIDVALIDITY reset would hide a
+     *  reused id until then. */
+    val removed: MutableSet<Pair<String, String>> = ConcurrentHashMap.newKeySet()
+
+    override fun resetForNewSession() {
+        removing.clear()
+        reading.clear()
+        removed.clear()
+    }
+
+    companion object {
+        val process = PendingMailActions().also { ProcessState.register(it) }
     }
 }
 

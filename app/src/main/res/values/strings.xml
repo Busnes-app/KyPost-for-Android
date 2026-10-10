@@ -80,6 +80,7 @@
     <string name="action_reply_all">Reply all</string>
     <string name="action_forward">Forward</string>
     <string name="mail_action_failed">%1$s failed: %2$s</string>
+    <string name="action_retry">Retry</string>
 
     <string name="keyword_settings_title">Keyword Settings</string>
     <string name="keyword_settings_intro">Hide or show keyword headings in inbox tabs. Touch and hold a row to change its order.</string>

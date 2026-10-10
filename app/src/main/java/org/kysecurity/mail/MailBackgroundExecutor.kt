@@ -40,10 +40,12 @@ object MailBackgroundExecutor {
         }
     }
 
-    /** Toasts against the application context: the Activity that started this has usually finished. */
+    /** Toasts against the application context: the Activity that started this has usually finished.
+     *  [onFailure] runs on the main thread first and returns true when a live screen showed it. */
     fun submitReporting(
         context: Context,
         actionLabel: String,
+        onFailure: ((reason: String) -> Boolean)? = null,
         task: () -> MailOutcome<*>,
     ) {
         val appContext = context.applicationContext
@@ -56,6 +58,7 @@ object MailBackgroundExecutor {
             val reason = outcome.userFacingMessage().orEmpty()
             android.util.Log.w(TAG, "$actionLabel failed: $reason")
             android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (onFailure?.invoke(reason) == true) return@post
                 Toast.makeText(
                     appContext,
                     appContext.getString(R.string.mail_action_failed, actionLabel, reason),
