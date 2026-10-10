@@ -40,6 +40,10 @@ class ContactAccountFlowsTest {
         DeviceContactSyncScheduler.cancelPeriodic(context)
         DeviceContactPurge.deleteSyncedRows(context)
         accounts.removeAccountBlocking()
+        PendingAccountSetup.cancel()
+        // androidTest/AGENTS.md: release the runtime graphs activity fixtures initialised.
+        DeviceContactsRuntime.invalidate()
+        org.kysecurity.mail.contacts.ContactsRuntime.invalidate()
     }
 
     /** AOSP Contacts reads CONTACTS_STRUCTURE off the service answering android.content.SyncAdapter. */
@@ -80,9 +84,19 @@ class ContactAccountFlowsTest {
         ActivityScenario.launch(ContactsListActivity::class.java).use { scenario ->
             scenario.onActivity { caller = it }
 
-            val result = AccountManager.get(context)
+            val instrumentation = InstrumentationRegistry.getInstrumentation()
+            val monitor = instrumentation.addMonitor(ContactsListActivity::class.java.name, null, false)
+            val future = AccountManager.get(context)
                 .addAccount(DeviceContactAccount.ACCOUNT_TYPE, null, null, null, caller, null, null)
-                .getResult(30, TimeUnit.SECONDS)
+            // The screen AccountManager opens asks first; the user's Enable is what adds the account.
+            val setup = instrumentation.waitForMonitorWithTimeout(monitor, 15_000) as ContactsListActivity?
+            instrumentation.removeMonitor(monitor)
+            assertNotNull("the setup screen was not opened", setup)
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                setup!!.setupDialog!!.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick()
+            }
+            val result = future.getResult(30, TimeUnit.SECONDS)
 
             assertEquals(DeviceContactAccount.ACCOUNT_NAME, result.getString(AccountManager.KEY_ACCOUNT_NAME))
             assertEquals(DeviceContactAccount.ACCOUNT_TYPE, result.getString(AccountManager.KEY_ACCOUNT_TYPE))

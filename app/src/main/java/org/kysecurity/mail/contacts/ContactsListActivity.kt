@@ -45,6 +45,7 @@ class ContactsListActivity : LockedActivity() {
     private val contactPermissionLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>> = registerForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions(),
     ) { permissions ->
+        setupPermissionRequested = false
         val allGranted = permissions.all { it.value }
         if (!allGranted) {
             Toast.makeText(this, R.string.contacts_device_sync_permission_denied, Toast.LENGTH_SHORT).show()
@@ -66,6 +67,10 @@ class ContactsListActivity : LockedActivity() {
     /** The account-setup confirmation, while shown. */
     @androidx.annotation.VisibleForTesting
     internal var setupDialog: androidx.appcompat.app.AlertDialog? = null
+
+    /** Account setup: the user confirmed, and whether the permission request is still out. */
+    private var setupConfirmed = false
+    private var setupPermissionRequested = false
 
 
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
@@ -133,20 +138,56 @@ class ContactsListActivity : LockedActivity() {
             }
         }
 
-        // Opened for Settings' "Add account": turning device sync on is how the account is added.
-        if (accountSetup && savedInstanceState == null) {
-            if (DeviceContactsRuntime.graph(this).settings.isEnabled()) {
-                PendingAccountSetup.complete(DeviceContactAccount.ACCOUNT_NAME)
-                finish()
-            } else {
-                syncEnabler.checkAndEnable()
+        // Opened for an "Add account" request: turning device sync on is how the account is added,
+        // and only the user can do that. Progress is saved on its own, so a recreated screen picks
+        // up where it was rather than starting over or forgetting the request.
+        if (accountSetup && PendingAccountSetup.isPending) {
+            setupConfirmed = savedInstanceState?.getBoolean(STATE_SETUP_CONFIRMED) == true
+            setupPermissionRequested = savedInstanceState?.getBoolean(STATE_SETUP_PERMISSION) == true
+            val graph = DeviceContactsRuntime.graph(this)
+            when {
+                // Nothing new would be enabled: answer with the account that is already there.
+                graph.settings.isEnabled() && graph.accountManager.accountExists() -> {
+                    PendingAccountSetup.complete(DeviceContactAccount.ACCOUNT_NAME)
+                    finish()
+                }
+                !setupConfirmed -> askToEnableForSetup()
+                // Confirmed: the permission request still outstanding answers itself; anything else
+                // was cut short by the recreate and runs again (enabling is idempotent).
+                !setupPermissionRequested -> setupPermissionRequested = syncEnabler.checkAndEnable()
             }
         }
     }
 
-    /** Leaving the add-account flow without turning sync on answers the waiting caller. Not on the
-     *  lock redirect: the request is kept for after unlock (see MainActivity). */
+    /** Explicit consent for an add-account request, which any app can make through AccountManager:
+     *  until the user confirms, nothing is enabled and nothing reaches the contacts provider. */
+    private fun askToEnableForSetup() {
+        setupDialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.contact_sync_intro_title)
+            .setMessage(R.string.contacts_account_setup_message)
+            .setPositiveButton(R.string.contact_sync_intro_positive) { _, _ ->
+                setupDialog = null
+                setupConfirmed = true
+                setupPermissionRequested = syncEnabler.checkAndEnable()
+            }
+            .setNegativeButton(R.string.contact_sync_intro_negative) { _, _ ->
+                setupDialog = null
+                finish()
+            }
+            .setOnCancelListener {
+                setupDialog = null
+                finish()
+            }
+            .create()
+            .showSecurely()
+    }
+
+    /** Leaving the add-account flow without turning sync on answers the waiting caller with a
+     *  cancel. Not on a recreate, nor on the lock redirect, which keeps the request for after
+     *  unlock (see MainActivity). */
     override fun onDestroy() {
+        setupDialog?.dismiss()
+        setupDialog = null
         super.onDestroy()
         if (accountSetup && isFinishing && !redirectedToUnlock) PendingAccountSetup.cancel()
     }
@@ -201,6 +242,8 @@ class ContactsListActivity : LockedActivity() {
         val layoutManager = recyclerView.layoutManager as? LinearLayoutManager
         val visible = layoutManager?.findFirstVisibleItemPosition() ?: 0
         outState.putInt(STATE_SCROLL, if (pendingScrollPosition > 0) pendingScrollPosition else visible)
+        outState.putBoolean(STATE_SETUP_CONFIRMED, setupConfirmed)
+        outState.putBoolean(STATE_SETUP_PERMISSION, setupPermissionRequested)
     }
 
     @androidx.annotation.VisibleForTesting
@@ -390,5 +433,7 @@ class ContactsListActivity : LockedActivity() {
         const val EXTRA_RESULT_UID = "result_uid"
 
         private const val STATE_SCROLL = "contacts_scroll"
+        private const val STATE_SETUP_CONFIRMED = "account_setup_confirmed"
+        private const val STATE_SETUP_PERMISSION = "account_setup_permission_requested"
     }
 }

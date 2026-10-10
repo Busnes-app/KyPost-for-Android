@@ -501,9 +501,13 @@ Owns production Android app code and resources.
   (`res/xml/contacts.xml`): AOSP Contacts treats an account without an `EditSchema` as read-only
   and discards a schema that breaks any of its parser rules, which `ContactsStructureSchemaTest`
   mirrors. `KyPostContactAuthenticator.addAccount` answers with the existing account, or holds the
-  caller's response in `PendingAccountSetup` and opens the Contacts screen in account-setup mode;
-  turning device sync on answers it with the account, leaving without doing so cancels it, and the
-  app-lock redirect keeps it (MainActivity resumes the flow after unlock). `editProperties` answers
+  caller's response in `PendingAccountSetup` and opens the Contacts screen in account-setup mode.
+  Any app can make that request, so setup never enables on its own: it asks first
+  (`contacts_account_setup_message`), even with contacts permission already granted; Enable runs
+  the normal enable flow and answers with the account once it exists, while declining or leaving
+  answers with a cancel. Setup progress (confirmed, permission request outstanding) is saved state
+  of its own, so a recreate re-asks or resumes. The app-lock redirect keeps the request
+  (MainActivity resumes the flow after unlock). `AccountSetupConsentTest`. `editProperties` answers
   an empty bundle. `ContactSyncAdapterDeclarationTest`, `ContactAccountFlowsTest`. Unverified on
   hardware: how stock Contacts apps render and edit these contacts with the schema.
 - **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same

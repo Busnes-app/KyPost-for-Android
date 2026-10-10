@@ -18,9 +18,10 @@ object PendingAccountSetup : ProcessScopedState {
 
     val isPending: Boolean get() = synchronized(this) { held != null }
 
+    /** Swaps in one step, then answers the displaced request outside the lock. */
     fun hold(onAdded: (accountName: String) -> Unit, onCancelled: () -> Unit) {
-        take()?.onCancelled?.invoke()
-        synchronized(this) { held = Request(onAdded, onCancelled) }
+        val displaced = synchronized(this) { held.also { held = Request(onAdded, onCancelled) } }
+        displaced?.onCancelled?.invoke()
     }
 
     fun complete(accountName: String) {
