@@ -72,6 +72,7 @@ class DeviceContactRepository(
     /** Runs every sync, not just at enable time, so installs that predate the fix repair themselves. */
     private suspend fun ensureAccountContactsVisible() = withContext(Dispatchers.IO) {
         DeviceContactAccount.makeContactsVisible(context)
+        Unit
     }
 
     /** Renames every already-linked group, not only those a brand-new contact references, and,
