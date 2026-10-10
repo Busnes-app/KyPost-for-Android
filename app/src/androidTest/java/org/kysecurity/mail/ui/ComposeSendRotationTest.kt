@@ -51,6 +51,7 @@ class ComposeSendRotationTest {
             val inFlight = ComposeSend.start(
                 CoroutineScope(Dispatchers.IO),
                 MailDraft(to = "recipient@example.com", subject = "Quarterly numbers", body = "b"),
+                org.kysecurity.mail.ProcessState.generation(),
             ) { _, _ ->
                 sends.incrementAndGet()
                 release.await(10, TimeUnit.SECONDS)

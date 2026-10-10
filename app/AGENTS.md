@@ -48,6 +48,11 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   (`PairingAuthHeaders.kt`). Add new HTTP clients through that factory rather than bounding reads
   per call site; endpoints that read raw bytes (attachment download) still apply their own tighter
   cap on top.
+- `ProcessState.resetAll` is the session boundary: the wipe, the account purge
+  (`purgeAccountScopedData`) and `AppRestart` all run it. It advances `ProcessState.generation()`
+  before resetting any holder. Work that outlives its caller (a callback, a background
+  completion) captures the generation when it starts and checks `ProcessState.isCurrent` before
+  touching session state; a stale result is dropped. `SessionGenerationTest` pins the ordering.
 - `SecurityWipe.wipeAndResetApp` destroys local plaintext **before** any network call, records a
   durable `wipe_in_progress` marker so an interrupted wipe resumes at next launch
   (`enforceTripwire` checks it first), and returns `WipeResult` — never report a wipe as complete
@@ -66,7 +71,10 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   through `ComposeSend` (process-scoped). Its session reset, run by `ProcessState.resetAll` at the
   start of a wipe or account purge, cancels every running send and its OkHttp `Call` (handed over
   through `MailSource.sendMail`'s `onCall`), waits up to 2 s for it to stop and zeroes its
-  attachments; a send queued before the reset never runs. A Compose that restores the
+  attachments; a send queued before the reset never runs. The composer captures
+  `ProcessState.generation()` before the editor's asynchronous export; `ComposeSend.start` refuses
+  a submission whose generation has ended, or that arrives while a reset is still tearing down,
+  without calling the transport, and zeroes its attachments. A Compose that restores the
   draft adopts a send still in flight and keeps Send disabled instead of sending it again. The
   client-encrypted send still lives in `lifecycleScope`: its unlock prompt is bound to the Activity.
 - MFA approval (`push/MfaApprovalActivity`) must show the sign-in's context (IP, location, user
