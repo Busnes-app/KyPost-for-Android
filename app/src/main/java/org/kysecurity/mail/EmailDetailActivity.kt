@@ -292,7 +292,7 @@ class EmailDetailActivity : LockedActivity() {
                     ).show()
                     return true
                 }
-                openExternally(request.url)
+                if (scheme == "http" || scheme == "https") confirmOpenLink(request.url.toString()) else openExternally(request.url)
                 return true
             }
         }
@@ -1030,6 +1030,27 @@ class EmailDetailActivity : LockedActivity() {
     }
 
     /** CATEGORY_BROWSABLE + NEW_TASK: an email link must not reach non-browsable activities. */
+    /** Mail links lie about where they go; show the parsed host and open exactly what was shown. */
+    private fun confirmOpenLink(raw: String) {
+        val target = org.kysecurity.mail.mail.linkTargetOf(raw)
+        if (target == null) {
+            Toast.makeText(this, R.string.email_link_blocked_scheme, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val url = target.url.toString()
+        var message = getString(R.string.email_link_confirm_message, target.host, url.take(LINK_PREVIEW_MAX_CHARS))
+        if (intent.getBooleanExtra("email_suspicious", false)) {
+            message += "\n\n" + getString(R.string.email_link_confirm_phishing)
+        }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.email_link_confirm_title)
+            .setMessage(message)
+            .setPositiveButton(R.string.email_link_confirm_open) { _, _ -> openExternally(android.net.Uri.parse(url)) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+            .showSecurely()
+    }
+
     private fun openExternally(uri: android.net.Uri) {
         val intent = Intent(Intent.ACTION_VIEW, uri)
             .addCategory(Intent.CATEGORY_BROWSABLE)
@@ -1092,6 +1113,7 @@ class EmailDetailActivity : LockedActivity() {
 
         /** `intent:`, `file:`, `content:` and any app's custom scheme are refused. */
         private val SAFE_LINK_SCHEMES = setOf("http", "https", "mailto", "tel")
+        private const val LINK_PREVIEW_MAX_CHARS = 300
 
         /** Caps the quote sanitizer only: `Jsoup.clean` is quadratic in nesting depth, so a
          *  sender-chosen body past this size falls back to the escaped preview. NOT a
