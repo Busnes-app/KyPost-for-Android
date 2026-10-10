@@ -124,6 +124,8 @@ object SecurityWipe {
         }
 
     private suspend fun runWipe(context: Context): WipeResult {
+        // Before anything else, as in the account purge: outgoing-session work reads as stale.
+        org.kysecurity.mail.ProcessState.advanceGeneration()
         val appContext = context.applicationContext
         val failed = mutableListOf<String>()
 
