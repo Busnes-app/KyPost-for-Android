@@ -137,6 +137,27 @@ class ContactSyncOutboxSafetyTest {
         assertTrue(status.reason is ContactSyncOutcome.Retry)
     }
 
+    @Test
+    fun import_queuesEveryContactAsACreate() = runBlocking {
+        val queued = repository.queueImport(listOf(ContactDto(fn = "A"), ContactDto(fn = "B")))
+
+        assertTrue(queued)
+        val pending = db.pendingContactChangeDao().getAllPending()
+        assertEquals(listOf(ContactSyncRepository.CHANGE_CREATE, ContactSyncRepository.CHANGE_CREATE), pending.map { it.changeType })
+        assertEquals(2, db.contactDao().observeAll().first().size)
+    }
+
+    @Test
+    fun import_refusesANonEmptyOutboxAndAddsNothing() = runBlocking {
+        enqueue(ContactSyncRepository.CHANGE_UPDATE, """{"uid":"uid-1","fn":"Edit"}""")
+
+        val queued = repository.queueImport(listOf(ContactDto(fn = "A")))
+
+        assertTrue(!queued)
+        assertEquals(1, db.pendingChangeCount())
+        assertEquals(0, db.contactDao().observeAll().first().size)
+    }
+
     private suspend fun AppDatabase.pendingChangeCount() = pendingContactChangeDao().getAllPending().size
 
     private companion object {

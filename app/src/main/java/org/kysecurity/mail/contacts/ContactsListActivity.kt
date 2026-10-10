@@ -1,6 +1,7 @@
 package org.kysecurity.mail.contacts
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
@@ -29,9 +30,15 @@ import org.kysecurity.mail.contacts.device.DeviceContactSyncScheduler
 import org.kysecurity.mail.data.ContactEntity
 import org.kysecurity.mail.pgp.hasPgpIdentity
 import org.kysecurity.mail.setupPrimaryNavigation
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import org.kysecurity.mail.security.LockedActivity
+import org.kysecurity.mail.security.showSecurely
+import java.io.IOException
 
 class ContactsListActivity : LockedActivity() {
 
@@ -59,7 +66,10 @@ class ContactsListActivity : LockedActivity() {
         permissionLauncher = contactPermissionLauncher,
         onEnabled = { invalidateOptionsMenu() },
     )
-
+    // The system picker grants this one document; no storage permission.
+    private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && !redirectedToUnlock) importVCard(uri)
+    }
 
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
         pendingScrollPosition = savedInstanceState?.getInt(STATE_SCROLL, 0) ?: 0
@@ -206,6 +216,7 @@ class ContactsListActivity : LockedActivity() {
         menu?.add(0, MENU_DEVICE_SYNC, 0, R.string.contacts_device_sync_enable)
         menu?.add(0, MENU_DEDUPE, 0, R.string.contacts_dedupe)
         menu?.add(0, MENU_EXPORT, 0, R.string.contacts_export_vcard)
+        menu?.add(0, MENU_IMPORT, 0, R.string.contacts_import_vcard)
         return super.onCreateOptionsMenu(menu)
     }
 
@@ -273,6 +284,10 @@ class ContactsListActivity : LockedActivity() {
                 }
                 true
             }
+            MENU_IMPORT -> {
+                importLauncher.launch(VCARD_PICKER_TYPES)
+                true
+            }
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -314,6 +329,72 @@ class ContactsListActivity : LockedActivity() {
         }
     }
 
+    private fun importVCard(uri: Uri) {
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    contentResolver.openInputStream(uri)?.use(::readVCardImport)
+                } catch (_: IOException) {
+                    null
+                } catch (_: SecurityException) {
+                    null
+                }
+            }
+            when (result) {
+                null -> Toast.makeText(this@ContactsListActivity, R.string.contacts_import_unreadable, Toast.LENGTH_LONG).show()
+                is VCardImport.Refused ->
+                    Toast.makeText(this@ContactsListActivity, importRefusalText(result.reason), Toast.LENGTH_LONG).show()
+                is VCardImport.Parsed -> confirmImport(result)
+            }
+        }
+    }
+
+    private fun importRefusalText(reason: VCardImport.Refusal): String = when (reason) {
+        VCardImport.Refusal.TOO_LARGE -> getString(R.string.contacts_import_too_large, MAX_VCARD_IMPORT_BYTES / 1024)
+        VCardImport.Refusal.NOT_UTF8 -> getString(R.string.contacts_import_not_utf8)
+        VCardImport.Refusal.MALFORMED -> getString(R.string.contacts_import_malformed)
+        VCardImport.Refusal.UNSUPPORTED_VERSION -> getString(R.string.contacts_import_unsupported_version)
+        VCardImport.Refusal.TOO_MANY_CONTACTS -> getString(R.string.contacts_import_too_many_contacts, MAX_VCARD_IMPORT_CONTACTS)
+        VCardImport.Refusal.TOO_MANY_VALUES -> getString(R.string.contacts_import_too_many_values, MAX_VCARD_VALUES_PER_FIELD)
+        VCardImport.Refusal.EMPTY -> getString(R.string.contacts_import_empty)
+    }
+
+    /** Names come from the file: one line each, bounded, plain text. */
+    private fun confirmImport(result: VCardImport.Parsed) {
+        val count = result.contacts.size
+        val message = buildString {
+            append(resources.getQuantityString(R.plurals.contacts_import_message, count, count))
+            result.contacts.take(IMPORT_PREVIEW_NAMES).forEach { append("\n• ").append(it.fn.lineSequence().first().take(80)) }
+            val rest = count - IMPORT_PREVIEW_NAMES
+            if (rest > 0) append("\n").append(resources.getQuantityString(R.plurals.contacts_import_more, rest, rest))
+            if (result.skipped > 0) {
+                append("\n\n").append(resources.getQuantityString(R.plurals.contacts_import_skipped, result.skipped, result.skipped))
+            }
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.contacts_import_title)
+            .setMessage(message)
+            .setPositiveButton(R.string.contacts_import_positive) { _, _ ->
+                lifecycleScope.launch {
+                    val graph = ContactsRuntime.graph(this@ContactsListActivity)
+                    if (!graph.repository.queueImport(result.contacts)) {
+                        Toast.makeText(this@ContactsListActivity, R.string.contacts_import_outbox_busy, Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
+                    graph.coordinator.syncNowAsync()
+                    DeviceContactsRuntime.graph(this@ContactsListActivity).coordinator.syncNowAsync()
+                    Toast.makeText(
+                        this@ContactsListActivity,
+                        resources.getQuantityString(R.plurals.contacts_import_done, count, count),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+            .showSecurely()
+    }
+
     private fun disableDeviceSync() {
         val graph = DeviceContactsRuntime.graph(this)
         lifecycleScope.launch {
@@ -347,6 +428,11 @@ class ContactsListActivity : LockedActivity() {
         private const val MENU_DEVICE_SYNC = 1
         private const val MENU_DEDUPE = 2
         private const val MENU_EXPORT = 3
+        private const val MENU_IMPORT = 4
+        private const val IMPORT_PREVIEW_NAMES = 10
+
+        /** Pickers label .vcf files inconsistently. */
+        private val VCARD_PICKER_TYPES = arrayOf(VCARD_MIME_TYPE, "text/x-vcard", "text/directory")
 
         /** When true, a tap returns the uid via [EXTRA_RESULT_UID] instead of opening the editor. */
         const val EXTRA_PICK_MODE = "pick_mode"
