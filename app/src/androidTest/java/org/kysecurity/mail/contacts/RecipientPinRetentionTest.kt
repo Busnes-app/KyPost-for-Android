@@ -20,6 +20,7 @@ import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailSendOutcome
 import org.kysecurity.mail.pgp.ClientEncryptedSender
 import org.kysecurity.mail.pgp.ClientSendOutcome
+import org.kysecurity.mail.pgp.EnrollmentSession
 import org.kysecurity.mail.pgp.OpenOutcome
 import org.kysecurity.mail.pgp.ResolveResult
 import org.kysecurity.mail.pgp.ResolvedRecipientKey
@@ -39,35 +40,37 @@ import java.math.BigInteger
 import java.security.SecureRandom
 import java.util.Date
 
-/** A key recorded for a recipient stays in force for encryption when sync removes the contact
- *  that held it: the sender still compares discovery keys against it. */
+/** A key verified on this device decides which key a recipient may be sent to. Keys that arrive
+ *  through sync, whether on a replacement contact or as an update, do not; only re-verifying
+ *  on this device replaces the pin. */
 @RunWith(AndroidJUnit4::class)
 class RecipientPinRetentionTest {
 
     private lateinit var db: AppDatabase
     private lateinit var server: FakeContactServer
-    private lateinit var cursorStore: ContactCursorStore
     private lateinit var repository: ContactSyncRepository
+
+    private val sent = mutableListOf<ClientEncryptedMessage>()
+    private var vaultOpened = false
 
     @Before
     fun setUp() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         server = FakeContactServer()
-        cursorStore = ContactCursorStore(context, db)
         repository = ContactSyncRepository(
             db = db,
             client = ContactSyncClient(callFactory = server),
-            cursorStore = cursorStore,
+            cursorStore = ContactCursorStore(context, db),
             pairingProvider = { TEST_PAIRING },
         )
     }
 
     @After
-    fun tearDown() = db.close()
-
-    private val sent = mutableListOf<ClientEncryptedMessage>()
-    private var vaultOpened = false
+    fun tearDown() {
+        EnrollmentSession.clear()
+        db.close()
+    }
 
     private fun sender(discoveryKey: String) = ClientEncryptedSender(
         opener = object : VaultOpener {
@@ -82,56 +85,109 @@ class RecipientPinRetentionTest {
         accountAddress = "me@example.invalid",
     )
 
-    @Test
-    fun aRecipientOmittedFromAFullSnapshot_stillRefusesADifferentKey() = runBlocking {
-        val recorded = armoredPublicKey("Recorded <alice@example.invalid>")
-        // Recorded locally, then gone from the server, its tombstone collected.
-        db.contactDao().upsertAll(
-            listOf(
-                ContactDto(
-                    uid = "alice",
-                    rev = 3,
-                    fn = "Alice",
-                    emails = listOf(ContactFieldDto(value = "alice@example.invalid")),
-                    pgpKey = recorded,
-                ).toEntity(),
-            ),
-        )
-        cursorStore.advanceCursor(TEST_PAIRING.subscriberId, 5)
-        server.seed(*Array(12) { ContactDto(uid = "remote-$it", fn = "Remote $it") })
-        server.gcHighWater = 10
+    private suspend fun sendTo(discoveryKey: String) = sender(discoveryKey)
+        .send(MailDraft(to = ALICE, subject = "s", body = "b", mode = "plain"), sign = false)
 
+    private fun alice(uid: String = "", key: String) =
+        ContactDto(uid = uid, fn = "Alice", emails = listOf(ContactFieldDto(value = ALICE)), pgpKey = key)
+
+    /** The QR flow's save: the user compared this key's fingerprint on screen. Then synced. */
+    private suspend fun verifyOnThisDevice(key: String): String {
+        val uid = repository.queueCreate(alice(key = key), verifiedInPerson = true)
         assertTrue(repository.sync() is ContactSyncOutcome.Success)
-        assertNull("the snapshot removed the contact", db.contactDao().getByUid("alice"))
+        return uid
+    }
 
-        val outcome = sender(armoredPublicKey("Other <alice@example.invalid>"))
-            .send(MailDraft(to = "alice@example.invalid", subject = "s", body = "b", mode = "plain"), sign = false)
-
+    private fun assertRefusedUnsent(outcome: ClientSendOutcome) {
         assertTrue("expected KeyChanged, got $outcome", outcome is ClientSendOutcome.KeyChanged)
         assertEquals(emptyList<ClientEncryptedMessage>(), sent)
         assertEquals(false, vaultOpened)
     }
 
-    @Suppress("DEPRECATION")
-    private fun armoredPublicKey(uid: String): String {
-        val rsa = RSAKeyPairGenerator().apply {
-            init(RSAKeyGenerationParameters(BigInteger.valueOf(0x10001), SecureRandom(), 2048, 12))
+    @Test
+    fun aVerifiedRecipientOmittedFromAFullSnapshot_stillRefusesADifferentKey() = runBlocking {
+        val uid = verifyOnThisDevice(KEY_A)
+        server.forget(uid)
+        server.gcHighWater = Long.MAX_VALUE
+
+        assertTrue(repository.sync() is ContactSyncOutcome.Success)
+        assertNull("the snapshot removed the contact", db.contactDao().getByUid(uid))
+
+        assertRefusedUnsent(sendTo(KEY_B))
+    }
+
+    @Test
+    fun aSnapshotReplacementContactWithADifferentKey_isRefused() = runBlocking {
+        val uid = verifyOnThisDevice(KEY_A)
+        server.forget(uid)
+        server.seed(alice(uid = "alice-replacement", key = KEY_B))
+        server.gcHighWater = Long.MAX_VALUE
+
+        assertTrue(repository.sync() is ContactSyncOutcome.Success)
+        assertEquals(KEY_B, db.contactDao().getByUid("alice-replacement")?.pgpKey)
+
+        assertRefusedUnsent(sendTo(KEY_B))
+    }
+
+    @Test
+    fun aServerUpdateGivingAVerifiedContactADifferentKey_isRefused() = runBlocking {
+        val uid = verifyOnThisDevice(KEY_A)
+        server.seed(alice(uid = uid, key = KEY_B))
+
+        assertTrue(repository.sync() is ContactSyncOutcome.Success)
+        assertEquals(KEY_B, db.contactDao().getByUid(uid)?.pgpKey)
+
+        assertRefusedUnsent(sendTo(KEY_B))
+    }
+
+    @Test
+    fun reVerifyingOnThisDevice_replacesThePin_andTheNextSendGoesOut() = runBlocking {
+        val uid = verifyOnThisDevice(KEY_A)
+        server.seed(alice(uid = uid, key = KEY_B))
+        assertTrue(repository.sync() is ContactSyncOutcome.Success)
+        assertRefusedUnsent(sendTo(KEY_B))
+
+        // The QR flow's save onto the existing contact, after comparing the new fingerprint.
+        val contact = db.contactDao().getByUid(uid)!!.toDto()
+        repository.queueUpdate(contact.copy(pgpKey = KEY_B), identityChanged = false, verifiedInPerson = true)
+        EnrollmentSession.put(OWN_SECRET_KEY.toCharArray())
+
+        val outcome = sendTo(KEY_B)
+
+        assertTrue("expected Sent, got $outcome", outcome is ClientSendOutcome.Sent)
+        assertEquals(1, sent.size)
+    }
+
+    private companion object {
+        const val ALICE = "alice@example.invalid"
+        val KEY_A: String by lazy { armored(ring("A <alice@example.invalid>").generatePublicKeyRing().encoded) }
+        val KEY_B: String by lazy { armored(ring("B <alice@example.invalid>").generatePublicKeyRing().encoded) }
+        val OWN_SECRET_KEY: String by lazy { armored(ring("Me <me@example.invalid>").generateSecretKeyRing().encoded) }
+
+        @Suppress("DEPRECATION")
+        fun ring(uid: String): PGPKeyRingGenerator {
+            val rsa = RSAKeyPairGenerator().apply {
+                init(RSAKeyGenerationParameters(BigInteger.valueOf(0x10001), SecureRandom(), 2048, 12))
+            }
+            val now = Date()
+            val primary = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), now)
+            val sub = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), now)
+            return PGPKeyRingGenerator(
+                PGPSignature.POSITIVE_CERTIFICATION,
+                primary,
+                uid,
+                BcPGPDigestCalculatorProvider().get(HashAlgorithmTags.SHA1),
+                null,
+                null,
+                BcPGPContentSignerBuilder(primary.publicKey.algorithm, HashAlgorithmTags.SHA256),
+                null,
+            ).apply { addSubKey(sub) }
         }
-        val now = Date()
-        val primary = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), now)
-        val sub = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), now)
-        val ring = PGPKeyRingGenerator(
-            PGPSignature.POSITIVE_CERTIFICATION,
-            primary,
-            uid,
-            BcPGPDigestCalculatorProvider().get(HashAlgorithmTags.SHA1),
-            null,
-            null,
-            BcPGPContentSignerBuilder(primary.publicKey.algorithm, HashAlgorithmTags.SHA256),
-            null,
-        ).apply { addSubKey(sub) }.generatePublicKeyRing()
-        val out = ByteArrayOutputStream()
-        ArmoredOutputStream(out).use { it.write(ring.encoded) }
-        return out.toString(Charsets.UTF_8.name())
+
+        fun armored(bytes: ByteArray): String {
+            val out = ByteArrayOutputStream()
+            ArmoredOutputStream(out).use { it.write(bytes) }
+            return out.toString(Charsets.UTF_8.name())
+        }
     }
 }

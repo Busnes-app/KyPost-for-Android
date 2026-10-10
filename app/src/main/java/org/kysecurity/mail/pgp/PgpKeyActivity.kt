@@ -311,7 +311,8 @@ class PgpKeyActivity : LockedActivity() {
         val dto = contactDtoFromCard(card, fallbackName = key.name, pgpKey = key.publicKey)
         lifecycleScope.launch {
             val graph = ContactsRuntime.graph(this@PgpKeyActivity)
-            graph.repository.queueCreate(dto)
+            // The fingerprint and these addresses were both confirmed on screen before this point.
+            graph.repository.queueCreate(dto, verifiedInPerson = true)
             graph.coordinator.syncNowAsync()
 
             Toast.makeText(this@PgpKeyActivity, R.string.pgp_qr_scan_saved_new, Toast.LENGTH_SHORT).show()
