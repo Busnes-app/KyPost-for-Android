@@ -96,9 +96,31 @@ class DeviceContactImportConsentTest {
         return results[0].uri!!.lastPathSegment!!.toLong()
     }
 
+    private val json = Json { ignoreUnknownKeys = true }
+
     private suspend fun queuedProbeCreates(): Int = db.pendingContactChangeDao().getAllPending()
         .filter { it.changeType == ContactSyncRepository.CHANGE_CREATE }
-        .count { Json { ignoreUnknownKeys = true }.decodeFromString(ContactDto.serializer(), it.payloadJson).fn == PROBE_NAME }
+        .count { json.decodeFromString(ContactDto.serializer(), it.payloadJson).fn == PROBE_NAME }
+
+    /** What the import decides on, for a failure message: the probe row and the queue. */
+    private suspend fun importState(): String {
+        val row = context.contentResolver.query(
+            ContactsContract.RawContacts.CONTENT_URI,
+            arrayOf(
+                ContactsContract.RawContacts.ACCOUNT_TYPE,
+                ContactsContract.RawContacts.ACCOUNT_NAME,
+                ContactsContract.RawContacts.CONTACT_ID,
+                ContactsContract.RawContacts.DELETED,
+            ),
+            "${ContactsContract.RawContacts._ID} = ?",
+            arrayOf(localRawContactId.toString()),
+            null,
+        )?.use { c -> if (c.moveToFirst()) "type=${c.getString(0)} name=${c.getString(1)} contact=${c.getLong(2)} deleted=${c.getInt(3)}" else "missing" }
+        val queued = db.pendingContactChangeDao().getAllPending()
+            .map { "${it.changeType}:" + runCatching { json.decodeFromString(ContactDto.serializer(), it.payloadJson).fn }.getOrNull() }
+        return "probe[$row] accounts=${repository.foreignContactAccounts()} consent=${settings.importAccounts()} " +
+            "watermark=${settings.lastForeignScanAtEpochMs()} queued=$queued"
+    }
 
     @Test
     fun withoutConsent_nothingFromAnotherAccountIsQueuedForUpload() = runBlocking {
@@ -110,12 +132,11 @@ class DeviceContactImportConsentTest {
     @Test
     fun consentingToAnAccount_importsItsExistingContacts() = runBlocking {
         repository.syncAll()
-        // The first sync already moved the scan watermark past the probe; consent must rewind it.
         val local = repository.foreignContactAccounts().single { it.type == null && it.name == null }
         settings.setImportAccounts(setOf(local.key))
-        repository.syncAll()
+        val failed = repository.syncAll()
 
-        assertEquals(1, queuedProbeCreates())
+        assertEquals("failed stages $failed; ${importState()}", 1, queuedProbeCreates())
     }
 
     private companion object {
