@@ -468,6 +468,11 @@ Owns production Android app code and resources.
   file) or unpair (`purgeAccountScopedData`) clears it. An address with no pin keeps the earlier
   behaviour: the contact's key, whatever its origin. Server-side provenance (`pgpKeySource`,
   `pgpKeyVerified`) is not read: it is the relay's claim. `RecipientPinRetentionTest`.
+  The one thing a synced copy can do to a pin is revoke it: `withVerifiedRevocation` takes a key
+  revocation from a synced copy of the SAME primary key, verified against the pinned primary, adds
+  only that signature to the pin and saves it. A revoked pin is still the address's pin — no
+  fallback — so the reader gives `KEY_CHANGED` and the sender `RecipientKeyRevoked`, before the
+  vault opens. `PinnedKeyRevocationTest`, `PinnedKeyRevocationMergeTest`.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`

@@ -24,6 +24,7 @@ import org.kysecurity.mail.mail.MailDraft
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailSendOutcome
 import org.kysecurity.mail.pgp.ClientEncryptedSender
+import org.kysecurity.mail.pgp.ClientSendOutcome
 import org.kysecurity.mail.pgp.OpenOutcome
 import org.kysecurity.mail.pgp.PgpSignatureState
 import org.kysecurity.mail.pgp.RawSignature
@@ -114,8 +115,9 @@ class PinnedKeyRevocationTest {
             accountAddress = "me@example.invalid",
         )
 
-        sender.send(MailDraft(to = ALICE, subject = "s", body = "b", mode = "plain"), sign = false)
+        val outcome = sender.send(MailDraft(to = ALICE, subject = "s", body = "b", mode = "plain"), sign = false)
 
+        assertEquals(ClientSendOutcome.RecipientKeyRevoked(listOf(ALICE)), outcome)
         assertEquals(false, vaultOpened)
         assertEquals(emptyList<ClientEncryptedMessage>(), sent)
     }
