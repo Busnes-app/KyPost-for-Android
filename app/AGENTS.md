@@ -48,6 +48,11 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   (`PairingAuthHeaders.kt`). Add new HTTP clients through that factory rather than bounding reads
   per call site; endpoints that read raw bytes (attachment download) still apply their own tighter
   cap on top.
+- `ProcessState.resetAll` is the session boundary: the wipe, the account purge
+  (`purgeAccountScopedData`) and `AppRestart` all run it. It advances `ProcessState.generation()`
+  before resetting any holder. Work that outlives its caller (a callback, a background
+  completion) captures the generation when it starts and checks `ProcessState.isCurrent` before
+  touching session state; a stale result is dropped. `SessionGenerationTest` pins the ordering.
 - `SecurityWipe.wipeAndResetApp` destroys local plaintext **before** any network call, records a
   durable `wipe_in_progress` marker so an interrupted wipe resumes at next launch
   (`enforceTripwire` checks it first), and returns `WipeResult` — never report a wipe as complete

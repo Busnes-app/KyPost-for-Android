@@ -1,0 +1,39 @@
+package org.kysecurity.mail
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/** A token captured before a session boundary must read as expired from the moment the reset begins. */
+class SessionGenerationTest {
+
+    @Test
+    fun aTokenIsCurrentUntilTheNextReset() {
+        val token = ProcessState.generation()
+        assertTrue(ProcessState.isCurrent(token))
+
+        ProcessState.resetAll()
+
+        assertFalse(ProcessState.isCurrent(token))
+        assertTrue(ProcessState.isCurrent(ProcessState.generation()))
+    }
+
+    /** Holders run after the bump, so a callback racing the reset already sees its token expired. */
+    @Test
+    fun theGenerationAdvancesBeforeAnyHolderIsReset() {
+        val before = ProcessState.generation()
+        var seenDuringReset = before
+        ProcessState.register(
+            object : ProcessScopedState {
+                override fun resetForNewSession() {
+                    seenDuringReset = ProcessState.generation()
+                }
+            },
+        )
+
+        ProcessState.resetAll()
+
+        assertEquals(before + 1, seenDuringReset)
+    }
+}

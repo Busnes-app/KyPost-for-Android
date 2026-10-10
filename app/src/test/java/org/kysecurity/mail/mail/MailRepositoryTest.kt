@@ -904,6 +904,67 @@ class MailRepositoryTest {
         assertTrue(PendingMailActions.process.removed.isEmpty())
     }
 
+    /** The session ends while the delete is on the wire, and the next one caches a message with the
+     *  same folder and UID. The late success belongs to the old session and must touch nothing. */
+    @Test
+    fun aDeleteCompletingAfterASessionResetLeavesTheNextSessionsMessage() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val pending = PendingMailActions()
+        val source = FakeMailSource()
+        val repository = MailRepository(dao, source, FakeCursorProvider(), pending)
+        source.duringAction = {
+            org.kysecurity.mail.ProcessState.resetAll()
+            pending.resetForNewSession()
+            dao.rows.clear()
+            dao.put(row("42", "INBOX", status = "unread").copy(subject = "next session"))
+        }
+
+        repository.delete("42", "INBOX")
+
+        assertEquals("next session", dao.getById("42", "INBOX")?.subject)
+        assertEquals(listOf("42"), repository.cachedEmails("INBOX").map { it.id })
+        assertTrue(pending.removed.isEmpty())
+    }
+
+    @Test
+    fun aMarkReadCompletingAfterASessionResetLeavesTheNextSessionsMessageUnread() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val pending = PendingMailActions()
+        val source = FakeMailSource()
+        val repository = MailRepository(dao, source, FakeCursorProvider(), pending)
+        source.duringAction = {
+            org.kysecurity.mail.ProcessState.resetAll()
+            pending.resetForNewSession()
+            dao.rows.clear()
+            dao.put(row("42", "INBOX"))
+        }
+
+        repository.markRead("42", "INBOX")
+
+        assertEquals("unread", dao.getById("42", "INBOX")?.status)
+    }
+
+    /** An old-session action finishing must not clear the same key for a newer action in flight. */
+    @Test
+    fun aStaleCompletionDoesNotClearANewerPendingRemoval() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val pending = PendingMailActions()
+        val source = FakeMailSource(actionOutcome = MailOutcome.ServiceUnavailable("down"))
+        val repository = MailRepository(dao, source, FakeCursorProvider(), pending)
+        source.duringAction = {
+            org.kysecurity.mail.ProcessState.resetAll()
+            pending.resetForNewSession()
+            pending.removing["INBOX" to "42"] = org.kysecurity.mail.ProcessState.generation()
+        }
+
+        repository.delete("42", "INBOX")
+
+        assertTrue(pending.removing.containsKey("INBOX" to "42"))
+    }
+
     @Test
     fun markReadFailure_showsTheRowUnreadAgain() {
         val dao = FakeEmailDao()

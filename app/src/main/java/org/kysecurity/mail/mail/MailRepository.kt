@@ -16,15 +16,15 @@ class MailRepository(
     private val emailDao: EmailDao,
     private val relaySource: MailSource,
     private val cursorProvider: MailCursorProvider,
-    pending: PendingMailActions = PendingMailActions(),
+    private val pending: PendingMailActions = PendingMailActions(),
 ) {
     private val removing = pending.removing
     private val reading = pending.reading
     private val removed = pending.removed
 
     fun cachedEmails(folder: String): List<Email> = emailDao.getByFolder(folder)
-        .filterNot { (folder to it.messageId).let { key -> key in removing || key in removed } }
-        .map { row -> row.toUiEmail().let { if ((folder to it.id) in reading) it.copy(status = "read") else it } }
+        .filterNot { (folder to it.messageId).let { key -> removing.containsKey(key) || key in removed } }
+        .map { row -> row.toUiEmail().let { if (reading.containsKey(folder to it.id)) it.copy(status = "read") else it } }
 
     /** [forceFullResync] asks for since=0; the daily self-heal runs regardless of this flag. */
     fun refreshFolder(folder: String, limit: Int = 50, forceFullResync: Boolean = false): MailOutcome<MailFetchResult> {
@@ -58,13 +58,16 @@ class MailRepository(
     /** Server first, Room second; [cachedEmails] shows the row read while the call is in flight. */
     fun markRead(id: String, folder: String): MailOutcome<Unit> {
         val key = folder to id
-        reading.add(key)
+        val token = ProcessState.generation()
+        reading[key] = token
         try {
             val outcome = relaySource.performAction(MailAction.READ, listOf(id), folder).appliedTo(id)
-            if (outcome is MailOutcome.Success) emailDao.updateStatus(id, folder, "read")
+            if (outcome is MailOutcome.Success) {
+                pending.applyIfCurrent(token) { emailDao.updateStatus(id, folder, "read") }
+            }
             return outcome
         } finally {
-            reading.remove(key)
+            reading.remove(key, token)
         }
     }
 
@@ -93,16 +96,20 @@ class MailRepository(
         account: MailAccount? = null,
     ): MailOutcome<Unit> {
         val key = folder to id
-        removing.add(key)
+        val token = ProcessState.generation()
+        removing[key] = token
         try {
             val outcome = relaySource.performAction(action, listOf(id), folder, targetFolder, account).appliedTo(id)
             if (outcome is MailOutcome.Success) {
-                removed.add(key)
-                emailDao.deleteById(id, folder)
+                // A success from an ended session names a UID the next session may also hold.
+                pending.applyIfCurrent(token) {
+                    removed.add(key)
+                    emailDao.deleteById(id, folder)
+                }
             }
             return outcome
         } finally {
-            removing.remove(key)
+            removing.remove(key, token)
         }
     }
 
@@ -158,8 +165,9 @@ class MailRepository(
  *  asked for and is waiting on, so the list neither waits on the network nor lies after a failure.
  *  Session-scoped: the next account's UIDs must not be hidden by this one's removals. */
 class PendingMailActions : ProcessScopedState {
-    val removing: MutableSet<Pair<String, String>> = ConcurrentHashMap.newKeySet()
-    val reading: MutableSet<Pair<String, String>> = ConcurrentHashMap.newKeySet()
+    /** Key -> the session generation the action started in, so a stale action clears only its own. */
+    val removing: MutableMap<Pair<String, String>, Long> = ConcurrentHashMap()
+    val reading: MutableMap<Pair<String, String>, Long> = ConcurrentHashMap()
 
     /** Confirmed removals. An IMAP UID is never reused in its mailbox, so a refresh that read the
      *  window before the removal landed must not write the row back.
@@ -167,7 +175,13 @@ class PendingMailActions : ProcessScopedState {
      *  reused id until then. */
     val removed: MutableSet<Pair<String, String>> = ConcurrentHashMap.newKeySet()
 
-    override fun resetForNewSession() {
+    /** Runs [apply] only if [token] is still the current session. Shares the reset's lock, so a
+     *  completion either lands before the reset clears this session's state or not at all. */
+    fun applyIfCurrent(token: Long, apply: () -> Unit) = synchronized(this) {
+        if (ProcessState.isCurrent(token)) apply()
+    }
+
+    override fun resetForNewSession() = synchronized(this) {
         removing.clear()
         reading.clear()
         removed.clear()
