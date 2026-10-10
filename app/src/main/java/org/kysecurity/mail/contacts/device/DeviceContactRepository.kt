@@ -26,6 +26,8 @@ class DeviceContactRepository(
     private val syncRepository: ContactSyncRepository,
     private val groupSyncRepository: GroupSyncRepository,
     private val now: () -> Long = System::currentTimeMillis,
+    /** Runs just before each import is queued; tests use it to change consent mid-scan. */
+    private val beforeImport: suspend () -> Unit = {},
 ) {
     private val contentResolver = context.contentResolver
     private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
@@ -264,8 +266,10 @@ class DeviceContactRepository(
 
     private suspend fun importNewDeviceContacts() = withContext(Dispatchers.IO) {
         val settings = DeviceContactSyncSettings(context)
-        // Importing uploads to the server: only from accounts the user picked, and none by default.
-        val consented = settings.importAccounts()
+        // Importing uploads to the server: only from accounts the user picked for this pairing,
+        // and none by default.
+        val destination = syncRepository.destination() ?: return@withContext
+        val consented = settings.importAccounts(destination)
         if (consented.isEmpty()) return@withContext
         val watermarkMs = settings.lastForeignScanAtEpochMs()
         // The next watermark is when this scan began: a contact edited while it runs is newer.
@@ -344,7 +348,10 @@ class DeviceContactRepository(
                 }
                 if (!alreadyImported) {
                     val newDto = candidate.toContactDto(UUID.randomUUID().toString(), 0)
-                    syncRepository.queueCreate(newDto)
+                    beforeImport()
+                    // Consent read now, not at scan start: it may have been withdrawn since.
+                    val account = DeviceAccount(candidate.accountType, candidate.accountName).key
+                    settings.whileConsented(destination, account) { syncRepository.queueCreate(newDto) }
                 }
             }
         }
