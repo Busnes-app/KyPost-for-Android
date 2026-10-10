@@ -391,6 +391,24 @@ Owns production Android app code and resources.
   HTML fallback/quoting, while HTML bodies must not be detected by content when the server supplied
   a mode. The detail screen renders known plain bodies in a native wrapping `TextView`, so email
   reading never requires horizontal scrolling.
+- Calendar invites (`mail/CalendarInvite.kt`, `CalendarHandoff.kt`). KyPost writes no calendar
+  and syncs none (DAVx5 does that). The detail screen downloads the first listed `text/calendar`
+  part (else `application/ics` / `.ics`) and parses it on the device with a strict RFC 5545
+  subset parser — no ical4j. Over 256 KiB, over 50 VEVENTs, or any structural error refuses the
+  whole invite; a refusal or throw only hides the card. Only a VEVENT's own properties count
+  (a VALARM's DESCRIPTION does not); RECURRENCE-ID overrides are never the headline event.
+  Lines are unfolded as bytes before UTF-8 decoding; dates resolve STRICT; format characters
+  (bidi, zero-width) are stripped from text and refused in addresses. The organizer is shown as
+  its bare `mailto:` address, never CN, and the card says when it is not the From address — the
+  sender writes both. A TZID over 128 chars, or one no IANA, last-2/3-segment or ICU Windows-name
+  lookup resolves, is read as floating and the card says so. **Add**
+  fires `ACTION_INSERT` on `Events.CONTENT_URI` (no calendar permission) and only on a tap;
+  CANCEL and REPLY offer no Add. Under Hostile Location Protection every calendar handoff,
+  including the "Create event from this email" overflow item (subject and body only, no date
+  guessing, never the decrypted body or protected subject), is confirmed first. A "Create
+  event" tap during the body fetch waits for it (`BodyFetchGate`) rather than going out
+  subject-only. The card is
+  only as reliable as the relay's listing: invites appear only when `hasAttachments` is true.
 - `pgp/deliverReadOutcome` owns completed attachment arrays inside the worker until rendering
   accepts them. Cancellation across the dispatcher return, render rejection, or a rendering
   exception wipes unadopted bytes; successful adoption transfers cleanup to the detail Activity.
