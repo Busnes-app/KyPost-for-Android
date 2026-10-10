@@ -82,4 +82,12 @@ class DeviceGroupLinkerTest {
             groupRenameTargets(links, groups),
         )
     }
+
+    @Test
+    fun groupRemovals_areExactlyTheLinksWhoseBackendGroupIsGone() {
+        val gone = GroupLinkEntity(groupId = "gone", androidGroupRowId = 3L)
+        val links = listOf(GroupLinkEntity(groupId = "g1", androidGroupRowId = 1L), gone)
+
+        assertEquals(listOf(gone), groupRemovals(links, listOf(GroupEntity(id = "g1", name = "Family", rev = 1))))
+    }
 }

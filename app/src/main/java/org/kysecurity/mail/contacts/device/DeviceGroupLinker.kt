@@ -68,6 +68,23 @@ class DeviceGroupLinker(
         return resultUri.lastPathSegment?.toLongOrNull()
     }
 
+    /** Deletes the device group of a backend group that no longer exists. Ownership is checked:
+     *  as the sync adapter CP2 would delete any account's group. The link goes only on success. */
+    suspend fun removeAndroidGroup(link: GroupLinkEntity) = withContext(Dispatchers.IO) {
+        val uri = ContactsContract.Groups.CONTENT_URI.buildUpon()
+            .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true")
+            .build()
+        runCatching {
+            contentResolver.delete(
+                uri,
+                "${ContactsContract.Groups._ID} = ? AND ${ContactsContract.Groups.ACCOUNT_TYPE} = ?",
+                arrayOf(link.androidGroupRowId.toString(), DeviceContactAccount.ACCOUNT_TYPE),
+            )
+        }.onSuccess { db.groupLinkDao().deleteByGroupId(link.groupId) }
+            .onFailure { android.util.Log.e("DeviceContactSync", "Could not delete group ${link.androidGroupRowId}", it) }
+        Unit
+    }
+
     /** Public so the full-refresh cycle can rename already-linked groups, not just new ones. */
     suspend fun renameIfNeeded(androidGroupRowId: Long, groupName: String) = withContext(Dispatchers.IO) {
         val currentTitle = contentResolver.query(
@@ -90,6 +107,12 @@ class DeviceGroupLinker(
             }
         }
     }
+}
+
+/** Links whose backend group is gone; their device groups go too. */
+internal fun groupRemovals(links: List<GroupLinkEntity>, groups: List<GroupEntity>): List<GroupLinkEntity> {
+    val live = groups.mapTo(HashSet()) { it.id }
+    return links.filter { it.groupId !in live }
 }
 
 /** A link whose backend group is gone is skipped — there is no fresh name to rename to. */

@@ -56,8 +56,9 @@ class DeviceContactRepository(
             stage("refreshGroups") {
                 // sync() reports failure as an outcome, not a throw; the stage must still fail.
                 val outcome = groupSyncRepository.sync()
-                reconcileGroupRenames()
-                check(outcome is org.kysecurity.mail.contacts.GroupSyncOutcome.Success) { "Group refresh: $outcome" }
+                val refreshed = outcome is org.kysecurity.mail.contacts.GroupSyncOutcome.Success
+                reconcileGroups(removeGone = refreshed)
+                check(refreshed) { "Group refresh: $outcome" }
             },
             stage("pullDeviceChanges") { pullDeviceChangesForOwnAccount() },
             stage("removeDeletedContacts") { removeRowsOfDeletedContacts() },
@@ -71,14 +72,16 @@ class DeviceContactRepository(
         DeviceContactAccount.makeContactsVisible(context)
     }
 
-    /** Renames every already-linked group, not only those a brand-new contact references. */
-    private suspend fun reconcileGroupRenames() = withContext(Dispatchers.IO) {
+    /** Renames every already-linked group, not only those a brand-new contact references, and,
+     *  only after a refresh that succeeded, removes the device groups the server deleted. */
+    private suspend fun reconcileGroups(removeGone: Boolean) = withContext(Dispatchers.IO) {
         val links = db.groupLinkDao().getAll()
         if (links.isEmpty()) return@withContext
         val groups = db.groupDao().getAll()
         for ((androidGroupRowId, freshName) in groupRenameTargets(links, groups)) {
             groupLinker.renameIfNeeded(androidGroupRowId, freshName)
         }
+        if (removeGone) groupRemovals(links, groups).forEach { groupLinker.removeAndroidGroup(it) }
     }
 
     private suspend fun pullDeviceChangesForOwnAccount() = withContext(Dispatchers.IO) {
