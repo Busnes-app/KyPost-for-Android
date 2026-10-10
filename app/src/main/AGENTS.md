@@ -100,8 +100,11 @@ Owns production Android app code and resources.
      before the removal must not resurrect it. The inbox puts a row whose swipe failed back in
      place with a Retry snackbar. A row action carries the `MailAccount` (subscriberId, serverUrl)
      its rows were read under; `RelayMailSource.performAction` sends nothing when the pairing it
-     builds the request from is a different account, and the inbox drops a failure (no row, no
-     Retry) that arrives after the account changed.
+     builds the request from is a different account. The inbox drops a failure (no row, no Retry)
+     unless the session generation captured at the swipe is still current and the active pairing
+     (read on the worker, since the screen's account only updates on repaint) is still the row's
+     account. `PendingMailActions` entries carry their generation; a completion writes the removal
+     set or Room only while it is current, under the lock the reset takes.
 - **`emails` is keyed on (folder, messageId), not messageId.** The relay's id is an IMAP UID,
   unique only within one mailbox, so INBOX and Archive can both hold `42`; under the old
   single-column key a refresh of either folder overwrote or relocated the other's row, and a
