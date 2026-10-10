@@ -12,6 +12,9 @@ interface PendingContactChangeDao {
     @Insert
     suspend fun enqueue(change: PendingContactChangeEntity): Long
 
+    @Query("SELECT * FROM pending_contact_changes WHERE localUid = :uid")
+    suspend fun getByUid(uid: String): List<PendingContactChangeEntity>
+
     @Query("DELETE FROM pending_contact_changes WHERE id IN (:ids)")
     suspend fun clearFlushed(ids: List<Long>)
 

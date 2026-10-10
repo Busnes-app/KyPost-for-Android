@@ -444,6 +444,11 @@ Owns production Android app code and resources.
   unknown uid as a create under that uid, so a push replayed after a lost reply, or a create
   followed by an edit or delete in the same outbox, lands on one contact. That uid is permanent,
   so nothing remaps it after sync. `ContactCreateIdempotencyTest` pins all three cases.
+  The outbox holds one row per uid (`coalescedChange`): an update to an unsynced create stays a
+  create with the new payload; a delete always replaces whatever was queued and is still sent,
+  because the create may already be on the server from a push whose reply is in flight. Rows are
+  replaced with new ids, never edited in place — a running sync acks by the ids it read, and
+  in-place edits would be acked unsent. `ContactOutboxCoalesceTest` covers both races.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`

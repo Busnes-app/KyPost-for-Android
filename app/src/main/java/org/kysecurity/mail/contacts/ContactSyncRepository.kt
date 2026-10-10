@@ -125,7 +125,7 @@ class ContactSyncRepository(
         db.withTransaction {
             val previous = db.contactDao().getByUid(contact.uid)
             db.contactDao().upsertAll(listOf(contact.toEntity(previous, verifiedInPerson, identityChanged)))
-            db.pendingContactChangeDao().enqueue(
+            enqueueCoalesced(
                 PendingContactChangeEntity(
                     localUid = contact.uid,
                     rev = contact.rev,
@@ -140,7 +140,7 @@ class ContactSyncRepository(
     suspend fun queueDelete(uid: String, rev: Long) {
         db.withTransaction {
             db.contactDao().deleteByUids(listOf(uid))
-            db.pendingContactChangeDao().enqueue(
+            enqueueCoalesced(
                 PendingContactChangeEntity(
                     localUid = uid,
                     rev = rev,
@@ -150,6 +150,15 @@ class ContactSyncRepository(
                 ),
             )
         }
+    }
+
+    /** One pending row per uid. The old rows are replaced, never edited in place: a sync may
+     *  already have read them, and its ack clears by row id. */
+    private suspend fun enqueueCoalesced(change: PendingContactChangeEntity) {
+        val dao = db.pendingContactChangeDao()
+        val existing = dao.getByUid(change.localUid)
+        if (existing.isNotEmpty()) dao.clearFlushed(existing.map { it.id })
+        dao.enqueue(coalescedChange(existing, change))
     }
 
     private suspend fun applyDelta(
@@ -198,6 +207,21 @@ internal fun PendingContactChangeEntity.toWireDtoOrNull(json: Json): ContactDto?
     ContactSyncRepository.CHANGE_UPDATE -> decodePayload(json)?.copy(uid = localUid, rev = rev)
     else -> null
 }
+
+/** An update to an unsynced create stays a create carrying the new payload. A delete stays a
+ *  delete even after an unsynced create: that create may already be on the server from a push
+ *  whose reply has not arrived, and the server ignores a delete for a uid it never saw. */
+internal fun coalescedChange(
+    existing: List<PendingContactChangeEntity>,
+    change: PendingContactChangeEntity,
+): PendingContactChangeEntity =
+    if (change.changeType == ContactSyncRepository.CHANGE_UPDATE &&
+        existing.any { it.changeType == ContactSyncRepository.CHANGE_CREATE }
+    ) {
+        change.copy(changeType = ContactSyncRepository.CHANGE_CREATE)
+    } else {
+        change
+    }
 
 private fun PendingContactChangeEntity.decodePayload(json: Json): ContactDto? =
     runCatching { json.decodeFromString<ContactDto>(payloadJson) }.getOrNull()
