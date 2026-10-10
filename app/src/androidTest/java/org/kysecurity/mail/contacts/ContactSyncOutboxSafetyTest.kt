@@ -102,9 +102,8 @@ class ContactSyncOutboxSafetyTest {
         assertEquals(2, db.pendingChangeCount())
     }
 
-    /** Wire contract: the server commits pushed changes BEFORE computing tooOld. Keeping the rows
-     *  would replay them, and a replayed create carries a blank uid, so the server mints a second
-     *  contact. Only the cursor is discarded, forcing a full since=0 re-pull. */
+    /** Wire contract: the server commits pushed changes BEFORE computing tooOld, so the rows are
+     *  acknowledged. Only the cursor is discarded, forcing a full since=0 re-pull. */
     @Test
     fun tooOld_clearsTheAcknowledgedOutboxAndResetsOnlyTheCursor() = runBlocking {
         val cursorStore = ContactCursorStore(
