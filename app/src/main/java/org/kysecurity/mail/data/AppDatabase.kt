@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GroupLinkEntity::class,
         ContactSyncStateEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -158,6 +158,16 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                 db.execSQL("DROP TABLE `emails`")
                 db.execSQL("ALTER TABLE `emails_new` RENAME TO `emails`")
+            }
+        }
+
+        /** Device sync looks links up by raw contact id on every pass. */
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_device_contact_links_rawContactId` " +
+                        "ON `device_contact_links` (`rawContactId`)",
+                )
             }
         }
     }

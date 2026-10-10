@@ -468,6 +468,13 @@ Owns production Android app code and resources.
   phones, addresses) through `DeviceContactUpdatePlan`, and advances the link's
   `deviceUpdatedAtEpochMs` only when the batch actually landed — stamping it for a write that never
   happened tells the next merge the device is already current.
+- **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
+  `applyBatch` as the insert. `device_contact_links` is a cache of that: before creating a row,
+  `pushRoomChangesToDevice` adopts a live row of our account whose SOURCE_ID is the uid, so a
+  death between insert and link write, or cleared app data, rebuilds the link instead of
+  duplicating the contact. Linked rows from before SOURCE_ID are backfilled on the next pass.
+  `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_12_13` indexes the link table's
+  `rawContactId`.
 - **A CP2 row that is deleted and reinserted destroys every column the reinsert does not re-emit.**
   `Organization.TITLE` and `DEPARTMENT` therefore both fall back to `DeviceRawContactSnapshot` —
   nothing reads a device-typed value of either into Room, so the device's own is what keeps it, and
