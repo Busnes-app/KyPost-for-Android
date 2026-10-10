@@ -757,7 +757,7 @@ class DeviceContactRepository(
 
         plan.ims?.let {
             deleteRows(ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE)
-            ops += imRows(it, ::insertRow)
+            ops += imRows(it, ::insertRow, kept = currentSnapshot.imTypes)
         }
         plan.websites?.let {
             deleteRows(ContactsContract.CommonDataKinds.Website.CONTENT_ITEM_TYPE)
@@ -798,17 +798,28 @@ class DeviceContactRepository(
     // Shared by create and update so the two cannot encode a field differently. Im is deprecated
     // with no replacement mimetype, and its rows are still the ones present on device.
     @Suppress("DEPRECATION")
-    private fun imRows(ims: List<ContactImDto>, newRow: (String) -> android.content.ContentProviderOperation.Builder) =
-        ims.map { im ->
-            newRow(ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE)
-                .withValue(ContactsContract.CommonDataKinds.Im.DATA, im.value)
-                .withValue(ContactsContract.CommonDataKinds.Im.PROTOCOL, ContactsContract.CommonDataKinds.Im.PROTOCOL_CUSTOM)
-                .withValue(
-                    ContactsContract.CommonDataKinds.Im.CUSTOM_PROTOCOL,
-                    DeviceContactFieldCoding.imCustomProtocolLabel(im.service, im.label),
-                )
-                .build()
-        }
+    // [kept]: the TYPE/LABEL the phone gave each IM it already holds, by value. Room has no slot
+    // for them, so a rebuilt row takes them back rather than losing Home/Work/custom.
+    private fun imRows(
+        ims: List<ContactImDto>,
+        newRow: (String) -> android.content.ContentProviderOperation.Builder,
+        kept: Map<String, Pair<Int?, String?>> = emptyMap(),
+    ) = ims.map { im ->
+        newRow(ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE)
+            .withValue(ContactsContract.CommonDataKinds.Im.DATA, im.value)
+            .withValue(ContactsContract.CommonDataKinds.Im.PROTOCOL, ContactsContract.CommonDataKinds.Im.PROTOCOL_CUSTOM)
+            .withValue(
+                ContactsContract.CommonDataKinds.Im.CUSTOM_PROTOCOL,
+                DeviceContactFieldCoding.imCustomProtocolLabel(im.service, im.label),
+            )
+            .apply {
+                kept[im.value]?.let { (type, label) ->
+                    withValue(ContactsContract.CommonDataKinds.Im.TYPE, type)
+                    withValue(ContactsContract.CommonDataKinds.Im.LABEL, label)
+                }
+            }
+            .build()
+    }
 
     private fun websiteRows(websites: List<ContactUrlDto>, newRow: (String) -> android.content.ContentProviderOperation.Builder) =
         websites.map { website ->
@@ -1045,6 +1056,7 @@ class DeviceContactRepository(
             val phones = mutableListOf<ContactFieldDto>()
             val addresses = mutableListOf<ContactAddressDto>()
             val ims = mutableListOf<ContactImDto>()
+            val imTypes = mutableMapOf<String, Pair<Int?, String?>>()
             val websites = mutableListOf<ContactUrlDto>()
             val relations = mutableListOf<ContactRelationDto>()
             val events = mutableListOf<ContactEventDto>()
@@ -1130,6 +1142,7 @@ class DeviceContactRepository(
                                 val service = DeviceContactFieldCoding.imServiceFromCustomProtocolLabel(customProtocol)
                                 val label = if (service.isEmpty()) customProtocol else null
                                 ims.add(ContactImDto(service = service, label = label, value = data1))
+                                imTypes[data1] = data2?.toIntOrNull() to data3?.takeIf { it.isNotBlank() }
                             }
                         }
 
@@ -1205,6 +1218,7 @@ class DeviceContactRepository(
                 phoneticFamilyName = phoneticFamilyName,
                 department = department,
                 title = title,
+                imTypes = imTypes,
                 givenName = given,
                 familyName = family,
                 middleName = middle,

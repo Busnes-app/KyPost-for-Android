@@ -30,6 +30,8 @@ data class DeviceRawContactSnapshot(
     val phoneticFamilyName: String? = null,
     val department: String? = null,
     val title: String? = null,
+    /** The phone's own TYPE/LABEL per IM value: device-only, kept so a rebuild does not drop it. */
+    val imTypes: Map<String, Pair<Int?, String?>> = emptyMap(),
     val givenName: String? = null,
     val familyName: String? = null,
     val middleName: String? = null,
