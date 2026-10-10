@@ -34,6 +34,9 @@ internal class FakeContactServer : Call.Factory {
     /** Cursors below this answer tooOld, as after tombstone GC. */
     var gcHighWater = 0L
 
+    /** The Nth POST (1-based) fails with a 500 before anything is applied; 0 for none. */
+    var failPost = 0
+
     fun live(): List<ContactDto> = contacts.values.filterNot { it.deleted }
 
     /** Seeds server-side contacts, as if written by another client. */
@@ -48,6 +51,7 @@ internal class FakeContactServer : Call.Factory {
         val since: Long
         if (request.method == "POST") {
             requests += "POST"
+            if (requests.count { it == "POST" } == failPost) return reply(request, 500, "internal error")
             val buffer = Buffer().also { request.body!!.writeTo(it) }
             if (buffer.size > MAX_BODY_BYTES) return reply(request, 400, "invalid request")
             val push = json.decodeFromString(ContactSyncPushRequestDto.serializer(), buffer.readUtf8())
