@@ -475,6 +475,11 @@ Owns production Android app code and resources.
   duplicating the contact. Linked rows from before SOURCE_ID are backfilled on the next pass.
   `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_12_13` indexes the link table's
   `rawContactId`.
+- **Deletes reach the phone through Room.** `syncAll`'s `removeDeletedContacts` stage removes the
+  raw contact of every link whose Room contact is gone, so server tombstones, snapshot prunes and
+  local deletes share one path. A device-side delete is queued and then hard-deleted as the sync
+  adapter: CP2 keeps `DELETED=1` rows until their adapter purges them. `deleteDeviceRawContact`
+  drops the link only after CP2 confirms, so a failed delete is retried. `DeviceContactDeleteTest`.
 - **A CP2 row that is deleted and reinserted destroys every column the reinsert does not re-emit.**
   `Organization.TITLE` and `DEPARTMENT` therefore both fall back to `DeviceRawContactSnapshot` —
   nothing reads a device-typed value of either into Room, so the device's own is what keeps it, and
