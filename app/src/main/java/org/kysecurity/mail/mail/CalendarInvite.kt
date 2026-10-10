@@ -27,7 +27,7 @@ class CalendarEvent(
     val end: Instant,
     val allDay: Boolean,
     val rrule: String,
-    /** A TZID that resolved to nothing, so the floating-time fallback was used. */
+    /** A DTSTART or DTEND TZID that resolved to nothing, so the floating fallback was used. */
     val unknownZone: String?,
 ) {
     /** Redacted: the description is message content. */
@@ -125,7 +125,7 @@ private fun parse(text: String, localZone: ZoneId, windowsZone: (String) -> Stri
             "END" -> {
                 if (stack.lastOrNull() != line.value.trim().uppercase()) return null
                 if (stack.removeAt(stack.size - 1) == "VEVENT") {
-                    event?.let { toEvent(it, localZone, windowsZone) }?.let(events::add)
+                    events.add(event?.let { toEvent(it, localZone, windowsZone) } ?: return null)
                     event = null
                 }
             }
@@ -146,7 +146,8 @@ private class Parsed(val event: CalendarEvent, val isOverride: Boolean)
 
 private fun toEvent(props: Map<String, ContentLine>, localZone: ZoneId, windowsZone: (String) -> String?): Parsed? {
     val start = props["DTSTART"]?.let { time(it, localZone, windowsZone) } ?: return null
-    val end = props["DTEND"]?.let { time(it, localZone, windowsZone) }?.at
+    val endTime = props["DTEND"]?.let { time(it, localZone, windowsZone) ?: return null }
+    val end = endTime?.at
         ?: props["DURATION"]?.let { addDuration(start.at, it.value.trim()) }
         ?: if (start.allDay) start.at.plusDays(1) else start.at
     return Parsed(
@@ -161,7 +162,7 @@ private fun toEvent(props: Map<String, ContentLine>, localZone: ZoneId, windowsZ
             end = maxOf(end, start.at).toInstant(),
             allDay = start.allDay,
             rrule = props["RRULE"]?.value?.trim()?.takeIf { RRULE_SAFE.matches(it) }.orEmpty(),
-            unknownZone = start.unknownZone,
+            unknownZone = start.unknownZone ?: endTime?.unknownZone,
         ),
         isOverride = props.containsKey("RECURRENCE-ID"),
     )
