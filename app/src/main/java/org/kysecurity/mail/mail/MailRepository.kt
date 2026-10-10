@@ -64,14 +64,15 @@ class MailRepository(
     /** For work that was never queued (scheduling refused): the row shows as it was. */
     fun abandon(claim: PendingMail) = release(claim)
 
-    /** Called when an overlay is dropped after a failure, so a list can repaint. Null to stop. */
+    /** Called when a read overlay is dropped after a failure, so a list can repaint. A failed
+     *  removal is not reported: the screen that hid the row decides whether it comes back. */
     fun setOverlayListener(listener: (() -> Unit)?) {
         pending.onOverlayDropped = listener
     }
 
     private fun release(claim: PendingMail, failed: Boolean = true) {
         (if (claim.read) reading else removing).remove(claim.folder to claim.id, claim.session)
-        if (failed) pending.onOverlayDropped?.invoke()
+        if (failed && claim.read) pending.onOverlayDropped?.invoke()
     }
 
     private fun commitCheckpoint(folder: String, checkpoint: MailCheckpoint?) {

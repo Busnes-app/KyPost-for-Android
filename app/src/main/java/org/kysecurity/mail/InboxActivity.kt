@@ -184,7 +184,7 @@ class InboxActivity : LockedActivity() {
     }
 
     override fun onStartUnlocked() {
-        // A failed read or action clears its overlay; repaint from the cache so the row shows it.
+        // A failed read clears its overlay; repaint from the cache so the row shows unread again.
         mailRepository.setOverlayListener { runOnUiThread { repaintFromCache() } }
         refreshInbox()
         scheduleNextRefresh()
