@@ -212,7 +212,8 @@ interface MailSource {
     ): MailOutcome<MailActionOutcome>
     fun saveDraft(draft: MailDraft): MailOutcome<Unit>
     fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit>
-    fun sendMail(draft: MailDraft): MailOutcome<MailSendOutcome>
+    /** [onCall] receives the HTTP call before it runs, so its owner can cancel it. */
+    fun sendMail(draft: MailDraft, onCall: (okhttp3.Call) -> Unit = {}): MailOutcome<MailSendOutcome>
 
     /** Relays ciphertext this device already built; a different endpoint and failure set. */
     fun sendClientEncrypted(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome>

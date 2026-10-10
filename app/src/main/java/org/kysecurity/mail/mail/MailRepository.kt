@@ -103,7 +103,8 @@ class MailRepository(
     fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> =
         relaySource.saveClientEncryptedDraft(draft)
 
-    fun send(draft: MailDraft): MailOutcome<MailSendOutcome> = relaySource.sendMail(draft)
+    fun send(draft: MailDraft, onCall: (okhttp3.Call) -> Unit = {}): MailOutcome<MailSendOutcome> =
+        relaySource.sendMail(draft, onCall)
 
     /** The client-custody send: this device already encrypted and signed, the relay only forwards. */
     fun sendClientEncrypted(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome> =
