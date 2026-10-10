@@ -4,21 +4,30 @@ import android.accounts.AbstractAccountAuthenticator
 import android.accounts.AccountAuthenticatorResponse
 import android.accounts.AccountManager
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 
-class KyPostContactAuthenticator(context: Context) : AbstractAccountAuthenticator(context) {
+class KyPostContactAuthenticator(private val context: Context) : AbstractAccountAuthenticator(context) {
+    /** No properties to edit. */
     override fun editProperties(
         response: AccountAuthenticatorResponse?,
         accountType: String?,
-    ): Bundle = throw UnsupportedOperationException()
+    ): Bundle? = null
 
+    /** The account is created by turning device sync on, with its consent prompts, so "Add
+     *  account" opens the Contacts screen where that switch lives instead of creating one here. */
     override fun addAccount(
         response: AccountAuthenticatorResponse?,
         accountType: String?,
         authTokenType: String?,
         requiredFeatures: Array<out String>?,
         options: Bundle?,
-    ): Bundle? = null
+    ): Bundle = Bundle().apply {
+        putParcelable(
+            AccountManager.KEY_INTENT,
+            Intent(context, org.kysecurity.mail.contacts.ContactsListActivity::class.java),
+        )
+    }
 
     override fun confirmCredentials(
         response: AccountAuthenticatorResponse?,

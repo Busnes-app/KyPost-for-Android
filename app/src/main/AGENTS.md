@@ -470,6 +470,15 @@ Owns production Android app code and resources.
   relation and event rows come from builders both paths share. It advances the link's
   `deviceUpdatedAtEpochMs` only when the batch actually landed — stamping it for a write that never
   happened tells the next merge the device is already current.
+- **KyPost is the declared contacts sync adapter for its own account** (`res/xml/syncadapter.xml`:
+  `com.android.contacts`, `supportsUploading`, not user-visible), so contacts apps can treat its
+  raw contacts as editable. `KyPostContactSyncService` is a non-exported stub: SyncManager binds it
+  from system_server, as AccountManager binds the authenticator, so neither enters the
+  exported-components allowlist; a system-initiated pass does nothing, because the coordinator and
+  worker own sync and its gates. `KyPostContactAuthenticator.addAccount` answers with the Contacts
+  screen, where turning device sync on creates the account; `editProperties` answers null.
+  `ContactSyncAdapterDeclarationTest`. Unverified on hardware: whether stock Contacts apps then
+  offer editing (AOSP may also want a `CONTACTS_STRUCTURE` schema; none is declared).
 - **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
   `applyBatch` as the insert. `device_contact_links` is a cache of that: before creating a row,
   `pushRoomChangesToDevice` adopts a live row of our account whose SOURCE_ID is the uid, so a

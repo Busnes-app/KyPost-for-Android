@@ -193,6 +193,18 @@
                 android:resource="@xml/contact_authenticator" />
         </service>
 
+        <!-- Not exported: only SyncManager (system_server) binds it, as with the authenticator. -->
+        <service
+            android:name=".contacts.device.KyPostContactSyncService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.content.SyncAdapter" />
+            </intent-filter>
+            <meta-data
+                android:name="android.content.SyncAdapter"
+                android:resource="@xml/syncadapter" />
+        </service>
+
         <provider
             android:name=".security.EphemeralAttachmentProvider"
             android:authorities="${applicationId}.ephemeralattachments"
