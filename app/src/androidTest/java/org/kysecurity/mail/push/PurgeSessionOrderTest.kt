@@ -37,4 +37,27 @@ class PurgeSessionOrderTest {
 
         assertEquals("an old-session completion was still current", false, currentAtStep["database"])
     }
+
+    /** Mail work submitted mid-teardown would run after the reset with the old pairing still on file. */
+    @Test
+    fun mailWorkSubmittedDuringTheTeardownIsHeldBack(): Unit = runBlocking {
+        val repo = PushRuntime.graph(context).repository
+        repo.savePairing(pairing)
+        var droppedAtStep: Boolean? = null
+        repo.purgeStepObserverForTest = { step ->
+            if (step == "database") {
+                var dropped = false
+                org.kysecurity.mail.MailBackgroundExecutor.submit(onDropped = { dropped = true }) {}
+                droppedAtStep = dropped
+            }
+        }
+        try {
+            repo.clearPairing()
+        } finally {
+            repo.purgeStepObserverForTest = null
+            ComposeDraftCache.take()
+        }
+
+        assertEquals("mail work was accepted while the account was torn down", true, droppedAtStep)
+    }
 }

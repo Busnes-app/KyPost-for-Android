@@ -5,8 +5,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.kysecurity.mail.mail.MailRuntime
 import org.kysecurity.mail.Email
 import org.kysecurity.mail.InboxActivity
 import org.kysecurity.mail.KeywordTabs
@@ -17,6 +19,12 @@ import java.util.concurrent.TimeUnit
 /** A row action belongs to the account it was created under; its result does not carry over. */
 @RunWith(AndroidJUnit4::class)
 class InboxRowActionAccountTest {
+
+    /** The database stays with the suite; only the mail graph the Activity built is released. */
+    @After
+    fun releaseTheMailGraph() {
+        MailRuntime.invalidate()
+    }
 
     private fun email(id: String) =
         Email(id = id, subject = "Subject $id", sender = "sender@example.com", preview = "", folder = FOLDER)
