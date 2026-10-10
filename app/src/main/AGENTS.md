@@ -444,8 +444,16 @@ Owns production Android app code and resources.
   `Color.rgb`, so alpha in `line` survives as a fully opaque near-black in
   `applyEmptyStateBackground`. `ThemePaletteTableTest` holds both rules.
 - `SettingsActivity` is only a hub for existing settings surfaces: Security, Themes, Keywords,
-  Pairing, PGP Key, and About. Keep settings logic in the destination screens rather than
-  duplicating it in the hub.
+  Pairing, PGP Key, Signature, and About. Keep settings logic in the destination screens rather
+  than duplicating it in the hub; Signature's destination is `showSignatureDialog`.
+- The signature (`MailSignature.kt`) is plain text only, at most 1000 characters, in its own
+  private preferences file. It is account data: the pairing purge deletes the file, and so does
+  a security wipe. It is a user-typed setting, not mail metadata, so Hostile Location Protection
+  does not suppress it. Compose escapes it (`plainTextToHtml`) and puts it after an RFC 3676
+  `-- ` delimiter, above any quote (`withSignature`). It goes on new messages, replies and
+  forwards, but never above text another app shared in, which is the message itself. A
+  signature-only body counts as content, so Back on an untouched composer prompts once.
+  `ComposeSignatureTest` covers the escaping and the share exclusion.
 - Primary navigation uses `bottom_nav_menu.xml` for both phone bottom navigation and the `w600dp`
   rail on Inbox, Compose, Contacts, and Settings. The item order is Inbox, Compose, Lock, Contacts,
   Settings; Lock is an action that either locks immediately or opens Security when app lock is
