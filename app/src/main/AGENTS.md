@@ -475,7 +475,9 @@ Owns production Android app code and resources.
   revocation from a synced copy of the SAME primary key, verified against the pinned primary, adds
   only that signature to the pin and saves it. A revoked pin is still the address's pin — no
   fallback — so the reader gives `KEY_CHANGED` and the sender `RecipientKeyRevoked`, before the
-  vault opens. `PinnedKeyRevocationTest`, `PinnedKeyRevocationMergeTest`.
+  vault opens. Pins seeded by `MIGRATION_12_13` take revocations the same way: pins are matched
+  by address alone, never by how they were made. `PinnedKeyRevocationTest`,
+  `PinnedKeyRevocationMergeTest`, `LegacyKeyMigrationTest.aBackfilledPin_takesASyncedRevocationOfItsKey`.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`

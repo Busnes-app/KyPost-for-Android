@@ -142,8 +142,7 @@ class LegacyKeyMigrationTest {
         var vaultOpened = false
         val outcome = sender(database, REVOKED_A, sent) { vaultOpened = true }
             .send(MailDraft(to = "alice@example.invalid", subject = "s", body = "b", mode = "plain"), sign = false)
-        // By name: the outcome type arrives with the revocation work.
-        assertEquals("got $outcome", "RecipientKeyRevoked", outcome::class.simpleName)
+        assertEquals(ClientSendOutcome.RecipientKeyRevoked(listOf("alice@example.invalid")), outcome)
         assertEquals(emptyList<ClientEncryptedMessage>(), sent)
         assertEquals(false, vaultOpened)
     }
