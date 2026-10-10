@@ -78,7 +78,9 @@ room = "2.8.5"
 sqlcipher = "4.19.1"
 ksp = "2.3.12"
 bouncyCastlePgp = "1.86"
-jsoup = "1.23.2"
+# 1.23.2 makes QuotedHtmlSanitizer output non-idempotent on an mXSS probe
+# (Run4SanitizerMxssProbeTest.everyOutputIsStableUnderReSanitization). Held until that passes.
+jsoup = "1.23.1"
 zxingCore = "3.5.4"
 zxingEmbedded = "4.3.0"
 richHtmlEditor = "1.1.0"
