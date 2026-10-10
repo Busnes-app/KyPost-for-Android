@@ -540,6 +540,9 @@ class InboxActivity : LockedActivity() {
         hideNewMailPill()
         currentFolder = folder
         selectedTab = KeywordTabs.ALL
+        // Empty, so refreshInbox takes its cold-open path: loading state, then this folder's cache.
+        allEmails = emptyList()
+        renderFilteredEmails()
         applyFolderTitle()
         renderFreshness()
         refreshInbox()
@@ -731,6 +734,9 @@ class InboxActivity : LockedActivity() {
             applyFolderTitle()
         }
     }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun switchFolderForTest(folder: String) = switchFolder(folder)
 
     @androidx.annotation.VisibleForTesting
     internal fun currentFolderForTest(): String = currentFolder
