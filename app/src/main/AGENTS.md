@@ -548,6 +548,8 @@ Owns production Android app code and resources.
     `AppLockStore.tripwire`'s KDoc in the same commit** — the previous change did not, and this
     file spent a release telling every reader the database was plaintext.
 - Compose's address-book and Send action icons use the active palette's `inkStrong` color.
+- Send needs a recipient and a body. A blank subject is legal (the relay doesn't require one), so
+  compose asks "Send without a subject?" instead of refusing (`sendReadiness`).
 - STYLE_GUIDE.md §7 gaps are closed: `EmailDetailActivity`'s WebView renders the body in the real
   IBM Plex Mono font via a base64-inlined `@font-face` (`AppTheme.ibmPlexMonoFontFaceCss`, backed
   by `assets/fonts/IBMPlexMono-Regular.ttf`) rather than a `file://` base URL, to avoid granting
