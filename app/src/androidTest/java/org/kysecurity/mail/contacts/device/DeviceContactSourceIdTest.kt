@@ -92,4 +92,37 @@ class DeviceContactSourceIdTest {
         assertEquals(1, ownRowsFor(uid))
         assertEquals("the link is rebuilt", 1, db.deviceContactLinkDao().getAll().count { it.uid == uid })
     }
+
+    private fun deviceDisplayName(rawContactId: Long): String? = context.contentResolver.query(
+        ContactsContract.Data.CONTENT_URI,
+        arrayOf(ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME),
+        "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+        arrayOf(rawContactId.toString(), ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE),
+        null,
+    )?.use { if (it.moveToFirst()) it.getString(0) else null }
+
+    /** A phone edit made while the link was lost is newer than Room's copy and must win, not be
+     *  overwritten when the row is adopted back. */
+    @Test
+    fun aPhoneEditMadeWhileTheLinkWasLost_survivesAdoption() = runBlocking {
+        val uid = syncRepository.queueCreate(ContactDto(fn = "Old Name", updatedAt = "2020-01-01T00:00:00Z"))
+        repository.syncAll()
+        val rawContactId = db.deviceContactLinkDao().getByUid(uid)!!.rawContactId
+        db.deviceContactLinkDao().deleteAll()
+        // An ordinary edit, as the system Contacts app makes one: the row becomes dirty.
+        context.contentResolver.update(
+            ContactsContract.Data.CONTENT_URI,
+            android.content.ContentValues().apply {
+                put(ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME, "New Name")
+            },
+            "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+            arrayOf(rawContactId.toString(), ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE),
+        )
+
+        repository.syncAll()
+
+        assertEquals("New Name", db.contactDao().getByUid(uid)!!.fn)
+        assertEquals("New Name", deviceDisplayName(rawContactId))
+        assertEquals("no duplicate row", 1, ownRowsFor(uid))
+    }
 }
