@@ -30,9 +30,11 @@ data class DeviceRawContactSnapshot(
     val phoneticFamilyName: String? = null,
     val department: String? = null,
     val title: String? = null,
-    /** The phone's own TYPE/LABEL per IM, keyed by [imTypeKey] and in row order for duplicates:
-     *  device-only, kept so a rebuild does not drop it. */
+    /** The phone's own TYPE/LABEL per IM, keyed by [keptTypeKey] of the protocol the rebuild
+     *  writes, in row order for duplicates: device-only, kept so a rebuild does not drop it. */
     val imTypes: Map<String, List<Pair<Int?, String?>>> = emptyMap(),
+    /** As [imTypes], per website label and URL. */
+    val websiteTypes: Map<String, List<Pair<Int?, String?>>> = emptyMap(),
     val givenName: String? = null,
     val familyName: String? = null,
     val middleName: String? = null,
@@ -77,6 +79,6 @@ data class DeviceFieldSet(
     val department: String? = null,
 )
 
-/** One IM's identity on the phone: its custom protocol label and its value. The same value on two
- *  services is two IMs. */
-internal fun imTypeKey(protocolLabel: String?, value: String): String = "${protocolLabel.orEmpty()}\n$value"
+/** One row's identity on the phone: what tells it apart besides its value (an IM's protocol, a
+ *  website's label) and the value. The same value on two services is two IMs. */
+internal fun keptTypeKey(qualifier: String?, value: String): String = "${qualifier.orEmpty()}\n$value"

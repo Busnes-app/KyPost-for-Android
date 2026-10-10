@@ -762,7 +762,7 @@ class DeviceContactRepository(
         }
         plan.websites?.let {
             deleteRows(ContactsContract.CommonDataKinds.Website.CONTENT_ITEM_TYPE)
-            ops += websiteRows(it, ::insertRow)
+            ops += websiteRows(it, ::insertRow, kept = currentSnapshot.websiteTypes)
         }
         plan.relations?.let {
             deleteRows(ContactsContract.CommonDataKinds.Relation.CONTENT_ITEM_TYPE)
@@ -815,7 +815,7 @@ class DeviceContactRepository(
                 .withValue(ContactsContract.CommonDataKinds.Im.PROTOCOL, ContactsContract.CommonDataKinds.Im.PROTOCOL_CUSTOM)
                 .withValue(ContactsContract.CommonDataKinds.Im.CUSTOM_PROTOCOL, protocol)
                 .apply {
-                    remaining[imTypeKey(protocol, im.value)]?.removeFirstOrNull()?.let { (type, label) ->
+                    remaining[keptTypeKey(protocol, im.value)]?.removeFirstOrNull()?.let { (type, label) ->
                         withValue(ContactsContract.CommonDataKinds.Im.TYPE, type)
                         withValue(ContactsContract.CommonDataKinds.Im.LABEL, label)
                     }
@@ -824,14 +824,24 @@ class DeviceContactRepository(
         }
     }
 
-    private fun websiteRows(websites: List<ContactUrlDto>, newRow: (String) -> android.content.ContentProviderOperation.Builder) =
-        websites.map { website ->
+    // [kept]: as for imRows. Room's label is the LABEL column, so only an unchanged label keeps
+    // the phone's TYPE.
+    private fun websiteRows(
+        websites: List<ContactUrlDto>,
+        newRow: (String) -> android.content.ContentProviderOperation.Builder,
+        kept: Map<String, List<Pair<Int?, String?>>> = emptyMap(),
+    ): List<android.content.ContentProviderOperation> {
+        val remaining = kept.mapValues { ArrayDeque(it.value) }
+        return websites.map { website ->
+            val (type, label) = remaining[keptTypeKey(website.label, website.value)]?.removeFirstOrNull()
+                ?: (ContactsContract.CommonDataKinds.Website.TYPE_CUSTOM to website.label)
             newRow(ContactsContract.CommonDataKinds.Website.CONTENT_ITEM_TYPE)
                 .withValue(ContactsContract.CommonDataKinds.Website.URL, website.value)
-                .withValue(ContactsContract.CommonDataKinds.Website.TYPE, ContactsContract.CommonDataKinds.Website.TYPE_CUSTOM)
-                .withValue(ContactsContract.CommonDataKinds.Website.LABEL, website.label)
+                .withValue(ContactsContract.CommonDataKinds.Website.TYPE, type)
+                .withValue(ContactsContract.CommonDataKinds.Website.LABEL, label)
                 .build()
         }
+    }
 
     private fun relationRows(relations: List<ContactRelationDto>, newRow: (String) -> android.content.ContentProviderOperation.Builder) =
         relations.map { relation ->
@@ -1060,6 +1070,7 @@ class DeviceContactRepository(
             val addresses = mutableListOf<ContactAddressDto>()
             val ims = mutableListOf<ContactImDto>()
             val imTypes = mutableMapOf<String, MutableList<Pair<Int?, String?>>>()
+            val websiteTypes = mutableMapOf<String, MutableList<Pair<Int?, String?>>>()
             val websites = mutableListOf<ContactUrlDto>()
             val relations = mutableListOf<ContactRelationDto>()
             val events = mutableListOf<ContactEventDto>()
@@ -1145,7 +1156,9 @@ class DeviceContactRepository(
                                 val service = DeviceContactFieldCoding.imServiceFromCustomProtocolLabel(customProtocol)
                                 val label = if (service.isEmpty()) customProtocol else null
                                 ims.add(ContactImDto(service = service, label = label, value = data1))
-                                imTypes.getOrPut(imTypeKey(customProtocol, data1)) { mutableListOf() } +=
+                                // Keyed as imRows writes it back: no protocol is "Other".
+                                val written = DeviceContactFieldCoding.imCustomProtocolLabel(service, label)
+                                imTypes.getOrPut(keptTypeKey(written, data1)) { mutableListOf() } +=
                                     data2?.toIntOrNull() to data3?.takeIf { it.isNotBlank() }
                             }
                         }
@@ -1154,6 +1167,8 @@ class DeviceContactRepository(
                             if (data1.isNotBlank()) {
                                 val label = data3?.takeIf { it.isNotBlank() }
                                 websites.add(ContactUrlDto(label = label, value = data1))
+                                websiteTypes.getOrPut(keptTypeKey(label, data1)) { mutableListOf() } +=
+                                    data2?.toIntOrNull() to label
                             }
                         }
 
@@ -1223,6 +1238,7 @@ class DeviceContactRepository(
                 department = department,
                 title = title,
                 imTypes = imTypes,
+                websiteTypes = websiteTypes,
                 givenName = given,
                 familyName = family,
                 middleName = middle,
