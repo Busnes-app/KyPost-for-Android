@@ -188,13 +188,14 @@ class EmailDetailActivity : LockedActivity() {
 
         val actionArchive = findViewById<ImageButton>(R.id.actionArchive)
         val actionJunk = findViewById<ImageButton>(R.id.actionJunk)
+        val actionMove = findViewById<ImageButton>(R.id.actionMove)
         val actionDelete = findViewById<ImageButton>(R.id.actionDelete)
         val actionReply = findViewById<ImageButton>(R.id.actionReply)
         val actionReplyAll = findViewById<ImageButton>(R.id.actionReplyAll)
         val actionForward = findViewById<ImageButton>(R.id.actionForward)
         actionButtons = listOf(
             actionReply, actionReplyAll, actionForward,
-            actionArchive, actionJunk, actionDelete,
+            actionArchive, actionMove, actionJunk, actionDelete,
         )
         replyForwardButtons = listOf(actionReply, actionReplyAll, actionForward)
         applyDetailChrome()
@@ -212,6 +213,11 @@ class EmailDetailActivity : LockedActivity() {
         }
         actionDelete.setOnClickListener {
             runMailActionAndFinish(getString(R.string.action_delete), emailId) { it.delete(emailId, emailFolder) }
+        }
+        actionMove.setOnClickListener {
+            pickMoveTarget(this, mailRepository, ioExecutor, emailFolder) { target ->
+                runMailActionAndFinish(getString(R.string.action_move), emailId) { it.move(emailId, emailFolder, target) }
+            }
         }
         actionJunk.setOnClickListener {
             runMailActionAndFinish(getString(R.string.action_junk), emailId) { it.spam(emailId, emailFolder) }
