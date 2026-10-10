@@ -295,6 +295,17 @@
     <string name="contacts_refresh">Sync now</string>
     <string name="contacts_sync_success">Contacts synced</string>
     <string name="contacts_sync_unauthorized">Device pairing expired or invalid — re-pair this device in Settings</string>
+    <plurals name="contacts_sync_waiting">
+        <item quantity="one">%d change waiting to sync</item>
+        <item quantity="other">%d changes waiting to sync</item>
+    </plurals>
+    <string name="contacts_sync_stuck">Sync stuck</string>
+    <plurals name="contacts_sync_stuck_waiting">
+        <item quantity="one">Sync stuck: %d change waiting</item>
+        <item quantity="other">Sync stuck: %d changes waiting</item>
+    </plurals>
+    <string name="contacts_sync_stuck_no_reason">Not sent for over an hour.</string>
+    <string name="contacts_sync_retry">Retry</string>
     <string name="contacts_dedupe">Find &amp; merge duplicates</string>
     <plurals name="contacts_dedupe_result">
         <item quantity="one">Merged %d duplicate contact</item>

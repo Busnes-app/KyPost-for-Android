@@ -6,6 +6,7 @@ import org.kysecurity.mail.data.PendingContactChangeEntity
 import org.kysecurity.mail.push.PairingData
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
@@ -39,7 +40,14 @@ class ContactSyncRepository(
     /** Guards the contacts table against the other sync writer, `DeviceContactRepository.syncAll`. */
     val syncMutex = Mutex()
 
+    val health = ContactSyncHealth()
+
     fun observeContacts(): Flow<List<ContactEntity>> = db.contactDao().observeAll()
+
+    fun observeSyncStatus(now: () -> Long = System::currentTimeMillis): Flow<ContactSyncStatus> =
+        combine(db.pendingContactChangeDao().observeSummary(), health.failures) { pending, failures ->
+            contactSyncStatusOf(pending, failures, now())
+        }
 
     suspend fun sync(): ContactSyncOutcome = syncMutex.withLock {
         val pairing = pairingProvider() ?: return@withLock ContactSyncOutcome.NotPaired
@@ -83,7 +91,7 @@ class ContactSyncRepository(
             is ContactSyncResult.BadRequest -> ContactSyncOutcome.Retry(result.message)
             is ContactSyncResult.Retryable -> ContactSyncOutcome.Retry(result.message)
         }
-    }
+    }.also(health::record)
 
     /** Deliberately does not call [sync]; the caller must trigger the follow-up sync itself. */
     suspend fun dedupe(): ContactDedupeOutcome = resolveDedupeOutcome(pairingProvider) { pairing ->
