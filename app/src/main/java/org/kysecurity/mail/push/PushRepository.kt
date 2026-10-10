@@ -274,6 +274,17 @@ class PushRepository(
     }
 
     override suspend fun clearPairing(): List<String> {
+        // Mail work stays held until the outgoing pairing is gone: a task started after the purge's
+        // reset but before this clear would carry the new session yet send with the old credentials.
+        org.kysecurity.mail.MailBackgroundExecutor.quiesce()
+        try {
+            return clearPairingHeld()
+        } finally {
+            org.kysecurity.mail.MailBackgroundExecutor.resume()
+        }
+    }
+
+    private suspend fun clearPairingHeld(): List<String> {
         val residue = purgeAccountScopedData()
         securePairingStore.clearPairing()
         inMemoryHistory.value = emptyList()

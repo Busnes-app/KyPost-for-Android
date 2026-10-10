@@ -24,6 +24,7 @@ import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import org.kysecurity.mail.mail.FolderInfo
 import org.kysecurity.mail.mail.MailAccount
+import org.kysecurity.mail.mail.PendingMail
 import org.kysecurity.mail.mail.MailFetchResult
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRepository
@@ -70,6 +71,10 @@ class InboxActivity : LockedActivity() {
     /** Null in production. Called on the main thread when an earlier account's outcome is dropped. */
     @androidx.annotation.VisibleForTesting
     internal var rowActionDroppedForTest: (() -> Unit)? = null
+
+    /** Null in production. Runs on the IO thread after the cache paint, before the network fetch. */
+    @androidx.annotation.VisibleForTesting
+    internal var beforeNetworkRefreshForTest: ((folder: String) -> Unit)? = null
 
     /** Null in production. Stands in for the active pairing's account in a row action's check. */
     @androidx.annotation.VisibleForTesting
@@ -179,8 +184,19 @@ class InboxActivity : LockedActivity() {
     }
 
     override fun onStartUnlocked() {
+        // A failed read or action clears its overlay; repaint from the cache so the row shows it.
+        mailRepository.setOverlayListener { runOnUiThread { repaintFromCache() } }
         refreshInbox()
         scheduleNextRefresh()
+    }
+
+    private fun repaintFromCache() {
+        if (isFinishing || isDestroyed) return
+        val folder = currentFolder
+        ioExecutor.execute {
+            val cached = mailRepository.cachedEmails(folder)
+            runOnUiThread { applyRefreshedEmails(folder, cached, isFinal = false, errorMessage = null) }
+        }
     }
 
     override fun onResume() {
@@ -202,6 +218,7 @@ class InboxActivity : LockedActivity() {
     override fun onStop() {
         super.onStop()
         if (redirectedToUnlock) return
+        mailRepository.setOverlayListener(null)
         mainHandler.removeCallbacks(refreshRunnable)
         mainHandler.removeCallbacks(pendingMessagePollRunnable)
     }
@@ -415,7 +432,9 @@ class InboxActivity : LockedActivity() {
         if (folder != currentFolder) return
         // Read before the rows: the account they are shown, and acted on, under.
         val account = mailRepository.currentAccount()
-        if (showCacheFirst) {
+        // Not only on a cold open: returning from a message must show its read overlay now, not
+        // after the network answers. A pull re-reads the folder and paints once.
+        if (showCacheFirst || !forceFullResync) {
             val cached = mailRepository.cachedEmails(folder)
             if (cached.isNotEmpty()) {
                 runOnUiThread {
@@ -423,6 +442,7 @@ class InboxActivity : LockedActivity() {
                 }
             }
         }
+        beforeNetworkRefreshForTest?.invoke(folder)
         val outcome: MailOutcome<MailFetchResult> =
             mailRepository.refreshFolder(folder, forceFullResync = forceFullResync)
         val emails = mailRepository.cachedEmails(folder)
@@ -753,9 +773,14 @@ class InboxActivity : LockedActivity() {
         val sourceFolder = email.sourceFolder()
         // Same reasoning as sourceFolder: the row belongs to the account it was painted under.
         val account = shownAccount
-        val session = ProcessState.generation()
-        val index = allEmails.indexOfFirst { it.id == email.id }
-        allEmails = allEmails.filter { it.id != email.id }
+        // Claimed now, before queueing: the row stays hidden from any refresh, and the action
+        // belongs to the session current at the swipe, not when a worker picks it up.
+        val claim = mailRepository.beginRemoval(email.id, sourceFolder)
+        val session = claim.session
+        // (folder, id): a Retry tapped after switching folders must not hide another folder's UID.
+        fun isTheRow(row: Email) = row.id == email.id && row.sourceFolder() == sourceFolder
+        val index = allEmails.indexOfFirst(::isTheRow)
+        allEmails = allEmails.filterNot(::isTheRow)
         renderFilteredEmails()
         // Decided on the worker: reading the pairing is disk and crypto. Until the next repaint
         // [shownAccount] still names the old account, so it cannot answer this alone.
@@ -763,10 +788,10 @@ class InboxActivity : LockedActivity() {
         val onFailure = { reason: String ->
             restoreFailedRow(email, sourceFolder, account, session, pairingChanged.get(), index, label, reason, mutate)
         }
-        MailBackgroundExecutor.submitReporting(this, label, onFailure) {
+        MailBackgroundExecutor.submitReporting(this, label, onFailure, onDropped = { mailRepository.abandon(claim) }) {
             rowActionObserverForTest?.invoke(email.id, sourceFolder)
-            // [mutate] takes the folder as an argument: it has no way to reach for currentFolder.
-            mutate(email.id, sourceFolder, account).also {
+            // [mutate] takes the folder through the claim: it has no way to reach for currentFolder.
+            mutate(claim, account).also {
                 val active = activeAccountForTest?.invoke() ?: mailRepository.currentAccount()
                 pairingChanged.set(account != active)
             }
@@ -890,5 +915,5 @@ internal fun newRowsAbove(old: List<Email>, new: List<Email>): Int {
     return new.takeWhile { it.id !in oldIds }.size
 }
 
-/** (id, folder, account) -> outcome; the account is checked when the request is built. */
-private typealias RowMutation = (String, String, MailAccount?) -> MailOutcome<Unit>
+/** (claim, account) -> outcome; the account is checked when the request is built. */
+private typealias RowMutation = (PendingMail, MailAccount?) -> MailOutcome<Unit>
