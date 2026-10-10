@@ -26,7 +26,11 @@ class DeviceContactSyncSettings(context: Context) {
      *  for any other destination; a new key rather than a reused one, so installs that imported
      *  everything start with none. */
     fun importAccounts(destination: String): Set<String> =
-        prefs.getStringSet(KEY_IMPORT_ACCOUNTS, null).orEmpty().toSet()
+        if (prefs.getString(KEY_IMPORT_DESTINATION, null) == destination) {
+            prefs.getStringSet(KEY_IMPORT_ACCOUNTS, null).orEmpty().toSet()
+        } else {
+            emptySet()
+        }
 
     /** A newly added account rewinds the scan, or its existing contacts sit behind the watermark.
      *  Waits for an import in progress under [whileConsented], so none starts after this returns. */

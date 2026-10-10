@@ -407,7 +407,9 @@ class DeviceContactRepository(
                 if (!alreadyImported) {
                     val newDto = candidate.toContactDto(UUID.randomUUID().toString(), 0)
                     beforeImport()
-                    syncRepository.queueCreate(newDto)
+                    // Consent read now, not at scan start: it may have been withdrawn since.
+                    val account = DeviceAccount(candidate.accountType, candidate.accountName).key
+                    settings.whileConsented(destination, account) { syncRepository.queueCreate(newDto) }
                 }
             }
         }

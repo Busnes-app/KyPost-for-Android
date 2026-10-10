@@ -479,7 +479,11 @@ Owns production Android app code and resources.
   `importNewDeviceContacts` reads only raw contacts whose `DeviceAccount` (type, name; both null
   for the phone's own storage) is in `DeviceContactSyncSettings.importAccounts()`, which is empty
   by default and stored under a key no earlier build wrote — installs that imported everything
-  start with nothing chosen. Adding an account rewinds the scan watermark so its existing contacts
+  start with nothing chosen. Consent is bound to the pairing it was given under
+  (`ContactSyncRepository.destination`: the relay's canonical origin and the subscriber id); any
+  other pairing reads none. It is checked again for each contact just before it is queued, inside
+  `whileConsented`, which shares a lock with `setImportAccounts`, so withdrawing consent stops a
+  scan already running. Adding an account rewinds the scan watermark so its existing contacts
   are seen. The choice is the Contacts menu's "Import from other accounts…" dialog, whose copy
   says the contacts go to the user's KyPost server. `DeviceContactImportConsentTest`.
 - **Deletes reach the phone through Room.** `syncAll`'s `removeDeletedContacts` stage removes the
