@@ -53,12 +53,25 @@ data class DeviceContactUpdatePlan(
         fun <T> after(planned: T?, device: T): T = planned ?: device
         return listOf(
             after(displayName, snapshot.fn) to dto.fn,
+            after(givenName, snapshot.givenName) to dto.givenName,
+            after(familyName, snapshot.familyName) to dto.familyName,
+            after(middleName, snapshot.middleName) to dto.middleName,
+            after(prefix, snapshot.prefix) to dto.prefix,
+            after(suffix, snapshot.suffix) to dto.suffix,
+            after(phoneticGivenName, snapshot.phoneticGivenName) to dto.phoneticGivenName,
+            after(phoneticFamilyName, snapshot.phoneticFamilyName) to dto.phoneticFamilyName,
             after(org, snapshot.org) to dto.org,
+            after(title, snapshot.title) to dto.title,
+            after(department, snapshot.department) to dto.department,
             after(notes, snapshot.notes) to dto.notes,
             after(birthday, snapshot.birthday) to dto.birthday,
             after(emails, snapshot.emails) to dto.emails,
             after(phones, snapshot.phones) to dto.phones,
             after(addresses, snapshot.addresses) to dto.addresses,
+            after(ims, snapshot.ims) to dto.ims,
+            after(websites, snapshot.websites) to dto.websites,
+            after(relations, snapshot.relations) to dto.relations,
+            after(events, snapshot.events) to dto.events,
         ).all { (device, room) -> DeviceContactFieldMerge.same(device, room) }
     }
 
