@@ -5,6 +5,7 @@ import org.kysecurity.mail.data.ContactEntity
 import org.kysecurity.mail.data.PendingContactChangeEntity
 import org.kysecurity.mail.data.RecipientPinEntity
 import org.kysecurity.mail.pgp.PgpFingerprint
+import org.kysecurity.mail.pgp.withVerifiedRevocation
 import org.kysecurity.mail.push.PairingData
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
@@ -207,6 +208,16 @@ class ContactSyncRepository(
         dao.upsertAll(addresses.map { RecipientPinEntity(it, fingerprint, key, confirmed = true) })
     }
 
+    /** Folds a verifiable revocation in [synced]'s key into each pin for its addresses. */
+    private suspend fun recordRevocations(synced: ContactDto) {
+        val key = synced.pgpKey?.takeIf { it.isNotBlank() } ?: return
+        val dao = db.recipientPinDao()
+        val revoked = synced.emails.map { it.value.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()
+            .flatMap { dao.forAddress(it) }
+            .mapNotNull { pin -> withVerifiedRevocation(pin.publicKey, key)?.let { pin.copy(publicKey = it) } }
+        if (revoked.isNotEmpty()) dao.upsertAll(revoked)
+    }
+
     /** One pending row per uid. The old rows are replaced, never edited in place: a sync may
      *  already have read them, and its ack clears by row id. */
     private suspend fun enqueueCoalesced(change: PendingContactChangeEntity) {
@@ -237,11 +248,14 @@ class ContactSyncRepository(
         }
 
         db.withTransaction {
-            // Keys verified on this device live in recipient_pins, which nothing here touches.
+            // Keys verified on this device live in recipient_pins. Sync never adds to them; the one
+            // thing it may do is revoke one, and that is stored here, with the sync that brought
+            // it, so it holds after the synced contact itself is replaced or removed.
             val incomingEntities = response.changed.map { dto ->
                 dto.toEntity(previous = db.contactDao().getByUid(dto.uid))
             }
             db.contactDao().upsertAll(incomingEntities)
+            response.changed.forEach { recordRevocations(it) }
             val removed = response.deleted.map { it.uid }.toMutableSet()
             if (snapshot) {
                 // Queued changes are not on the server yet; everything else absent was deleted there.
