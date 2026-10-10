@@ -51,6 +51,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -125,6 +127,12 @@ class ComposeActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun isSendingForTest(): Boolean = sending != null
 
+    @androidx.annotation.VisibleForTesting
+    internal fun addAttachmentsForTest(uris: List<Uri>): Job = addAttachments(uris)
+
+    @androidx.annotation.VisibleForTesting
+    internal fun attachmentBytesForTest(): Long = attachments.sumOf { it.size.toLong() }
+
     private val bodyMirror = object : Runnable {
         override fun run() {
             bodyEditor.exportHtml { mirroredBodyHtml = it }
@@ -132,6 +140,7 @@ class ComposeActivity : LockedActivity() {
         }
     }
     private val attachments = mutableListOf<OutgoingAttachment>()
+    private val attachmentLock = Mutex()
 
     /** The in-flight preflight; cancelled so a late result cannot re-show a dismissed warning. */
     private var preflightJob: Job? = null
@@ -547,9 +556,10 @@ class ComposeActivity : LockedActivity() {
         return TextUtils.htmlEncode(text).replace("\n", "<br>")
     }
 
-    /** Sequential, not concurrent: each is checked against the remaining budget before adding. */
-    private fun addAttachments(uris: List<Uri>) {
-        lifecycleScope.launch {
+    /** One [attachmentLock] covers every call: computing the remaining budget, reading the file and
+     *  adding it happen as one step, so concurrent picks are checked against each other's bytes. */
+    private fun addAttachments(uris: List<Uri>): Job = lifecycleScope.launch {
+        attachmentLock.withLock {
             for (uri in uris) {
                 if (isFinishing || isDestroyed) return@launch
                 addAttachment(uri)
