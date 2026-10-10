@@ -1,12 +1,15 @@
 package org.kysecurity.mail.contacts.device
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class DeviceContactSyncCoordinatorTest {
 
@@ -57,20 +60,36 @@ class DeviceContactSyncCoordinatorTest {
             scope = scope,
             onFoundRunning = {
                 requesterStalled.countDown()
-                resumeRequester.await()
+                resumeRequester.await(WAIT_S, java.util.concurrent.TimeUnit.SECONDS)
             },
         )
+        suspend fun joinPasses() =
+            withTimeout(WAIT_S * 1_000) { scope.coroutineContext[kotlinx.coroutines.Job]!!.children.forEach { it.join() } }
 
-        coordinator.syncNowAsync()
-        withTimeout(5_000) { firstStarted.await() }
-        val requester = kotlin.concurrent.thread { coordinator.syncNowAsync() }
-        requesterStalled.await()
-        releaseFirst.complete(Unit)
-        withTimeout(5_000) { scope.coroutineContext[kotlinx.coroutines.Job]!!.children.forEach { it.join() } }
-        resumeRequester.countDown()
-        requester.join()
-        withTimeout(5_000) { scope.coroutineContext[kotlinx.coroutines.Job]!!.children.forEach { it.join() } }
+        var requester: Thread? = null
+        try {
+            coordinator.syncNowAsync()
+            withTimeout(WAIT_S * 1_000) { firstStarted.await() }
+            requester = kotlin.concurrent.thread { coordinator.syncNowAsync() }
+            assertTrue(requesterStalled.await(WAIT_S, java.util.concurrent.TimeUnit.SECONDS), "requester never reached the running pass")
+            releaseFirst.complete(Unit)
+            joinPasses()
+            resumeRequester.countDown()
+            requester.join(WAIT_S * 1_000)
+            assertFalse(requester.isAlive, "requester did not finish")
+            joinPasses()
+        } finally {
+            // Whatever failed above, nothing may be left blocked or running for the next test.
+            resumeRequester.countDown()
+            releaseFirst.complete(Unit)
+            scope.cancel()
+            requester?.join(WAIT_S * 1_000)
+        }
 
         assertEquals(2, runs.get())
+    }
+
+    private companion object {
+        const val WAIT_S = 5L
     }
 }

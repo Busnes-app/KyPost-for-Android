@@ -570,7 +570,7 @@ Owns production Android app code and resources.
   the plan's value or else the snapshot's; title and department are also merged into Room by the
   device pull, so a value typed on the phone is not just kept but synced. Custom relation labels
   read back from `Relation.LABEL` rather than collapsing to "other". IM rows are rebuilt with the
-  phone's own `Im.TYPE`/`LABEL` per IM value (`DeviceRawContactSnapshot.imTypes`,
+  phone's own `Im.TYPE`/`LABEL` per IM value (`DeviceRawContactSnapshot.imTypes`, keyed by protocol and value,
   `DeviceContactImTypeTest`), which Room has no slot for. Still unfixed
   on the same shape: `JOB_DESCRIPTION`, `OFFICE_LOCATION`, `SYMBOL`, `PHONETIC_NAME` and
   `StructuredPostal`'s `POBOX`/`NEIGHBORHOOD` are not in the snapshot at all, so every replace drops

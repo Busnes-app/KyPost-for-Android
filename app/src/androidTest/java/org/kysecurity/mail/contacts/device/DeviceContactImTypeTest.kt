@@ -76,6 +76,63 @@ class DeviceContactImTypeTest {
         null,
     )?.use { c -> buildMap { while (c.moveToNext()) put(c.getString(0), if (c.isNull(1)) null else c.getInt(1)) } }.orEmpty()
 
+    private fun setImType(rawContactId: Long, protocolLabel: String, type: Int, label: String?) {
+        context.contentResolver.update(
+            dataAsAdapter,
+            ContentValues().apply {
+                put(ContactsContract.CommonDataKinds.Im.TYPE, type)
+                put(ContactsContract.CommonDataKinds.Im.LABEL, label)
+            },
+            "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ? AND " +
+                "${ContactsContract.CommonDataKinds.Im.CUSTOM_PROTOCOL} = ?",
+            arrayOf(rawContactId.toString(), ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE, protocolLabel),
+        )
+    }
+
+    /** Type and label per protocol: a number on Signal and the same number on Telegram can be
+     *  filed differently, and each keeps its own. */
+    private fun imTypesByProtocol(rawContactId: Long): Map<String, Pair<Int?, String?>> = context.contentResolver.query(
+        ContactsContract.Data.CONTENT_URI,
+        arrayOf(
+            ContactsContract.CommonDataKinds.Im.CUSTOM_PROTOCOL,
+            ContactsContract.CommonDataKinds.Im.TYPE,
+            ContactsContract.CommonDataKinds.Im.LABEL,
+        ),
+        "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+        arrayOf(rawContactId.toString(), ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE),
+        null,
+    )?.use { c ->
+        buildMap { while (c.moveToNext()) put(c.getString(0), (if (c.isNull(1)) null else c.getInt(1)) to c.getString(2)) }
+    }.orEmpty()
+
+    @Test
+    fun theSameValueOnTwoServices_keepsEachServicesType() = runBlocking {
+        val uid = syncRepository.queueCreate(
+            ContactDto(
+                fn = "Im Service Probe",
+                ims = listOf(
+                    ContactImDto(service = "signal", value = "+15550100"),
+                    ContactImDto(service = "telegram", value = "+15550100"),
+                ),
+            ),
+        )
+        repository.syncAll()
+        val rawContactId = db.deviceContactLinkDao().getByUid(uid)!!.rawContactId
+        setImType(rawContactId, "Signal", ContactsContract.CommonDataKinds.Im.TYPE_HOME, null)
+        setImType(rawContactId, "Telegram", ContactsContract.CommonDataKinds.Im.TYPE_CUSTOM, "Night line")
+
+        val contact = db.contactDao().getByUid(uid)!!.toDto()
+        syncRepository.queueUpdate(
+            contact.copy(ims = contact.ims + ContactImDto(service = "matrix", value = "@probe:example.org")),
+            identityChanged = false,
+        )
+        repository.syncAll()
+
+        val types = imTypesByProtocol(rawContactId)
+        assertEquals(ContactsContract.CommonDataKinds.Im.TYPE_HOME to null, types["Signal"])
+        assertEquals(ContactsContract.CommonDataKinds.Im.TYPE_CUSTOM to "Night line", types["Telegram"])
+    }
+
     @Test
     fun appendingAnImInRoom_keepsTheExistingImsWorkType() = runBlocking {
         val uid = syncRepository.queueCreate(ContactDto(fn = "Im Type Probe", ims = listOf(ContactImDto(service = "matrix", value = "@probe:example.org"))))

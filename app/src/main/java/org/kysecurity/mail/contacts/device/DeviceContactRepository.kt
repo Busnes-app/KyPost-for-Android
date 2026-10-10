@@ -799,27 +799,29 @@ class DeviceContactRepository(
     // Shared by create and update so the two cannot encode a field differently. Im is deprecated
     // with no replacement mimetype, and its rows are still the ones present on device.
     @Suppress("DEPRECATION")
-    // [kept]: the TYPE/LABEL the phone gave each IM it already holds, by value. Room has no slot
-    // for them, so a rebuilt row takes them back rather than losing Home/Work/custom.
+    // [kept]: the TYPE/LABEL the phone gave each IM it already holds, by protocol and value, in
+    // row order for exact duplicates. Room has no slot for them, so a rebuilt row takes them back
+    // rather than losing Home/Work/custom.
     private fun imRows(
         ims: List<ContactImDto>,
         newRow: (String) -> android.content.ContentProviderOperation.Builder,
-        kept: Map<String, Pair<Int?, String?>> = emptyMap(),
-    ) = ims.map { im ->
-        newRow(ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE)
-            .withValue(ContactsContract.CommonDataKinds.Im.DATA, im.value)
-            .withValue(ContactsContract.CommonDataKinds.Im.PROTOCOL, ContactsContract.CommonDataKinds.Im.PROTOCOL_CUSTOM)
-            .withValue(
-                ContactsContract.CommonDataKinds.Im.CUSTOM_PROTOCOL,
-                DeviceContactFieldCoding.imCustomProtocolLabel(im.service, im.label),
-            )
-            .apply {
-                kept[im.value]?.let { (type, label) ->
-                    withValue(ContactsContract.CommonDataKinds.Im.TYPE, type)
-                    withValue(ContactsContract.CommonDataKinds.Im.LABEL, label)
+        kept: Map<String, List<Pair<Int?, String?>>> = emptyMap(),
+    ): List<android.content.ContentProviderOperation> {
+        val remaining = kept.mapValues { ArrayDeque(it.value) }
+        return ims.map { im ->
+            val protocol = DeviceContactFieldCoding.imCustomProtocolLabel(im.service, im.label)
+            newRow(ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE)
+                .withValue(ContactsContract.CommonDataKinds.Im.DATA, im.value)
+                .withValue(ContactsContract.CommonDataKinds.Im.PROTOCOL, ContactsContract.CommonDataKinds.Im.PROTOCOL_CUSTOM)
+                .withValue(ContactsContract.CommonDataKinds.Im.CUSTOM_PROTOCOL, protocol)
+                .apply {
+                    remaining[imTypeKey(protocol, im.value)]?.removeFirstOrNull()?.let { (type, label) ->
+                        withValue(ContactsContract.CommonDataKinds.Im.TYPE, type)
+                        withValue(ContactsContract.CommonDataKinds.Im.LABEL, label)
+                    }
                 }
-            }
-            .build()
+                .build()
+        }
     }
 
     private fun websiteRows(websites: List<ContactUrlDto>, newRow: (String) -> android.content.ContentProviderOperation.Builder) =
@@ -1057,7 +1059,7 @@ class DeviceContactRepository(
             val phones = mutableListOf<ContactFieldDto>()
             val addresses = mutableListOf<ContactAddressDto>()
             val ims = mutableListOf<ContactImDto>()
-            val imTypes = mutableMapOf<String, Pair<Int?, String?>>()
+            val imTypes = mutableMapOf<String, MutableList<Pair<Int?, String?>>>()
             val websites = mutableListOf<ContactUrlDto>()
             val relations = mutableListOf<ContactRelationDto>()
             val events = mutableListOf<ContactEventDto>()
@@ -1143,7 +1145,8 @@ class DeviceContactRepository(
                                 val service = DeviceContactFieldCoding.imServiceFromCustomProtocolLabel(customProtocol)
                                 val label = if (service.isEmpty()) customProtocol else null
                                 ims.add(ContactImDto(service = service, label = label, value = data1))
-                                imTypes[data1] = data2?.toIntOrNull() to data3?.takeIf { it.isNotBlank() }
+                                imTypes.getOrPut(imTypeKey(customProtocol, data1)) { mutableListOf() } +=
+                                    data2?.toIntOrNull() to data3?.takeIf { it.isNotBlank() }
                             }
                         }
 
