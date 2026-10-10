@@ -137,7 +137,7 @@ class ContactSyncClient(
         return when (response.code) {
             200 -> response.decoded?.let { HttpMappedResult.Success(it) }
                 ?: HttpMappedResult.Retryable(malformedMessage)
-            400 -> HttpMappedResult.BadRequest(response.errorBody.ifBlank { "Malformed request" })
+            400, 413 -> HttpMappedResult.BadRequest(response.errorBody.ifBlank { "Malformed request" })
             401 -> HttpMappedResult.Unauthorized(unauthorizedMessage)
             503 -> HttpMappedResult.ServiceUnavailable(serviceUnavailableMessage)
             else -> HttpMappedResult.Retryable("$failureMessagePrefix (${response.code})")
