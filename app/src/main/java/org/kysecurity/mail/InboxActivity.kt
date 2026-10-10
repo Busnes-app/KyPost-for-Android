@@ -848,11 +848,15 @@ internal enum class SpecialFolder(@androidx.annotation.StringRes val label: Int,
 
 private fun mailboxLeaf(path: String): String = path.split('/', '.').last().trim()
 
-internal fun specialFolderOf(path: String): SpecialFolder? =
-    SpecialFolder.entries.firstOrNull { kind -> kind.aliases.any { it.equals(mailboxLeaf(path), ignoreCase = true) } }
+/** Null under Archive: `Archive/Sent` is an archived folder, which the Archive entry owns. */
+internal fun specialFolderOf(path: String): SpecialFolder? {
+    if (path.startsWith("Archive/", ignoreCase = true) || path.startsWith("Archive.", ignoreCase = true)) return null
+    return SpecialFolder.entries.firstOrNull { kind -> kind.aliases.any { it.equals(mailboxLeaf(path), ignoreCase = true) } }
+}
 
 internal fun resolveSpecialFolder(paths: List<String>, kind: SpecialFolder): String? =
     kind.aliases.firstNotNullOfOrNull { alias -> paths.firstOrNull { mailboxLeaf(it).equals(alias, ignoreCase = true) } }
+
 /** Rows [new] puts above the first row [old] already had. Zero on a first load. */
 internal fun newRowsAbove(old: List<Email>, new: List<Email>): Int {
     if (old.isEmpty()) return 0
