@@ -3,6 +3,7 @@ package org.kysecurity.mail.contacts.device
 import org.kysecurity.mail.contacts.ContactAddressDto
 import org.kysecurity.mail.contacts.ContactDto
 import org.kysecurity.mail.contacts.ContactFieldDto
+import org.kysecurity.mail.contacts.ContactUrlDto
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -219,5 +220,51 @@ class DeviceContactUpdatePlanTest {
 
         assertTrue(plan.isEmpty())
         assertFalse(plan.leavesDeviceMatching(dto, device))
+    }
+
+    /** CP2 reads TYPE_HOME back as "Home"; the base recorded Room's "home". Same email, so the
+     *  phone did not change it and Room's clear must win. */
+    @Test
+    fun aLabelCp2SpellsDifferently_isNotADeviceChange() {
+        val base = ContactDto(uid = "u1", fn = "Ada Lovelace", emails = listOf(ContactFieldDto(label = "home", value = "ada@example.com")))
+
+        val plan = DeviceContactUpdatePlan.of(
+            dto = base.copy(emails = emptyList()),
+            snapshot = snapshot(emails = listOf(ContactFieldDto(label = "Home", value = "ada@example.com"))),
+            roomUpdatedAtEpochMs = roomNewer,
+            deviceUpdatedAtEpochMs = deviceOlder,
+            base = base,
+        )
+
+        assertEquals(emptyList(), plan.emails)
+    }
+
+    /** A plan that leaves a field off, here the website Room cleared, leaves the phone holding the
+     *  old value, so that field's base stays put while the fields that did reach the phone advance. */
+    @Test
+    fun nextBase_keepsTheOldBaseForAFieldThePlanLeavesOff() {
+        val site = listOf(ContactUrlDto(value = "https://example.invalid"))
+        val base = ContactDto(uid = "u1", fn = "Ada Lovelace", notes = "Old", websites = site)
+        val dto = base.copy(notes = "New", websites = emptyList())
+        val device = snapshot(notes = "Old").copy(websites = site)
+
+        val plan = DeviceContactUpdatePlan(notes = "New")
+        val next = plan.nextBase(dto, device, base)!!
+
+        assertEquals("New", next.notes)
+        assertEquals(site, next.websites)
+        assertFalse(plan.leavesDeviceMatching(dto, device))
+    }
+
+    /** Without a previous base there is nothing to keep for a field that disagrees. */
+    @Test
+    fun nextBase_withoutABase_needsEveryFieldToAgree() {
+        val dto = ContactDto(uid = "u1", fn = "Ada Lovelace")
+        val device = snapshot().copy(websites = listOf(ContactUrlDto(value = "https://example.invalid")))
+
+        val plan = DeviceContactUpdatePlan.of(dto, device, roomNewer, deviceOlder, base = null)
+
+        assertNull(plan.nextBase(dto, device, base = null))
+        assertEquals(dto, plan.nextBase(dto, snapshot(), base = null))
     }
 }

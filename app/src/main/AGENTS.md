@@ -460,15 +460,18 @@ Owns production Android app code and resources.
   JSON against its 1 MiB body limit), each acked and advancing the cursor on its own. 400/413 is
   "this request is too big": the batch is halved, and a single change still refused stays queued
   while the rest go out. Once a reply says `tooOld`, the remaining batches keep the stale cursor
-  (cheap `tooOld` replies with no lists) and one `since=0` pull ends the sync.
-  `ContactPushBatchingTest` pins all three.
+  (cheap `tooOld` replies with no lists) and one `since=0` pull ends the sync. So does any sync
+  that starts at cursor zero, pushes queued or not: a `tooOld` sync that failed before its pull
+  leaves only the reset cursor to say a snapshot is owed. `ContactPushBatchingTest` pins all four.
   A `since=0` pull is a snapshot: after tombstone GC the server can no longer list what it
   deleted, so `applyDelta(snapshot = true)` removes every Room contact absent from it except
   uids still in the outbox. `ContactFullResyncTest` covers both.
   **Per address, a key verified on this device is authoritative; a synced key never is.** The PGP
   QR flow's two saves (`queueCreate`/`queueUpdate` with `verifiedInPerson`) are the only writers of
-  `recipient_pins` (`MIGRATION_12_13`), and each replaces the pins for that contact's addresses —
-  re-scanning is how a pin changes. `RoomLocalSignerKeys` (`authoritativeKeys`) returns ONLY the pins
+  `recipient_pins` after `MIGRATION_12_13`, and each replaces the pins for that contact's addresses
+  — re-scanning is how a pin changes. The migration itself seeds the table with exactly what the
+  lookup before it trusted (`legacyPins`: every contact key per address, with its confirmation), so
+  an upgrade never turns a trusted key into an untrusted one. `LegacyKeyMigrationTest`. `RoomLocalSignerKeys` (`authoritativeKeys`) returns ONLY the pins
   for a pinned address, so a contact key the server delivers, on a replacement contact or as an
   update, cannot satisfy `ClientEncryptedSender.applyPins` and the send is `KeyChanged`. Sync never
   writes the table, so removing or rewriting the contact does not touch the pin; a wipe (database
@@ -514,10 +517,11 @@ Owns production Android app code and resources.
   an empty bundle. `ContactSyncAdapterDeclarationTest`, `ContactAccountFlowsTest`. Unverified on
   hardware: how stock Contacts apps render and edit these contacts with the schema.
 - **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
-  `applyBatch` as the insert. `device_contact_links` is a cache of that: before creating a row,
-  `pushRoomChangesToDevice` adopts a live row of our account whose SOURCE_ID is the uid, so a
-  death between insert and link write, or cleared app data, rebuilds the link instead of
-  duplicating the contact. Linked rows from before SOURCE_ID are backfilled on the next pass.
+  `applyBatch` as the insert. `device_contact_links` is a cache of that: `adoptLostLinks` runs
+  before the pull and relinks a live row of our account whose SOURCE_ID is the uid, so a death
+  between insert and link write, or cleared app data, rebuilds the link instead of duplicating
+  the contact, and a phone edit made while the link was gone is pulled, not overwritten. The
+  push repeats the lookup before any create. Linked rows from before SOURCE_ID are backfilled.
   `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_13_14` indexes the link table's
   `rawContactId`.
 - **The periodic `DeviceContactSyncWorker` is the only background path to the server**, so it runs
@@ -540,11 +544,13 @@ Owns production Android app code and resources.
   obsolete link goes. `DeviceGroupDeleteTest` covers that and the account-type scoping.
 - **Device merges are three-way.** `device_contact_links.syncedJson` (`MIGRATION_14_15`) holds the
   `ContactDto` both sides agreed on after the last sync. It is written on create and by the push
-  pass only when `DeviceContactUpdatePlan.leavesDeviceMatching` says the phone will then hold
-  Room's value for every planned field — never by the pull, which runs before the phone has the
-  merge, and not on an empty plan alone. `DeviceContactMergeBaseTest`. `DeviceContactFieldMerge.againstBase` gives
-  each field to the side that changed it since then, so a field emptied on either side stays
-  empty; null, blank and empty compare equal because CP2 drops empty rows. With no base (links
+  pass, per field: `DeviceContactUpdatePlan.nextBase` takes Room's value for each field the phone
+  will then hold too and keeps the old base for the rest — never by the pull, which runs before the phone has
+  the merge. With no old base it needs every field to agree. `DeviceContactMergeBaseTest`.
+  `DeviceContactFieldMerge.againstBase` gives each field to the side that changed it since then,
+  so a field emptied on either side stays empty. `same` compares as CP2 stores: null, blank and
+  empty are equal because CP2 drops empty rows, and labels ignore case because CP2 reads Room's
+  "home" back as "Home". With no base (links
   older than the column, or adopted by SOURCE_ID) or a change on both sides, the old two-way rule
   decides, and it cannot tell cleared from unset. In `DeviceContactUpdatePlan` a blank or empty
   value is a clear: rows are deleted and nothing is inserted.
@@ -561,7 +567,8 @@ Owns production Android app code and resources.
   current, and abandons the scan if not. The account purge's database step runs under the same
   lock and clears consent (`clearConsentDuring`): the purge advances the generation only at its
   end, so this is what stops an import from landing in the outbox the next pairing inherits. Adding an account rewinds the scan watermark so its existing contacts
-  are seen. The choice is the Contacts menu's "Import from other accounts…" dialog, whose copy
+  are seen; a scan moves the watermark to its own start time only if `consentRevision` is
+  unchanged since it began, so a rewind made mid-scan survives it. The choice is the Contacts menu's "Import from other accounts…" dialog, whose copy
   says the contacts go to the user's KyPost server. `DeviceContactImportConsentTest`.
 - **Deletes reach the phone through Room.** `syncAll`'s `removeDeletedContacts` stage removes the
   raw contact of every link whose Room contact is gone, so server tombstones, snapshot prunes and
@@ -572,9 +579,10 @@ Owns production Android app code and resources.
   The Organization row is therefore rebuilt from all three of company, title and department, each
   the plan's value or else the snapshot's; title and department are also merged into Room by the
   device pull, so a value typed on the phone is not just kept but synced. Custom relation labels
-  read back from `Relation.LABEL` rather than collapsing to "other". IM rows are rebuilt with the
-  phone's own `Im.TYPE`/`LABEL` per IM value (`DeviceRawContactSnapshot.imTypes`, keyed by protocol and value,
-  `DeviceContactImTypeTest`), which Room has no slot for. Still unfixed
+  read back from `Relation.LABEL` rather than collapsing to "other". IM and website rows are rebuilt
+  with the phone's own TYPE/LABEL, which Room has no slot for (`DeviceRawContactSnapshot.imTypes`,
+  keyed by the protocol the rebuild writes, so no protocol is "Other", and value; `websiteTypes`,
+  keyed by label and URL; `DeviceContactImTypeTest`). Still unfixed
   on the same shape: `JOB_DESCRIPTION`, `OFFICE_LOCATION`, `SYMBOL`, `PHONETIC_NAME` and
   `StructuredPostal`'s `POBOX`/`NEIGHBORHOOD` are not in the snapshot at all, so every replace drops
   them. Widen the snapshot before adding another replaced group.

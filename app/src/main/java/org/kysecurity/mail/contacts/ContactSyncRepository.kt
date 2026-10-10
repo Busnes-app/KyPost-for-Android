@@ -51,7 +51,8 @@ class ContactSyncRepository(
         val deviceSecret = pairing.deviceSecret
         if (deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return@withLock ContactSyncOutcome.NotPaired
         val pendingChanges = db.pendingContactChangeDao().getAllPending()
-        var cursor = cursorStore.cursor(pairing.subscriberId)
+        val startCursor = cursorStore.cursor(pairing.subscriberId)
+        var cursor = startCursor
 
         // Fail closed BEFORE the network call. A row this app cannot encode used to become an
         // empty ContactDto, which the server accepts as a real update and applyDelta then clears
@@ -93,7 +94,9 @@ class ContactSyncRepository(
             if (!tooOld) cursor = response.cursor
         }
 
-        var pullFrom: Long? = if (tooOld) 0L else cursor.takeIf { pendingChanges.isEmpty() }
+        // A sync starting at zero owes the snapshot even with pushes queued: a tooOld whose sync
+        // failed before its pull leaves only the reset cursor behind.
+        var pullFrom: Long? = if (tooOld || startCursor == 0L) 0L else cursor.takeIf { pendingChanges.isEmpty() }
         while (pullFrom != null) {
             val result = client.pull(pairing.serverUrl, deviceId, deviceSecret, pullFrom)
             val response = (result as? ContactSyncResult.Success)?.response ?: return@withLock failureOutcome(result)
