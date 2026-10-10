@@ -1,5 +1,6 @@
 package org.kysecurity.mail
 
+import android.content.ContentResolver
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -7,6 +8,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.system.Os
 import android.text.TextUtils
 import android.view.Menu
 import android.view.MenuItem
@@ -52,6 +54,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.Executors
@@ -552,6 +555,7 @@ class ComposeActivity : LockedActivity() {
         val picked = withContext(Dispatchers.IO) {
             var name = "attachment"
             var declaredSize = -1L
+            if (!isForeignContentUri(uri)) return@withContext PickedAttachment.Unreadable(name)
             runCatching {
                 resolver.query(uri, null, null, null, null)?.use { cursor ->
                     if (cursor.moveToFirst()) {
@@ -566,7 +570,12 @@ class ComposeActivity : LockedActivity() {
             if (declaredSize > budget) return@withContext PickedAttachment.TooLarge(name)
 
             val bytes = try {
-                resolver.openInputStream(uri)?.use { readAtMost(it, budget, declaredSize) }
+                resolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+                    // The provider is foreign, but the file it hands back may still be ours.
+                    val path = Os.readlink("/proc/self/fd/${afd.parcelFileDescriptor.fd}")
+                    if (isUnderAny(path, appPrivateDirs())) return@withContext PickedAttachment.Unreadable(name)
+                    afd.createInputStream().use { readAtMost(it, budget, declaredSize) }
+                }
             } catch (e: AttachmentTooLargeException) {
                 // The provider under-reported, or omitted, OpenableColumns.SIZE.
                 android.util.Log.i(TAG, "Picked attachment exceeded the remaining budget", e)
@@ -602,6 +611,19 @@ class ComposeActivity : LockedActivity() {
                 Toast.makeText(this, getString(R.string.compose_attachment_unreadable, picked.name), Toast.LENGTH_SHORT).show()
         }
     }
+
+    /** Attachments come from other apps' providers only, never `file:` or this app's own. */
+    private fun isForeignContentUri(uri: Uri): Boolean {
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
+        val authority = uri.authority ?: return false
+        // Null is an invisible foreign provider; only this package's own are refused.
+        return packageManager.resolveContentProvider(authority, 0)?.packageName != packageName
+    }
+
+    private fun appPrivateDirs(): List<String> =
+        listOf(applicationInfo.dataDir, applicationInfo.deviceProtectedDataDir)
+            .flatMap { listOf(it, File(it).canonicalPath) }
+            .distinct()
 
     /** Outcome of reading one picked document — named rather than a nullable pair so the three
      *  cases stay distinguishable at the call site. */
@@ -1061,6 +1083,10 @@ internal class AttachmentTooLargeException : IOException("Attachment exceeds the
 /** Copy buffer for [readAtMost]. Large enough that a 25 MB attachment is a few hundred reads, small
  *  enough that the refusal below happens long before the heap notices. */
 private const val ATTACHMENT_COPY_BUFFER_BYTES = 64 * 1024
+
+/** True when [path] is one of [dirs] or inside one. */
+internal fun isUnderAny(path: String, dirs: List<String>): Boolean =
+    dirs.any { path == it || path.startsWith("$it/") }
 
 /** Reads [input] fully, or throws [AttachmentTooLargeException] past [limit] bytes. */
 internal fun readAtMost(input: InputStream, limit: Long, expectedSize: Long = -1L): ByteArray {
