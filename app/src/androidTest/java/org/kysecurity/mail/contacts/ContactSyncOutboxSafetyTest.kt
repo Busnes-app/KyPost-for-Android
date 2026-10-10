@@ -103,7 +103,7 @@ class ContactSyncOutboxSafetyTest {
     }
 
     /** Wire contract: the server commits pushed changes BEFORE computing tooOld, so the rows are
-     *  acknowledged. Only the cursor is discarded, forcing a full since=0 re-pull. */
+     *  acknowledged. Only the cursor is discarded, and a since=0 pull follows in the same sync. */
     @Test
     fun tooOld_clearsTheAcknowledgedOutboxAndResetsOnlyTheCursor() = runBlocking {
         val cursorStore = ContactCursorStore(
@@ -117,7 +117,11 @@ class ContactSyncOutboxSafetyTest {
         val outcome = repository.sync()
 
         assertTrue(outcome is ContactSyncOutcome.Success)
-        assertEquals("the push must actually have gone out", 1, factory.requests.size)
+        assertEquals(
+            "the push must go out once, then a full re-pull",
+            listOf("POST", "GET since=0"),
+            factory.requests.map { if (it.method == "GET") "GET since=${it.url.queryParameter("since")}" else it.method },
+        )
         assertEquals("acknowledged rows must not be replayed", 0, db.pendingChangeCount())
         assertEquals("cursor must be discarded for a full re-pull", 0L, cursorStore.cursor(SUB))
     }
