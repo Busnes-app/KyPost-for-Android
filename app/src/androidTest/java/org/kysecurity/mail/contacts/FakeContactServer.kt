@@ -25,6 +25,9 @@ internal class FakeContactServer : Call.Factory {
     /** Applies the next push, then fails the call as if the app died before reading the reply. */
     var loseNextResponse = false
 
+    /** Runs once, after a push is applied and before its reply: an edit made mid-sync. */
+    var duringPush: (() -> Unit)? = null
+
     fun live(): List<ContactDto> = contacts.values.filterNot { it.deleted }
 
     override fun newCall(request: Request): Call {
@@ -35,6 +38,7 @@ internal class FakeContactServer : Call.Factory {
             pushes += push
             push.changes.forEach(::apply)
             since = push.baseCursor
+            duringPush?.also { duringPush = null }?.invoke()
         } else {
             since = request.url.queryParameter("since")?.toLong() ?: 0L
         }
