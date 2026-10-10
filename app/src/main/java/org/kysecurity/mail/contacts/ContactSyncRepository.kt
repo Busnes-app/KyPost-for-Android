@@ -3,6 +3,8 @@ package org.kysecurity.mail.contacts
 import org.kysecurity.mail.data.AppDatabase
 import org.kysecurity.mail.data.ContactEntity
 import org.kysecurity.mail.data.PendingContactChangeEntity
+import org.kysecurity.mail.pgp.recipientPins
+import org.kysecurity.mail.pgp.toLocalSignerKey
 import org.kysecurity.mail.push.PairingData
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
@@ -215,17 +217,25 @@ class ContactSyncRepository(
         }
 
         db.withTransaction {
+            // Every removal below is on the server's word; a key recorded here outlives it.
+            val lostKeys = mutableListOf<ContactEntity>()
             val incomingEntities = response.changed.map { dto ->
-                dto.toEntity(previous = db.contactDao().getByUid(dto.uid))
+                val previous = db.contactDao().getByUid(dto.uid)
+                dto.toEntity(previous = previous).also { updated ->
+                    if (previous != null && updated.toLocalSignerKey() == null) lostKeys += previous
+                }
             }
             db.contactDao().upsertAll(incomingEntities)
-            db.contactDao().deleteByUids(response.deleted.map { it.uid })
+            val removed = response.deleted.map { it.uid }.toMutableSet()
             if (snapshot) {
                 // Queued changes are not on the server yet; everything else absent was deleted there.
                 val keep = response.changed.mapTo(HashSet()) { it.uid } +
                     db.pendingContactChangeDao().getAllPending().map { it.localUid }
-                db.contactDao().deleteByUids(db.contactDao().allUids().filterNot { it in keep })
+                removed += db.contactDao().allUids().filterNot { it in keep }
             }
+            removed.mapNotNullTo(lostKeys) { db.contactDao().getByUid(it) }
+            db.recipientPinDao().upsertAll(lostKeys.flatMap { it.recipientPins() })
+            db.contactDao().deleteByUids(removed.toList())
             if (flushedChanges.isNotEmpty()) {
                 db.pendingContactChangeDao().clearFlushed(flushedChanges.map { it.id })
             }

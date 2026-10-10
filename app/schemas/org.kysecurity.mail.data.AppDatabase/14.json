@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
   "database": {
-    "version": 13,
-    "identityHash": "784d5121f8b5033f8a1ca4a00630a25c",
+    "version": 14,
+    "identityHash": "1af91d2077ea544d119b1e4dffab1494",
     "entities": [
       {
         "tableName": "emails",
@@ -459,7 +459,18 @@
           "columnNames": [
             "uid"
           ]
-        }
+        },
+        "indices": [
+          {
+            "name": "index_device_contact_links_rawContactId",
+            "unique": false,
+            "columnNames": [
+              "rawContactId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_device_contact_links_rawContactId` ON `${TABLE_NAME}` (`rawContactId`)"
+          }
+        ]
       },
       {
         "tableName": "groups",
@@ -579,7 +590,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '784d5121f8b5033f8a1ca4a00630a25c')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1af91d2077ea544d119b1e4dffab1494')"
     ]
   }
 }
