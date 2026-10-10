@@ -56,6 +56,7 @@ class DeviceContactRepository(
                 reconcileGroupRenames()
             },
             stage("pullDeviceChanges") { pullDeviceChangesForOwnAccount() },
+            stage("removeDeletedContacts") { removeRowsOfDeletedContacts() },
             stage("importNewDeviceContacts") { importNewDeviceContacts() },
             stage("pushRoomChanges") { pushRoomChangesToDevice() },
         )
@@ -115,7 +116,8 @@ class DeviceContactRepository(
                         restoreDeletedRawContact(rawContactId)
                     } else {
                         syncRepository.queueDelete(link.uid, 0)
-                        db.deviceContactLinkDao().deleteByUid(link.uid)
+                        // Purges the tombstone: CP2 keeps DELETED=1 rows until their adapter does.
+                        deleteDeviceRawContact(link.uid)
                     }
                 } else if (!deleted && dirty && link != null) {
                     dirtyRawContacts.add(rawContactId)
@@ -829,11 +831,21 @@ class DeviceContactRepository(
                 ).build(),
         )
 
-        runCatching {
-            contentResolver.applyBatch(ContactsContract.AUTHORITY, deleteOps)
-        }
+        // On failure the link stays, so removeRowsOfDeletedContacts retries next sync.
+        runCatching { contentResolver.applyBatch(ContactsContract.AUTHORITY, deleteOps) }
+            .onSuccess { db.deviceContactLinkDao().deleteByUid(uid) }
+            .onFailure { android.util.Log.e("DeviceContactSync", "Could not delete raw contact ${link.rawContactId}", it) }
+        Unit
+    }
 
-        db.deviceContactLinkDao().deleteByUid(uid)
+    /** Room is the truth: a link whose contact is gone (server tombstone, snapshot prune, local
+     *  delete) takes its raw contact with it. */
+    private suspend fun removeRowsOfDeletedContacts() {
+        val live = db.contactDao().allUids().toHashSet()
+        for (link in db.deviceContactLinkDao().getAll()) {
+            if (!syncPermitted()) return
+            if (link.uid !in live) deleteDeviceRawContact(link.uid)
+        }
     }
 
     /** These rows sit outside the app sandbox, so neither the wipe nor in-memory Room reaches them. */
