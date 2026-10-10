@@ -86,3 +86,19 @@ internal fun Activity.handOffToCalendar(extras: Map<String, Any>) {
         .create()
         .showSecurely()
 }
+
+/** Holds a "Create event" tap until the body fetch has settled, so it is not sent subject-only.
+ *  One pending action: repeated taps while loading launch once. Main thread only. */
+internal class BodyFetchGate {
+    private var settled = false
+    private var pending: (() -> Unit)? = null
+
+    fun settle() {
+        settled = true
+        pending?.also { pending = null }?.invoke()
+    }
+
+    fun whenSettled(action: () -> Unit) {
+        if (settled) action() else pending = action
+    }
+}

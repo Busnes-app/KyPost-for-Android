@@ -94,6 +94,7 @@ class EmailDetailActivity : LockedActivity() {
      *  see [quoteForReply] for why the 140-character preview was never an acceptable substitute. */
     private var fetchedBodyHtml: String? = null
     private var fetchedBodyMode: String = ""
+    private val bodyFetch = BodyFetchGate()
 
     /** The intent's subject: a decrypted protected subject never leaves for another app. */
     private var envelopeSubject: String = ""
@@ -330,6 +331,7 @@ class EmailDetailActivity : LockedActivity() {
                     runOnUiThread {
                         if (isFinishing || isDestroyed) return@runOnUiThread
                         loading.visibility = android.view.View.GONE
+                        bodyFetch.settle()
                         Toast.makeText(this, R.string.email_body_render_failed, Toast.LENGTH_LONG).show()
                     }
                 }
@@ -391,6 +393,7 @@ class EmailDetailActivity : LockedActivity() {
             // A local decrypt must never reach this property; not `bodyToRender`, which is blanked.
             fetchedBodyHtml = content?.html?.takeIf { pgpState != PgpMessageState.CLIENT_PROTECTED }
             fetchedBodyMode = bodyMode
+            bodyFetch.settle()
             val plainTextBody = content?.html?.takeIf { it.isNotBlank() }
                 ?: emailPreview.takeIf { mayFallBackToPreview(outcome) }.orEmpty()
             val plainText = plainTextBody.takeIf { isPlainTextBody(it, bodyMode) }
@@ -946,14 +949,17 @@ class EmailDetailActivity : LockedActivity() {
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         if (item.itemId != MENU_CREATE_EVENT) return super.onOptionsItemSelected(item)
-        val subject = envelopeSubject
-        val body = fetchedBodyHtml
-        val mode = fetchedBodyMode
-        // Off Main: the body can be megabytes of HTML for jsoup.
-        ioExecutor.execute {
-            val extras = runCatching { emailEventExtras(subject, body, mode) }.getOrElse { emailEventExtras(subject, null, mode) }
-            runOnUiThread {
-                if (!isFinishing && !isDestroyed) handOffToCalendar(extras)
+        // The body is read once its fetch has settled, not when tapped.
+        bodyFetch.whenSettled {
+            val subject = envelopeSubject
+            val body = fetchedBodyHtml
+            val mode = fetchedBodyMode
+            // Off Main: the body can be megabytes of HTML for jsoup.
+            ioExecutor.execute {
+                val extras = runCatching { emailEventExtras(subject, body, mode) }.getOrElse { emailEventExtras(subject, null, mode) }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) handOffToCalendar(extras)
+                }
             }
         }
         return true

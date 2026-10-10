@@ -29,7 +29,7 @@ class CalendarEvent(
     val end: Instant,
     val allDay: Boolean,
     val rrule: String,
-    /** A TZID that resolved to nothing, so the floating-time fallback was used. */
+    /** A DTSTART or DTEND TZID that resolved to nothing, so the floating fallback was used. */
     val unknownZone: String?,
     /** Bare addresses of every ATTENDEE that has a usable one. */
     val attendees: List<String> = emptyList(),
@@ -140,7 +140,7 @@ private fun parse(text: String, localZone: ZoneId, windowsZone: (String) -> Stri
             "END" -> {
                 if (stack.lastOrNull() != line.value.trim().uppercase()) return null
                 if (stack.removeAt(stack.size - 1) == "VEVENT") {
-                    event?.let { toEvent(it, attendees.toList(), localZone, windowsZone) }?.let(events::add)
+                    events.add(event?.let { toEvent(it, attendees.toList(), localZone, windowsZone) } ?: return null)
                     event = null
                 }
             }
@@ -168,7 +168,8 @@ private fun toEvent(
     windowsZone: (String) -> String?,
 ): Parsed? {
     val start = props["DTSTART"]?.let { time(it, localZone, windowsZone) } ?: return null
-    val end = props["DTEND"]?.let { time(it, localZone, windowsZone) }?.at
+    val endTime = props["DTEND"]?.let { time(it, localZone, windowsZone) ?: return null }
+    val end = endTime?.at
         ?: props["DURATION"]?.let { addDuration(start.at, it.value.trim()) }
         ?: if (start.allDay) start.at.plusDays(1) else start.at
     val uid = props["UID"]?.value?.trim()?.takeIf { it.length <= 1_000 && it.none(Char::isISOControl) }.orEmpty()
@@ -189,7 +190,7 @@ private fun toEvent(
             end = maxOf(end, start.at).toInstant(),
             allDay = start.allDay,
             rrule = props["RRULE"]?.value?.trim()?.takeIf { RRULE_SAFE.matches(it) }.orEmpty(),
-            unknownZone = start.unknownZone,
+            unknownZone = start.unknownZone ?: endTime?.unknownZone,
             attendees = attendees,
             recurrenceId = recurrenceId,
             canReply = uid.isNotEmpty() && organizer.isNotEmpty() && sequence != null &&

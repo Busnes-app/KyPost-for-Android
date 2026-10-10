@@ -134,6 +134,32 @@ class CalendarInviteTest {
     }
 
     @Test
+    fun oneUnparseableEventRefusesTheWholeInvite() {
+        val bytes = ics(
+            "BEGIN:VCALENDAR",
+            "METHOD:REQUEST",
+            "BEGIN:VEVENT",
+            "SUMMARY:no start",
+            "END:VEVENT",
+            "BEGIN:VEVENT",
+            "DTSTART:20261012T100000Z",
+            "SUMMARY:valid",
+            "END:VEVENT",
+            "END:VCALENDAR",
+        )
+        assertNull(parse(bytes))
+        assertNull(parse(invite("REQUEST", "DTSTART:20261012T100000Z", "DTEND:garbage")))
+    }
+
+    @Test
+    fun unknownZoneOnTheEndIsReportedToo() {
+        val event = assertNotNull(
+            parse(invite("REQUEST", "DTSTART;TZID=Europe/Berlin:20261012T090000", "DTEND;TZID=Narnia:20261012T100000")),
+        ).primary
+        assertEquals("Narnia", event.unknownZone)
+    }
+
+    @Test
     fun floatingTimeIsReadInTheLocalZone() {
         val event = assertNotNull(parse(invite("REQUEST", "DTSTART:20261012T090000"))).primary
         assertEquals(Instant.parse("2026-10-12T07:00:00Z"), event.begin)

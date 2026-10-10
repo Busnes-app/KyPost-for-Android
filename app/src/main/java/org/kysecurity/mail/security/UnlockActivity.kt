@@ -3,6 +3,7 @@ package org.kysecurity.mail.security
 import android.content.Intent
 import android.os.Bundle
 import android.os.CountDownTimer
+import android.text.InputFilter
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
@@ -60,6 +61,7 @@ class UnlockActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback(this) { moveTaskToBack(true) }
 
         pinField = findViewById(R.id.unlockPinField)
+        pinField.filters = arrayOf(InputFilter.LengthFilter(PinPolicy.MAX_LENGTH))
         errorText = findViewById(R.id.unlockErrorText)
         submitButton = findViewById(R.id.unlockSubmitButton)
         submitButton.setOnClickListener { attemptUnlock() }
