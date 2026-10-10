@@ -19,6 +19,10 @@ class KeywordSettingsBoundsTest {
     @Before
     fun clearStore() {
         context = ApplicationProvider.getApplicationContext()
+        // KeywordSettings writes with apply(). A previous method's queued write would rewrite the
+        // file after the delete; a commit() returns only once the writes queued before it land.
+        context.getSharedPreferences(KeywordSettings.PREFS_NAME, Context.MODE_PRIVATE)
+            .edit().putBoolean("flush", true).commit()
         context.deleteSharedPreferences(KeywordSettings.PREFS_NAME)
         org.kysecurity.mail.security.HostileLocationSettings(context).setEnabled(false)
     }
