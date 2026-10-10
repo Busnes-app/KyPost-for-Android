@@ -106,7 +106,8 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   unrelated `ComposeDraftCache` entry left by an earlier internal compose screen.
 - Inbox freshness is success-only and folder-scoped for the visible Activity lifetime. A failed
   refresh leaves the last confirmed time intact; it must not replace it with a sticky error or let
-  a late result from a previously selected folder paint the current folder.
+  a late result from a previously selected folder paint the current folder. A folder switch
+  clears the old rows at once and shows the loading state, then the new folder's cache.
 
 # Work Guidance
 
