@@ -83,7 +83,11 @@ class DeviceContactRepository(
         for ((androidGroupRowId, freshName) in groupRenameTargets(links, groups)) {
             groupLinker.renameIfNeeded(androidGroupRowId, freshName)
         }
-        if (removeGone) groupRemovals(links, groups).forEach { groupLinker.removeAndroidGroup(it) }
+        if (removeGone) {
+            for ((link, deleteRow) in groupRemovals(links, groups)) {
+                if (deleteRow) groupLinker.removeAndroidGroup(link) else db.groupLinkDao().deleteByGroupId(link.groupId)
+            }
+        }
     }
 
     private suspend fun pullDeviceChangesForOwnAccount() = withContext(Dispatchers.IO) {

@@ -109,10 +109,13 @@ class DeviceGroupLinker(
     }
 }
 
-/** Links whose backend group is gone; their device groups go too. */
-internal fun groupRemovals(links: List<GroupLinkEntity>, groups: List<GroupEntity>): List<GroupLinkEntity> {
+/** Links whose backend group is gone, each with whether its device row goes too. Title matching
+ *  can link two backend groups to one row, so a row a live group still links to is kept. */
+internal fun groupRemovals(links: List<GroupLinkEntity>, groups: List<GroupEntity>): List<Pair<GroupLinkEntity, Boolean>> {
     val live = groups.mapTo(HashSet()) { it.id }
-    return links.filter { it.groupId !in live }
+    val (kept, gone) = links.partition { it.groupId in live }
+    val stillUsed = kept.mapTo(HashSet()) { it.androidGroupRowId }
+    return gone.map { it to (it.androidGroupRowId !in stillUsed) }
 }
 
 /** A link whose backend group is gone is skipped — there is no fresh name to rename to. */
