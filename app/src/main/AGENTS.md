@@ -510,8 +510,10 @@ Owns production Android app code and resources.
   `makeContactsVisible` writes only when `UNGROUPED_VISIBLE` is off: each write notifies the
   contacts observer, which used to trigger the next sync, which wrote again.
 - **Device merges are three-way.** `device_contact_links.syncedJson` (`MIGRATION_14_15`) holds the
-  `ContactDto` both sides agreed on after the last sync, written on create, on an applied or
-  already-agreeing update, and after a device pull. `DeviceContactFieldMerge.againstBase` gives
+  `ContactDto` both sides agreed on after the last sync. It is written on create and by the push
+  pass only when `DeviceContactUpdatePlan.leavesDeviceMatching` says the phone will then hold
+  Room's value for every planned field — never by the pull, which runs before the phone has the
+  merge, and not on an empty plan alone. `DeviceContactMergeBaseTest`. `DeviceContactFieldMerge.againstBase` gives
   each field to the side that changed it since then, so a field emptied on either side stays
   empty; null, blank and empty compare equal because CP2 drops empty rows. With no base (links
   older than the column, or adopted by SOURCE_ID) or a change on both sides, the old two-way rule
