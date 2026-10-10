@@ -29,6 +29,9 @@ class MailRepository(
     /** A confirmed removal stays gone: a fetch that read the folder before it landed must not write it back. */
     private fun notRemoved(folder: String, messages: List<Email>) = messages.filterNot { (folder to it.id) in removed }
 
+    /** Unread rows per folder in the local cache: what this device holds, not a server total. */
+    fun unreadCounts(): Map<String, Int> = emailDao.unreadCounts().associate { it.folder to it.unread }
+
     /** [forceFullResync] asks for since=0; the daily self-heal runs regardless of this flag. */
     fun refreshFolder(folder: String, forceFullResync: Boolean = false): MailOutcome<MailFetchResult> {
         val outcome = relaySource.fetchInbox(folder, WINDOW_LIMIT, forceFullResync)

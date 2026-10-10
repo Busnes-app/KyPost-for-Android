@@ -7,6 +7,8 @@ import androidx.room.Upsert
 
 /** Every per-message statement takes the folder as well as the id: the pair is the primary key
  *  (see [EmailEntity]), and an id-only `WHERE` would reach a same-UID row in another mailbox. */
+data class FolderUnread(val folder: String, val unread: Int)
+
 @Dao
 interface EmailDao {
     @Query("SELECT * FROM emails WHERE folder = :folder ORDER BY atUtc DESC")
@@ -31,6 +33,9 @@ interface EmailDao {
 
     @Query("SELECT messageId FROM emails WHERE folder = :folder")
     fun getIds(folder: String): List<String>
+
+    @Query("SELECT folder, COUNT(*) AS unread FROM emails WHERE status = 'unread' GROUP BY folder")
+    fun unreadCounts(): List<FolderUnread>
 
     /** Window rows only: a snapshot cannot speak for mail older than the window. */
     @Query("DELETE FROM emails WHERE folder = :folder AND inWindow = 1 AND messageId NOT IN (:keepIds)")
