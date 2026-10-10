@@ -26,7 +26,8 @@ object DeviceContactAccount {
      * the flag is off: every write notifies the contacts observer, which runs another sync, which
      * called this again.
      */
-    fun makeContactsVisible(context: Context) {
+    /** True when it had to write the setting; false when it was already on and nothing was written. */
+    fun makeContactsVisible(context: Context): Boolean {
         val resolver = context.applicationContext.contentResolver
         val visible = resolver.query(
             ContactsContract.Settings.CONTENT_URI,
@@ -35,13 +36,14 @@ object DeviceContactAccount {
             arrayOf(ACCOUNT_TYPE, ACCOUNT_NAME),
             null,
         )?.use { it.moveToFirst() && it.getInt(0) == 1 } ?: false
-        if (visible) return
+        if (visible) return false
         val values = ContentValues().apply {
             put(ContactsContract.Settings.ACCOUNT_NAME, ACCOUNT_NAME)
             put(ContactsContract.Settings.ACCOUNT_TYPE, ACCOUNT_TYPE)
             put(ContactsContract.Settings.UNGROUPED_VISIBLE, 1)
         }
         resolver.insert(ContactsContract.Settings.CONTENT_URI, values)
+        return true
     }
 }
 
