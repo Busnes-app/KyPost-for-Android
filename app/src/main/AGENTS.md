@@ -19,6 +19,9 @@ Owns production Android app code and resources.
 - Whether a pairing is an account replacement is `isAccountReplacement(incoming, currentPairing, reconnectExpectation)`, never "is there a pairing right now". A reconnect leaves account-scoped data with no pairing, so the pairing alone under-reports; the marker is the second input. `attemptPairing` purges on it and `PushPairingActivity` picks the replace-warning dialog from the same answer (`PushRepository.replacesAnotherAccount`), so the warning cannot disagree with what happens. No pairing and no marker is a first-ever pairing: it must purge nothing.
 - Account replacement is staged: `attemptPairing` registers FIRST and only then purges the account being replaced. Nothing may be destroyed before the replacement is proven, or an offline scan of a valid QR silently unpairs a working account. `clearPairing` returns the stores that survived the purge; a non-empty result during replacement refuses the new account and escalates to `SecurityWipe.wipeAndResetApp`, because no table carries a subscriber column and survivors are readable by whoever pairs next. Never let a purge failure become a log line.
 - A PIN change is staged, not swapped in place. The verifier (`app_lock_secure`) and the wrapped device secret (`push_pairing_secure`) are different preference files, so no single `commit()` covers both. `SecuritySettingsActivity.changePin` writes the new wrapping via `SecurePairingStore.stagePendingSecret` **before** `setPin`, `resolveDeviceSecret` tries the live wrapping then the staged one, and the following `savePairing` promotes and clears the staged copy. Without staging, a process death between the two files sealed the secret under a key no surviving PIN derived, `needsCredentialRewrap()` could not see it (it answers a scheme-version question only — `deviceSecretIsStranded` is the one that detects this), and the relay's eventual 409 read to the user as "re-pair this device". Both of its key derivations go through `CredentialCipher.deriveKeysOrNull` and abort the change on null: an unreadable Keystore pepper is not a wrong PIN, and letting `PepperUnavailableException` out killed the process mid-protocol. Both abort points sit ahead of `setPin`, so there is nothing staged to roll back. `SourceRulesTest.credentialDerivationsHandleAnUnavailableKeystore` keeps raw `deriveKeys` out of every caller but `AppLockManager`.
+- `PinPolicy` alone decides PIN length. A field that caps input sets
+  `InputFilter.LengthFilter(PinPolicy.MAX_LENGTH)` in code; layouts never set `maxLength` on a
+  `numberPassword` field (`PinLayoutLengthTest`).
 - `AppLockStore.putCredentialSaltIfAbsent` is compare-and-set under a companion-scoped lock and never overwrites. It replaced a `check()` that threw `IllegalStateException` through `AppLockManager`'s PIN paths, which catch only `PepperUnavailableException`.
 - Saving an attachment to Downloads is `security/AttachmentDownloads.kt`'s `saveAttachmentToDownloads`, not the detail Activity. Pass the raw sender name and MIME type: the sink resolves the safe type from both before sanitising the display name. The row is recorded in `DownloadedAttachmentLedger` BEFORE the first byte (it is the only handle a later wipe has on decrypted mail outside the sandbox) and is created `IS_PENDING = 1`, published only once the write completes; any failure deletes the row and KEEPS the ledger entry, since a row the delete could not remove must stay findable by the wipe. A decrypted-part save uses `OwnedAttachmentSave`: confirmation admits at most one owned snapshot before the executor hop; lock/destroy wipes a queued snapshot and makes its stale runnable refuse the write, while an already-started write keeps coherent ownership; completion or scheduling rejection wipes the remaining snapshot.
 - `EphemeralAttachmentProvider.openFile` peeks rather than consumes: viewers that probe before reading open the same URI twice, and consuming on the first open made the attachment unreopenable. The TTL sweep is the single owner of pending bytes — the writer does not zero on completion, because that races a second reader streaming the same array. Every mutation of the pending map shares one monitor so the size budget is computed against a map nothing is concurrently draining. `PendingAttachment` sanitises `displayName` through `safeFileName` in its own constructor: the sender's Content-Disposition filename is served to the chooser as `OpenableColumns.DISPLAY_NAME`, so it gets the same treatment as the Downloads sink's name, at the sink rather than at each caller.
@@ -410,6 +413,10 @@ Owns production Android app code and resources.
   Each inbox row shows `atUtc` in the device zone (`inboxRowDate`: time for today, date otherwise,
   blank if unparseable). The "No messages in {folder}" empty state shows only once that folder has
   refreshed successfully (`inboxEmptyVisible`): a loading or unreachable folder never reads as empty.
+  A refresh that lands mail above the top row scrolls to it when the list is at the top;
+  otherwise a "N new messages" pill (`inbox_new_mail` plurals, polite live region) over the list
+  counts it and scrolls up on tap. Only a repaint of the folder and tab already painted counts,
+  and a pending saved-position restore wins. `InboxNewMailTest` covers both branches.
 - Theme selection is managed in `ThemesActivity` and uses the shared theme name list based on
   `theme.ts` palettes, led by `Busnes Light`/`Busnes Dark` from `busnes-color-theme-handoff.md`.
   `AppTheme.DEFAULT_THEME` (`Busnes Light`) is the only place the fallback name lives — the
@@ -440,11 +447,13 @@ Owns production Android app code and resources.
 - Keyword refresh is best-effort every 90 seconds while inbox UI is foregrounded (both connection modes).
 - Background keyword staleness is accepted; app catches up on next foreground refresh.
 - Contact sync (`contacts/` package) mirrors `push/`'s repository+coordinator+singleton-graph shape:
-  `ContactSyncClient` (OkHttp, `sub`/`hash` auth) pulls/pushes `/api/contacts/sync`, `ContactSyncRepository`
-  applies the delta into Room and reconciles locally-created contacts' server-assigned uid (no
-  correlation id in v1 — matched by content/order, see `ContactSyncReconciliation`), and
-  `ContactCursorStore` persists a per-subscriber cursor in Room alongside the contact outbox so
-  acknowledgement is atomic.
+  `ContactSyncClient` (OkHttp, device-id/secret auth) pulls/pushes `/api/contacts/sync`,
+  `ContactSyncRepository` applies the delta into Room, and `ContactCursorStore` persists a
+  per-subscriber cursor in Room alongside the contact outbox so acknowledgement is atomic.
+  A create is pushed under the UUID `queueCreate` minted, never a blank uid: the server stores an
+  unknown uid as a create under that uid, so a push replayed after a lost reply, or a create
+  followed by an edit or delete in the same outbox, lands on one contact. That uid is permanent,
+  so nothing remaps it after sync. `ContactCreateIdempotencyTest` pins all three cases.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`

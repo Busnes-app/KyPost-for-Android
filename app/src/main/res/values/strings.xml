@@ -394,6 +394,10 @@
     <string name="inbox_updated">Updated %1$s</string>
     <string name="inbox_not_updated">Not updated yet</string>
     <string name="inbox_empty">No messages in %1$s</string>
+    <plurals name="inbox_new_mail">
+        <item quantity="one">%1$d new message</item>
+        <item quantity="other">%1$d new messages</item>
+    </plurals>
     <string name="finding_email">Finding new email…</string>
     <string name="no_archive_folders">No archive folders found</string>
     <string name="email_not_found">Email no longer available</string>
