@@ -7,8 +7,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.kysecurity.mail.mail.MailRuntime
 import org.kysecurity.mail.Email
 import org.kysecurity.mail.EmailAdapter
 import org.kysecurity.mail.InboxActivity
@@ -17,6 +19,12 @@ import org.kysecurity.mail.R
 /** TalkBack users see neither the unread dot nor the swipes, so the row has to say and offer both. */
 @RunWith(AndroidJUnit4::class)
 class EmailRowAccessibilityTest {
+
+    /** The database stays with the suite; only the mail graph the Activity built is released. */
+    @After
+    fun releaseTheMailGraph() {
+        MailRuntime.invalidate()
+    }
 
     private fun email(status: String, attachments: Boolean) = Email(
         id = "1", subject = "Invoice", sender = "Bob <bob@example.com>", preview = "",
