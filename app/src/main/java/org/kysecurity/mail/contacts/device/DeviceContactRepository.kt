@@ -257,6 +257,8 @@ class DeviceContactRepository(
         // Importing uploads to the server: only from accounts the user picked for this pairing,
         // and none by default.
         val destination = syncRepository.destination() ?: return@withContext
+        // The session this scan belongs to; a pairing replacement or wipe ends it.
+        val session = org.kysecurity.mail.ProcessState.generation()
         val consented = settings.importAccounts(destination)
         if (consented.isEmpty()) return@withContext
         val watermarkMs = settings.lastForeignScanAtEpochMs()
@@ -337,7 +339,16 @@ class DeviceContactRepository(
                     beforeImport()
                     // Consent read now, not at scan start: it may have been withdrawn since.
                     val account = DeviceAccount(candidate.accountType, candidate.accountName).key
-                    settings.whileConsented(destination, account) { syncRepository.queueCreate(newDto) }
+                    val current = settings.whileConsented(destination, account) {
+                        // Checked under the consent lock the purge also takes, so the session and
+                        // the pairing cannot change between this check and the write.
+                        val stillCurrent = org.kysecurity.mail.ProcessState.isCurrent(session) &&
+                            syncRepository.destination() == destination
+                        if (stillCurrent) syncRepository.queueCreate(newDto)
+                        stillCurrent
+                    }
+                    // The pairing this scan started under is gone: nothing more may be queued.
+                    if (current == false) return@withContext
                 }
             }
         }
