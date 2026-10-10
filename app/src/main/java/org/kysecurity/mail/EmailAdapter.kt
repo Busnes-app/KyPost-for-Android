@@ -20,10 +20,15 @@ import org.kysecurity.mail.pgp.pgpSignatureStateOf
 
 class EmailAdapter(
     private var emails: List<Email>,
+    private val onEmailLongClick: ((Email, View) -> Unit)? = null,
     private val onEmailClick: ((Email) -> Unit)? = null
 ) : RecyclerView.Adapter<EmailAdapter.EmailViewHolder>() {
 
-    class EmailViewHolder(view: View, private val onEmailClick: ((Email) -> Unit)?) : RecyclerView.ViewHolder(view) {
+    class EmailViewHolder(
+        view: View,
+        private val onEmailClick: ((Email) -> Unit)?,
+        private val onEmailLongClick: ((Email, View) -> Unit)?,
+    ) : RecyclerView.ViewHolder(view) {
         private val cardView: CardView = view as CardView
         private val contentLayout: LinearLayout = view.findViewById(R.id.emailItemContent)
         private val unreadDot: View = view.findViewById(R.id.unreadDot)
@@ -75,13 +80,26 @@ class EmailAdapter(
             senderTextView.setTextColor(Color.parseColor(palette.ink))
 
             itemView.setOnClickListener { onEmailClick?.invoke(email) }
+            onEmailLongClick?.let { onLongClick ->
+                itemView.setOnLongClickListener { view ->
+                    onLongClick(email, view)
+                    true
+                }
+                // Names what the long press does; TalkBack otherwise says only "long press".
+                androidx.core.view.ViewCompat.replaceAccessibilityAction(
+                    itemView,
+                    androidx.core.view.accessibility.AccessibilityNodeInfoCompat.AccessibilityActionCompat.ACTION_LONG_CLICK,
+                    context.getString(if (isUnread) R.string.action_mark_read else R.string.action_mark_unread),
+                    null,
+                )
+            }
         }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EmailViewHolder {
         val view = LayoutInflater.from(parent.context)
             .inflate(R.layout.item_email, parent, false)
-        return EmailViewHolder(view, onEmailClick)
+        return EmailViewHolder(view, onEmailClick, onEmailLongClick)
     }
 
     override fun onBindViewHolder(holder: EmailViewHolder, position: Int) {

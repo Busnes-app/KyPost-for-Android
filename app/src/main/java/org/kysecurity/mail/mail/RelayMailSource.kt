@@ -416,7 +416,7 @@ class RelayMailSource(
         400 -> if (rawBody.contains(NOT_CONFIGURED_PREFIX, ignoreCase = true)) {
             MailOutcome.NotConfigured(rawBody)
         } else {
-            MailOutcome.BadRequest(rawBody.ifBlank { "Malformed request" })
+            MailOutcome.BadRequest(rawBody.trim().ifBlank { "Malformed request" })
         }
         401 -> MailOutcome.Unauthorized("Bad secret or unknown device")
         // The 403 prose names an unauthorized From, which is the one thing the user can act on.
@@ -560,6 +560,7 @@ private fun MailAction.wireValue(): String = when (this) {
     MailAction.ARCHIVE -> "archive"
     MailAction.SPAM -> "spam"
     MailAction.READ -> "read"
+    MailAction.UNREAD -> "unread"
     MailAction.MOVE -> "move"
 }
 

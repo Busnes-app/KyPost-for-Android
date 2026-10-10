@@ -1274,4 +1274,26 @@ class RelayMailSourceTest {
         assertEquals("c-foreign", calls.requests.single().url.queryParameter("since"))
         assertFalse(result.isDelta)
     }
+
+    @Test
+    fun unreadAction_postsTheUnreadWireValue() {
+        val calls = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true,"processed":1}""") }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        source.performAction(MailAction.UNREAD, listOf("42"), "INBOX")
+
+        assertTrue(calls.urls.single().endsWith("/api/inbox/actions"))
+        assertTrue(calls.bodies.single(), calls.bodies.single().contains("\"action\":\"unread\""))
+    }
+
+    /** Pre-#350 relays refuse the action with plain-text 400; that text is what the user sees. */
+    @Test
+    fun unreadAction_onAServerWithoutIt_isTheServersBadRequest() {
+        val calls = FakeCallFactory { request -> jsonResponse(request, "unsupported action\n", code = 400) }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        val outcome = source.performAction(MailAction.UNREAD, listOf("42"), "INBOX")
+
+        assertEquals("unsupported action", (outcome as MailOutcome.BadRequest).message)
+    }
 }

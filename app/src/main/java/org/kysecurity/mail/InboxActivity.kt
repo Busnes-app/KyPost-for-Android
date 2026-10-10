@@ -93,6 +93,11 @@ class InboxActivity : LockedActivity() {
                 allEmails = allEmails.filter { it.id != removedId }
                 renderFilteredEmails()
             }
+            // Already confirmed by the relay and written to Room; this only repaints the row.
+            val unreadId = result.data?.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_ID)
+            if (unreadId != null && result.data?.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_FOLDER) == currentFolder) {
+                showStatus(unreadId, "unread")
+            }
         }
     }
 
@@ -269,7 +274,7 @@ class InboxActivity : LockedActivity() {
     }
 
     private fun setupRecyclerView() {
-        adapter = EmailAdapter(emptyList()) { email ->
+        adapter = EmailAdapter(emptyList(), onEmailLongClick = ::showRowMenu) { email ->
             openEmailDetail(email)
         }
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -306,6 +311,39 @@ class InboxActivity : LockedActivity() {
                 outcome?.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
             }
         }
+    }
+
+    private fun showRowMenu(email: Email, anchor: View) {
+        val markRead = email.status == "unread"
+        PopupMenu(this, anchor).apply {
+            menu.add(if (markRead) R.string.action_mark_read else R.string.action_mark_unread)
+            setOnMenuItemClickListener {
+                setReadState(email, markRead)
+                true
+            }
+            show()
+        }
+    }
+
+    /** Server first: the row changes only once the relay confirms, so a server without the
+     *  unread action leaves it as it was and the failure is toasted. */
+    private fun setReadState(email: Email, read: Boolean) {
+        val folder = email.sourceFolder()
+        val label = getString(if (read) R.string.action_mark_read else R.string.action_mark_unread)
+        MailBackgroundExecutor.submitReporting(this, label) {
+            val outcome = if (read) mailRepository.markRead(email.id, folder) else mailRepository.markUnread(email.id, folder)
+            if (outcome is MailOutcome.Success) {
+                runOnUiThread { if (folder == currentFolder) showStatus(email.id, if (read) "read" else "unread") }
+            }
+            outcome
+        }
+    }
+
+    private fun showStatus(id: String, status: String) {
+        if (redirectedToUnlock || isDestroyed) return
+        allEmails = allEmails.map { if (it.id == id) it.copy(status = status) else it }
+        rebuildTabs(allEmails)
+        renderFilteredEmails()
     }
 
     /** The row's own mailbox, not the screen's. An IMAP UID is unique only within one folder, so

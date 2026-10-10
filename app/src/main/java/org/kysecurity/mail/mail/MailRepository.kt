@@ -77,9 +77,15 @@ class MailRepository(
     /** Server first, cache second. An optimistic local "read" bought nothing — the caller already
      *  runs on a background thread and shows the message regardless — and left the row lying about
      *  a state the server never reached. */
-    fun markRead(id: String, folder: String): MailOutcome<Unit> {
-        val outcome = relaySource.performAction(MailAction.READ, listOf(id), folder).appliedTo(id)
-        if (outcome is MailOutcome.Success) emailDao.updateStatus(id, folder, "read")
+    fun markRead(id: String, folder: String): MailOutcome<Unit> = setStatus(MailAction.READ, "read", id, folder)
+
+    /** Same rule as [markRead]. A server without the action (pre-KyPost-Server #350) answers 400
+     *  "unsupported action", which is returned for the caller to show. */
+    fun markUnread(id: String, folder: String): MailOutcome<Unit> = setStatus(MailAction.UNREAD, "unread", id, folder)
+
+    private fun setStatus(action: MailAction, status: String, id: String, folder: String): MailOutcome<Unit> {
+        val outcome = relaySource.performAction(action, listOf(id), folder).appliedTo(id)
+        if (outcome is MailOutcome.Success) emailDao.updateStatus(id, folder, status)
         return outcome
     }
 

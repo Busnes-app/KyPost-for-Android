@@ -192,9 +192,10 @@ class EmailDetailActivity : LockedActivity() {
         val actionReply = findViewById<ImageButton>(R.id.actionReply)
         val actionReplyAll = findViewById<ImageButton>(R.id.actionReplyAll)
         val actionForward = findViewById<ImageButton>(R.id.actionForward)
+        val actionMarkUnread = findViewById<ImageButton>(R.id.actionMarkUnread)
         actionButtons = listOf(
             actionReply, actionReplyAll, actionForward,
-            actionArchive, actionJunk, actionDelete,
+            actionMarkUnread, actionArchive, actionJunk, actionDelete,
         )
         replyForwardButtons = listOf(actionReply, actionReplyAll, actionForward)
         applyDetailChrome()
@@ -204,8 +205,20 @@ class EmailDetailActivity : LockedActivity() {
         if (!markReadSubmitted) {
             markReadSubmitted = true
             markReadSubmitCount++
-            MailBackgroundExecutor.submit { mailRepository.markRead(emailId, emailFolder) }
+            val key = markReadKey(emailFolder, emailId)
+            val repository = mailRepository
+            val task = Supersedable { repository.markRead(emailId, emailFolder) }
+            pendingMarkRead[key] = task
+            MailBackgroundExecutor.submit {
+                try {
+                    task.run()
+                } finally {
+                    pendingMarkRead.remove(key, task)
+                }
+            }
         }
+
+        actionMarkUnread.setOnClickListener { markUnreadAndFinish(it, emailId, emailFolder) }
 
         actionArchive.setOnClickListener {
             runMailActionAndFinish(getString(R.string.action_archive), emailId) { it.archive(emailId, emailFolder) }
@@ -998,6 +1011,37 @@ class EmailDetailActivity : LockedActivity() {
         actionButtons.forEach { applyIconButtonTheme(this, it) }
     }
 
+    /** Server first: the inbox shows the row unread only once the relay has confirmed it. */
+    private fun markUnreadAndFinish(button: View, emailId: String, emailFolder: String) {
+        button.isEnabled = false
+        val label = getString(R.string.action_mark_unread)
+        Toast.makeText(this, label, Toast.LENGTH_SHORT).show()
+        val readTask = pendingMarkRead[markReadKey(emailFolder, emailId)]
+        val repository = mailRepository
+        MailBackgroundExecutor.submitReporting(this, label) {
+            var outcome: MailOutcome<Unit>? = null
+            try {
+                val markUnread = { repository.markUnread(emailId, emailFolder) }
+                (readTask?.supersede(MARK_READ_WAIT_SECONDS, markUnread) ?: markUnread()).also { outcome = it }
+            } finally {
+                runOnUiThread { onMarkUnreadDone(button, emailId, emailFolder, outcome) }
+            }
+        }
+    }
+
+    private fun onMarkUnreadDone(button: View, emailId: String, emailFolder: String, outcome: MailOutcome<Unit>?) {
+        if (isDestroyed) return
+        if (outcome !is MailOutcome.Success) {
+            button.isEnabled = true
+            return
+        }
+        setResult(
+            RESULT_OK,
+            Intent().putExtra(EXTRA_MARKED_UNREAD_ID, emailId).putExtra(EXTRA_MARKED_UNREAD_FOLDER, emailFolder),
+        )
+        finish()
+    }
+
     private fun runMailActionAndFinish(actionLabel: String, emailId: String, action: (MailRepository) -> MailOutcome<Unit>) {
         Toast.makeText(this, actionLabel, Toast.LENGTH_SHORT).show()
         // Reporting, not fire-and-forget: the row is removed optimistically, so a failure the user
@@ -1080,6 +1124,17 @@ class EmailDetailActivity : LockedActivity() {
         private const val TAG = "EmailDetailActivity"
 
         const val EXTRA_REMOVED_EMAIL_ID = "removed_email_id"
+        const val EXTRA_MARKED_UNREAD_ID = "marked_unread_email_id"
+        const val EXTRA_MARKED_UNREAD_FOLDER = "marked_unread_email_folder"
+
+        /** Process-wide, not per instance: a recreated screen must still order Mark unread after
+         *  the markRead its first instance submitted. Entries leave when their task finishes. */
+        private val pendingMarkRead = java.util.concurrent.ConcurrentHashMap<String, Supersedable>()
+
+        private fun markReadKey(folder: String, id: String) = "$folder\u0000$id"
+
+        /** Bounds the wait on a hung markRead; Mark unread is sent either way. */
+        private const val MARK_READ_WAIT_SECONDS = 30L
 
         private const val STATE_MARK_READ_SUBMITTED = "mark_read_submitted"
         private const val STATE_MARK_READ_COUNT = "mark_read_count"

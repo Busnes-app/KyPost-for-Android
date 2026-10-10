@@ -13,6 +13,30 @@ private const val QUIESCE_TIMEOUT_MS = 2_000L
 
 private const val TAG = "MailBackground"
 
+/** A mutation a later one of the same message may supersede. The pool runs two tasks at once, so
+ *  nothing else orders them. */
+internal class Supersedable(private val work: () -> Unit) : Runnable {
+    private val claimed = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val finished = java.util.concurrent.CountDownLatch(1)
+
+    override fun run() {
+        if (!claimed.compareAndSet(false, true)) return
+        try {
+            work()
+        } finally {
+            finished.countDown()
+        }
+    }
+
+    /** Runs [block] in this task's place: at once if it never started (now it never will), else
+     *  once it finishes or [timeoutSeconds] pass. An interrupt (a wipe quiescing the pool)
+     *  propagates, and [block] does not run. */
+    fun <T> supersede(timeoutSeconds: Long, block: () -> T): T {
+        if (!claimed.compareAndSet(false, true)) finished.await(timeoutSeconds, TimeUnit.SECONDS)
+        return block()
+    }
+}
+
 // Mail mutations outlive the Activity that fired them, so the UI can update optimistically.
 object MailBackgroundExecutor {
     /** Null means suspended, and that is the whole point: a wipe that swapped in a fresh pool
