@@ -35,3 +35,27 @@ interface RecipientPinDao {
     @Query("DELETE FROM recipient_pins")
     suspend fun clearAll()
 }
+
+/**
+ * The pins one pre-migration contact row stands for: the key the earlier lookup trusted for each
+ * of its addresses. That lookup required both a key and a fingerprint and matched addresses
+ * trimmed and case-insensitively, so the same rules apply here.
+ */
+internal fun legacyPins(
+    emailsJson: String?,
+    publicKey: String?,
+    fingerprint: String?,
+    confirmed: Boolean,
+): List<RecipientPinEntity> {
+    if (publicKey.isNullOrBlank() || fingerprint.isNullOrBlank()) return emptyList()
+    val addresses = runCatching {
+        legacyJson.decodeFromString(
+            kotlinx.serialization.builtins.ListSerializer(org.kysecurity.mail.contacts.ContactFieldDto.serializer()),
+            emailsJson.orEmpty(),
+        )
+    }.getOrDefault(emptyList())
+    return addresses.map { it.value.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()
+        .map { RecipientPinEntity(it, fingerprint, publicKey, confirmed) }
+}
+
+private val legacyJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
