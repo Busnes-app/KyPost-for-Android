@@ -30,6 +30,9 @@ class EmailAdapter(
         private val subjectTextView: TextView = view.findViewById(R.id.textViewSubject)
         private val senderTextView: TextView = view.findViewById(R.id.textViewSender)
 
+        // setTypeface(current, NORMAL) keeps a bold current face; derive from the inflated one.
+        private val subjectTypeface: Typeface = subjectTextView.typeface
+
         fun bind(email: Email, palette: ThemePalette) {
             // A message this app can't render is worth knowing before tapping it — otherwise the
             // only signal is opening it and finding nothing there.
@@ -70,7 +73,7 @@ class EmailAdapter(
             if (isUnread) {
                 unreadDot.background = unreadDotDrawable(itemView.context)
             }
-            subjectTextView.setTypeface(subjectTextView.typeface, if (isUnread) Typeface.BOLD else Typeface.NORMAL)
+            subjectTextView.typeface = Typeface.create(subjectTypeface, if (isUnread) Typeface.BOLD else Typeface.NORMAL)
             subjectTextView.setTextColor(Color.parseColor(if (isUnread) palette.inkStrong else palette.ink))
             senderTextView.setTextColor(Color.parseColor(palette.ink))
 
