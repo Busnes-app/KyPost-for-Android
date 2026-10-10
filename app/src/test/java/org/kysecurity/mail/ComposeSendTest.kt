@@ -29,8 +29,12 @@ import java.util.concurrent.atomic.AtomicInteger
 /** A session reset must stop a send it overlaps; without one, the send carries on to be adopted. */
 class ComposeSendTest {
 
+    /** Some tests here run resetAll, which seals the draft cache until take(); unseal it too. */
     @After
-    fun reset() = ComposeSend.resetForNewSession()
+    fun reset() {
+        ComposeSend.resetForNewSession()
+        ComposeDraftCache.take()
+    }
 
     /** Blocks in [execute] until cancelled, like a request waiting on a slow relay. */
     private class BlockingCall : Call {
