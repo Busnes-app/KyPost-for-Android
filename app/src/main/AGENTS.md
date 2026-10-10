@@ -437,11 +437,13 @@ Owns production Android app code and resources.
 - Keyword refresh is best-effort every 90 seconds while inbox UI is foregrounded (both connection modes).
 - Background keyword staleness is accepted; app catches up on next foreground refresh.
 - Contact sync (`contacts/` package) mirrors `push/`'s repository+coordinator+singleton-graph shape:
-  `ContactSyncClient` (OkHttp, `sub`/`hash` auth) pulls/pushes `/api/contacts/sync`, `ContactSyncRepository`
-  applies the delta into Room and reconciles locally-created contacts' server-assigned uid (no
-  correlation id in v1 — matched by content/order, see `ContactSyncReconciliation`), and
-  `ContactCursorStore` persists a per-subscriber cursor in Room alongside the contact outbox so
-  acknowledgement is atomic.
+  `ContactSyncClient` (OkHttp, device-id/secret auth) pulls/pushes `/api/contacts/sync`,
+  `ContactSyncRepository` applies the delta into Room, and `ContactCursorStore` persists a
+  per-subscriber cursor in Room alongside the contact outbox so acknowledgement is atomic.
+  A create is pushed under the UUID `queueCreate` minted, never a blank uid: the server stores an
+  unknown uid as a create under that uid, so a push replayed after a lost reply, or a create
+  followed by an edit or delete in the same outbox, lands on one contact. That uid is permanent,
+  so nothing remaps it after sync. `ContactCreateIdempotencyTest` pins all three cases.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
