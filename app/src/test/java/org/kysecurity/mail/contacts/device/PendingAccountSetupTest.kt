@@ -3,7 +3,7 @@ package org.kysecurity.mail.contacts.device
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
+import kotlin.test.assertNull
 
 /** Every add-account request gets exactly one answer, so no caller is left waiting. */
 class PendingAccountSetupTest {
@@ -25,7 +25,7 @@ class PendingAccountSetupTest {
         PendingAccountSetup.cancel()
 
         assertEquals(listOf("a added KyPost"), answers)
-        assertFalse(PendingAccountSetup.isPending)
+        assertNull(PendingAccountSetup.pendingToken)
     }
 
     @Test
@@ -62,5 +62,16 @@ class PendingAccountSetupTest {
         PendingAccountSetup.resetForNewSession()
 
         assertEquals(listOf("a cancelled"), answers)
+    }
+
+    @Test
+    fun cancellingADisplacedTokenLeavesTheNewRequest() {
+        val first = hold("a")
+        val second = hold("b")
+        PendingAccountSetup.cancel(first)
+
+        assertEquals(second, PendingAccountSetup.pendingToken)
+        PendingAccountSetup.cancel(second)
+        assertEquals(listOf("a cancelled", "b cancelled"), answers)
     }
 }

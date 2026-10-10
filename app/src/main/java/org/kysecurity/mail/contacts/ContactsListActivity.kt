@@ -63,6 +63,8 @@ class ContactsListActivity : LockedActivity() {
     )
 
     private val accountSetup: Boolean by lazy { intent.getBooleanExtra(EXTRA_ACCOUNT_SETUP, false) }
+    // 0 is never issued, so a screen opened without a token answers no request.
+    private val setupToken: Long by lazy { intent.getLongExtra(EXTRA_SETUP_TOKEN, 0L) }
 
     /** The account-setup confirmation, while shown. */
     @androidx.annotation.VisibleForTesting
@@ -141,7 +143,7 @@ class ContactsListActivity : LockedActivity() {
         // Opened for an "Add account" request: turning device sync on is how the account is added,
         // and only the user can do that. Progress is saved on its own, so a recreated screen picks
         // up where it was rather than starting over or forgetting the request.
-        if (accountSetup && PendingAccountSetup.isPending) {
+        if (accountSetup && PendingAccountSetup.isCurrent(setupToken)) {
             setupConfirmed = savedInstanceState?.getBoolean(STATE_SETUP_CONFIRMED) == true
             setupPermissionRequested = savedInstanceState?.getBoolean(STATE_SETUP_PERMISSION) == true
             val graph = DeviceContactsRuntime.graph(this)
@@ -189,7 +191,7 @@ class ContactsListActivity : LockedActivity() {
         setupDialog?.dismiss()
         setupDialog = null
         super.onDestroy()
-        if (accountSetup && isFinishing && !redirectedToUnlock) PendingAccountSetup.cancel()
+        if (accountSetup && isFinishing && !redirectedToUnlock) PendingAccountSetup.cancel(setupToken)
     }
 
     override fun onStartUnlocked() {
@@ -430,6 +432,13 @@ class ContactsListActivity : LockedActivity() {
 
         /** Opened by the contacts account's "Add account"; see [PendingAccountSetup]. */
         const val EXTRA_ACCOUNT_SETUP = "account_setup"
+        private const val EXTRA_SETUP_TOKEN = "account_setup_token"
+
+        /** The setup screen for the request [token] names; null opens it with no request to answer. */
+        fun setupIntent(context: android.content.Context, token: Long?): Intent =
+            Intent(context, ContactsListActivity::class.java)
+                .putExtra(EXTRA_ACCOUNT_SETUP, true)
+                .apply { if (token != null) putExtra(EXTRA_SETUP_TOKEN, token) }
         const val EXTRA_RESULT_UID = "result_uid"
 
         private const val STATE_SCROLL = "contacts_scroll"

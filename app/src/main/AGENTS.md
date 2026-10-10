@@ -507,7 +507,10 @@ Owns production Android app code and resources.
   the normal enable flow and answers with the account once it exists, while declining or leaving
   answers with a cancel. Setup progress (confirmed, permission request outstanding) is saved state
   of its own, so a recreate re-asks or resumes. The app-lock redirect keeps the request
-  (MainActivity resumes the flow after unlock). `AccountSetupConsentTest`. `editProperties` answers
+  (MainActivity resumes the flow after unlock). Each request's token rides in the setup intent
+  (`ContactsListActivity.setupIntent`), and a screen acts on and cancels only its own request, so
+  closing a screen whose request a newer one displaced leaves the newer one waiting.
+  `AccountSetupConsentTest`. `editProperties` answers
   an empty bundle. `ContactSyncAdapterDeclarationTest`, `ContactAccountFlowsTest`. Unverified on
   hardware: how stock Contacts apps render and edit these contacts with the schema.
 - **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same

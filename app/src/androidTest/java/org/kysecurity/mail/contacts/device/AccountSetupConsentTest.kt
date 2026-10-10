@@ -66,9 +66,7 @@ class AccountSetupConsentTest {
     @Test
     fun setupWaitsForAnExplicitEnable() {
         val added = CountDownLatch(1)
-        PendingAccountSetup.hold(onAdded = { added.countDown() }, onCancelled = {})
-        val intent = Intent(context, ContactsListActivity::class.java)
-            .putExtra(ContactsListActivity.EXTRA_ACCOUNT_SETUP, true)
+        val intent = ContactsListActivity.setupIntent(context, PendingAccountSetup.hold(onAdded = { added.countDown() }, onCancelled = {}))
 
         ActivityScenario.launch<ContactsListActivity>(intent).use { scenario ->
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()
@@ -97,9 +95,7 @@ class AccountSetupConsentTest {
         settings.setEnabled(true)
         var existedWhenAnswered: Boolean? = null
         val added = CountDownLatch(1)
-        PendingAccountSetup.hold(onAdded = { existedWhenAnswered = accounts.accountExists(); added.countDown() }, onCancelled = {})
-        val intent = Intent(context, ContactsListActivity::class.java)
-            .putExtra(ContactsListActivity.EXTRA_ACCOUNT_SETUP, true)
+        val intent = ContactsListActivity.setupIntent(context, PendingAccountSetup.hold(onAdded = { existedWhenAnswered = accounts.accountExists(); added.countDown() }, onCancelled = {}))
 
         ActivityScenario.launch<ContactsListActivity>(intent).use { scenario ->
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()
@@ -114,15 +110,13 @@ class AccountSetupConsentTest {
     @Test
     fun setupSurvivesRecreation() {
         val added = CountDownLatch(1)
-        PendingAccountSetup.hold(onAdded = { added.countDown() }, onCancelled = {})
-        val intent = Intent(context, ContactsListActivity::class.java)
-            .putExtra(ContactsListActivity.EXTRA_ACCOUNT_SETUP, true)
+        val intent = ContactsListActivity.setupIntent(context, PendingAccountSetup.hold(onAdded = { added.countDown() }, onCancelled = {}))
 
         ActivityScenario.launch<ContactsListActivity>(intent).use { scenario ->
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()
             scenario.recreate()
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()
-            assertTrue("the request is still waiting", PendingAccountSetup.isPending)
+            assertTrue("the request is still waiting", PendingAccountSetup.pendingToken != null)
 
             scenario.onActivity { activity ->
                 val dialog = activity.setupDialog
@@ -137,9 +131,7 @@ class AccountSetupConsentTest {
     @Test
     fun decliningAnswersTheCallerWithACancel() {
         val cancelled = CountDownLatch(1)
-        PendingAccountSetup.hold(onAdded = {}, onCancelled = { cancelled.countDown() })
-        val intent = Intent(context, ContactsListActivity::class.java)
-            .putExtra(ContactsListActivity.EXTRA_ACCOUNT_SETUP, true)
+        val intent = ContactsListActivity.setupIntent(context, PendingAccountSetup.hold(onAdded = {}, onCancelled = { cancelled.countDown() }))
 
         ActivityScenario.launch<ContactsListActivity>(intent).use { scenario ->
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()

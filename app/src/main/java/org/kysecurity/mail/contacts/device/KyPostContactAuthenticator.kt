@@ -4,7 +4,6 @@ import android.accounts.AbstractAccountAuthenticator
 import android.accounts.AccountAuthenticatorResponse
 import android.accounts.AccountManager
 import android.content.Context
-import android.content.Intent
 import android.os.Bundle
 
 class KyPostContactAuthenticator(private val context: Context) : AbstractAccountAuthenticator(context) {
@@ -27,18 +26,14 @@ class KyPostContactAuthenticator(private val context: Context) : AbstractAccount
         options: Bundle?,
     ): Bundle? {
         if (DeviceContactAccountManager(context).accountExists()) return accountResult(DeviceContactAccount.ACCOUNT_NAME)
-        if (response != null) {
+        val token = response?.let {
             PendingAccountSetup.hold(
-                onAdded = { name -> response.onResult(accountResult(name)) },
-                onCancelled = { response.onError(AccountManager.ERROR_CODE_CANCELED, "Device contact sync was not turned on") },
+                onAdded = { name -> it.onResult(accountResult(name)) },
+                onCancelled = { it.onError(AccountManager.ERROR_CODE_CANCELED, "Device contact sync was not turned on") },
             )
         }
         return Bundle().apply {
-            putParcelable(
-                AccountManager.KEY_INTENT,
-                Intent(context, org.kysecurity.mail.contacts.ContactsListActivity::class.java)
-                    .putExtra(org.kysecurity.mail.contacts.ContactsListActivity.EXTRA_ACCOUNT_SETUP, true),
-            )
+            putParcelable(AccountManager.KEY_INTENT, org.kysecurity.mail.contacts.ContactsListActivity.setupIntent(context, token))
         }
     }
 
