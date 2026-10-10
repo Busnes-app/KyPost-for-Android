@@ -57,7 +57,15 @@ internal suspend fun runContactSync(
     server: suspend () -> org.kysecurity.mail.contacts.ContactSyncOutcome,
     device: suspend () -> List<String>,
 ): List<String> {
-    val serverFailed = server() !is org.kysecurity.mail.contacts.ContactSyncOutcome.Success
+    // A throw is a failed stage like any other; it must not cost the local pass. Cancellation is
+    // not a failure and still ends the work.
+    val serverFailed = try {
+        server() !is org.kysecurity.mail.contacts.ContactSyncOutcome.Success
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        true
+    }
     return listOfNotNull("serverSync".takeIf { serverFailed }) + device()
 }
 
