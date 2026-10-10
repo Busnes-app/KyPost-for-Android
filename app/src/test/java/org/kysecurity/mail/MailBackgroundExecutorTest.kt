@@ -115,4 +115,75 @@ class MailBackgroundExecutorTest {
         assertEquals("a task ran against a database the wipe had already deleted", 0, startedTooLate.get())
         assertEquals("submitting during a wipe threw at the caller", 0, rejections.get())
     }
+
+    private val order = java.util.Collections.synchronizedList(mutableListOf<String>())
+
+    /** A markRead that is already running, held open until [release] counts down. */
+    private fun runningRead(release: CountDownLatch): Supersedable {
+        val started = CountDownLatch(1)
+        val read = Supersedable {
+            started.countDown()
+            release.await()
+            order += "read"
+        }
+        Thread(read).start()
+        assertTrue(started.await(2, TimeUnit.SECONDS))
+        return read
+    }
+
+    /** Mark unread on the detail screen must land after the markRead its open submitted; with two
+     *  pool threads, nothing else orders them. */
+    @Test
+    fun supersedeWaitsForARunningTask() {
+        val release = CountDownLatch(1)
+        val read = runningRead(release)
+        val unread = Thread { read.supersede(5) { order += "unread" } }.apply { start() }
+
+        unread.join(200)
+        assertTrue("unread must wait for read", unread.isAlive)
+        release.countDown()
+        unread.join(2_000)
+
+        assertEquals(listOf("read", "unread"), order)
+    }
+
+    /** A markRead still queued never runs: the unread supersedes it, and waiting on it could hold a
+     *  pool thread for a task queued behind that same thread. */
+    @Test
+    fun supersedeDropsATaskThatNeverStarted() {
+        val read = Supersedable { order += "read" }
+
+        read.supersede(5) { order += "unread" }
+        read.run()
+
+        assertEquals(listOf("unread"), order)
+    }
+
+    @Test
+    fun supersedeGivesUpOnAHungTaskAndRunsAnyway() {
+        val release = CountDownLatch(1)
+        val read = runningRead(release)
+
+        assertEquals("ran", read.supersede(0) { "ran" })
+        release.countDown()
+    }
+
+    /** A wipe quiesces the pool by interrupting it; the superseding mutation must not then run. */
+    @Test
+    fun supersedeStopsWhenInterrupted() {
+        val release = CountDownLatch(1)
+        val read = runningRead(release)
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val unread = Thread {
+            runCatching { read.supersede(5) { order += "unread" } }.onFailure(failure::set)
+        }.apply { start() }
+
+        unread.join(200)
+        unread.interrupt()
+        unread.join(2_000)
+        release.countDown()
+
+        assertTrue(failure.get() is InterruptedException)
+        assertFalse("unread" in order)
+    }
 }
