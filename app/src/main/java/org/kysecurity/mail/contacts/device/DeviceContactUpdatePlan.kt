@@ -23,18 +23,34 @@ data class DeviceContactUpdatePlan(
         birthday == null && emails == null && phones == null && addresses == null
 
     /** True when applying this plan to [snapshot] leaves the phone with [dto]'s value for every
-     *  field the plan covers: only then do both sides hold the same thing, the merge base. */
-    fun leavesDeviceMatching(dto: ContactDto, snapshot: DeviceRawContactSnapshot): Boolean {
-        fun <T> after(planned: T?, device: T): T = planned ?: device
-        return listOf(
-            after(displayName, snapshot.fn) to dto.fn,
-            after(org, snapshot.org) to dto.org,
-            after(notes, snapshot.notes) to dto.notes,
-            after(birthday, snapshot.birthday) to dto.birthday,
-            after(emails, snapshot.emails) to dto.emails,
-            after(phones, snapshot.phones) to dto.phones,
-            after(addresses, snapshot.addresses) to dto.addresses,
-        ).all { (device, room) -> DeviceContactFieldMerge.same(device, room) }
+     *  merged field, including those the plan never writes. */
+    fun leavesDeviceMatching(dto: ContactDto, snapshot: DeviceRawContactSnapshot): Boolean =
+        nextBase(dto, snapshot, base = null) != null
+
+    /** The merge base once this plan lands: [dto]'s value for each field the phone will then hold
+     *  too, [base]'s for the rest. Without a [base], null unless every field agrees. */
+    fun nextBase(dto: ContactDto, snapshot: DeviceRawContactSnapshot, base: ContactDto?): ContactDto? {
+        val old = base ?: dto
+        var disagreed = false
+        fun <T> pick(planned: T?, device: T, room: T, previous: T): T =
+            if (DeviceContactFieldMerge.same(planned ?: device, room)) room else previous.also { disagreed = true }
+        val next = dto.copy(
+            fn = pick(displayName, snapshot.fn, dto.fn, old.fn),
+            org = pick(org, snapshot.org, dto.org, old.org),
+            notes = pick(notes, snapshot.notes, dto.notes, old.notes),
+            birthday = pick(birthday, snapshot.birthday, dto.birthday, old.birthday),
+            emails = pick(emails, snapshot.emails, dto.emails, old.emails),
+            phones = pick(phones, snapshot.phones, dto.phones, old.phones),
+            addresses = pick(addresses, snapshot.addresses, dto.addresses, old.addresses),
+            ims = pick(null, snapshot.ims, dto.ims, old.ims),
+            websites = pick(null, snapshot.websites, dto.websites, old.websites),
+            relations = pick(null, snapshot.relations, dto.relations, old.relations),
+            events = pick(null, snapshot.events, dto.events, old.events),
+            department = pick(null, snapshot.department, dto.department, old.department),
+            phoneticGivenName = pick(null, snapshot.phoneticGivenName, dto.phoneticGivenName, old.phoneticGivenName),
+            phoneticFamilyName = pick(null, snapshot.phoneticFamilyName, dto.phoneticFamilyName, old.phoneticFamilyName),
+        )
+        return next.takeUnless { base == null && disagreed }
     }
 
     companion object {
@@ -61,7 +77,7 @@ data class DeviceContactUpdatePlan(
                     .let { if (DeviceContactFieldMerge.same(it, deviceValue)) null else it.orEmpty() }
 
             fun <T> mergedList(field: (ContactDto) -> List<T>, deviceValue: List<T>, twoWay: (List<T>, List<T>, Long?, Long?) -> List<T>) =
-                merged(field, deviceValue, twoWay).takeIf { it != deviceValue }
+                merged(field, deviceValue, twoWay).takeUnless { DeviceContactFieldMerge.same(it, deviceValue) }
 
             return DeviceContactUpdatePlan(
                 displayName = mergedString({ it.fn }, snapshot.fn),

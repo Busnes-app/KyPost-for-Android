@@ -603,7 +603,8 @@ class DeviceContactRepository(
                     uid = dto.uid,
                     rawContactId = rawContactId,
                     deviceUpdatedAtEpochMs = System.currentTimeMillis(),
-                    syncedJson = syncedJsonOf(dto),
+                    // A department rides on the Organization row, written only with an org.
+                    syncedJson = syncedJsonOf(dto.copy(department = dto.department.takeUnless { dto.org.isNullOrBlank() })),
                 ),
             )
         }
@@ -621,19 +622,19 @@ class DeviceContactRepository(
             return@withContext
         }
 
+        val base = baseOf(link)
         val plan = DeviceContactUpdatePlan.of(
             dto = dto,
             snapshot = currentSnapshot,
             roomUpdatedAtEpochMs = dto.updatedAt?.let { DeviceContactConflictResolver.parseIso(it) },
             deviceUpdatedAtEpochMs = link.deviceUpdatedAtEpochMs,
-            base = baseOf(link),
+            base = base,
         )
-        // The base advances only when the phone will hold Room's value for every planned field; an
-        // empty plan alone may mean the merge kept a device value Room does not have.
-        val agreed = plan.leavesDeviceMatching(dto, currentSnapshot)
+        // Each field's base advances only once the phone holds Room's value for it; an empty plan
+        // alone may mean the merge kept a device value Room does not have.
+        val synced = plan.nextBase(dto, currentSnapshot, base)?.let(::syncedJsonOf) ?: link.syncedJson
         if (plan.isEmpty()) {
-            val synced = syncedJsonOf(dto)
-            if (agreed && link.syncedJson != synced) db.deviceContactLinkDao().upsert(link.copy(syncedJson = synced))
+            if (link.syncedJson != synced) db.deviceContactLinkDao().upsert(link.copy(syncedJson = synced))
             return@withContext
         }
 
@@ -786,7 +787,7 @@ class DeviceContactRepository(
             db.deviceContactLinkDao().upsert(
                 link.copy(
                     deviceUpdatedAtEpochMs = System.currentTimeMillis(),
-                    syncedJson = if (agreed) syncedJsonOf(dto) else link.syncedJson,
+                    syncedJson = synced,
                 ),
             )
         }
