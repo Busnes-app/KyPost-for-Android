@@ -31,6 +31,10 @@ internal sealed class ClientSendOutcome {
      *  from [KeysMissing] and checked before it — see the KDoc on the check itself. */
     data class KeyChanged(val addresses: List<String>) : ClientSendOutcome()
 
+    /** Every key this device trusts for these recipients was revoked by its owner. Checked before
+     *  the vault opens, and never answered by falling back to a synced key. */
+    data class RecipientKeyRevoked(val addresses: List<String>) : ClientSendOutcome()
+
     data class KeysMissing(val addresses: List<String>) : ClientSendOutcome()
     data class TooManyRecipients(val message: String) : ClientSendOutcome()
     data class ResolveFailed(val message: String) : ClientSendOutcome()
@@ -82,6 +86,14 @@ internal class ClientEncryptedSender(
             is ResolveResult.Failed -> return ClientSendOutcome.ResolveFailed(result.message)
         }
         val byAddress = resolved.associateBy { it.address.lowercase() }
+
+        // This device's own pins first: whatever the relay says about a key, a pin its owner
+        // revoked is the reason the send cannot happen.
+        val revoked = addresses.filter { address ->
+            val trusted = localKeys.keysFor(address).filter { it.publicKey.isNotBlank() }
+            trusted.isNotEmpty() && trusted.all { isPrimaryRevoked(it.publicKey) }
+        }
+        if (revoked.isNotEmpty()) return ClientSendOutcome.RecipientKeyRevoked(revoked)
 
         // A broken pin outranks a missing key: key_changed can mean interception, so check it first.
         val changed = addresses.filter { byAddress[it.lowercase()]?.tier == TIER_KEY_CHANGED }
@@ -188,8 +200,10 @@ internal class ClientEncryptedSender(
             // not fingerprint — and treating that as never-pinned let a relay erase an in-person pin
             // by serving a broken key, then substitute any key it liked. A pin we cannot verify is
             // a refusal.
-            val recorded = localKeys.keysFor(address).filter { it.publicKey.isNotBlank() }
-            if (recorded.isEmpty()) continue
+            val trusted = localKeys.keysFor(address).filter { it.publicKey.isNotBlank() }
+            if (trusted.isEmpty()) continue
+            // A revoked key is still the key this device trusts; it just may not be used.
+            val recorded = trusted.filterNot { isPrimaryRevoked(it.publicKey) }
             val pins = recorded
                 .mapNotNull { pin -> PgpFingerprint.compute(pin.publicKey)?.let { it to pin.publicKey } }
             if (pins.isEmpty()) {
