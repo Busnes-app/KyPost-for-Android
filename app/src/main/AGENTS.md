@@ -500,7 +500,11 @@ Owns production Android app code and resources.
   (`ContactSyncRepository.destination`: the relay's canonical origin and the subscriber id); any
   other pairing reads none. It is checked again for each contact just before it is queued, inside
   `whileConsented`, which shares a lock with `setImportAccounts`, so withdrawing consent stops a
-  scan already running. Adding an account rewinds the scan watermark so its existing contacts
+  scan already running. Inside that lock the scan also checks that its session
+  (`ProcessState.generation()`, captured at scan start) and its pairing destination are still
+  current, and abandons the scan if not. The account purge's database step runs under the same
+  lock and clears consent (`clearConsentDuring`): the purge advances the generation only at its
+  end, so this is what stops an import from landing in the outbox the next pairing inherits. Adding an account rewinds the scan watermark so its existing contacts
   are seen. The choice is the Contacts menu's "Import from other accounts…" dialog, whose copy
   says the contacts go to the user's KyPost server. `DeviceContactImportConsentTest`.
 - **Deletes reach the phone through Room.** `syncAll`'s `removeDeletedContacts` stage removes the

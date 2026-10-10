@@ -44,6 +44,13 @@ class DeviceContactSyncSettings(context: Context) {
         Unit
     }
 
+    /** Clears import consent and runs [block] under the consent lock, for the account purge: an
+     *  import is either queued before [block] (which then removes it) or finds no consent after. */
+    suspend fun <T> clearConsentDuring(block: suspend () -> T): T = consentLock.withLock {
+        prefs.edit().remove(KEY_IMPORT_ACCOUNTS).remove(KEY_IMPORT_DESTINATION).commit()
+        block()
+    }
+
     /** Runs [block] only while [accountKey] is consented for [destination], holding the consent
      *  lock so a change cannot land between the check and the write. Null when not consented. */
     suspend fun <T> whileConsented(destination: String, accountKey: String, block: suspend () -> T): T? =
