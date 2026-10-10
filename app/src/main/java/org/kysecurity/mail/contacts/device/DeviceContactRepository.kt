@@ -25,6 +25,7 @@ class DeviceContactRepository(
     private val db: AppDatabase,
     private val syncRepository: ContactSyncRepository,
     private val groupSyncRepository: GroupSyncRepository,
+    private val now: () -> Long = System::currentTimeMillis,
 ) {
     private val contentResolver = context.contentResolver
     private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
@@ -87,12 +88,14 @@ class DeviceContactRepository(
             ContactsContract.RawContacts.DELETED,
             // DIRTY has to be read, not assumed: a no-op UPDATE wakes our own observer into a loop.
             ContactsContract.RawContacts.DIRTY,
+            ContactsContract.RawContacts.VERSION,
         )
 
         val selection = "${ContactsContract.RawContacts.ACCOUNT_TYPE} = ?"
         val selectionArgs = arrayOf(DeviceContactAccount.ACCOUNT_TYPE)
 
-        val dirtyRawContacts = mutableListOf<Long>()
+        // Raw contact id to the VERSION read here; the dirty flag is cleared only at that version.
+        val dirtyRawContacts = mutableMapOf<Long, Long>()
 
         // Loaded once; this used to be a Room query per row from inside the cursor loop.
         val linksByRawContactId = db.deviceContactLinkDao().getAll().associateBy { it.rawContactId }
@@ -123,7 +126,8 @@ class DeviceContactRepository(
                         deleteDeviceRawContact(link.uid)
                     }
                 } else if (!deleted && dirty && link != null) {
-                    dirtyRawContacts.add(rawContactId)
+                    dirtyRawContacts[rawContactId] =
+                        cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.VERSION))
                 }
             }
         }
@@ -132,7 +136,7 @@ class DeviceContactRepository(
         // getByUid per dirty row.
         val roomByUid = db.contactDao().observeAll().first().associateBy { it.uid }
 
-        for (rawContactId in dirtyRawContacts) {
+        for ((rawContactId, version) in dirtyRawContacts) {
             val snapshot = readRawContactSnapshot(rawContactId) ?: continue
             val link = linksByRawContactId[rawContactId] ?: continue
 
@@ -196,7 +200,7 @@ class DeviceContactRepository(
                 syncRepository.queueUpdate(mergedDto, identityChanged = changed)
             }
 
-            clearDirtyFlag(rawContactId)
+            clearDirtyFlag(rawContactId, version)
             db.deviceContactLinkDao().upsert(
                 link.copy(deviceUpdatedAtEpochMs = System.currentTimeMillis(), syncedJson = syncedJsonOf(mergedDto)),
             )
@@ -235,13 +239,18 @@ class DeviceContactRepository(
         Unit
     }
 
-    private suspend fun clearDirtyFlag(rawContactId: Long) = withContext(Dispatchers.IO) {
+    /** Only at [version]: an edit landing after the read bumps it, keeps the row dirty, and is
+     *  merged on the next pass instead of being marked clean unread. */
+    internal suspend fun clearDirtyFlag(rawContactId: Long, version: Long) = withContext(Dispatchers.IO) {
         val uri = ContactsContract.RawContacts.CONTENT_URI.buildUpon()
             .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true")
             .build()
         val ops = arrayListOf(
             android.content.ContentProviderOperation.newUpdate(uri)
-                .withSelection("${ContactsContract.RawContacts._ID} = ?", arrayOf(rawContactId.toString()))
+                .withSelection(
+                    "${ContactsContract.RawContacts._ID} = ? AND ${ContactsContract.RawContacts.VERSION} = ?",
+                    arrayOf(rawContactId.toString(), version.toString()),
+                )
                 .withValue(ContactsContract.RawContacts.DIRTY, 0)
                 .build(),
         )
@@ -256,6 +265,8 @@ class DeviceContactRepository(
         val consented = settings.importAccounts()
         if (consented.isEmpty()) return@withContext
         val watermarkMs = settings.lastForeignScanAtEpochMs()
+        // The next watermark is when this scan began: a contact edited while it runs is newer.
+        val scanStartedAtMs = now()
 
         val projection = arrayOf(
             ContactsContract.RawContacts._ID,
@@ -335,7 +346,7 @@ class DeviceContactRepository(
             }
         }
 
-        settings.setLastForeignScanAtEpochMs(System.currentTimeMillis())
+        settings.setLastForeignScanAtEpochMs(scanStartedAtMs)
     }
 
     /** Accounts other than ours holding live contacts, for the import consent screen. */

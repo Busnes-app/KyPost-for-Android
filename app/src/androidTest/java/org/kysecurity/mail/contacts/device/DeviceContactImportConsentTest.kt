@@ -30,6 +30,7 @@ class DeviceContactImportConsentTest {
     private val accounts = DeviceContactAccountManager(context)
     private val settings = DeviceContactSyncSettings(context)
     private lateinit var db: AppDatabase
+    private lateinit var syncRepository: ContactSyncRepository
     private lateinit var repository: DeviceContactRepository
     private var localRawContactId = 0L
 
@@ -43,7 +44,7 @@ class DeviceContactImportConsentTest {
         settings.setLastForeignScanAtEpochMs(0L)
 
         db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
-        val syncRepository = ContactSyncRepository(
+        syncRepository = ContactSyncRepository(
             db = db,
             client = ContactSyncClient(callFactory = OkHttpClient()),
             cursorStore = ContactCursorStore(context, db),
@@ -107,6 +108,23 @@ class DeviceContactImportConsentTest {
         assertEquals(0, queuedProbeCreates())
     }
 
+    /** A contact edited while the scan runs is newer than the scan's start, so it is seen next time. */
+    @Test
+    fun theNextWatermark_isWhenTheScanBegan() = runBlocking {
+        settings.setImportAccounts(setOf(DeviceAccount(null, null).key))
+        val clocked = DeviceContactRepository(
+            context = context,
+            db = db,
+            syncRepository = syncRepository,
+            groupSyncRepository = GroupSyncRepository(db, GroupsSyncClient(callFactory = OkHttpClient())) { null },
+            now = { SCAN_STARTED_AT },
+        )
+
+        clocked.syncAll()
+
+        assertEquals(SCAN_STARTED_AT, settings.lastForeignScanAtEpochMs())
+    }
+
     @Test
     fun consentingToAnAccount_importsItsExistingContacts() = runBlocking {
         repository.syncAll()
@@ -120,5 +138,6 @@ class DeviceContactImportConsentTest {
 
     private companion object {
         const val PROBE_NAME = "Import Consent Probe"
+        const val SCAN_STARTED_AT = 42L
     }
 }
