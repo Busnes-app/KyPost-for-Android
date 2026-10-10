@@ -24,12 +24,14 @@ class ContactOutboxEncodingTest {
             createdAtEpochMs = 0L,
         )
 
+    /** The server stores an unknown uid as a create, so a replayed create lands on the same
+     *  contact instead of minting a second one. Rows queued by older builds carry a blank payload uid. */
     @Test
-    fun create_blanksUidSoTheServerMintsOne() {
+    fun create_sendsTheLocalUid() {
         val payload = json.encodeToString(ContactDto.serializer(), ContactDto(uid = "", fn = "Jane"))
         val dto = row(ContactSyncRepository.CHANGE_CREATE, payload).toWireDtoOrNull(json)
 
-        assertEquals("", dto?.uid)
+        assertEquals("uid-1", dto?.uid)
         assertEquals("Jane", dto?.fn)
     }
 
