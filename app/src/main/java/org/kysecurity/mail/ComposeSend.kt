@@ -1,5 +1,6 @@
 package org.kysecurity.mail
 
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -20,6 +21,8 @@ internal object ComposeSend : ProcessScopedState {
 
     class InFlight internal constructor(
         val draft: MailDraft,
+        /** The session it was submitted in; a follow-up send of the same draft reuses it. */
+        val session: Long,
         val outcome: Deferred<MailOutcome<MailSendOutcome>>,
         private val call: CallHandle,
     ) {
@@ -59,21 +62,31 @@ internal object ComposeSend : ProcessScopedState {
         ProcessState.register(this)
     }
 
+    /** True from a reset's start until its teardown has finished. */
+    private var tearingDown = false
+
     /** [scope] must outlive the Activity: the app scope, not `lifecycleScope`. [send] must hand
-     *  its HTTP call to the callback so a reset can cancel it. */
+     *  its HTTP call to the callback so a reset can cancel it. [session] is the generation the
+     *  composer captured before its asynchronous work; a submission from an ended session, or
+     *  one arriving during teardown, never reaches [send] and has its attachments zeroed. */
     fun start(
         scope: CoroutineScope,
         draft: MailDraft,
+        session: Long,
         send: (MailDraft, onCall: (Call) -> Unit) -> MailOutcome<MailSendOutcome>,
     ): InFlight {
         val call = CallHandle()
-        // Launched and registered under the lock, so a concurrent reset either sees it or precedes it.
+        // Checked, launched and registered under the lock, so a reset either sees it or refuses it.
         val sending = synchronized(lock) {
+            if (tearingDown || !ProcessState.isCurrent(session)) {
+                draft.attachments.forEach { it.wipe() }
+                return InFlight(draft, session, CompletableDeferred<MailOutcome<MailSendOutcome>>().apply { cancel() }, call)
+            }
             val outcome = scope.async {
                 runCatching { send(draft, call::attach) }
                     .getOrElse { MailOutcome.UpstreamFailure(it.message ?: "Unexpected error") }
             }
-            InFlight(draft, outcome, call).also {
+            InFlight(draft, session, outcome, call).also {
                 running += it
                 inFlight = it
             }
@@ -91,18 +104,23 @@ internal object ComposeSend : ProcessScopedState {
 
     override fun resetForNewSession() {
         val stopping = synchronized(lock) {
+            tearingDown = true
             inFlight = null
             running.toList()
         }
-        val finished = CountDownLatch(stopping.size)
-        stopping.forEach {
-            it.outcome.invokeOnCompletion { finished.countDown() }
-            it.cancel()
+        try {
+            val finished = CountDownLatch(stopping.size)
+            stopping.forEach {
+                it.outcome.invokeOnCompletion { finished.countDown() }
+                it.cancel()
+            }
+            // A cancelled job completes only once its blocking body returns, so this waits for the call.
+            // ponytail: bounded like MailBackgroundExecutor.quiesce; a read that ignores cancel outlives it.
+            finished.await(STOP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            stopping.forEach { sending -> sending.draft.attachments.forEach { it.wipe() } }
+        } finally {
+            synchronized(lock) { tearingDown = false }
         }
-        // A cancelled job completes only once its blocking body returns, so this waits for the call.
-        // ponytail: bounded like MailBackgroundExecutor.quiesce; a read that ignores cancel outlives it.
-        finished.await(STOP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-        stopping.forEach { sending -> sending.draft.attachments.forEach { it.wipe() } }
     }
 
     private const val STOP_TIMEOUT_MS = 2_000L
