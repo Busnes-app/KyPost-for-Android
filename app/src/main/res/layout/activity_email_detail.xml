@@ -184,6 +184,39 @@
                 android:layout_marginTop="8dp"
                 android:text="@string/invite_add" />
 
+            <LinearLayout
+                android:id="@+id/inviteRsvpRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <Button
+                    android:id="@+id/btnRsvpAccept"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:text="@string/rsvp_accept" />
+
+                <Button
+                    android:id="@+id/btnRsvpTentative"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="6dp"
+                    android:layout_weight="1"
+                    android:text="@string/rsvp_tentative" />
+
+                <Button
+                    android:id="@+id/btnRsvpDecline"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/rsvp_decline" />
+
+            </LinearLayout>
+
         </LinearLayout>
 
         <LinearLayout

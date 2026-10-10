@@ -6,6 +6,8 @@ import org.kysecurity.mail.pgp.OUTER_PLACEHOLDER_SUBJECT
 import org.kysecurity.mail.push.PairingData
 import org.kysecurity.mail.testing.streamingResponse
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -1064,6 +1066,71 @@ class RelayMailSourceTest {
         assertEquals(false, sent.sign)
         assertEquals(false, sent.encrypt)
         assertEquals(false, sent.allowPickupFallback)
+    }
+
+    @Test
+    fun calendarReply_ridesOnSendOnly_andIsAbsentOtherwise() {
+        val callFactory = BodyRecordingCallFactory { request ->
+            jsonResponse(request, """{"ok":true,"sentSaved":true,"warning":""}""")
+        }
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = callFactory,
+        )
+        val rsvp = MailDraft(
+            to = "boss@example.com", subject = "Accepted: x", body = "b",
+            from = "alias@example.com", calendarReply = "BEGIN:VCALENDAR\r\n",
+        )
+
+        assertTrue(source.sendMail(rsvp) is MailOutcome.Success)
+        source.sendMail(rsvp.copy(calendarReply = null))
+        source.saveDraft(rsvp)
+
+        val wire = Json.parseToJsonElement(callFactory.bodies[0]).jsonObject
+        assertEquals("https://relay.example.com/api/mail/send", callFactory.urls[0])
+        assertEquals("BEGIN:VCALENDAR\r\n", wire["calendarReply"]!!.jsonObject["ics"]!!.jsonPrimitive.content)
+        assertEquals("alias@example.com", wire["from"]!!.jsonPrimitive.content)
+        // The relay refuses calendarReply beside either flag; encodeDefaults=false omits them.
+        assertNull(wire["encrypt"])
+        assertNull(wire["sign"])
+        assertFalse("calendarReply" in Json.parseToJsonElement(callFactory.bodies[1]).jsonObject)
+        assertFalse("calendarReply" in Json.parseToJsonElement(callFactory.bodies[2]).jsonObject)
+    }
+
+    @Test
+    fun calendarReplyRefusal_surfacesTheRelaysReason() {
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request ->
+                Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(400).message("Bad Request")
+                    .body("invalid calendar reply: calendar reply needs exactly one VEVENT".toResponseBody("text/plain".toMediaType()))
+                    .build()
+            },
+        )
+
+        val outcome = source.sendMail(MailDraft(to = "a@example.com", subject = "s", body = "b", calendarReply = "x"))
+
+        assertEquals(
+            "invalid calendar reply: calendar reply needs exactly one VEVENT",
+            (outcome as MailOutcome.BadRequest).message,
+        )
+    }
+
+    @Test
+    fun listAttachments_carriesTheCalendarMethod() {
+        val body = """{"ok":true,"attachments":[{"index":0,"name":"a.pdf","mimeType":"application/pdf","size":3},""" +
+            """{"index":1,"name":"invite.ics","mimeType":"text/calendar","size":9,"calendarMethod":"REQUEST"}]}"""
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body) },
+        )
+
+        val infos = (source.listAttachments("7", "INBOX") as MailOutcome.Success).value
+
+        assertEquals(listOf("", "REQUEST"), infos.map { it.calendarMethod })
     }
 
     @Test

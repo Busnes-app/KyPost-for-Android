@@ -115,10 +115,17 @@ data class RelayMailRequestDto(
     val sign: Boolean = false,
     val encrypt: Boolean = false,
     val allowPickupFallback: Boolean = false,
+    /** Send only, like the three above. Omitted when null (encodeDefaults is off). */
+    val calendarReply: RelayCalendarReplyDto? = null,
+    /** Send only; omitted when blank, which sends as the primary address. */
+    val from: String = "",
 ) {
     /** Redacted: the body is the user's outgoing message. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "RelayMailRequestDto(redacted)"
 }
+
+@Serializable
+data class RelayCalendarReplyDto(val ics: String)
 
 /** One pre-encrypted delivery for POST /api/mail/send-pgp. */
 @Serializable
@@ -158,6 +165,7 @@ data class RelayAttachmentInfoDto(
     val name: String = "",
     val mimeType: String = "",
     val size: Int = 0,
+    val calendarMethod: String = "",
 )
 
 @Serializable

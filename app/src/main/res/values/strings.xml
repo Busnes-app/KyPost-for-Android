@@ -112,6 +112,17 @@
     <string name="invite_organizer_not_sender">The organizer (%1$s) is not the sender of this email. Anyone can name any organizer.</string>
     <string name="invite_unknown_zone">Time zone \"%1$s\" isn\'t recognised, so this time is read as your own zone and may be wrong.</string>
     <string name="invite_add">Add to calendar</string>
+    <string name="rsvp_accept">Accept</string>
+    <string name="rsvp_tentative">Maybe</string>
+    <string name="rsvp_decline">Decline</string>
+    <string name="rsvp_confirm_title">Send RSVP unencrypted?</string>
+    <string name="rsvp_confirm_message">Reply \"%1$s\" to %2$s as %3$s.\n\nRSVPs are always sent unencrypted and unsigned, because the organizer\'s calendar can\'t read an encrypted reply. The reply carries your answer, your address and the event\'s ID.</string>
+    <string name="rsvp_confirm_not_sender">The organizer is not the sender of this email, so this reply goes to an address the sender chose.</string>
+    <string name="rsvp_maybe_sent">RSVP may not have been sent: %1$s. Check your Sent folder before trying again.</string>
+    <string name="rsvp_send">Send unencrypted</string>
+    <string name="rsvp_sent">RSVP sent</string>
+    <string name="rsvp_failed">RSVP not sent: %1$s</string>
+    <string name="rsvp_no_address">Couldn\'t confirm your account address, so no RSVP was sent. Try again.</string>
     <string name="calendar_create_event">Create event from this email</string>
     <string name="calendar_no_app">No calendar app can add this event</string>
     <string name="calendar_handoff_confirm_title">Hand off to your calendar app?</string>

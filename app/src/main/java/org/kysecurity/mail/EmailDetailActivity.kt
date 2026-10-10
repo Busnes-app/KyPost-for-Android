@@ -18,7 +18,11 @@ import android.widget.Toast
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import org.kysecurity.mail.mail.AttachmentInfo
+import org.kysecurity.mail.mail.CalendarEvent
 import org.kysecurity.mail.mail.CalendarInvite
+import org.kysecurity.mail.mail.MailDraft
+import org.kysecurity.mail.mail.Rsvp
+import org.kysecurity.mail.mail.refusedBeforeSending
 import org.kysecurity.mail.mail.MailMessageBody
 import org.kysecurity.mail.mail.displayHeaderText
 import org.kysecurity.mail.mail.MailOutcome
@@ -95,6 +99,7 @@ class EmailDetailActivity : LockedActivity() {
     private var envelopeSubject: String = ""
     private var senderHeader: String = ""
     private var phishingFlagged = false
+    private var rsvpDialog: android.app.Dialog? = null
 
     /** The relay's signature verdict, overwritten by the local one once a local decrypt finishes. */
     private var pgpSignatureState: PgpSignatureState = PgpSignatureState.NONE
@@ -779,18 +784,18 @@ class EmailDetailActivity : LockedActivity() {
                 renderAttachments(emailId, emailFolder, infos)
             }
             // After the chips: a slow or hostile invite must not hold up the attachment list.
-            val invite = runCatching { loadInvite(emailId, emailFolder, infos) }
+            val info = org.kysecurity.mail.mail.inviteAttachment(infos) ?: return@execute
+            val invite = runCatching { loadInvite(emailId, emailFolder, info) }
                 .onFailure { android.util.Log.w(TAG, "Invite not shown", it) }
                 .getOrNull() ?: return@execute
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                renderInvite(invite)
+                renderInvite(invite, info.calendarMethod)
             }
         }
     }
 
-    private fun loadInvite(emailId: String, emailFolder: String, infos: List<AttachmentInfo>): CalendarInvite? {
-        val info = org.kysecurity.mail.mail.inviteAttachment(infos) ?: return null
+    private fun loadInvite(emailId: String, emailFolder: String, info: AttachmentInfo): CalendarInvite? {
         val bytes = (mailRepository.downloadAttachment(emailId, emailFolder, info.index) as? MailOutcome.Success)
             ?.value?.bytes ?: return null
         return org.kysecurity.mail.mail.parseCalendarInvite(bytes, java.time.ZoneId.systemDefault()) { windowsId ->
@@ -799,7 +804,7 @@ class EmailDetailActivity : LockedActivity() {
     }
 
     /** Shows the invite; adding it is always the user's tap, never automatic. */
-    private fun renderInvite(invite: CalendarInvite) {
+    private fun renderInvite(invite: CalendarInvite, listedMethod: String) {
         val event = invite.primary
         findViewById<TextView>(R.id.inviteMethod).text = invite.method.takeIf { it.isNotEmpty() }
             ?.let { getString(R.string.invite_label_method, it) } ?: getString(R.string.invite_label)
@@ -828,8 +833,100 @@ class EmailDetailActivity : LockedActivity() {
             visibility = if (invite.offersAdd) View.VISIBLE else View.GONE
             setOnClickListener { handOffToCalendar(calendarInsertExtras(event)) }
         }
+        findViewById<View>(R.id.inviteRsvpRow).visibility = if (invite.offersRsvp(listedMethod)) View.VISIBLE else View.GONE
+        findViewById<Button>(R.id.btnRsvpAccept).setOnClickListener { confirmRsvp(event, Rsvp.ACCEPTED) }
+        findViewById<Button>(R.id.btnRsvpTentative).setOnClickListener { confirmRsvp(event, Rsvp.TENTATIVE) }
+        findViewById<Button>(R.id.btnRsvpDecline).setOnClickListener { confirmRsvp(event, Rsvp.DECLINED) }
+        rsvpButtons().forEach { it.isEnabled = rsvpKey(event) !in rsvpInFlight }
         findViewById<View>(R.id.emailInviteCard).visibility = View.VISIBLE
         applyInviteChrome()
+    }
+
+    private fun rsvpButtons(): List<Button> =
+        listOf(R.id.btnRsvpAccept, R.id.btnRsvpTentative, R.id.btnRsvpDecline).map { findViewById(it) }
+
+    private fun rsvpKey(event: CalendarEvent) = event.uid + "\u0000" + event.recurrenceId.orEmpty()
+
+    /** Asks before every RSVP: it is mail the user sends, and it always goes unencrypted. */
+    private fun confirmRsvp(event: CalendarEvent, answer: Rsvp) {
+        val key = rsvpKey(event)
+        // Process-wide, so a rotation mid-send cannot offer the same answer twice.
+        if (!rsvpInFlight.add(key)) return
+        rsvpButtons().forEach { it.isEnabled = false }
+        fun release() {
+            rsvpInFlight.remove(key)
+            rsvpButtons().forEach { it.isEnabled = true }
+        }
+        lifecycleScope.launch {
+            var dialogOwnsKey = false
+            try {
+                dialogOwnsKey = showRsvpDialog(event, answer, key, ::release)
+            } finally {
+                // No address, or a rotation cancelled the lookup: nothing is pending any more.
+                if (!dialogOwnsKey) release()
+            }
+        }
+    }
+
+    /** True once the dialog is up; from then on its dismiss listener owns [key]. */
+    private suspend fun showRsvpDialog(event: CalendarEvent, answer: Rsvp, key: String, release: () -> Unit): Boolean {
+        val addresses = ComposePgpController.from(this).accountAddresses()
+        val attendee = org.kysecurity.mail.mail.rsvpAttendee(event, addresses)
+        if (attendee == null) {
+            Toast.makeText(this, R.string.rsvp_no_address, Toast.LENGTH_LONG).show()
+            return false
+        }
+        // Answering as an alias must also send from it, or the organizer sees a stranger reply.
+        val sendAs = attendee.takeUnless { it.equals(addresses.firstOrNull()?.trim(), ignoreCase = true) }.orEmpty()
+        val warning = getString(R.string.rsvp_confirm_not_sender).takeUnless {
+            event.organizer.equals(extractAddress(senderHeader), ignoreCase = true)
+        }
+        var sending = false
+        rsvpDialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.rsvp_confirm_title)
+            .setMessage(
+                listOfNotNull(
+                    getString(R.string.rsvp_confirm_message, answer.subjectPrefix, event.organizer, attendee),
+                    warning,
+                ).joinToString("\n\n"),
+            )
+            .setPositiveButton(R.string.rsvp_send) { _, _ ->
+                sending = true
+                sendRsvp(key, org.kysecurity.mail.mail.rsvpDraft(event, attendee, answer, java.time.Instant.now(), sendAs))
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .setOnDismissListener {
+                rsvpDialog = null
+                if (!sending) release()
+            }
+            .create()
+            .showSecurely()
+        return true
+    }
+
+    /** On the mail executor, so leaving the screen does not cancel a reply already on its way. */
+    private fun sendRsvp(key: String, draft: MailDraft) {
+        val appContext = applicationContext
+        MailBackgroundExecutor.submit {
+            val outcome = runCatching { mailRepository.send(draft) }
+                .getOrElse { MailOutcome.UpstreamFailure(it.message ?: "Unexpected error") }
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                val sent = outcome is MailOutcome.Success
+                val refused = outcome.refusedBeforeSending()
+                val reason = outcome.userFacingMessage().orEmpty()
+                val message = when {
+                    sent -> appContext.getString(R.string.rsvp_sent)
+                    refused -> appContext.getString(R.string.rsvp_failed, reason)
+                    else -> appContext.getString(R.string.rsvp_maybe_sent, reason)
+                }
+                Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+                // A sent answer stays sent for this process. Reopening the message allows a retry.
+                if (!sent) rsvpInFlight.remove(key)
+                if (isFinishing || isDestroyed) return@post
+                // Only a definite refusal re-arms this screen: a timeout may already have gone out.
+                rsvpButtons().forEach { it.isEnabled = refused }
+            }
+        }
     }
 
     private fun applyInviteChrome() {
@@ -837,6 +934,7 @@ class EmailDetailActivity : LockedActivity() {
         applySectionEyebrowLabel(this, findViewById(R.id.inviteMethod))
         applyWarningCalloutTheme(this, findViewById(R.id.inviteNotice))
         applyPrimaryButtonTheme(this, findViewById(R.id.btnInviteAdd))
+        rsvpButtons().forEach { applyGhostButtonTheme(this, it) }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -1162,6 +1260,8 @@ class EmailDetailActivity : LockedActivity() {
     private fun extractAddress(raw: String): String = addressFromHeader(raw)
 
     override fun onDestroy() {
+        // Not leaked across a rotation; its dismiss listener releases the pending RSVP.
+        rsvpDialog?.dismiss()
         super.onDestroy()
         dropDecryptedAttachments()
         // No redirectedToUnlock guard: ioExecutor is a property initializer, so it exists even
@@ -1169,8 +1269,19 @@ class EmailDetailActivity : LockedActivity() {
         ioExecutor.shutdownNow()
     }
 
-    companion object {
+    companion object : ProcessScopedState {
         private const val TAG = "EmailDetailActivity"
+
+        /** RSVPs between the first tap and a send outcome, or sent; Main thread only. */
+        private val rsvpInFlight = HashSet<String>()
+
+        init {
+            ProcessState.register(this)
+        }
+
+        override fun resetForNewSession() {
+            android.os.Handler(android.os.Looper.getMainLooper()).post { rsvpInFlight.clear() }
+        }
 
         const val EXTRA_REMOVED_EMAIL_ID = "removed_email_id"
 

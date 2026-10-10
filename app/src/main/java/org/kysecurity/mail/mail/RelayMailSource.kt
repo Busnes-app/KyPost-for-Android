@@ -325,7 +325,9 @@ class RelayMailSource(
             if (code != 200) return@execute mapErrorCode(code, body)
             val parsed = runCatching { json.decodeFromString<RelayAttachmentListResponseDto>(body) }.getOrNull()
                 ?: return@execute MailOutcome.UpstreamFailure("Malformed attachment list response")
-            MailOutcome.Success(parsed.attachments.map { AttachmentInfo(it.index, it.name, it.mimeType, it.size) })
+            MailOutcome.Success(
+                parsed.attachments.map { AttachmentInfo(it.index, it.name, it.mimeType, it.size, it.calendarMethod) },
+            )
         }
     }
 
@@ -559,7 +561,13 @@ private fun MailDraft.toWireDto(): RelayMailRequestDto =
 /** Send-only mapping. [toWireDto] stays flagless because /api/mail/draft ignores these fields —
  *  see [MailDraft.allowPickupFallback]. */
 private fun MailDraft.toSendWireDto(): RelayMailRequestDto =
-    toWireDto().copy(sign = sign, encrypt = encrypt, allowPickupFallback = allowPickupFallback)
+    toWireDto().copy(
+        sign = sign,
+        encrypt = encrypt,
+        allowPickupFallback = allowPickupFallback,
+        calendarReply = calendarReply?.let(::RelayCalendarReplyDto),
+        from = from,
+    )
 
 private fun RelayEmailDto.toUiEmail(tab: String): Email {
     val emailLabel = label.ifBlank { tab }

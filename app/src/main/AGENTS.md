@@ -404,6 +404,21 @@ Owns production Android app code and resources.
   including the "Create event from this email" overflow item (subject and body only, no date
   guessing, never the decrypted body or protected subject), is confirmed first. The card is
   only as reliable as the relay's listing: invites appear only when `hasAttachments` is true.
+- RSVP (Accept/Maybe/Decline on the invite card) sends an RFC 5546 REPLY through
+  `MailRepository.send` with `MailDraft.calendarReply` → `/api/mail/send` `calendarReply.ics`
+  (KyPost-Server #354), addressed to the ORGANIZER.
+  - `rsvpDraft` copies UID and SEQUENCE, restates RECURRENCE-ID without TZID (the REPLY has no
+    VTIMEZONE), adds DTSTAMP, folds at 75 octets. An unreadable SEQUENCE or RECURRENCE-ID means
+    no RSVP.
+  - ATTENDEE is the bootstrap `suggestedUserIDs` address the invite lists, else the primary; an
+    alias is also sent as `from`. No usable address means no RSVP.
+  - **Always** unencrypted and unsigned (the relay 400s `calendarReply` beside either flag), so
+    each RSVP is confirmed in a dialog that says so. The draft never sets `sign`/`encrypt`.
+  - Buttons need the relay's `calendarMethod` (#353): an older relay ignores `calendarReply` and
+    would send plain mail. #353 without #354 cannot be detected; ship them together.
+  - A refusal shows the relay's reason; nothing else is sent instead. Only a definite refusal
+    (`refusedBeforeSending`) re-arms the buttons; a timeout says "may have been sent". The
+    in-flight set is process-wide so a rotation cannot double-send.
 - `pgp/deliverReadOutcome` owns completed attachment arrays inside the worker until rendering
   accepts them. Cancellation across the dispatcher return, render rejection, or a rendering
   exception wipes unadopted bytes; successful adoption transfers cleanup to the detail Activity.
