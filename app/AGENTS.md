@@ -102,6 +102,9 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   `ComposeActivity`. Shared attachments still enter through the Activity's existing bounded
   attachment reader. An external compose request starts a new draft and must not restore an
   unrelated `ComposeDraftCache` entry left by an earlier internal compose screen.
+  In-app launches go through `ComposeActivity.internalIntent` (the non-exported
+  `InternalComposeActivity` alias); only those read the `compose_*` extras, including prefilled
+  HTML. Every launch of the exported `ComposeActivity` gets public extras only, as plain text.
 - Inbox freshness is success-only and folder-scoped for the visible Activity lifetime. A failed
   refresh leaves the last confirmed time intact; it must not replace it with a sticky error or let
   a late result from a previously selected folder paint the current folder.

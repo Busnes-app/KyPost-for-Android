@@ -269,7 +269,8 @@ class ComposeActivity : LockedActivity() {
             ForwardAttachmentHandoff.clear()
             Toast.makeText(this, R.string.compose_draft_restored, Toast.LENGTH_SHORT).show()
         } else {
-            val (to, subject, bodyHtml) = parseComposeIntent(intent, ::plainTextToHtml)
+            val internal = intent.component?.className == INTERNAL_COMPOSE
+            val (to, subject, bodyHtml) = parseComposeIntent(intent, internal, ::plainTextToHtml)
             subjectField.setText(subject)
             toInput.setInitialRecipients(to)
             mirroredBodyHtml = bodyHtml
@@ -277,7 +278,8 @@ class ComposeActivity : LockedActivity() {
 
             // A forward's attachments, handed over out-of-band because they are far too large for
             // an Intent extra — see [ForwardAttachmentHandoff].
-            val forwarded = ForwardAttachmentHandoff.take()
+            // Always taken so a leftover never outlives this screen; used only by in-app launches.
+            val forwarded = ForwardAttachmentHandoff.take().takeIf { internal }.orEmpty()
             if (forwarded.isNotEmpty()) {
                 // Re-checked HERE, not only in addAttachment: that guard covers files the user
                 // picks, and a forward walked straight past it with attachment sizes the relay
@@ -1029,6 +1031,12 @@ class ComposeActivity : LockedActivity() {
         /** A ready-made HTML quote, for Reply/Forward of an HTML message. Kept separate from
          *  [EXTRA_BODY] because that one is plain text and gets html-escaped on the way in. */
         const val EXTRA_BODY_HTML = "compose_body_html"
+
+        /** Non-exported alias in the manifest; the EXTRA_* above are read only through it. */
+        private const val INTERNAL_COMPOSE = "org.kysecurity.mail.InternalComposeActivity"
+
+        fun internalIntent(context: android.content.Context): Intent =
+            Intent().setClassName(context, INTERNAL_COMPOSE)
 
         private const val TAG = "ComposeActivity"
 
