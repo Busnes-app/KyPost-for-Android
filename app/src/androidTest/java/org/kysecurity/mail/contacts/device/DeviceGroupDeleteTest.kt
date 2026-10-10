@@ -33,13 +33,28 @@ class DeviceGroupDeleteTest {
     private val accounts = DeviceContactAccountManager(context)
     private lateinit var db: AppDatabase
 
-    /** The relay's `GET /api/groups` after the user deleted every group. */
-    private val noGroups = OkHttpClient.Builder().addInterceptor(
+    /** The relay, answering `GET /api/groups` with [groupsJson]. */
+    private fun relay(groupsJson: String) = OkHttpClient.Builder().addInterceptor(
         Interceptor { chain ->
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
-                .body("""{"groups":[]}""".toResponseBody("application/json".toMediaType())).build()
+                .body("""{"groups":$groupsJson}""".toResponseBody("application/json".toMediaType())).build()
         },
     ).build()
+
+    /** After the user deleted every group. */
+    private val noGroups = relay("[]")
+
+    private fun repositoryAgainst(client: OkHttpClient) = DeviceContactRepository(
+        context = context,
+        db = db,
+        syncRepository = ContactSyncRepository(
+            db = db,
+            client = ContactSyncClient(callFactory = client),
+            cursorStore = ContactCursorStore(context, db),
+            pairingProvider = { null },
+        ),
+        groupSyncRepository = GroupSyncRepository(db, GroupsSyncClient(callFactory = client)) { TEST_PAIRING },
+    )
 
     @Before
     fun setUp() = runBlocking {
@@ -86,4 +101,78 @@ class DeviceGroupDeleteTest {
         assertEquals(0, groupRows(rowId))
         assertEquals(null, db.groupLinkDao().getByGroupId("g-gone"))
     }
+
+    /** Two backend groups with one title share a device row; deleting one keeps the row. */
+    @Test
+    fun aDeviceRowSharedByASurvivingGroup_isKept_withItsMemberships() = runBlocking {
+        val linker = DeviceGroupLinker(context, db)
+        val rowId = linker.ensureAndroidGroupRowId("g-kept", "Shared Title Probe")!!
+        assertEquals("title matching shares the row", rowId, linker.ensureAndroidGroupRowId("g-gone", "Shared Title Probe"))
+        val member = insertOwnRawContactInGroup(rowId)
+
+        repositoryAgainst(relay("""[{"id":"g-kept","name":"Shared Title Probe","rev":1}]""")).syncAll()
+
+        assertEquals(1, groupRows(rowId))
+        assertEquals(rowId, db.groupLinkDao().getByGroupId("g-kept")?.androidGroupRowId)
+        assertEquals(null, db.groupLinkDao().getByGroupId("g-gone"))
+        assertEquals(listOf(rowId), membershipsOf(member))
+    }
+
+    /** The removal is scoped to this app's account type: a stale link pointing at another
+     *  account's group cannot delete it. */
+    @Test
+    fun aGroupOfAnotherAccountType_survivesRemoval() = runBlocking {
+        val foreign = context.contentResolver.insert(
+            ContactsContract.Groups.CONTENT_URI,
+            android.content.ContentValues().apply {
+                put(ContactsContract.Groups.ACCOUNT_TYPE, "org.kysecurity.test.foreign")
+                put(ContactsContract.Groups.ACCOUNT_NAME, "foreign")
+                put(ContactsContract.Groups.TITLE, "Foreign Group Probe")
+            },
+        )!!.lastPathSegment!!.toLong()
+        try {
+            db.groupLinkDao().upsert(org.kysecurity.mail.data.GroupLinkEntity(groupId = "g-stale", androidGroupRowId = foreign))
+
+            repositoryAgainst(noGroups).syncAll()
+
+            assertEquals(1, groupRows(foreign))
+        } finally {
+            context.contentResolver.delete(
+                ContactsContract.Groups.CONTENT_URI.buildUpon()
+                    .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true").build(),
+                "${ContactsContract.Groups._ID} = ?",
+                arrayOf(foreign.toString()),
+            )
+        }
+    }
+
+    private fun insertOwnRawContactInGroup(groupRowId: Long): Long {
+        val raw = ContactsContract.RawContacts.CONTENT_URI.buildUpon()
+            .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true").build()
+        val data = ContactsContract.Data.CONTENT_URI.buildUpon()
+            .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true").build()
+        val results = context.contentResolver.applyBatch(
+            ContactsContract.AUTHORITY,
+            arrayListOf(
+                android.content.ContentProviderOperation.newInsert(raw)
+                    .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, DeviceContactAccount.ACCOUNT_TYPE)
+                    .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, DeviceContactAccount.ACCOUNT_NAME)
+                    .build(),
+                android.content.ContentProviderOperation.newInsert(data)
+                    .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                    .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.GroupMembership.CONTENT_ITEM_TYPE)
+                    .withValue(ContactsContract.CommonDataKinds.GroupMembership.GROUP_ROW_ID, groupRowId)
+                    .build(),
+            ),
+        )
+        return results[0].uri!!.lastPathSegment!!.toLong()
+    }
+
+    private fun membershipsOf(rawContactId: Long): List<Long> = context.contentResolver.query(
+        ContactsContract.Data.CONTENT_URI,
+        arrayOf(ContactsContract.CommonDataKinds.GroupMembership.GROUP_ROW_ID),
+        "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+        arrayOf(rawContactId.toString(), ContactsContract.CommonDataKinds.GroupMembership.CONTENT_ITEM_TYPE),
+        null,
+    )?.use { c -> buildList { while (c.moveToNext()) add(c.getLong(0)) } }.orEmpty()
 }

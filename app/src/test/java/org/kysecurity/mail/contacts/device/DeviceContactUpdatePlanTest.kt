@@ -195,4 +195,29 @@ class DeviceContactUpdatePlanTest {
         assertEquals(emptyList(), plan.emails)
         assertNull(plan.displayName)
     }
+
+    /** A clear that the plan writes leaves both sides equal, so the base may advance. */
+    @Test
+    fun leavesDeviceMatching_afterAPlannedClear() {
+        val base = ContactDto(uid = "u1", fn = "Ada Lovelace", notes = "Old")
+        val dto = base.copy(notes = null)
+        val device = snapshot(notes = "Old")
+
+        val plan = DeviceContactUpdatePlan.of(dto, device, roomNewer, deviceOlder, base = base)
+
+        assertTrue(plan.leavesDeviceMatching(dto, device))
+    }
+
+    /** An empty plan is not agreement: here the merge keeps the phone's note, which Room lacks,
+     *  and advancing the base would make that note look like the phone's own new edit. */
+    @Test
+    fun anEmptyPlan_thatKeepsADeviceValue_isNotAgreement() {
+        val dto = ContactDto(uid = "u1", fn = "Ada Lovelace", notes = null)
+        val device = snapshot(notes = "Old")
+
+        val plan = DeviceContactUpdatePlan.of(dto, device, roomNewer, deviceOlder, base = dto)
+
+        assertTrue(plan.isEmpty())
+        assertFalse(plan.leavesDeviceMatching(dto, device))
+    }
 }
