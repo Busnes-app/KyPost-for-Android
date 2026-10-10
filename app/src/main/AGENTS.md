@@ -392,7 +392,10 @@ Owns production Android app code and resources.
     creation but enrollment can change mid-process, so it is re-probed on every `composeState()`.
   - Sign-only is impossible (the relay accepts `multipart/encrypted` only), so the two chips are
     coupled when `clientSide`.
-- Inbox tabs come from the relay's `tabs`/`label` response fields.
+- Inbox tabs come from the relay's `tabs`/`label` response fields. IMAP system keywords (`$…`,
+  `\…`) are message state, never tabs: `KeywordTabs.isSystemKeyword` filters them in `buildTabs`
+  and on both the write and read side of `KeywordSettings`. They stay on `Email.keywords`, where
+  `isFlaggedPhishing` reads `$Phishing`.
 - The inbox is fetched with `bodies=0`, so **an inbox row never carries a body** and the `emails`
   table is a cache of the messages actually opened, not a mirror of the window. `fetchBody` fills a
   blank one from `GET /api/mail/body` and writes it back. Two rules hold this together, both with
