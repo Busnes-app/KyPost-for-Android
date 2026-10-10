@@ -16,6 +16,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.kysecurity.mail.mail.MailRuntime
 import org.kysecurity.mail.Email
 import org.kysecurity.mail.EmailAdapter
 import org.kysecurity.mail.InboxActivity
@@ -25,6 +26,12 @@ import org.kysecurity.mail.R
 
 @RunWith(AndroidJUnit4::class)
 class InboxRowRebindTest {
+
+    /** The database stays with the suite; only the mail graph the Activity built is released. */
+    @After
+    fun releaseTheMailGraph() {
+        MailRuntime.invalidate()
+    }
 
     private val keywordSettings =
         KeywordSettings(InstrumentationRegistry.getInstrumentation().targetContext)
