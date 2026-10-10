@@ -424,13 +424,18 @@ class DeviceContactRepository(
         val currentRoomContacts = db.contactDao().observeAll().first()
         // One read of the link table for the whole loop rather than a getByUid per contact.
         val linksByUid = db.deviceContactLinkDao().getAll().associateBy { it.uid }
+        val rowsByUid = ownRawContactsBySourceId(linksByUid.values)
 
         for (entity in currentRoomContacts) {
             // Policy can change mid-loop: protection can be enabled while this is still running.
             if (!syncPermitted()) return@withContext
 
             val dto = entity.toDto()
-            val existingLink = linksByUid[dto.uid]
+            // A row whose link was lost (death before the link write, cleared data) is adopted.
+            val existingLink = linksByUid[dto.uid] ?: rowsByUid[dto.uid]?.let { rawContactId ->
+                org.kysecurity.mail.data.DeviceContactLinkEntity(dto.uid, rawContactId, 0L)
+                    .also { db.deviceContactLinkDao().upsert(it) }
+            }
 
             if (existingLink == null) {
                 createRawContactForDto(dto)
@@ -455,6 +460,7 @@ class DeviceContactRepository(
             android.content.ContentProviderOperation.newInsert(rawContactUriBase)
                 .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, DeviceContactAccount.ACCOUNT_TYPE)
                 .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, DeviceContactAccount.ACCOUNT_NAME)
+                .withValue(ContactsContract.RawContacts.SOURCE_ID, dto.uid)
                 .build(),
         )
 
@@ -868,6 +874,41 @@ class DeviceContactRepository(
             cursor.moveToFirst() &&
                 cursor.getString(0) == DeviceContactAccount.ACCOUNT_TYPE
         } ?: false
+    }
+
+    /** Our live raw contacts keyed by SOURCE_ID (the contact uid). Linked rows written before
+     *  SOURCE_ID existed get it backfilled, so they can be adopted after a lost link too. */
+    private suspend fun ownRawContactsBySourceId(
+        links: Collection<org.kysecurity.mail.data.DeviceContactLinkEntity>,
+    ): Map<String, Long> = withContext(Dispatchers.IO) {
+        val bySourceId = mutableMapOf<String, Long>()
+        val unstamped = mutableSetOf<Long>()
+        contentResolver.query(
+            ContactsContract.RawContacts.CONTENT_URI,
+            arrayOf(ContactsContract.RawContacts._ID, ContactsContract.RawContacts.SOURCE_ID),
+            "${ContactsContract.RawContacts.ACCOUNT_TYPE} = ? AND ${ContactsContract.RawContacts.DELETED} = 0",
+            arrayOf(DeviceContactAccount.ACCOUNT_TYPE),
+            null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val sourceId = cursor.getString(1)
+                if (sourceId.isNullOrEmpty()) unstamped += cursor.getLong(0) else bySourceId[sourceId] = cursor.getLong(0)
+            }
+        }
+        val uri = ContactsContract.RawContacts.CONTENT_URI.buildUpon()
+            .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true")
+            .build()
+        val backfill = links.filter { it.rawContactId in unstamped }.map { link ->
+            android.content.ContentProviderOperation.newUpdate(uri)
+                .withSelection("${ContactsContract.RawContacts._ID} = ?", arrayOf(link.rawContactId.toString()))
+                .withValue(ContactsContract.RawContacts.SOURCE_ID, link.uid)
+                .build()
+        }
+        if (backfill.isNotEmpty()) {
+            runCatching { contentResolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(backfill)) }
+                .onFailure { android.util.Log.e("DeviceContactSync", "Could not backfill SOURCE_ID", it) }
+        }
+        bySourceId
     }
 
     /** Sweeps legacy link rows pointing at another account's raw contacts, before the first sync. */

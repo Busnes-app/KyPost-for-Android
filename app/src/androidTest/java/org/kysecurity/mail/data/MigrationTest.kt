@@ -225,6 +225,20 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate13To14_indexesLinksByRawContactId_keepingRows() {
+        helper.createDatabase(TEST_DB, 13).apply {
+            execSQL("INSERT INTO device_contact_links (uid, rawContactId, deviceUpdatedAtEpochMs) VALUES ('u1', 7, 0)")
+            close()
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 14, true, AppDatabase.MIGRATION_13_14)
+
+        migrated.query("SELECT uid FROM device_contact_links WHERE rawContactId = 7").use { cursor ->
+            assertEquals(1, cursor.count)
+        }
+    }
+
     private fun insertV11Email(messageId: String, folder: String, subject: String) =
         "INSERT INTO emails " +
             "(messageId, folder, sender, sentTo, cc, bcc, subject, preview, bodyMode, label, " +

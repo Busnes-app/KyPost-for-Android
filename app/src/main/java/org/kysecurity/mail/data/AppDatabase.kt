@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ContactSyncStateEntity::class,
         RecipientPinEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -170,6 +170,16 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE TABLE IF NOT EXISTS `recipient_pins` (`address` TEXT NOT NULL, " +
                         "`fingerprint` TEXT NOT NULL, `publicKey` TEXT NOT NULL, `confirmed` INTEGER NOT NULL, " +
                         "PRIMARY KEY(`address`, `fingerprint`))",
+                )
+            }
+        }
+
+        /** Device sync looks links up by raw contact id on every pass. */
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_device_contact_links_rawContactId` " +
+                        "ON `device_contact_links` (`rawContactId`)",
                 )
             }
         }
