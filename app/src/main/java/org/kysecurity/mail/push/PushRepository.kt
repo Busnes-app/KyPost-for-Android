@@ -156,6 +156,29 @@ class PushRepository(
         }
     }
 
+    /** The account's rows in Room, or the whole file when no graph is open in this process. */
+    private suspend fun purgeDatabase() {
+        // peek, not graph: building one during a wipe recreates the database, disk-backed.
+        val db = org.kysecurity.mail.data.DataRuntime.peekGraph()?.database
+        if (db != null) {
+            db.emailDao().clearAll()
+            db.contactDao().clearAll()
+            db.recipientPinDao().clearAll()
+            db.pendingContactChangeDao().clearAll()
+            db.groupDao().clearAll()
+            db.groupLinkDao().clearAll()
+            db.deviceContactLinkDao().deleteAll()
+            // The contact-sync cursor lives here now; without this a re-pair resumes from the old cursor.
+            db.contactSyncStateDao().clearAll()
+        } else {
+            // No graph in this process does NOT mean no data: the encrypted file is still on
+            // disk, and treating the null as "already purged" is how one account's cached mail
+            // reached the next one. Nothing holds the file open, so deleting it is both safe
+            // and the only proof available. Throws if the file survives.
+            org.kysecurity.mail.security.SecurityWipe.closeAndDeleteDatabase(context)
+        }
+    }
+
     /** Drops everything scoped to the account we are leaving; no table carries a subscriber column.
      *
      *  Returns the stores that could NOT be shown to be gone. Every failure below used to be a
@@ -187,25 +210,12 @@ class PushRepository(
             true
         }
 
+        // Under the import consent lock, which it also clears: a contact import running now either
+        // queued before this (and is purged) or finds no consent after, so it cannot slip a row
+        // into the outbox the next account inherits.
         step("database") {
-            // peek, not graph: building one during a wipe recreates the database, disk-backed.
-            val db = org.kysecurity.mail.data.DataRuntime.peekGraph()?.database
-            if (db != null) {
-                db.emailDao().clearAll()
-                db.contactDao().clearAll()
-                db.recipientPinDao().clearAll()
-                db.pendingContactChangeDao().clearAll()
-                db.groupDao().clearAll()
-                db.groupLinkDao().clearAll()
-                db.deviceContactLinkDao().deleteAll()
-                // The contact-sync cursor lives here now; without this a re-pair resumes from the old cursor.
-                db.contactSyncStateDao().clearAll()
-            } else {
-                // No graph in this process does NOT mean no data: the encrypted file is still on
-                // disk, and treating the null as "already purged" is how one account's cached mail
-                // reached the next one. Nothing holds the file open, so deleting it is both safe
-                // and the only proof available. Throws if the file survives.
-                org.kysecurity.mail.security.SecurityWipe.closeAndDeleteDatabase(context)
+            org.kysecurity.mail.contacts.device.DeviceContactSyncSettings(context).clearConsentDuring {
+                purgeDatabase()
             }
             true
         }
