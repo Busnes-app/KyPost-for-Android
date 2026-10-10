@@ -13,6 +13,7 @@ import org.kysecurity.mail.contacts.ContactSyncClient
 import org.kysecurity.mail.contacts.ContactSyncRepository
 import org.kysecurity.mail.contacts.GroupSyncRepository
 import org.kysecurity.mail.contacts.GroupsSyncClient
+import org.kysecurity.mail.contacts.TEST_PAIRING
 import org.kysecurity.mail.data.AppDatabase
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -32,6 +33,7 @@ class DeviceContactImportConsentTest {
     private lateinit var db: AppDatabase
     private lateinit var syncRepository: ContactSyncRepository
     private lateinit var repository: DeviceContactRepository
+    private lateinit var destination: String
     private var localRawContactId = 0L
 
     @Before
@@ -40,22 +42,12 @@ class DeviceContactImportConsentTest {
         automation.grantRuntimePermission(context.packageName, Manifest.permission.READ_CONTACTS)
         automation.grantRuntimePermission(context.packageName, Manifest.permission.WRITE_CONTACTS)
         check(accounts.ensureAccount()) { "needs a sync account; is the device unlocked?" }
-        settings.setImportAccounts(emptySet())
-        settings.setLastForeignScanAtEpochMs(0L)
-
         db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
-        syncRepository = ContactSyncRepository(
-            db = db,
-            client = ContactSyncClient(callFactory = OkHttpClient()),
-            cursorStore = ContactCursorStore(context, db),
-            pairingProvider = { null },
-        )
-        repository = DeviceContactRepository(
-            context = context,
-            db = db,
-            syncRepository = syncRepository,
-            groupSyncRepository = GroupSyncRepository(db, GroupsSyncClient(callFactory = OkHttpClient())) { null },
-        )
+        syncRepository = syncRepositoryFor(TEST_PAIRING)
+        destination = syncRepository.destination()!!
+        settings.setImportAccounts(destination, emptySet())
+        settings.setLastForeignScanAtEpochMs(0L)
+        repository = deviceRepository(syncRepository)
         localRawContactId = insertLocalContact(PROBE_NAME, "consent-probe@example.com")
     }
 
@@ -68,10 +60,26 @@ class DeviceContactImportConsentTest {
             "${ContactsContract.RawContacts._ID} = ?",
             arrayOf(localRawContactId.toString()),
         )
-        settings.setImportAccounts(emptySet())
+        runBlocking { settings.setImportAccounts(destination, emptySet()) }
         DeviceContactPurge.deleteSyncedRows(context)
         accounts.removeAccountBlocking()
     }
+
+    private fun syncRepositoryFor(pairing: org.kysecurity.mail.push.PairingData) = ContactSyncRepository(
+        db = db,
+        client = ContactSyncClient(callFactory = OkHttpClient()),
+        cursorStore = ContactCursorStore(context, db),
+        pairingProvider = { pairing },
+    )
+
+    private fun deviceRepository(sync: ContactSyncRepository, beforeImport: suspend () -> Unit = {}) =
+        DeviceContactRepository(
+            context = context,
+            db = db,
+            syncRepository = sync,
+            groupSyncRepository = GroupSyncRepository(db, GroupsSyncClient(callFactory = OkHttpClient())) { null },
+            beforeImport = beforeImport,
+        )
 
     /** A contact in the phone's own storage: no account at all. */
     private fun insertLocalContact(name: String, email: String): Long {
@@ -119,7 +127,7 @@ class DeviceContactImportConsentTest {
         )?.use { c -> if (c.moveToFirst()) "type=${c.getString(0)} name=${c.getString(1)} contact=${c.getLong(2)} deleted=${c.getInt(3)}" else "missing" }
         val queued = db.pendingContactChangeDao().getAllPending()
             .map { "${it.changeType}:" + runCatching { json.decodeFromString(ContactDto.serializer(), it.payloadJson).fn }.getOrNull() }
-        return "probe[$row] accounts=${repository.foreignContactAccounts()} consent=${settings.importAccounts()} " +
+        return "probe[$row] accounts=${repository.foreignContactAccounts()} consent=${settings.importAccounts(destination)} " +
             "watermark=${settings.lastForeignScanAtEpochMs()} queued=$queued"
     }
 
@@ -133,7 +141,7 @@ class DeviceContactImportConsentTest {
     /** A contact edited while the scan runs is newer than the scan's start, so it is seen next time. */
     @Test
     fun theNextWatermark_isWhenTheScanBegan() = runBlocking {
-        settings.setImportAccounts(setOf(DeviceAccount(null, null).key))
+        settings.setImportAccounts(destination, setOf(DeviceAccount(null, null).key))
         val clocked = DeviceContactRepository(
             context = context,
             db = db,
@@ -151,10 +159,32 @@ class DeviceContactImportConsentTest {
     fun consentingToAnAccount_importsItsExistingContacts() = runBlocking {
         repository.syncAll()
         val local = repository.foreignContactAccounts().single { it.type == null && it.name == null }
-        settings.setImportAccounts(setOf(local.key))
+        settings.setImportAccounts(destination, setOf(local.key))
         val failed = repository.syncAll()
 
         assertEquals("failed stages $failed; ${importState()}", 1, queuedProbeCreates())
+    }
+
+    @Test
+    fun consentWithdrawnDuringAScan_importsNothing() = runBlocking {
+        settings.setImportAccounts(destination, setOf(DeviceAccount(null, null).key))
+        val scan = deviceRepository(syncRepository) { settings.setImportAccounts(destination, emptySet()) }
+
+        scan.syncAll()
+
+        assertEquals(0, queuedProbeCreates())
+    }
+
+    @Test
+    fun consentGivenForOnePairing_doesNotCarryToAnother() = runBlocking {
+        settings.setImportAccounts(destination, setOf(DeviceAccount(null, null).key))
+        val otherSync = syncRepositoryFor(TEST_PAIRING.copy(subscriberId = "sub-2"))
+        val otherServer = syncRepositoryFor(TEST_PAIRING.copy(serverUrl = "https://other.example.com"))
+
+        assertEquals(emptySet<String>(), settings.importAccounts(otherSync.destination()!!))
+        assertEquals(emptySet<String>(), settings.importAccounts(otherServer.destination()!!))
+        deviceRepository(otherSync).syncAll()
+        assertEquals(0, queuedProbeCreates())
     }
 
     private companion object {
