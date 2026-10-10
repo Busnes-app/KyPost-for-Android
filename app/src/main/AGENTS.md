@@ -458,12 +458,16 @@ Owns production Android app code and resources.
   A `since=0` pull is a snapshot: after tombstone GC the server can no longer list what it
   deleted, so `applyDelta(snapshot = true)` removes every Room contact absent from it except
   uids still in the outbox. `ContactFullResyncTest` covers both.
-  **A recorded key outlives the contact sync removes.** Before `applyDelta` deletes a contact
-  (tombstone or snapshot) or applies an update that leaves it without its key, the key is copied
-  to `recipient_pins` (`ContactEntity.recipientPins`, `MIGRATION_12_13`), and `RoomLocalSignerKeys`
-  reads that table beside the contacts, so the sender's pin check and the reader keep it. Only a
-  local wipe (the database file) or unpair (`purgeAccountScopedData`) clears it; the server's word
-  never does. `RecipientPinRetentionTest` pins the send-side refusal.
+  **Per address, a key verified on this device is authoritative; a synced key never is.** The PGP
+  QR flow's two saves (`queueCreate`/`queueUpdate` with `verifiedInPerson`) are the only writers of
+  `recipient_pins` (`MIGRATION_12_13`), and each replaces the pins for that contact's addresses —
+  re-scanning is how a pin changes. `RoomLocalSignerKeys` (`authoritativeKeys`) returns ONLY the pins
+  for a pinned address, so a contact key the server delivers, on a replacement contact or as an
+  update, cannot satisfy `ClientEncryptedSender.applyPins` and the send is `KeyChanged`. Sync never
+  writes the table, so removing or rewriting the contact does not touch the pin; a wipe (database
+  file) or unpair (`purgeAccountScopedData`) clears it. An address with no pin keeps the earlier
+  behaviour: the contact's key, whatever its origin. Server-side provenance (`pgpKeySource`,
+  `pgpKeyVerified`) is not read: it is the relay's claim. `RecipientPinRetentionTest`.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
