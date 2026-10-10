@@ -30,6 +30,7 @@ import org.kysecurity.mail.pgp.hasPgpIdentity
 import org.kysecurity.mail.setupPrimaryNavigation
 import kotlinx.coroutines.launch
 import org.kysecurity.mail.security.LockedActivity
+import org.kysecurity.mail.security.showSecurely
 
 class ContactsListActivity : LockedActivity() {
 
@@ -187,6 +188,7 @@ class ContactsListActivity : LockedActivity() {
         if (pickMode) return false
         menu?.add(0, MENU_REFRESH, 0, R.string.contacts_refresh)
         menu?.add(0, MENU_DEVICE_SYNC, 0, R.string.contacts_device_sync_enable)
+        menu?.add(0, MENU_IMPORT_ACCOUNTS, 0, R.string.contacts_import_menu)
         menu?.add(0, MENU_DEDUPE, 0, R.string.contacts_dedupe)
         return super.onCreateOptionsMenu(menu)
     }
@@ -200,6 +202,7 @@ class ContactsListActivity : LockedActivity() {
                 deviceSyncItem.title = getString(
                     if (isEnabled) R.string.contacts_device_sync_disable else R.string.contacts_device_sync_enable,
                 )
+                menu.findItem(MENU_IMPORT_ACCOUNTS)?.isVisible = isEnabled
             } catch (e: Exception) {
                 android.util.Log.e("ContactsListActivity", "Error getting device sync status", e)
                 deviceSyncItem.title = getString(R.string.contacts_device_sync_enable)
@@ -234,6 +237,10 @@ class ContactsListActivity : LockedActivity() {
                 }
                 true
             }
+            MENU_IMPORT_ACCOUNTS -> {
+                showImportAccounts()
+                true
+            }
             MENU_DEDUPE -> {
                 lifecycleScope.launch {
                     val repository = ContactsRuntime.graph(this@ContactsListActivity).repository
@@ -260,6 +267,48 @@ class ContactsListActivity : LockedActivity() {
                 true
             }
             else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    /** Per-account consent: importing uploads those contacts to the server, so nothing is checked
+     *  until the user checks it. */
+    private fun showImportAccounts() {
+        val graph = DeviceContactsRuntime.graph(this)
+        lifecycleScope.launch {
+            val accounts = graph.repository.foreignContactAccounts()
+            if (accounts.isEmpty()) {
+                Toast.makeText(this@ContactsListActivity, R.string.contacts_import_none, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val chosen = graph.settings.importAccounts().toMutableSet()
+            val padding = (16 * resources.displayMetrics.density).toInt()
+            val container = android.widget.LinearLayout(this@ContactsListActivity).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                setPadding(padding, padding, padding, 0)
+                addView(android.widget.TextView(context).apply { setText(R.string.contacts_import_message) })
+                for (account in accounts) {
+                    addView(
+                        android.widget.CheckBox(context).apply {
+                            text = account.name?.let { "$it (${account.type})" }
+                                ?: getString(R.string.contacts_import_local_account)
+                            isChecked = account.key in chosen
+                            setOnCheckedChangeListener { _, checked ->
+                                if (checked) chosen += account.key else chosen -= account.key
+                            }
+                        },
+                    )
+                }
+            }
+            androidx.appcompat.app.AlertDialog.Builder(this@ContactsListActivity)
+                .setTitle(R.string.contacts_import_title)
+                .setView(android.widget.ScrollView(this@ContactsListActivity).apply { addView(container) })
+                .setPositiveButton(R.string.contacts_import_save) { _, _ ->
+                    graph.settings.setImportAccounts(chosen)
+                    graph.coordinator.syncNowAsync()
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .create()
+                .showSecurely()
         }
     }
 
@@ -295,6 +344,7 @@ class ContactsListActivity : LockedActivity() {
         private const val MENU_REFRESH = 0
         private const val MENU_DEVICE_SYNC = 1
         private const val MENU_DEDUPE = 2
+        private const val MENU_IMPORT_ACCOUNTS = 3
 
         /** When true, a tap returns the uid via [EXTRA_RESULT_UID] instead of opening the editor. */
         const val EXTRA_PICK_MODE = "pick_mode"

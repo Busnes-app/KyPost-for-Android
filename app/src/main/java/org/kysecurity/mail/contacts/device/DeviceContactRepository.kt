@@ -324,6 +324,9 @@ class DeviceContactRepository(
 
     private suspend fun importNewDeviceContacts() = withContext(Dispatchers.IO) {
         val settings = DeviceContactSyncSettings(context)
+        // Importing uploads to the server: only from accounts the user picked, and none by default.
+        val consented = settings.importAccounts()
+        if (consented.isEmpty()) return@withContext
         val watermarkMs = settings.lastForeignScanAtEpochMs()
 
         val projection = arrayOf(
@@ -333,8 +336,7 @@ class DeviceContactRepository(
             ContactsContract.RawContacts.ACCOUNT_NAME,
         )
 
-        val selection =
-            "(${ContactsContract.RawContacts.ACCOUNT_TYPE} IS NULL OR ${ContactsContract.RawContacts.ACCOUNT_TYPE} != ?)"
+        val selection = FOREIGN_LIVE_ROWS
         val selectionArgs = arrayOf(DeviceContactAccount.ACCOUNT_TYPE)
 
         val rawContactCandidates = mutableListOf<Long>()
@@ -348,6 +350,11 @@ class DeviceContactRepository(
             while (cursor.moveToNext()) {
                 val rawContactId = cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts._ID))
                 val contactId = cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.CONTACT_ID))
+                val account = DeviceAccount(
+                    cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_TYPE)),
+                    cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_NAME)),
+                )
+                if (account.key !in consented) continue
 
                 val lastUpdated = queryContactLastUpdated(contactId)
                 if (lastUpdated > watermarkMs) {
@@ -401,6 +408,21 @@ class DeviceContactRepository(
         }
 
         settings.setLastForeignScanAtEpochMs(System.currentTimeMillis())
+    }
+
+    /** Accounts other than ours holding live contacts, for the import consent screen. */
+    suspend fun foreignContactAccounts(): List<DeviceAccount> = withContext(Dispatchers.IO) {
+        val found = linkedSetOf<DeviceAccount>()
+        contentResolver.query(
+            ContactsContract.RawContacts.CONTENT_URI,
+            arrayOf(ContactsContract.RawContacts.ACCOUNT_TYPE, ContactsContract.RawContacts.ACCOUNT_NAME),
+            FOREIGN_LIVE_ROWS,
+            arrayOf(DeviceContactAccount.ACCOUNT_TYPE),
+            null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) found += DeviceAccount(cursor.getString(0), cursor.getString(1))
+        }
+        found.toList()
     }
 
     /** True when [existingContact] and the candidate share any email or phone, normalized the same
@@ -1170,3 +1192,8 @@ class DeviceContactRepository(
             )
         }
 }
+
+/** Live raw contacts of every account but ours, including the account-less local store. */
+private const val FOREIGN_LIVE_ROWS =
+    "(${ContactsContract.RawContacts.ACCOUNT_TYPE} IS NULL OR ${ContactsContract.RawContacts.ACCOUNT_TYPE} != ?) AND " +
+        "${ContactsContract.RawContacts.DELETED} = 0"

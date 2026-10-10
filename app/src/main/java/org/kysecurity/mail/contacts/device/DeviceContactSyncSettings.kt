@@ -19,6 +19,17 @@ class DeviceContactSyncSettings(context: Context) {
         prefs.edit().putLong(KEY_LAST_FOREIGN_SCAN, epochMs).commit()
     }
 
+    /** [DeviceAccount.key]s whose contacts the user chose to upload. Empty by default; a new
+     *  key rather than a reused one, so installs that imported everything start with none. */
+    fun importAccounts(): Set<String> = prefs.getStringSet(KEY_IMPORT_ACCOUNTS, null).orEmpty().toSet()
+
+    /** A newly added account rewinds the scan, or its existing contacts sit behind the watermark. */
+    fun setImportAccounts(keys: Set<String>) {
+        val edit = prefs.edit().putStringSet(KEY_IMPORT_ACCOUNTS, keys.toSet())
+        if (!importAccounts().containsAll(keys)) edit.putLong(KEY_LAST_FOREIGN_SCAN, 0L)
+        edit.commit()
+    }
+
     fun hasShownSyncIntro(): Boolean = prefs.getBoolean(KEY_SHOWN_INTRO, false)
 
     fun setHasShownSyncIntro(shown: Boolean) {
@@ -30,5 +41,11 @@ class DeviceContactSyncSettings(context: Context) {
         private const val KEY_ENABLED = "enabled"
         private const val KEY_LAST_FOREIGN_SCAN = "last_foreign_scan_epoch_ms"
         private const val KEY_SHOWN_INTRO = "has_shown_sync_intro"
+        private const val KEY_IMPORT_ACCOUNTS = "import_account_keys"
     }
+}
+
+/** Another account's contact storage. Null type and name is the phone's account-less storage. */
+data class DeviceAccount(val type: String?, val name: String?) {
+    val key: String get() = "${type.orEmpty()}\n${name.orEmpty()}"
 }

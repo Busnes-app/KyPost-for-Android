@@ -7,7 +7,7 @@ KyPost is an Android email client backed by a self-hosted KyPost relay. It shows
 - **Mail**: The paired KyPost relay proxies mail; the app stores no mail credentials on the device.
 - **Keyword tabs**: Inbox tabs come from server tab and label fields. Tune the tabs in the Keywords screen.
 - **Compose**: The To, Cc, and Bcc fields complete recipients from local contacts. An address-book picker adds recipients directly.
-- **Contacts**: A two-way contact sync runs against a self-hosted KyPost server. Open it from the Inbox overflow menu.
+- **Contacts**: A two-way contact sync runs against a self-hosted KyPost server. Open it from the Inbox overflow menu. Contacts held by other accounts on the phone (Google, SIM, …) are uploaded to your server only from accounts you pick under **Import from other accounts**; none are picked by default.
 - **PGP**: One screen shows your own PGP public-key QR code and scans another person's, saving that key onto an existing contact. The app also encrypts outgoing mail to a recipient's key, and decrypts client-custody mail on the device once it holds a sealed key envelope — see **Device enrollment** in [SECURITY.md](SECURITY.md). Without that envelope, encrypted mail hands off to webmail instead.
 - **MFA push approval**: Push notifications approve or deny KyPost account logins. An in-app screen does the same when OEM background limits block the action notification.
 - **Themes**: The app shares theme presets with the KyPost web app. The default theme is **Busnes Light**; **Busnes Dark** is its charcoal counterpart, and the 15 older presets are still offered. Select a theme in the Themes screen.

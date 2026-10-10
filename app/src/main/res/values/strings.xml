@@ -404,7 +404,13 @@
     <string name="contacts_device_sync_account_failed">Could not create the KyPost contacts account, so device contact sync was not enabled</string>
     <string name="contacts_device_sync_disabled_toast">Device contact sync disabled</string>
     <string name="contact_sync_intro_title">Sync contacts with this device?</string>
-    <string name="contact_sync_intro_message">Kypost can keep your contacts in sync with this device\'s address book. This is off by default and only happens if you turn it on — you can change it anytime from the Contacts screen.</string>
+    <string name="contact_sync_intro_message">Kypost can keep your contacts in sync with this device\'s address book. This is off by default and only happens if you turn it on — you can change it anytime from the Contacts screen.\n\nContacts saved in other accounts on this phone, such as Google or the SIM, are not uploaded unless you pick those accounts under Import from other accounts.</string>
+    <string name="contacts_import_menu">Import from other accounts…</string>
+    <string name="contacts_import_title">Import from other accounts</string>
+    <string name="contacts_import_message">Contacts from the accounts you check are copied into KyPost and uploaded to your KyPost server, which syncs them to your other devices. Nothing is uploaded from an account you leave unchecked.\n\nUnchecking an account later stops new imports. Contacts already uploaded stay on your server until you delete them.</string>
+    <string name="contacts_import_none">No other accounts on this phone hold contacts.</string>
+    <string name="contacts_import_local_account">This phone (no account)</string>
+    <string name="contacts_import_save">Save</string>
     <string name="contact_sync_intro_positive">Enable</string>
     <string name="contact_sync_intro_negative">Not Now</string>
     <string name="password_pairing_open">Pair with server login</string>

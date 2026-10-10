@@ -475,6 +475,13 @@ Owns production Android app code and resources.
   duplicating the contact. Linked rows from before SOURCE_ID are backfilled on the next pass.
   `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_12_13` indexes the link table's
   `rawContactId`.
+- **Importing another account's contacts uploads them, so it is per-account opt-in.**
+  `importNewDeviceContacts` reads only raw contacts whose `DeviceAccount` (type, name; both null
+  for the phone's own storage) is in `DeviceContactSyncSettings.importAccounts()`, which is empty
+  by default and stored under a key no earlier build wrote — installs that imported everything
+  start with nothing chosen. Adding an account rewinds the scan watermark so its existing contacts
+  are seen. The choice is the Contacts menu's "Import from other accounts…" dialog, whose copy
+  says the contacts go to the user's KyPost server. `DeviceContactImportConsentTest`.
 - **Deletes reach the phone through Room.** `syncAll`'s `removeDeletedContacts` stage removes the
   raw contact of every link whose Room contact is gone, so server tombstones, snapshot prunes and
   local deletes share one path. A device-side delete is queued and then hard-deleted as the sync
