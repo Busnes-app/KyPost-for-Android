@@ -93,6 +93,8 @@ class EmailAdapter(
 
     fun getEmailAt(position: Int): Email = emails[position]
 
+    fun currentEmails(): List<Email> = emails
+
     fun updateEmails(newEmails: List<Email>) {
         val previous = emails
         emails = newEmails
