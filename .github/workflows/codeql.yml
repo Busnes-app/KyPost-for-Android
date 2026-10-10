@@ -68,7 +68,7 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: manual
-          # Default suite is security-and-quality. Uncomment to widen:
+          # No queries: input runs the default suite. Uncomment to widen:
           # queries: security-extended
 
       - name: Build for CodeQL
