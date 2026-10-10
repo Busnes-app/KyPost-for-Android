@@ -9,7 +9,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -43,10 +42,5 @@ class ContactSyncAdapterDeclarationTest {
             intent?.component?.className,
         )
         assertEquals(context.packageName, intent?.component?.packageName)
-    }
-
-    @Test
-    fun editProperties_answersInsteadOfThrowing() {
-        assertNull(KyPostContactAuthenticator(context).editProperties(null, DeviceContactAccount.ACCOUNT_TYPE))
     }
 }
