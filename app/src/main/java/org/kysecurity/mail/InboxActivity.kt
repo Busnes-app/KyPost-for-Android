@@ -446,7 +446,6 @@ class InboxActivity : LockedActivity() {
         intent.putExtra("email_id", email.id)
         intent.putExtra("email_subject", email.subject)
         intent.putExtra("email_sender", email.sender)
-        intent.putExtra("email_preview", email.preview)
         intent.putExtra("email_body_mode", email.bodyMode)
         intent.putExtra("email_folder", email.sourceFolder())
         // A search result has no Room row, so these are the only copy of its recipients.

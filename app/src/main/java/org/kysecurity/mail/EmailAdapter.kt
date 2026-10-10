@@ -42,6 +42,7 @@ class EmailAdapter(
         private val subjectTextView: TextView = view.findViewById(R.id.textViewSubject)
         private val senderTextView: TextView = view.findViewById(R.id.textViewSender)
         private val dateTextView: TextView = view.findViewById(R.id.textViewDate)
+        private val previewTextView: TextView = view.findViewById(R.id.textViewPreview)
 
         fun bind(email: Email, palette: ThemePalette, selected: Boolean) {
             // A message this app can't render is worth knowing before tapping it — otherwise the
@@ -74,6 +75,9 @@ class EmailAdapter(
             }
             senderTextView.text = email.sender
             dateTextView.text = inboxRowDate(email.atUtc, ZonedDateTime.now(), Locale.getDefault())
+            // Plain text into a TextView: the relay already flattened it, and nothing here parses it.
+            previewTextView.text = email.preview
+            previewTextView.visibility = if (email.preview.isBlank()) View.GONE else View.VISIBLE
 
             val panel = Color.parseColor(palette.panel)
             val background = if (selected) blend(panel, Color.parseColor(palette.accent), 0.3f) else panel
@@ -91,6 +95,8 @@ class EmailAdapter(
             subjectTextView.setTextColor(Color.parseColor(if (isUnread) palette.inkStrong else palette.ink))
             senderTextView.setTextColor(Color.parseColor(palette.ink))
             dateTextView.setTextColor(Color.parseColor(palette.ink))
+            // Muted, so a snippet that starts with a name and address does not read as a sender.
+            previewTextView.setTextColor(withAlpha(Color.parseColor(palette.ink), 0.72f))
 
             itemView.setOnClickListener { onEmailClick?.invoke(email) }
             itemView.setOnLongClickListener {
