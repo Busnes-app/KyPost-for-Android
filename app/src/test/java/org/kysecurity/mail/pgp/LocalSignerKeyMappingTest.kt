@@ -94,17 +94,20 @@ class LocalSignerKeyMappingTest {
         assertEquals(LocalSignerKey(TestPgpKey.ARMORED, confirmed = false), mapped)
     }
 
-    /** The pin-only record keeps the same key, under each address, lowercased. */
+    /** A key verified on this device decides alone; the contact's synced key is not added. */
     @Test
-    fun recipientPins_carryTheRecordedKeyPerAddress() {
-        val pins = contact(emails = """[{"value":"Bob@Example.com"},{"value":"bob@work.example"}]""").recipientPins()
+    fun authoritativeKeys_aPinExcludesTheContactKey() {
+        val pin = org.kysecurity.mail.data.RecipientPinEntity("bob@example.com", "F", "PINNED", confirmed = true)
+        val synced = LocalSignerKey("SYNCED", confirmed = true)
 
-        assertEquals(listOf("bob@example.com", "bob@work.example"), pins.map { it.address })
-        assertTrue(pins.all { it.publicKey == TestPgpKey.ARMORED && it.fingerprint == "AAAA BBBB CCCC DDDD" && it.confirmed })
+        assertEquals(listOf(LocalSignerKey("PINNED", confirmed = true)), authoritativeKeys(listOf(pin), listOf(synced)))
     }
 
+    /** No pin: the contact's key is used exactly as before pins existed. */
     @Test
-    fun recipientPins_noneWithoutARecordedKey() {
-        assertTrue(contact(pgpKey = null).recipientPins().isEmpty())
+    fun authoritativeKeys_noPinKeepsTheContactKey() {
+        val synced = LocalSignerKey("SYNCED", confirmed = false)
+
+        assertEquals(listOf(synced), authoritativeKeys(emptyList(), listOf(synced)))
     }
 }
