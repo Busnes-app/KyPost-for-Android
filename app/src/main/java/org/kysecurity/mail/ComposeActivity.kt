@@ -30,6 +30,7 @@ import org.kysecurity.mail.data.DataRuntime
 import org.kysecurity.mail.mail.MailDraft
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRuntime
+import org.kysecurity.mail.mail.MailSendOutcome
 import org.kysecurity.mail.mail.OutgoingAttachment
 import org.kysecurity.mail.mail.userFacingMessage
 import org.kysecurity.mail.pgp.ClientEncryptedDraftSaver
@@ -54,7 +55,6 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
-import java.util.concurrent.Executors
 import org.kysecurity.mail.security.LockedActivity
 import org.kysecurity.mail.security.showSecurely
 
@@ -99,7 +99,9 @@ class ComposeActivity : LockedActivity() {
     private val handoffOpener by lazy { AndroidVaultOpener(this) }
     private var handoffBusy = false
     private var handoffAttempt = 0L
-    private val ioExecutor = Executors.newSingleThreadExecutor()
+
+    /** The relay send this screen is waiting on, possibly started by the instance a rotation replaced. */
+    private var sending: ComposeSend.InFlight? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /** The editor exports its HTML asynchronously, and a configuration change destroys this
@@ -119,6 +121,9 @@ class ComposeActivity : LockedActivity() {
 
     @androidx.annotation.VisibleForTesting
     internal fun discardPromptCountForTest(): Int = discardPromptCount
+
+    @androidx.annotation.VisibleForTesting
+    internal fun isSendingForTest(): Boolean = sending != null
 
     private val bodyMirror = object : Runnable {
         override fun run() {
@@ -316,6 +321,13 @@ class ComposeActivity : LockedActivity() {
             }
         }
 
+        // A send still in flight belongs to the draft just restored (a rotation, or the lock
+        // tearing the screen down): adopt it rather than offer Send again. A new composition
+        // must not inherit an unrelated send's result.
+        ComposeSend.current()?.let { inFlight ->
+            if (restored != null) awaitSend(inFlight) else ComposeSend.clear(inFlight)
+        }
+
         boldChip.setOnClickListener { bodyEditor.toggleBold() }
         italicChip.setOnClickListener { bodyEditor.toggleItalic() }
         underlineChip.setOnClickListener { bodyEditor.toggleUnderline() }
@@ -376,7 +388,7 @@ class ComposeActivity : LockedActivity() {
     /** Withdraws Send on an account this app cannot encrypt for. See [applyPgpComposeState]. */
     private fun applySendAvailability() {
         sendMenuItem?.isVisible = !handoffOnlyAccount
-        sendMenuItem?.isEnabled = !handoffOnlyAccount && !handoffBusy
+        sendMenuItem?.isEnabled = !handoffOnlyAccount && !handoffBusy && sending == null
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
@@ -627,7 +639,7 @@ class ComposeActivity : LockedActivity() {
     }
 
     private fun sendEmail() {
-        if (handoffBusy) return
+        if (handoffBusy || sending != null) return
         val to = toInput.commaJoinedRecipients()
         val cc = ccInput.commaJoinedRecipients()
         val bcc = bccInput.commaJoinedRecipients()
@@ -642,7 +654,7 @@ class ComposeActivity : LockedActivity() {
         sendMenuItem?.isEnabled = false
 
         bodyEditor.exportHtml { html ->
-            // exportHtml's main-looper callback can fire after onDestroy shut ioExecutor down.
+            // exportHtml's main-looper callback can fire after onDestroy.
             if (isFinishing || isDestroyed) return@exportHtml
             val draft = MailDraft(
                 to = to, cc = cc, bcc = bcc, subject = subject, body = html, mode = "html",
@@ -770,35 +782,49 @@ class ComposeActivity : LockedActivity() {
 
     /** Shared by the first attempt and the confirmed re-send, so the re-send cannot drift. */
     private fun dispatchSend(draft: MailDraft) {
-        ioExecutor.execute {
-            val outcome = MailRuntime.graph(this).repository.send(draft)
-            runOnUiThread {
-                // runOnUiThread still runs after finish(); an AlertDialog on a finishing Activity throws.
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                when (outcome) {
-                    is MailOutcome.Success -> {
-                        val warning = outcome.value.warning
-                        // The send already succeeded: surface the warning as a notice, never as a failure or a retry.
-                        val message = warning.ifBlank { getString(R.string.compose_send_success) }
-                        val length = if (warning.isBlank()) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
-                        Toast.makeText(this, message, length).show()
-                        sendSucceeded = true
-                        ComposeDraftCache.clear()
-                        finish()
-                    }
-                    is MailOutcome.PickupFallbackNeeded -> {
-                        sendMenuItem?.isEnabled = true
-                        confirmPickupFallback(outcome.keylessRecipients)
-                    }
-                    is MailOutcome.ClientSideNeeded -> {
-                        sendMenuItem?.isEnabled = true
-                        handOffToWebmail()
-                    }
-                    else -> {
-                        sendMenuItem?.isEnabled = true
-                        Toast.makeText(this, outcome.userFacingMessage(), Toast.LENGTH_LONG).show()
-                    }
-                }
+        val app = application as KyPostApp
+        // The graph lookup inside: building it opens the database, which is not main-thread work.
+        awaitSend(ComposeSend.start(app.appScope, draft) { MailRuntime.graph(app).repository.send(it) })
+    }
+
+    /** Renders [sending], whether this screen started it or the one a rotation replaced did. */
+    private fun awaitSend(sending: ComposeSend.InFlight) {
+        this.sending = sending
+        sentDraft = sending.draft
+        sendMenuItem?.isEnabled = false
+        lifecycleScope.launch {
+            val outcome = sending.outcome.await()
+            ComposeSend.clear(sending)
+            this@ComposeActivity.sending = null
+            // An AlertDialog on a finishing Activity throws.
+            if (isFinishing || isDestroyed) return@launch
+            renderSendOutcome(outcome)
+        }
+    }
+
+    private fun renderSendOutcome(outcome: MailOutcome<MailSendOutcome>) {
+        when (outcome) {
+            is MailOutcome.Success -> {
+                val warning = outcome.value.warning
+                // The send already succeeded: surface the warning as a notice, never as a failure or a retry.
+                val message = warning.ifBlank { getString(R.string.compose_send_success) }
+                val length = if (warning.isBlank()) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+                Toast.makeText(this, message, length).show()
+                sendSucceeded = true
+                ComposeDraftCache.clear()
+                finish()
+            }
+            is MailOutcome.PickupFallbackNeeded -> {
+                sendMenuItem?.isEnabled = true
+                confirmPickupFallback(outcome.keylessRecipients)
+            }
+            is MailOutcome.ClientSideNeeded -> {
+                sendMenuItem?.isEnabled = true
+                handOffToWebmail()
+            }
+            else -> {
+                sendMenuItem?.isEnabled = true
+                Toast.makeText(this, outcome.userFacingMessage(), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -1012,9 +1038,6 @@ class ComposeActivity : LockedActivity() {
         // Whatever the cache needed is already in it by now — onStop saved synchronously.
         mirroredBodyHtml = ""
         restoredDraftForTest = null
-        // No redirectedToUnlock guard: ioExecutor is a property initializer, so it exists even
-        // when onCreate bailed, and skipping shutdown would leak its thread.
-        ioExecutor.shutdownNow()
         // Dismiss rather than leave a shown AlertDialog referencing a destroyed Activity's window.
         activeDialog?.dismiss()
         discardDialog?.dismiss()
