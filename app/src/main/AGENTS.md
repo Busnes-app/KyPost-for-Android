@@ -453,8 +453,9 @@ Owns production Android app code and resources.
   JSON against its 1 MiB body limit), each acked and advancing the cursor on its own. 400/413 is
   "this request is too big": the batch is halved, and a single change still refused stays queued
   while the rest go out. Once a reply says `tooOld`, the remaining batches keep the stale cursor
-  (cheap `tooOld` replies with no lists) and one `since=0` pull ends the sync.
-  `ContactPushBatchingTest` pins all three.
+  (cheap `tooOld` replies with no lists) and one `since=0` pull ends the sync. So does any sync
+  that starts at cursor zero, pushes queued or not: a `tooOld` sync that failed before its pull
+  leaves only the reset cursor to say a snapshot is owed. `ContactPushBatchingTest` pins all four.
   A `since=0` pull is a snapshot: after tombstone GC the server can no longer list what it
   deleted, so `applyDelta(snapshot = true)` removes every Room contact absent from it except
   uids still in the outbox. `ContactFullResyncTest` covers both.
