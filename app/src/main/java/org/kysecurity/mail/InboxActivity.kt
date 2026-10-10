@@ -122,22 +122,22 @@ class InboxActivity : LockedActivity() {
         setupBottomNav()
         setupSwipeGestures()
 
-        val msgId = intent.getStringExtra(PushNotificationDispatcher.EXTRA_MESSAGE_ID)
-        if (msgId != null) {
-            setPendingMessage(
-                msgId,
-                intent.getStringExtra(PushNotificationDispatcher.EXTRA_SENDER),
-                intent.getStringExtra(PushNotificationDispatcher.EXTRA_SUBJECT),
-            )
+        // A recreate already consumed the tap; re-reading it reopens the message and resets the folder.
+        if (savedInstanceState == null && takeNotificationTarget(intent)) {
             currentFolder = "INBOX"
         }
     }
 
-    private fun setPendingMessage(msgId: String, sender: String?, subject: String?) {
-        pendingMessageId = msgId
-        pendingSender = sender
-        pendingSubject = subject
+    /** Moves a notification's target into the pending fields and off [intent], so it acts once. */
+    private fun takeNotificationTarget(intent: Intent): Boolean {
+        pendingMessageId = intent.getStringExtra(PushNotificationDispatcher.EXTRA_MESSAGE_ID) ?: return false
+        pendingSender = intent.getStringExtra(PushNotificationDispatcher.EXTRA_SENDER)
+        pendingSubject = intent.getStringExtra(PushNotificationDispatcher.EXTRA_SUBJECT)
         pendingMessageDeadlineMs = System.currentTimeMillis() + PENDING_MESSAGE_TIMEOUT_MS
+        intent.removeExtra(PushNotificationDispatcher.EXTRA_MESSAGE_ID)
+        intent.removeExtra(PushNotificationDispatcher.EXTRA_SENDER)
+        intent.removeExtra(PushNotificationDispatcher.EXTRA_SUBJECT)
+        return true
     }
 
     private fun applyFolderTitle() {
@@ -262,13 +262,7 @@ class InboxActivity : LockedActivity() {
         super.onNewIntent(intent)
         if (redirectedToUnlock) return
         setIntent(intent)
-        val msgId = intent.getStringExtra(PushNotificationDispatcher.EXTRA_MESSAGE_ID)
-        if (msgId != null) {
-            setPendingMessage(
-                msgId,
-                intent.getStringExtra(PushNotificationDispatcher.EXTRA_SENDER),
-                intent.getStringExtra(PushNotificationDispatcher.EXTRA_SUBJECT),
-            )
+        if (takeNotificationTarget(intent)) {
             currentFolder = "INBOX"
             applyFolderTitle()
             mainHandler.removeCallbacks(pendingMessagePollRunnable)
@@ -767,6 +761,14 @@ class InboxActivity : LockedActivity() {
 
     @androidx.annotation.VisibleForTesting
     internal fun pendingScrollPositionForTest(): Int = pendingScrollPosition
+
+    @androidx.annotation.VisibleForTesting
+    internal fun pendingMessageIdForTest(): String? = pendingMessageId
+
+    @androidx.annotation.VisibleForTesting
+    internal fun clearPendingMessageForTest() {
+        pendingMessageId = null
+    }
 
     @androidx.annotation.VisibleForTesting
     internal fun firstVisiblePositionForTest(): Int =
