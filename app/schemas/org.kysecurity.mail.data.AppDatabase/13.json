@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 13,
-    "identityHash": "f758802508ee0b72a9964139c098c8f2",
+    "identityHash": "784d5121f8b5033f8a1ca4a00630a25c",
     "entities": [
       {
         "tableName": "emails",
@@ -459,18 +459,7 @@
           "columnNames": [
             "uid"
           ]
-        },
-        "indices": [
-          {
-            "name": "index_device_contact_links_rawContactId",
-            "unique": false,
-            "columnNames": [
-              "rawContactId"
-            ],
-            "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_device_contact_links_rawContactId` ON `${TABLE_NAME}` (`rawContactId`)"
-          }
-        ]
+        }
       },
       {
         "tableName": "groups",
@@ -549,11 +538,48 @@
             "subscriberId"
           ]
         }
+      },
+      {
+        "tableName": "recipient_pins",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`address` TEXT NOT NULL, `fingerprint` TEXT NOT NULL, `publicKey` TEXT NOT NULL, `confirmed` INTEGER NOT NULL, PRIMARY KEY(`address`, `fingerprint`))",
+        "fields": [
+          {
+            "fieldPath": "address",
+            "columnName": "address",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fingerprint",
+            "columnName": "fingerprint",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "publicKey",
+            "columnName": "publicKey",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confirmed",
+            "columnName": "confirmed",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "address",
+            "fingerprint"
+          ]
+        }
       }
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'f758802508ee0b72a9964139c098c8f2')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '784d5121f8b5033f8a1ca4a00630a25c')"
     ]
   }
 }

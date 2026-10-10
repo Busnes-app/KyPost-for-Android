@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
   "database": {
-    "version": 14,
-    "identityHash": "1af91d2077ea544d119b1e4dffab1494",
+    "version": 15,
+    "identityHash": "946b2bbd68172502282a4632df99e31c",
     "entities": [
       {
         "tableName": "emails",
@@ -433,7 +433,7 @@
       },
       {
         "tableName": "device_contact_links",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`uid` TEXT NOT NULL, `rawContactId` INTEGER NOT NULL, `deviceUpdatedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`uid`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`uid` TEXT NOT NULL, `rawContactId` INTEGER NOT NULL, `deviceUpdatedAtEpochMs` INTEGER NOT NULL, `syncedJson` TEXT NOT NULL, PRIMARY KEY(`uid`))",
         "fields": [
           {
             "fieldPath": "uid",
@@ -451,6 +451,12 @@
             "fieldPath": "deviceUpdatedAtEpochMs",
             "columnName": "deviceUpdatedAtEpochMs",
             "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncedJson",
+            "columnName": "syncedJson",
+            "affinity": "TEXT",
             "notNull": true
           }
         ],
@@ -590,7 +596,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1af91d2077ea544d119b1e4dffab1494')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '946b2bbd68172502282a4632df99e31c')"
     ]
   }
 }

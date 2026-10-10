@@ -4,23 +4,28 @@ import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.kysecurity.mail.contacts.toDto
+import org.kysecurity.mail.data.AppDatabase
 import org.kysecurity.mail.data.ContactEntity
 import org.kysecurity.mail.data.DataRuntime
+import org.kysecurity.mail.data.RecipientPinEntity
 
-internal class RoomLocalSignerKeys(context: Context) : LocalSignerKeyLookup {
-    private val appContext = context.applicationContext
+internal class RoomLocalSignerKeys(private val database: () -> AppDatabase) : LocalSignerKeyLookup {
+    constructor(context: Context) : this({ DataRuntime.graph(context.applicationContext).database })
 
     override suspend fun keysFor(address: String): List<LocalSignerKey> {
         val needle = address.trim()
         if (needle.isBlank()) return emptyList()
         return withContext(Dispatchers.IO) {
-            val dao = DataRuntime.graph(appContext).database.contactDao()
+            val db = database()
             // pinnedForEmail, never search: search is capped at five name-ordered rows, which let
             // relay-supplied contacts evict the pin. Exact match in Kotlin, not the SQL LIKE, so a
             // substring cannot admit a lookalike.
-            dao.pinnedForEmail(needle)
+            val fromContacts = db.contactDao().pinnedForEmail(needle)
                 .filter { it.hasEmail(needle) }
                 .mapNotNull { it.toLocalSignerKey() }
+            // Keys whose contact sync removed still count; see RecipientPinEntity.
+            fromContacts + db.recipientPinDao().forAddress(needle.lowercase())
+                .map { LocalSignerKey(publicKey = it.publicKey, confirmed = it.confirmed) }
         }
     }
 }
@@ -38,4 +43,14 @@ internal fun ContactEntity.toLocalSignerKey(): LocalSignerKey? {
         publicKey = key,
         confirmed = !pgpKeyNeedsReverification && !identityNeedsReview,
     )
+}
+
+/** The pin-only records that keep this contact's recorded key once the contact row is gone:
+ *  one per address, the same key [toLocalSignerKey] would hand the sender. */
+internal fun ContactEntity.recipientPins(): List<RecipientPinEntity> {
+    val key = toLocalSignerKey() ?: return emptyList()
+    val fingerprint = pgpKeyFingerprint ?: return emptyList()
+    val addresses = runCatching { toDto().emails.map { it.value.trim().lowercase() } }.getOrDefault(emptyList())
+    return addresses.filter { it.isNotEmpty() }.distinct()
+        .map { RecipientPinEntity(it, fingerprint, key.publicKey, key.confirmed) }
 }

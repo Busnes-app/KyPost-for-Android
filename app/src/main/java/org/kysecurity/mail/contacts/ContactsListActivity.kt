@@ -280,7 +280,13 @@ class ContactsListActivity : LockedActivity() {
                 Toast.makeText(this@ContactsListActivity, R.string.contacts_import_none, Toast.LENGTH_LONG).show()
                 return@launch
             }
-            val chosen = graph.settings.importAccounts().toMutableSet()
+            // Consent belongs to this pairing; a different server or account starts with none.
+            val destination = ContactsRuntime.graph(this@ContactsListActivity).repository.destination()
+            if (destination == null) {
+                Toast.makeText(this@ContactsListActivity, R.string.connection_mode_relay_not_paired, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val chosen = graph.settings.importAccounts(destination).toMutableSet()
             val padding = (16 * resources.displayMetrics.density).toInt()
             val container = android.widget.LinearLayout(this@ContactsListActivity).apply {
                 orientation = android.widget.LinearLayout.VERTICAL
@@ -303,8 +309,10 @@ class ContactsListActivity : LockedActivity() {
                 .setTitle(R.string.contacts_import_title)
                 .setView(android.widget.ScrollView(this@ContactsListActivity).apply { addView(container) })
                 .setPositiveButton(R.string.contacts_import_save) { _, _ ->
-                    graph.settings.setImportAccounts(chosen)
-                    graph.coordinator.syncNowAsync()
+                    lifecycleScope.launch {
+                        graph.settings.setImportAccounts(destination, chosen)
+                        graph.coordinator.syncNowAsync()
+                    }
                 }
                 .setNegativeButton(R.string.cancel, null)
                 .create()
