@@ -50,7 +50,9 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   cap on top.
 - `ProcessState.resetAll` is the session boundary: the wipe, the account purge
   (`purgeAccountScopedData`) and `AppRestart` all run it. It advances `ProcessState.generation()`
-  before resetting any holder. Work that outlives its caller (a callback, a background
+  before resetting any holder. The purge and the wipe also call `advanceGeneration()` as their
+  very first statement, before any data step, so outgoing-session work is stale for the whole
+  teardown (`PurgeSessionOrderTest`). Work that outlives its caller (a callback, a background
   completion) captures the generation when it starts and checks `ProcessState.isCurrent` before
   touching session state; a stale result is dropped. `SessionGenerationTest` pins the ordering.
 - `SecurityWipe.wipeAndResetApp` destroys local plaintext **before** any network call, records a
