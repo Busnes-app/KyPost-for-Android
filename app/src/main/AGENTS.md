@@ -407,6 +407,9 @@ Owns production Android app code and resources.
   The Inbox freshness label stays centered immediately below those tabs. Before the first
   successful refresh it reads "Not updated yet", so its row never appears empty and the first
   success does not shift the message list.
+  Each inbox row shows `atUtc` in the device zone (`inboxRowDate`: time for today, date otherwise,
+  blank if unparseable). The "No messages in {folder}" empty state shows only once that folder has
+  refreshed successfully (`inboxEmptyVisible`): a loading or unreachable folder never reads as empty.
 - Theme selection is managed in `ThemesActivity` and uses the shared theme name list based on
   `theme.ts` palettes, led by `Busnes Light`/`Busnes Dark` from `busnes-color-theme-handoff.md`.
   `AppTheme.DEFAULT_THEME` (`Busnes Light`) is the only place the fallback name lives — the

@@ -44,6 +44,7 @@ class InboxActivity : LockedActivity() {
     private lateinit var loadingStatus: TextView
     private lateinit var cancelLoading: View
     private lateinit var freshnessText: TextView
+    private lateinit var emptyText: TextView
     private lateinit var inboxRoot: View
     private lateinit var inboxContent: View
     private lateinit var adapter: EmailAdapter
@@ -68,6 +69,8 @@ class InboxActivity : LockedActivity() {
     private var pendingSubject: String? = null
     private var pendingMessageDeadlineMs: Long = 0L
     private val refreshedAtByFolder = mutableMapOf<String, Long>()
+    /** Last folder the relay confirmed; before that an empty list is unknown, not empty. */
+    private var loadedFolder: String? = null
 
     private val refreshRunnable = object : Runnable {
         override fun run() {
@@ -215,6 +218,7 @@ class InboxActivity : LockedActivity() {
         loadingStatus = findViewById<TextView>(R.id.loadingStatus)
         cancelLoading = findViewById(R.id.cancelLoading)
         freshnessText = findViewById(R.id.inboxFreshness)
+        emptyText = findViewById(R.id.inboxEmpty)
 
         cancelLoading.setOnClickListener {
             pendingMessageId = null
@@ -235,6 +239,7 @@ class InboxActivity : LockedActivity() {
 
         // Rounded panel bar behind the keyword pills — shared STYLE_GUIDE.md §3 Card/panel radius.
         applyPanelBackground(this, keywordChipScroll)
+        applyEmptyStateBackground(this, emptyText)
 
         // Re-style every existing chip in place so a theme switch recolors them even when
         // rebuildTabs() short-circuits because the keyword set itself hasn't changed.
@@ -405,6 +410,7 @@ class InboxActivity : LockedActivity() {
         refreshedAt: Long? = null,
     ) {
         if (folder != currentFolder) return
+        if (refreshedAt != null) loadedFolder = folder
         allEmails = emails
         rebuildTabs(emails)
         renderFilteredEmails()
@@ -492,6 +498,9 @@ class InboxActivity : LockedActivity() {
     private fun renderFilteredEmails() {
         val filtered = KeywordTabs.filterEmails(allEmails, selectedTab)
         adapter.updateEmails(filtered)
+        emptyText.text = getString(R.string.inbox_empty, currentFolderLabel())
+        emptyText.visibility =
+            if (inboxEmptyVisible(filtered.size, loadedFolder, currentFolder)) View.VISIBLE else View.GONE
         if (pendingScrollPosition > 0 && adapter.itemCount > 0) {
             val target = pendingScrollPosition.coerceAtMost(adapter.itemCount - 1)
             pendingScrollPosition = 0
@@ -502,6 +511,7 @@ class InboxActivity : LockedActivity() {
     private fun switchFolder(folder: String) {
         currentFolder = folder
         selectedTab = KeywordTabs.ALL
+        emptyText.visibility = View.GONE
         applyFolderTitle()
         renderFreshness()
         refreshInbox()
@@ -736,3 +746,6 @@ class InboxActivity : LockedActivity() {
         private val SWIPE_DELETE_COLOR = Color.parseColor(COLOR_DANGER)
     }
 }
+
+internal fun inboxEmptyVisible(shown: Int, loadedFolder: String?, currentFolder: String): Boolean =
+    shown == 0 && loadedFolder == currentFolder
