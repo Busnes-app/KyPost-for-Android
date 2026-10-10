@@ -1,9 +1,11 @@
-# DEFERRED BUMPS. Five entries below are 3+ years stale and are NOT security fixes, so they were
+# DEFERRED BUMPS. Three entries below are 3+ years stale and are NOT security fixes, so they were
 # deliberately kept out of the security pass rather than mixed into it:
 #
-#   androidx-cardview  1.0.0  (2018)   androidx-appcompat  1.6.1  (Feb 2023)
-#   material          1.10.0  (2023)   androidx-core-ktx  1.10.1  (May 2023)
+#   androidx-cardview  1.0.0  (2018)   androidx-core-ktx  1.10.1  (May 2023)
 #   biometric          1.1.0  (2021)   <- see its own note below; this one is security-relevant
+#
+# core-ktx 1.19.1 and okhttp 5.5.0 require compileSdk 37 (checkAarMetadata); both stay put
+# until compileSdk moves in its own change.
 #
 # Bumping any of them means regenerating gradle/verification-metadata.xml, which is the file CI
 # watches most closely. Do it in its own commit:
@@ -16,7 +18,7 @@
 [versions]
 agp = "9.4.1"
 kotlin = "2.4.20"
-coreKtx = "1.19.1"
+coreKtx = "1.10.1"
 activityKtx = "1.10.1"
 junit = "4.13.2"
 junitVersion = "1.3.0"
@@ -32,7 +34,7 @@ lifecycleRuntimeKtx = "2.9.4"
 lifecycleViewModelKtx = "2.9.4"
 coroutinesAndroid = "1.11.0"
 datastorePreferences = "1.1.7"
-okhttp = "5.5.0"
+okhttp = "5.2.1"
 serializationJson = "1.11.0"
 firebaseBom = "34.2.0"
 kotlinxCoroutinesPlayServices = "1.11.0"
