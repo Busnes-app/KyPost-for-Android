@@ -103,8 +103,15 @@ Owns production Android app code and resources.
      builds the request from is a different account. The inbox drops a failure (no row, no Retry)
      unless the session generation captured at the swipe is still current and the active pairing
      (read on the worker, since the screen's account only updates on repaint) is still the row's
-     account. `PendingMailActions` entries carry their generation; a completion writes the removal
-     set or Room only while it is current, under the lock the reset takes.
+     account. Every action is claimed on the caller's thread before it is queued
+     (`MailRepository.beginRemoval`/`beginRead` return a `PendingMail` carrying the generation
+     then): the overlay shows at once, the action is not sent if that generation has ended, and a
+     completion writes the removal set or Room only while it is current, under the lock the reset
+     takes. Refresh filtering and writes take that same lock. A task the executor refuses or
+     discards unrun calls `abandon`. `PushRepository.clearPairing` holds mail work
+     (`MailBackgroundExecutor.quiesce`) until the outgoing pairing is cleared. A failed read or
+     action notifies `setOverlayListener`, and the inbox repaints from the cache; it also paints the
+     cache before every non-pull network refresh, so a row opened and marked read shows read at once.
 - **`emails` is keyed on (folder, messageId), not messageId.** The relay's id is an IMAP UID,
   unique only within one mailbox, so INBOX and Archive can both hold `42`; under the old
   single-column key a refresh of either folder overwrote or relocated the other's row, and a

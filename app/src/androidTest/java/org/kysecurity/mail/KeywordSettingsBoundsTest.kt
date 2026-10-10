@@ -77,7 +77,9 @@ class KeywordSettingsBoundsTest {
         val settings = KeywordSettings(context)
         settings.rememberKeywords(setOf("\$Phishing", "\\Seen", "Work"))
 
-        assertEquals(listOf("Work"), settings.getOrderedKeywords())
+        // The stored set, not getOrderedKeywords(): that read filters on its own and would hide a
+        // write-side regression.
+        assertEquals(setOf("Work"), settings.getAllKeywords())
     }
 
     /** An install that stored them before the write-side filter must not keep their chips. */
