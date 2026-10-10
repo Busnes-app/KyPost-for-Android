@@ -45,7 +45,7 @@ class ContactPushBatchingTest {
 
         assertTrue(repository.sync() is ContactSyncOutcome.Success)
 
-        assertEquals(listOf("POST", "POST", "POST"), server.requests)
+        assertEquals("a first sync ends with the snapshot", listOf("POST", "POST", "POST", "GET since=0"), server.requests)
         assertEquals(1200, server.live().size)
         assertEquals(0, db.pendingContactChangeDao().getAllPending().size)
     }
