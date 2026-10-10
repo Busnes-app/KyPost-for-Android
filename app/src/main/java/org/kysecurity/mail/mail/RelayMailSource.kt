@@ -233,7 +233,9 @@ class RelayMailSource(
             if (code != 200) return@execute mapErrorCode(code, rawBody)
             val parsed = runCatching { json.decodeFromString<RelaySendResponseDto>(rawBody) }.getOrNull()
                 ?: return@execute MailOutcome.UpstreamFailure("Malformed send response")
-            MailOutcome.Success(MailSendOutcome(sentSaved = parsed.sentSaved, warning = parsed.warning))
+            MailOutcome.Success(
+                MailSendOutcome(sentSaved = parsed.sentSaved, warning = parsed.warning, calendarReplySent = parsed.calendarReply),
+            )
         }
     }
 

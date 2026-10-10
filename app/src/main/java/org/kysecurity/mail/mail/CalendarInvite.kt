@@ -303,6 +303,17 @@ fun rsvpDraft(event: CalendarEvent, attendee: String, answer: Rsvp, now: Instant
     )
 }
 
+enum class RsvpResult { SENT, SENT_AS_PLAIN_MAIL, REFUSED, MAYBE_SENT }
+
+/** A 200 without the relay's `calendarReply: true` means a relay that ignored the field: the
+ *  organizer got only the plain body. It is never retried, and never counted as an RSVP. */
+fun rsvpResult(outcome: MailOutcome<MailSendOutcome>): RsvpResult = when {
+    outcome is MailOutcome.Success ->
+        if (outcome.value.calendarReplySent) RsvpResult.SENT else RsvpResult.SENT_AS_PLAIN_MAIL
+    outcome.refusedBeforeSending() -> RsvpResult.REFUSED
+    else -> RsvpResult.MAYBE_SENT
+}
+
 /** True when the relay answered and refused: nothing went out, so asking again is safe. Anything
  *  else (a timeout, a 502) may have been sent. */
 fun MailOutcome<*>.refusedBeforeSending(): Boolean = when (this) {

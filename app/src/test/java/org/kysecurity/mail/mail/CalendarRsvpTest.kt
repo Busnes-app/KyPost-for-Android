@@ -142,6 +142,15 @@ class CalendarRsvpTest {
     }
 
     @Test
+    fun aTwoHundredWithoutTheAckIsPlainMailNotAnRsvp() {
+        fun ok(ack: Boolean) = MailOutcome.Success(MailSendOutcome(sentSaved = true, warning = "", calendarReplySent = ack))
+        assertEquals(RsvpResult.SENT, rsvpResult(ok(true)))
+        assertEquals(RsvpResult.SENT_AS_PLAIN_MAIL, rsvpResult(ok(false)))
+        assertEquals(RsvpResult.REFUSED, rsvpResult(MailOutcome.BadRequest("invalid calendar reply: x")))
+        assertEquals(RsvpResult.MAYBE_SENT, rsvpResult(MailOutcome.UpstreamFailure("timeout")))
+    }
+
+    @Test
     fun onlyADefiniteRefusalIsSafeToRetry() {
         assertTrue(MailOutcome.BadRequest("invalid calendar reply: x").refusedBeforeSending())
         assertTrue(MailOutcome.RateLimited("slow down", 10).refusedBeforeSending())

@@ -164,7 +164,12 @@ data class ClientEncryptedDraft(val to: String, val pgpDraft: String) {
     override fun toString(): String = "ClientEncryptedDraft(redacted)"
 }
 
-data class MailSendOutcome(val sentSaved: Boolean, val warning: String)
+data class MailSendOutcome(
+    val sentSaved: Boolean,
+    val warning: String,
+    /** The relay confirmed the iTIP part went out (KyPost-Server #354). An older relay omits it. */
+    val calendarReplySent: Boolean = false,
+)
 
 data class ClientEncryptedDelivery(val recipients: List<String>, val ciphertext: String)
 

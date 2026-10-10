@@ -415,7 +415,9 @@ Owns production Android app code and resources.
   - **Always** unencrypted and unsigned (the relay 400s `calendarReply` beside either flag), so
     each RSVP is confirmed in a dialog that says so. The draft never sets `sign`/`encrypt`.
   - Buttons need the relay's `calendarMethod` (#353): an older relay ignores `calendarReply` and
-    would send plain mail. #353 without #354 cannot be detected; ship them together.
+    would send plain mail. Only a 200 carrying `"calendarReply": true` (#354) is an RSVP
+    (`rsvpResult`). A 200 without it means the organizer got plain mail: the user is told to
+    update the server, the RSVP is not marked sent, and nothing is retried.
   - A refusal shows the relay's reason; nothing else is sent instead. Only a definite refusal
     (`refusedBeforeSending`) re-arms the buttons; a timeout says "may have been sent". The
     in-flight set is process-wide so a rotation cannot double-send.

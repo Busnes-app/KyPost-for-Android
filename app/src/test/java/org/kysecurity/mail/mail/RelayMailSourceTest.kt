@@ -1099,6 +1099,24 @@ class RelayMailSourceTest {
     }
 
     @Test
+    fun calendarReplyAck_isReadOnlyAsAJsonTrue() {
+        fun send(body: String) = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body) },
+        ).sendMail(MailDraft(to = "boss@example.com", subject = "s", body = "b", calendarReply = "x"))
+
+        val acked = send("""{"ok":true,"sentSaved":true,"warning":"","calendarReply":true}""")
+        assertTrue((acked as MailOutcome.Success).value.calendarReplySent)
+        // An older relay ignores the field and still answers 200: the organizer got plain mail.
+        val ignored = send("""{"ok":true,"sentSaved":true,"warning":""}""")
+        assertFalse((ignored as MailOutcome.Success).value.calendarReplySent)
+        assertFalse(send("""{"ok":true,"calendarReply":false}""").let { (it as MailOutcome.Success).value.calendarReplySent })
+        // Not a JSON boolean: the reply is not understood, so it is not a success either.
+        assertTrue(send("""{"ok":true,"calendarReply":"yes"}""") is MailOutcome.UpstreamFailure)
+    }
+
+    @Test
     fun calendarReplyRefusal_surfacesTheRelaysReason() {
         val source = RelayMailSource(
             pairingProvider = { testPairing() },

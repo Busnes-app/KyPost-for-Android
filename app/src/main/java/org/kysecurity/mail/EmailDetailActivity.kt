@@ -911,20 +911,20 @@ class EmailDetailActivity : LockedActivity() {
             val outcome = runCatching { mailRepository.send(draft) }
                 .getOrElse { MailOutcome.UpstreamFailure(it.message ?: "Unexpected error") }
             android.os.Handler(android.os.Looper.getMainLooper()).post {
-                val sent = outcome is MailOutcome.Success
-                val refused = outcome.refusedBeforeSending()
+                val result = org.kysecurity.mail.mail.rsvpResult(outcome)
                 val reason = outcome.userFacingMessage().orEmpty()
-                val message = when {
-                    sent -> appContext.getString(R.string.rsvp_sent)
-                    refused -> appContext.getString(R.string.rsvp_failed, reason)
-                    else -> appContext.getString(R.string.rsvp_maybe_sent, reason)
+                val message = when (result) {
+                    org.kysecurity.mail.mail.RsvpResult.SENT -> appContext.getString(R.string.rsvp_sent)
+                    org.kysecurity.mail.mail.RsvpResult.SENT_AS_PLAIN_MAIL -> appContext.getString(R.string.rsvp_sent_as_plain_mail)
+                    org.kysecurity.mail.mail.RsvpResult.REFUSED -> appContext.getString(R.string.rsvp_failed, reason)
+                    org.kysecurity.mail.mail.RsvpResult.MAYBE_SENT -> appContext.getString(R.string.rsvp_maybe_sent, reason)
                 }
                 Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
-                // A sent answer stays sent for this process. Reopening the message allows a retry.
-                if (!sent) rsvpInFlight.remove(key)
+                // Only a confirmed RSVP stays sent for this process. Reopening the message allows a retry.
+                if (result != org.kysecurity.mail.mail.RsvpResult.SENT) rsvpInFlight.remove(key)
                 if (isFinishing || isDestroyed) return@post
-                // Only a definite refusal re-arms this screen: a timeout may already have gone out.
-                rsvpButtons().forEach { it.isEnabled = refused }
+                // Only a definite refusal re-arms this screen: anything else may already have gone out.
+                rsvpButtons().forEach { it.isEnabled = result == org.kysecurity.mail.mail.RsvpResult.REFUSED }
             }
         }
     }

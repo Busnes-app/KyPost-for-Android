@@ -118,6 +118,7 @@
     <string name="rsvp_confirm_title">Send RSVP unencrypted?</string>
     <string name="rsvp_confirm_message">Reply \"%1$s\" to %2$s as %3$s.\n\nRSVPs are always sent unencrypted and unsigned, because the organizer\'s calendar can\'t read an encrypted reply. The reply carries your answer, your address and the event\'s ID.</string>
     <string name="rsvp_confirm_not_sender">The organizer is not the sender of this email, so this reply goes to an address the sender chose.</string>
+    <string name="rsvp_sent_as_plain_mail">Your server didn\'t send this as a calendar reply. The organizer got a plain email; update your server.</string>
     <string name="rsvp_maybe_sent">RSVP may not have been sent: %1$s. Check your Sent folder before trying again.</string>
     <string name="rsvp_send">Send unencrypted</string>
     <string name="rsvp_sent">RSVP sent</string>
