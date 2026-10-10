@@ -16,7 +16,7 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   token mint (`/api/pgp/qr/token`), PGP bootstrap (`/api/pgp/bootstrap`), recipient key lookup
   (`/api/pgp/recipients/check`, and `/api/pgp/recipients/resolve` for client-side encrypted send
   only), mail relay (`/api/inbox`, `/api/inbox/folders`,
-  `/api/inbox/actions`, `/api/mail/draft`, `/api/mail/send`, `/api/mail/send-pgp`), MFA push-respond
+  `/api/inbox/actions`, `/api/mail/search`, `/api/mail/draft`, `/api/mail/send`, `/api/mail/send-pgp`), MFA push-respond
   (`/api/mfa/push/respond`), and self-deregistration (`/api/notifications/native/deregister`).
   `deviceSecret` is minted server-side once per successful `POST
   /api/notifications/native/register` call and returned only in that response — the app must

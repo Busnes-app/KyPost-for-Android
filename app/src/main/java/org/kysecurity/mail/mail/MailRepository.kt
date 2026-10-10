@@ -81,6 +81,10 @@ class MailRepository(
 
     fun listFolders(parent: String?): MailOutcome<FolderListResult> = relaySource.listFolders(parent)
 
+    /** Not cached: results are a view of [folder], not its window, and must not prune it. */
+    fun search(query: String, folder: String, limit: Int = 50): MailOutcome<List<Email>> =
+        relaySource.searchMail(query, folder, limit)
+
     fun listAttachments(id: String, folder: String): MailOutcome<List<AttachmentInfo>> =
         relaySource.listAttachments(id, folder)
 

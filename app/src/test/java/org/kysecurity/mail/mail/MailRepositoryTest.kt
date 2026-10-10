@@ -110,6 +110,7 @@ private class FakeMailSource(
     }
 
     override fun listFolders(parent: String?) = unsupported()
+    override fun searchMail(query: String, mailbox: String, limit: Int) = unsupported()
     override fun createFolder(parent: String, name: String) = unsupported()
     override fun renameFolder(folder: String, name: String) = unsupported()
     override fun deleteFolder(folder: String) = unsupported()
