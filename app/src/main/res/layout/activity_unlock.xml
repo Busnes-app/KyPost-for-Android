@@ -23,7 +23,6 @@
         android:layout_height="wrap_content"
         android:importantForAutofill="no"
         android:inputType="numberPassword"
-        android:maxLength="6"
         android:gravity="center"
         android:textSize="28sp"
         android:hint="@string/unlock_pin_hint" />
