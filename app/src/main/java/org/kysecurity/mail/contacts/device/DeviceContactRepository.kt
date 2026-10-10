@@ -210,9 +210,9 @@ class DeviceContactRepository(
             }
 
             clearDirtyFlag(rawContactId, version)
-            db.deviceContactLinkDao().upsert(
-                link.copy(deviceUpdatedAtEpochMs = System.currentTimeMillis(), syncedJson = syncedJsonOf(mergedDto)),
-            )
+            // The base stays put: the phone still holds its own values until the push writes the
+            // merge back, and a base advanced now reads that pending write as a device change.
+            db.deviceContactLinkDao().upsert(link.copy(deviceUpdatedAtEpochMs = System.currentTimeMillis()))
         }
     }
 
@@ -648,10 +648,12 @@ class DeviceContactRepository(
             deviceUpdatedAtEpochMs = link.deviceUpdatedAtEpochMs,
             base = baseOf(link),
         )
+        // The base advances only when the phone will hold Room's value for every planned field; an
+        // empty plan alone may mean the merge kept a device value Room does not have.
+        val agreed = plan.leavesDeviceMatching(dto, currentSnapshot)
         if (plan.isEmpty()) {
-            // Both sides already agree, so this is the new base.
             val synced = syncedJsonOf(dto)
-            if (link.syncedJson != synced) db.deviceContactLinkDao().upsert(link.copy(syncedJson = synced))
+            if (agreed && link.syncedJson != synced) db.deviceContactLinkDao().upsert(link.copy(syncedJson = synced))
             return@withContext
         }
 
@@ -802,7 +804,10 @@ class DeviceContactRepository(
         // batch that never landed makes the next merge believe the device is already current.
         if (applied) {
             db.deviceContactLinkDao().upsert(
-                link.copy(deviceUpdatedAtEpochMs = System.currentTimeMillis(), syncedJson = syncedJsonOf(dto)),
+                link.copy(
+                    deviceUpdatedAtEpochMs = System.currentTimeMillis(),
+                    syncedJson = if (agreed) syncedJsonOf(dto) else link.syncedJson,
+                ),
             )
         }
     }
