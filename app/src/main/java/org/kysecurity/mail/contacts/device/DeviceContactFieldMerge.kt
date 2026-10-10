@@ -18,11 +18,26 @@ object DeviceContactFieldMerge {
         else -> twoWay(room, device)
     }
 
-    /** Null, blank and empty are one value: CP2 drops an empty row, so "" never round-trips. */
-    fun same(a: Any?, b: Any?): Boolean = a == b || (isUnset(a) && isUnset(b))
+    /** Compares as CP2 stores: null, blank and empty are one value, since CP2 drops an empty row,
+     *  and labels ignore case, since CP2 reads Room's "home" back as TYPE_HOME, "Home". */
+    fun same(a: Any?, b: Any?): Boolean = a == b || normal(a) == normal(b)
 
-    private fun isUnset(v: Any?): Boolean =
-        v == null || (v is String && v.isBlank()) || (v is Collection<*> && v.isEmpty())
+    private fun normal(v: Any?): Any? = when (v) {
+        is String -> v.trim().ifEmpty { null }
+        is Collection<*> -> v.map(::normal).ifEmpty { null }
+        is ContactFieldDto -> v.copy(label = label(v.label), value = v.value.trim())
+        is ContactAddressDto -> ContactAddressDto(
+            label = label(v.label),
+            street = normal(v.street) as String?,
+            city = normal(v.city) as String?,
+            region = normal(v.region) as String?,
+            postalCode = normal(v.postalCode) as String?,
+            country = normal(v.country) as String?,
+        )
+        else -> v
+    }
+
+    private fun label(l: String?): String? = l?.trim()?.lowercase()?.ifEmpty { null }
 
     fun <T> mergeField(
         roomValue: T?,

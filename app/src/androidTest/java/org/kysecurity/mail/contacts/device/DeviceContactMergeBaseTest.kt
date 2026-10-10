@@ -12,6 +12,7 @@ import org.kysecurity.mail.contacts.ContactDto
 import org.kysecurity.mail.contacts.ContactFieldDto
 import org.kysecurity.mail.contacts.ContactSyncClient
 import org.kysecurity.mail.contacts.ContactSyncRepository
+import org.kysecurity.mail.contacts.ContactUrlDto
 import org.kysecurity.mail.contacts.GroupSyncRepository
 import org.kysecurity.mail.contacts.GroupsSyncClient
 import org.kysecurity.mail.contacts.toDto
@@ -102,5 +103,30 @@ class DeviceContactMergeBaseTest {
         assertNull(db.contactDao().getByUid(uid)!!.notes?.takeIf { it.isNotBlank() })
         assertEquals(emptyList<String>(), deviceNotes(rawContactId))
         assertEquals("+15550199", db.contactDao().getByUid(uid)!!.toDto().phones.single().value)
+    }
+
+    /** The push never writes websites, so a website cleared in Room stays on the phone; the base
+     *  must keep it, or the next phone edit reads the stale website as the phone's own change. */
+    @Test
+    fun aWebsiteClearedInRoom_staysClearedAfterAPhoneEdit() = runBlocking {
+        val uid = syncRepository.queueCreate(
+            ContactDto(
+                fn = "Website Base Probe",
+                websites = listOf(ContactUrlDto(value = "https://example.invalid")),
+                phones = listOf(ContactFieldDto(value = "+15550100")),
+            ),
+        )
+        repository.syncAll()
+        val rawContactId = db.deviceContactLinkDao().getByUid(uid)!!.rawContactId
+
+        val cleared = db.contactDao().getByUid(uid)!!.toDto().copy(websites = emptyList())
+        syncRepository.queueUpdate(cleared, identityChanged = false)
+        repository.syncAll()
+        editDevicePhone(rawContactId, "+15550199")
+        repository.syncAll()
+
+        val room = db.contactDao().getByUid(uid)!!.toDto()
+        assertEquals(emptyList<ContactUrlDto>(), room.websites)
+        assertEquals("+15550199", room.phones.single().value)
     }
 }
