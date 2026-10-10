@@ -39,6 +39,11 @@ internal class FakeContactServer : Call.Factory {
     /** Seeds server-side contacts, as if written by another client. */
     fun seed(vararg seeded: ContactDto) = seeded.forEach(::apply)
 
+    /** Drops a contact with no tombstone, as after tombstone GC. */
+    fun forget(uid: String) {
+        contacts.remove(uid)
+    }
+
     override fun newCall(request: Request): Call {
         val since: Long
         if (request.method == "POST") {
