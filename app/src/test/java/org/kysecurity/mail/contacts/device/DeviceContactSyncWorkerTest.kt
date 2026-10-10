@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 import org.kysecurity.mail.contacts.ContactSyncOutcome
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /** The periodic worker is the only background path to the server; it must not be device-only. */
 class DeviceContactSyncWorkerTest {
@@ -32,5 +33,29 @@ class DeviceContactSyncWorkerTest {
 
         assertEquals(listOf("serverSync", "refreshGroups"), failed)
         assertEquals(true, deviceRan)
+    }
+
+    @Test
+    fun aServerSyncThatThrows_isAFailedStage_andTheDevicePassStillRuns() = runBlocking {
+        val failed = runContactSync(
+            server = { throw IllegalStateException("database closed") },
+            device = { listOf("refreshGroups") },
+        )
+
+        assertEquals(listOf("serverSync", "refreshGroups"), failed)
+    }
+
+    @Test
+    fun cancellation_isNotSwallowed() = runBlocking {
+        var deviceRan = false
+        val thrown = runCatching {
+            runContactSync(
+                server = { throw kotlinx.coroutines.CancellationException("stopped") },
+                device = { deviceRan = true; emptyList() },
+            )
+        }.exceptionOrNull()
+
+        assertTrue(thrown is kotlinx.coroutines.CancellationException, "got $thrown")
+        assertEquals(false, deviceRan)
     }
 }

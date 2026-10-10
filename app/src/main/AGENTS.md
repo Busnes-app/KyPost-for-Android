@@ -506,17 +506,22 @@ Owns production Android app code and resources.
   repository reports that as an outcome, not a throw.
 - **Device sync must not lose a change that lands while it runs, nor wake itself.** A
   `DeviceContactSyncCoordinator` request during a pass sets `rerun` and gets one more pass rather
-  than being dropped. A dirty raw contact is cleared only at the `VERSION` the pull read, so a later
+  than being dropped; the request (`claimPass`) and the pass's decision to stop (`runAgainOrStop`)
+  share one lock, so a request can never land between the pass's last check and its exit. A dirty raw contact is cleared only at the `VERSION` the pull read, so a later
   edit stays dirty. The foreign-import watermark is the scan's start time, not its end.
   `makeContactsVisible` writes only when `UNGROUPED_VISIBLE` is off: each write notifies the
   contacts observer, which used to trigger the next sync, which wrote again.
 - **A backend group's lifetime is the device group's.** After a group refresh that succeeded,
   `reconcileGroups` deletes, as the sync adapter and only within our account, the device group of
   every link whose group the server no longer lists (`groupRemovals`), then drops the link. A failed
-  refresh removes nothing, since the Room groups were not refreshed. `DeviceGroupDeleteTest`.
+  refresh removes nothing, since the Room groups were not refreshed. Title matching can link two
+  backend groups to one device row, so a row a live group still links to is kept and only the
+  obsolete link goes. `DeviceGroupDeleteTest` covers that and the account-type scoping.
 - **Device merges are three-way.** `device_contact_links.syncedJson` (`MIGRATION_14_15`) holds the
-  `ContactDto` both sides agreed on after the last sync, written on create, on an applied or
-  already-agreeing update, and after a device pull. `DeviceContactFieldMerge.againstBase` gives
+  `ContactDto` both sides agreed on after the last sync. It is written on create and by the push
+  pass only when `DeviceContactUpdatePlan.leavesDeviceMatching` says the phone will then hold
+  Room's value for every planned field — never by the pull, which runs before the phone has the
+  merge, and not on an empty plan alone. `DeviceContactMergeBaseTest`. `DeviceContactFieldMerge.againstBase` gives
   each field to the side that changed it since then, so a field emptied on either side stays
   empty; null, blank and empty compare equal because CP2 drops empty rows. With no base (links
   older than the column, or adopted by SOURCE_ID) or a change on both sides, the old two-way rule

@@ -47,6 +47,21 @@ data class DeviceContactUpdatePlan(
     /** The Organization row has a change; it holds all three. */
     fun hasOrganizationChange(): Boolean = org != null || title != null || department != null
 
+    /** True when applying this plan to [snapshot] leaves the phone with [dto]'s value for every
+     *  field the plan covers: only then do both sides hold the same thing, the merge base. */
+    fun leavesDeviceMatching(dto: ContactDto, snapshot: DeviceRawContactSnapshot): Boolean {
+        fun <T> after(planned: T?, device: T): T = planned ?: device
+        return listOf(
+            after(displayName, snapshot.fn) to dto.fn,
+            after(org, snapshot.org) to dto.org,
+            after(notes, snapshot.notes) to dto.notes,
+            after(birthday, snapshot.birthday) to dto.birthday,
+            after(emails, snapshot.emails) to dto.emails,
+            after(phones, snapshot.phones) to dto.phones,
+            after(addresses, snapshot.addresses) to dto.addresses,
+        ).all { (device, room) -> DeviceContactFieldMerge.same(device, room) }
+    }
+
     companion object {
         /**
          * Runs the same merge as the device pull, against the same [base], then keeps only the
