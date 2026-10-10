@@ -212,13 +212,27 @@ class MigrationTest {
     }
 
     @Test
-    fun migrate12To13_indexesLinksByRawContactId_keepingRows() {
-        helper.createDatabase(TEST_DB, 12).apply {
+    fun migrate12To13_createsTheRecipientPinTable() {
+        helper.createDatabase(TEST_DB, 12).close()
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 13, true, AppDatabase.MIGRATION_12_13)
+
+        migrated.execSQL(
+            "INSERT INTO recipient_pins (address, fingerprint, publicKey, confirmed) VALUES ('a@example.invalid', 'F', 'K', 1)",
+        )
+        migrated.query("SELECT publicKey FROM recipient_pins WHERE address = 'a@example.invalid'").use { cursor ->
+            assertEquals(1, cursor.count)
+        }
+    }
+
+    @Test
+    fun migrate13To14_indexesLinksByRawContactId_keepingRows() {
+        helper.createDatabase(TEST_DB, 13).apply {
             execSQL("INSERT INTO device_contact_links (uid, rawContactId, deviceUpdatedAtEpochMs) VALUES ('u1', 7, 0)")
             close()
         }
 
-        val migrated = helper.runMigrationsAndValidate(TEST_DB, 13, true, AppDatabase.MIGRATION_12_13)
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 14, true, AppDatabase.MIGRATION_13_14)
 
         migrated.query("SELECT uid FROM device_contact_links WHERE rawContactId = 7").use { cursor ->
             assertEquals(1, cursor.count)
