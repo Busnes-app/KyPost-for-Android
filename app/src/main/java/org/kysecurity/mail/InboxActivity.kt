@@ -71,6 +71,10 @@ class InboxActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal var rowActionDroppedForTest: (() -> Unit)? = null
 
+    /** Null in production. Stands in for the active pairing's account in a row action's check. */
+    @androidx.annotation.VisibleForTesting
+    internal var activeAccountForTest: (() -> MailAccount?)? = null
+
     /** The account the rows on screen were read under; row actions carry it to the request. */
     @Volatile private var shownAccount: MailAccount? = null
     private var lastAppliedThemeName: String = ""
@@ -740,14 +744,23 @@ class InboxActivity : LockedActivity() {
         val sourceFolder = email.sourceFolder()
         // Same reasoning as sourceFolder: the row belongs to the account it was painted under.
         val account = shownAccount
+        val session = ProcessState.generation()
         val index = allEmails.indexOfFirst { it.id == email.id }
         allEmails = allEmails.filter { it.id != email.id }
         renderFilteredEmails()
-        val onFailure = { reason: String -> restoreFailedRow(email, sourceFolder, account, index, label, reason, mutate) }
+        // Decided on the worker: reading the pairing is disk and crypto. Until the next repaint
+        // [shownAccount] still names the old account, so it cannot answer this alone.
+        val pairingChanged = java.util.concurrent.atomic.AtomicBoolean(false)
+        val onFailure = { reason: String ->
+            restoreFailedRow(email, sourceFolder, account, session, pairingChanged.get(), index, label, reason, mutate)
+        }
         MailBackgroundExecutor.submitReporting(this, label, onFailure) {
             rowActionObserverForTest?.invoke(email.id, sourceFolder)
             // [mutate] takes the folder as an argument: it has no way to reach for currentFolder.
-            mutate(email.id, sourceFolder, account)
+            mutate(email.id, sourceFolder, account).also {
+                val active = activeAccountForTest?.invoke() ?: mailRepository.currentAccount()
+                pairingChanged.set(account != active)
+            }
         }
     }
 
@@ -758,13 +771,16 @@ class InboxActivity : LockedActivity() {
         email: Email,
         sourceFolder: String,
         account: MailAccount?,
+        session: Long,
+        pairingChanged: Boolean,
         index: Int,
         label: String,
         reason: String,
         mutate: RowMutation,
     ): Boolean {
         if (isFinishing || isDestroyed) return false
-        if (account != shownAccount) {
+        fun stillOurs() = !pairingChanged && ProcessState.isCurrent(session) && account == shownAccount
+        if (!stillOurs()) {
             rowActionDroppedForTest?.invoke()
             return true
         }
@@ -773,7 +789,7 @@ class InboxActivity : LockedActivity() {
             renderFilteredEmails()
         }
         Snackbar.make(recyclerView, getString(R.string.mail_action_failed, label, reason), Snackbar.LENGTH_LONG)
-            .setAction(R.string.action_retry) { if (account == shownAccount) submitRowAction(email, label, mutate) }
+            .setAction(R.string.action_retry) { if (stillOurs()) submitRowAction(email, label, mutate) }
             // Above the phone's bottom bar; the w600dp rail runs the full height beside the list.
             .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
             .show()
