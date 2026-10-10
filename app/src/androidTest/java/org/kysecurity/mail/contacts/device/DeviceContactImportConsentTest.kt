@@ -15,6 +15,7 @@ import org.kysecurity.mail.contacts.GroupSyncRepository
 import org.kysecurity.mail.contacts.GroupsSyncClient
 import org.kysecurity.mail.contacts.TEST_PAIRING
 import org.kysecurity.mail.data.AppDatabase
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -173,6 +174,55 @@ class DeviceContactImportConsentTest {
         scan.syncAll()
 
         assertEquals(0, queuedProbeCreates())
+    }
+
+    /** A pairing replacement lands while a scan runs: the session ends, the outbox is purged and a
+     *  new pairing becomes active. Nothing consented under the old one may reach the new outbox. */
+    @Test
+    fun aPairingReplacedDuringAScan_queuesNothingForTheNewPairing() = runBlocking {
+        settings.setImportAccounts(destination, setOf(DeviceAccount(null, null).key))
+        var active = TEST_PAIRING
+        val switching = ContactSyncRepository(
+            db = db,
+            client = ContactSyncClient(callFactory = OkHttpClient()),
+            cursorStore = ContactCursorStore(context, db),
+            pairingProvider = { active },
+        )
+        val scan = deviceRepository(switching) {
+            org.kysecurity.mail.ProcessState.resetAll()
+            db.pendingContactChangeDao().clearAll()
+            active = TEST_PAIRING.copy(subscriberId = "sub-replacement")
+        }
+
+        scan.syncAll()
+
+        assertEquals(0, queuedProbeCreates())
+    }
+
+    /** The account purge takes the consent lock and clears consent: an import already inside the
+     *  lock finishes first (so the purge removes its row), and none can start after. */
+    @Test
+    fun theAccountPurge_waitsForAnImportInProgress_andLeavesNoConsent() = runBlocking {
+        val key = DeviceAccount(null, null).key
+        settings.setImportAccounts(destination, setOf(key))
+        val order = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val inside = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val importing = launch(kotlinx.coroutines.Dispatchers.Default) {
+            settings.whileConsented(destination, key) {
+                inside.complete(Unit)
+                release.await()
+                order += "import"
+            }
+        }
+        inside.await()
+        val purging = launch(kotlinx.coroutines.Dispatchers.Default) { settings.clearConsentDuring { order += "purge" } }
+        release.complete(Unit)
+        importing.join()
+        purging.join()
+
+        assertEquals(listOf("import", "purge"), order.toList())
+        assertEquals(null, settings.whileConsented(destination, key) { "queued" })
     }
 
     @Test
