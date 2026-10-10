@@ -34,6 +34,9 @@ private class FakeEmailDao : EmailDao {
     override fun clearAll() { rows.clear() }
     override fun getById(id: String, folder: String): EmailEntity? = rows[key(id, folder)]
     override fun getIds(folder: String): List<String> = getByFolder(folder).map { it.messageId }
+    override fun unreadCounts(): List<org.kysecurity.mail.data.FolderUnread> =
+        rows.values.filter { it.status == "unread" }.groupBy { it.folder }
+            .map { (folder, unread) -> org.kysecurity.mail.data.FolderUnread(folder, unread.size) }
     override fun pruneStaleInFolder(folder: String, keepIds: List<String>) {
         val keep = keepIds.toSet()
         rows.values.filter { it.folder == folder && it.inWindow && it.messageId !in keep }

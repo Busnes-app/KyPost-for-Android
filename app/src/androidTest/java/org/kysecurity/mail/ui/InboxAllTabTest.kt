@@ -45,7 +45,7 @@ class InboxAllTabTest {
         ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val chips = activity.findViewById<ChipGroup>(R.id.keywordChipGroup)
-                val labels = (0 until chips.childCount).map { (chips.getChildAt(it) as Chip).text.toString() }
+                val labels = (0 until chips.childCount).map { (chips.getChildAt(it) as Chip).tag as String }
 
                 assertEquals(listOf(TAB_KEYWORD), labels)
                 assertEquals(TAB_KEYWORD, activity.selectedTabForTest())
@@ -62,7 +62,7 @@ class InboxAllTabTest {
         ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val chips = activity.findViewById<ChipGroup>(R.id.keywordChipGroup)
-                val labels = (0 until chips.childCount).map { (chips.getChildAt(it) as Chip).text.toString() }
+                val labels = (0 until chips.childCount).map { (chips.getChildAt(it) as Chip).tag as String }
 
                 assertEquals(listOf(TAB_KEYWORD), labels)
             }
@@ -82,7 +82,7 @@ class InboxAllTabTest {
         ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val chips = activity.findViewById<ChipGroup>(R.id.keywordChipGroup)
-                val labels = (0 until chips.childCount).map { (chips.getChildAt(it) as Chip).text.toString() }
+                val labels = (0 until chips.childCount).map { (chips.getChildAt(it) as Chip).tag as String }
 
                 assertEquals(listOf(TAB_KEYWORD), labels)
             }

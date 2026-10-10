@@ -483,6 +483,14 @@ Owns production Android app code and resources.
   selected primary destination for mail folders, but its
   displayed label must mirror the active folder so Junk/Trash/Archive do not leave Inbox highlighted
   by name.
+- Unread counts are local-cache counts, not server totals: each keyword chip shows how many unread
+  rows of the folder on screen carry it (`KeywordTabs.unreadCounts`, with a spelled-out
+  `contentDescription`), and the folder picker shows `EmailDao.unreadCounts()` per folder as of the
+  last cache read, Archive summing its subfolders (`unreadInFolderTree`); a local read, unread,
+  swipe or detail removal adjusts it (`adjustedUnread`) until the next refresh re-reads Room. A
+  chip's keyword lives in its `tag`; its text carries the count, so never read the keyword from
+  the text. Paged-in rows count too, and their read state only refreshes when paged again. No
+  launcher badge.
 - Keyword refresh is best-effort every 90 seconds while inbox UI is foregrounded (both connection modes).
 - Background keyword staleness is accepted; app catches up on next foreground refresh.
 - Contact sync (`contacts/` package) mirrors `push/`'s repository+coordinator+singleton-graph shape:

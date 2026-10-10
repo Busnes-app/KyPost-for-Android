@@ -165,4 +165,18 @@ class EmailDaoFolderScopeTest {
         assertEquals(true, dao.getById("undated", "INBOX")?.inWindow)
         assertEquals(true, dao.getById("old", "Archive")?.inWindow)
     }
+
+    @Test
+    fun unreadCountsArePerFolderAndCountOnlyUnreadRows() {
+        dao.upsertAll(
+            listOf(
+                row("1", "INBOX", null),
+                row("2", "INBOX", null),
+                row("3", "INBOX", null, status = "read"),
+                row("1", "Archive", null),
+            ),
+        )
+
+        assertEquals(mapOf("INBOX" to 2, "Archive" to 1), dao.unreadCounts().associate { it.folder to it.unread })
+    }
 }

@@ -73,6 +73,8 @@ class InboxActivity : LockedActivity() {
     private var pendingSubject: String? = null
     private var pendingMessageDeadlineMs: Long = 0L
     private val refreshedAtByFolder = mutableMapOf<String, Long>()
+    /** Unread rows per folder in the cache, as of the last refresh; labels the folder picker. */
+    private var unreadByFolder: Map<String, Int> = emptyMap()
 
     private val refreshRunnable = object : Runnable {
         override fun run() {
@@ -90,7 +92,9 @@ class InboxActivity : LockedActivity() {
         if (result.resultCode == RESULT_OK) {
             val removedId = result.data?.getStringExtra(EmailDetailActivity.EXTRA_REMOVED_EMAIL_ID)
             if (removedId != null) {
+                allEmails.find { it.id == removedId }?.let { adjustUnread(currentFolder, it.status, null) }
                 allEmails = allEmails.filter { it.id != removedId }
+                rebuildTabs(allEmails)
                 renderFilteredEmails()
             }
             // Already confirmed by the relay and written to Room; this only repaints the row.
@@ -292,7 +296,9 @@ class InboxActivity : LockedActivity() {
             val before = frontier ?: mailRepository.cachedEmails(folder).lastOrNull()?.id
             val outcome = before?.let { mailRepository.loadOlder(folder, it) }
             val emails = mailRepository.cachedEmails(folder)
+            val unread = mailRepository.unreadCounts()
             runOnUiThread {
+                unreadByFolder = unread
                 olderFooter.loading = false
                 when {
                     outcome is MailOutcome.Success -> {
@@ -341,6 +347,7 @@ class InboxActivity : LockedActivity() {
 
     private fun showStatus(id: String, status: String) {
         if (redirectedToUnlock || isDestroyed) return
+        allEmails.find { it.id == id }?.let { adjustUnread(currentFolder, it.status, status) }
         allEmails = allEmails.map { if (it.id == id) it.copy(status = status) else it }
         rebuildTabs(allEmails)
         renderFilteredEmails()
@@ -399,7 +406,8 @@ class InboxActivity : LockedActivity() {
     private fun setupTabs() {
         keywordChips.setOnCheckedStateChangeListener { group, checkedIds ->
             val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
-            selectedTab = (group.findViewById<Chip>(checkedId))?.text?.toString().orEmpty().ifBlank { KeywordTabs.ALL }
+            // The tag, not the text: the text carries the unread count.
+            selectedTab = (group.findViewById<Chip>(checkedId))?.tag as? String ?: KeywordTabs.ALL
             renderFilteredEmails()
         }
 
@@ -447,6 +455,8 @@ class InboxActivity : LockedActivity() {
         if (folder != currentFolder) return
         if (showCacheFirst) {
             val cached = mailRepository.cachedEmails(folder)
+            val unread = mailRepository.unreadCounts()
+            runOnUiThread { unreadByFolder = unread }
             if (cached.isNotEmpty()) {
                 runOnUiThread { applyRefreshedEmails(folder, cached, isFinal = false, errorMessage = null) }
             }
@@ -454,6 +464,8 @@ class InboxActivity : LockedActivity() {
         val outcome: MailOutcome<MailFetchResult> =
             mailRepository.refreshFolder(folder, forceFullResync = forceFullResync)
         val emails = mailRepository.cachedEmails(folder)
+        val unread = mailRepository.unreadCounts()
+        runOnUiThread { unreadByFolder = unread }
         val errorMessage = outcome.userFacingMessage()
         keywordSettings.rememberKeywords(emails.flatMap { it.keywords }.toSet())
         runOnUiThread {
@@ -517,9 +529,9 @@ class InboxActivity : LockedActivity() {
 
         val current = mutableListOf<String>()
         for (index in 0 until keywordChips.childCount) {
-            current.add((keywordChips.getChildAt(index) as? Chip)?.text?.toString().orEmpty())
+            current.add((keywordChips.getChildAt(index) as? Chip)?.tag as? String ?: "")
         }
-        val checked = keywordChips.findViewById<Chip?>(keywordChips.checkedChipId)?.text?.toString()
+        val checked = keywordChips.findViewById<Chip?>(keywordChips.checkedChipId)?.tag as? String
         // With All hidden there may be no tab at all; then All is still the right filter, unchipped.
         if (!tabs.contains(selectedTab)) {
             selectedTab = tabs.firstOrNull() ?: KeywordTabs.ALL
@@ -528,6 +540,7 @@ class InboxActivity : LockedActivity() {
             keywordChips.removeAllViews()
             tabs.forEach { keyword ->
                 val chip = Chip(this).apply {
+                    tag = keyword
                     text = keyword
                     isCheckable = true
                     isClickable = true
@@ -540,11 +553,17 @@ class InboxActivity : LockedActivity() {
 
         // Unread counts change on a refresh even when the keyword set does not, so refresh always.
         val dotSizePx = (7 * resources.displayMetrics.density).toInt()
+        val unreadByTab = KeywordTabs.unreadCounts(emails)
         for (index in 0 until keywordChips.childCount) {
             val chip = keywordChips.getChildAt(index) as? Chip ?: continue
-            val keyword = chip.text.toString()
-            val hasUnread = emails.any {
-                it.status == "unread" && (keyword == KeywordTabs.ALL || it.keywords.contains(keyword))
+            val keyword = chip.tag as? String ?: continue
+            val unread = unreadByTab[keyword] ?: 0
+            val hasUnread = unread > 0
+            chip.text = withUnread(keyword, unread)
+            chip.contentDescription = if (hasUnread) {
+                resources.getQuantityString(R.plurals.tab_unread_description, unread, keyword, unread)
+            } else {
+                null
             }
             chip.setTypeface(chip.typeface, if (hasUnread) Typeface.BOLD else Typeface.NORMAL)
             chip.isChipIconVisible = hasUnread
@@ -574,6 +593,20 @@ class InboxActivity : LockedActivity() {
         }
     }
 
+    /** Counts come from the local cache, so they cover the mail this device holds. The label is
+     *  bidi-isolated so a right-to-left name cannot swallow the number. */
+    private fun withUnread(label: String, unread: Int): String =
+        if (unread > 0) {
+            getString(R.string.label_with_unread, androidx.core.text.BidiFormatter.getInstance().unicodeWrap(label), unread)
+        } else {
+            label
+        }
+
+    /** Keeps the picker's counts in step with a local change until the next refresh re-reads Room. */
+    private fun adjustUnread(folder: String, before: String, after: String?) {
+        unreadByFolder = KeywordTabs.adjustedUnread(unreadByFolder, folder, before, after)
+    }
+
     private fun switchFolder(folder: String) {
         currentFolder = folder
         selectedTab = KeywordTabs.ALL
@@ -584,10 +617,15 @@ class InboxActivity : LockedActivity() {
 
     private fun showFolderPickerPopup(anchor: View) {
         val popupMenu = PopupMenu(this, anchor)
-        popupMenu.menu.add(0, 0, 0, getString(R.string.nav_inbox)).isChecked = currentFolder == "INBOX"
-        popupMenu.menu.add(0, 1, 1, getString(R.string.nav_junk)).isChecked = currentFolder == "Junk"
-        popupMenu.menu.add(0, 2, 2, getString(R.string.nav_trash)).isChecked = currentFolder == "Trash"
-        popupMenu.menu.add(0, 3, 3, getString(R.string.nav_archive)).isChecked =
+        val unread = unreadByFolder
+        popupMenu.menu.add(0, 0, 0, withUnread(getString(R.string.nav_inbox), unread["INBOX"] ?: 0)).isChecked =
+            currentFolder == "INBOX"
+        popupMenu.menu.add(0, 1, 1, withUnread(getString(R.string.nav_junk), unread["Junk"] ?: 0)).isChecked =
+            currentFolder == "Junk"
+        popupMenu.menu.add(0, 2, 2, withUnread(getString(R.string.nav_trash), unread["Trash"] ?: 0)).isChecked =
+            currentFolder == "Trash"
+        val archiveUnread = KeywordTabs.unreadInFolderTree(unread, ARCHIVE_PARENT_FOLDER)
+        popupMenu.menu.add(0, 3, 3, withUnread(getString(R.string.nav_archive), archiveUnread)).isChecked =
             currentFolder == ARCHIVE_PARENT_FOLDER || currentFolder.startsWith("$ARCHIVE_PARENT_FOLDER/")
         popupMenu.menu.setGroupCheckable(0, true, true)
 
@@ -631,7 +669,8 @@ class InboxActivity : LockedActivity() {
         }
         val popupMenu = PopupMenu(this, anchor)
         folders.forEachIndexed { index, folder ->
-            popupMenu.menu.add(0, index, index, folder.path.substringAfterLast('/')).isChecked =
+            val label = withUnread(folder.path.substringAfterLast('/'), unreadByFolder[folder.path] ?: 0)
+            popupMenu.menu.add(0, index, index, label).isChecked =
                 currentFolder == folder.path
         }
         popupMenu.menu.setGroupCheckable(0, true, true)
@@ -754,7 +793,9 @@ class InboxActivity : LockedActivity() {
         mutate: (id: String, folder: String) -> MailOutcome<Unit>,
     ) {
         val sourceFolder = email.sourceFolder()
+        adjustUnread(sourceFolder, email.status, null)
         allEmails = allEmails.filter { it.id != email.id }
+        rebuildTabs(allEmails)
         renderFilteredEmails()
         MailBackgroundExecutor.submitReporting(this, label) {
             rowActionObserverForTest?.invoke(email.id, sourceFolder)
