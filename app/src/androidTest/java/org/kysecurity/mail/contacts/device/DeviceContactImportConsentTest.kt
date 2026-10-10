@@ -158,6 +158,29 @@ class DeviceContactImportConsentTest {
         assertEquals(0, queuedProbeCreates())
     }
 
+    /** A pairing replacement lands while a scan runs: the session ends, the outbox is purged and a
+     *  new pairing becomes active. Nothing consented under the old one may reach the new outbox. */
+    @Test
+    fun aPairingReplacedDuringAScan_queuesNothingForTheNewPairing() = runBlocking {
+        settings.setImportAccounts(destination, setOf(DeviceAccount(null, null).key))
+        var active = TEST_PAIRING
+        val switching = ContactSyncRepository(
+            db = db,
+            client = ContactSyncClient(callFactory = OkHttpClient()),
+            cursorStore = ContactCursorStore(context, db),
+            pairingProvider = { active },
+        )
+        val scan = deviceRepository(switching) {
+            org.kysecurity.mail.ProcessState.resetAll()
+            db.pendingContactChangeDao().clearAll()
+            active = TEST_PAIRING.copy(subscriberId = "sub-replacement")
+        }
+
+        scan.syncAll()
+
+        assertEquals(0, queuedProbeCreates())
+    }
+
     @Test
     fun consentGivenForOnePairing_doesNotCarryToAnother() = runBlocking {
         settings.setImportAccounts(destination, setOf(DeviceAccount(null, null).key))
