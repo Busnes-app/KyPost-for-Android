@@ -475,6 +475,14 @@ Owns production Android app code and resources.
   duplicating the contact. Linked rows from before SOURCE_ID are backfilled on the next pass.
   `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_12_13` indexes the link table's
   `rawContactId`.
+- **Device merges are three-way.** `device_contact_links.syncedJson` (`MIGRATION_13_14`) holds the
+  `ContactDto` both sides agreed on after the last sync, written on create, on an applied or
+  already-agreeing update, and after a device pull. `DeviceContactFieldMerge.againstBase` gives
+  each field to the side that changed it since then, so a field emptied on either side stays
+  empty; null, blank and empty compare equal because CP2 drops empty rows. With no base (links
+  older than the column, or adopted by SOURCE_ID) or a change on both sides, the old two-way rule
+  decides, and it cannot tell cleared from unset. In `DeviceContactUpdatePlan` a blank or empty
+  value is a clear: rows are deleted and nothing is inserted.
 - **Importing another account's contacts uploads them, so it is per-account opt-in.**
   `importNewDeviceContacts` reads only raw contacts whose `DeviceAccount` (type, name; both null
   for the phone's own storage) is in `DeviceContactSyncSettings.importAccounts()`, which is empty

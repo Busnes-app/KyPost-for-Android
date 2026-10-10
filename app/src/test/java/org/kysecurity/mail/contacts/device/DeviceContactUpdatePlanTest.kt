@@ -141,4 +141,23 @@ class DeviceContactUpdatePlanTest {
         assertNull(plan.addresses)
         assertTrue(plan.isEmpty())
     }
+
+    /** Notes and an email removed on the server must leave the phone, not be re-uploaded from it. */
+    @Test
+    fun withABase_fieldsClearedInRoom_planAClear() {
+        val email = listOf(ContactFieldDto(value = "ada@example.com"))
+        val base = ContactDto(uid = "u1", fn = "Ada Lovelace", notes = "Old", emails = email)
+
+        val plan = DeviceContactUpdatePlan.of(
+            dto = base.copy(notes = null, emails = emptyList()),
+            snapshot = snapshot(notes = "Old", emails = email),
+            roomUpdatedAtEpochMs = roomNewer,
+            deviceUpdatedAtEpochMs = deviceOlder,
+            base = base,
+        )
+
+        assertEquals("", plan.notes)
+        assertEquals(emptyList(), plan.emails)
+        assertNull(plan.displayName)
+    }
 }

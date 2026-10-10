@@ -24,49 +24,38 @@ data class DeviceContactUpdatePlan(
 
     companion object {
         /**
-         * Runs the same conflict-resolution merge in both directions as `readDeviceChanges`, then
-         * keeps only the groups whose merged value differs from what the device already holds.
-         *
-         * A list merge returns empty only when BOTH sides are empty, so a non-null list here is
-         * never a request to clear rows the device has and Room does not.
+         * Runs the same merge as the device pull, against the same [base], then keeps only the
+         * groups whose merged value differs from what the device already holds. An empty string
+         * or list is a clear: Room emptied a field the device still has, since the last sync.
          */
         fun of(
             dto: ContactDto,
             snapshot: DeviceRawContactSnapshot,
             roomUpdatedAtEpochMs: Long?,
             deviceUpdatedAtEpochMs: Long?,
+            base: ContactDto? = null,
         ): DeviceContactUpdatePlan {
-            fun mergedString(roomValue: String?, deviceValue: String?): String? =
-                DeviceContactFieldMerge.mergeStringField(
-                    roomValue = roomValue,
-                    deviceValue = deviceValue,
-                    roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                    deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-                )?.takeIf { it != deviceValue }
+            fun <T> merged(field: (ContactDto) -> T, device: T, twoWay: (T, T, Long?, Long?) -> T): T =
+                DeviceContactFieldMerge.againstBase(field(dto), device, base?.let(field), base != null) { r, d ->
+                    twoWay(r, d, roomUpdatedAtEpochMs, deviceUpdatedAtEpochMs)
+                }
+
+            // "" is a clear: only a known base can produce one, since two-way never empties a side.
+            fun mergedString(field: (ContactDto) -> String?, deviceValue: String?): String? =
+                merged(field, deviceValue, DeviceContactFieldMerge::mergeStringField)
+                    .let { if (DeviceContactFieldMerge.same(it, deviceValue)) null else it.orEmpty() }
+
+            fun <T> mergedList(field: (ContactDto) -> List<T>, deviceValue: List<T>, twoWay: (List<T>, List<T>, Long?, Long?) -> List<T>) =
+                merged(field, deviceValue, twoWay).takeIf { it != deviceValue }
 
             return DeviceContactUpdatePlan(
-                displayName = mergedString(dto.fn, snapshot.fn),
-                org = mergedString(dto.org, snapshot.org),
-                notes = mergedString(dto.notes, snapshot.notes),
-                birthday = mergedString(dto.birthday, snapshot.birthday),
-                emails = DeviceContactFieldMerge.mergeEmailList(
-                    roomEmails = dto.emails,
-                    deviceEmails = snapshot.emails,
-                    roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                    deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-                ).takeIf { it != snapshot.emails },
-                phones = DeviceContactFieldMerge.mergePhoneList(
-                    roomPhones = dto.phones,
-                    devicePhones = snapshot.phones,
-                    roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                    deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-                ).takeIf { it != snapshot.phones },
-                addresses = DeviceContactFieldMerge.mergeAddressList(
-                    roomAddresses = dto.addresses,
-                    deviceAddresses = snapshot.addresses,
-                    roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                    deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-                ).takeIf { it != snapshot.addresses },
+                displayName = mergedString({ it.fn }, snapshot.fn),
+                org = mergedString({ it.org }, snapshot.org),
+                notes = mergedString({ it.notes }, snapshot.notes),
+                birthday = mergedString({ it.birthday }, snapshot.birthday),
+                emails = mergedList({ it.emails }, snapshot.emails, DeviceContactFieldMerge::mergeEmailList),
+                phones = mergedList({ it.phones }, snapshot.phones, DeviceContactFieldMerge::mergePhoneList),
+                addresses = mergedList({ it.addresses }, snapshot.addresses, DeviceContactFieldMerge::mergeAddressList),
             )
         }
     }
