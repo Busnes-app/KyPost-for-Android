@@ -34,4 +34,43 @@ class DeviceContactSyncCoordinatorTest {
 
         assertEquals(2, withTimeout(5_000) { started.receive() })
     }
+
+    /** The request and the running pass's decision to stop must not interleave: a requester stalled
+     *  after finding a pass running, while that pass finishes, still gets its pass. */
+    @Test
+    fun aRequestRacingTheEndOfAPass_stillGetsAPass() = runBlocking {
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+        val runs = AtomicInteger()
+        val firstStarted = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val requesterStalled = java.util.concurrent.CountDownLatch(1)
+        val resumeRequester = java.util.concurrent.CountDownLatch(1)
+        val coordinator = DeviceContactSyncCoordinator(
+            syncAll = {
+                if (runs.incrementAndGet() == 1) {
+                    firstStarted.complete(Unit)
+                    releaseFirst.await()
+                }
+                emptyList()
+            },
+            enabled = { true },
+            scope = scope,
+            onFoundRunning = {
+                requesterStalled.countDown()
+                resumeRequester.await()
+            },
+        )
+
+        coordinator.syncNowAsync()
+        withTimeout(5_000) { firstStarted.await() }
+        val requester = kotlin.concurrent.thread { coordinator.syncNowAsync() }
+        requesterStalled.await()
+        releaseFirst.complete(Unit)
+        withTimeout(5_000) { scope.coroutineContext[kotlinx.coroutines.Job]!!.children.forEach { it.join() } }
+        resumeRequester.countDown()
+        requester.join()
+        withTimeout(5_000) { scope.coroutineContext[kotlinx.coroutines.Job]!!.children.forEach { it.join() } }
+
+        assertEquals(2, runs.get())
+    }
 }
