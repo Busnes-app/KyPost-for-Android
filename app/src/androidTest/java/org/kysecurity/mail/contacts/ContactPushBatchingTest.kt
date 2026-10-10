@@ -45,9 +45,27 @@ class ContactPushBatchingTest {
 
         assertTrue(repository.sync() is ContactSyncOutcome.Success)
 
-        assertEquals(listOf("POST", "POST", "POST"), server.requests)
+        assertEquals("a first sync ends with the snapshot", listOf("POST", "POST", "POST", "GET since=0"), server.requests)
         assertEquals(1200, server.live().size)
         assertEquals(0, db.pendingContactChangeDao().getAllPending().size)
+    }
+
+    /** A sync that saw tooOld and then failed must still end, on a later sync, with the snapshot:
+     *  its reset cursor is the only trace that one is owed. */
+    @Test
+    fun aFailedBatchAfterTooOld_stillGetsTheSnapshotOnRetry() = runBlocking {
+        db.contactDao().upsertAll(listOf(ContactDto(uid = "forgotten", rev = 2, fn = "Forgotten").toEntity()))
+        server.gcHighWater = 10
+        server.failPost = 2
+        cursorStore.advanceCursor(TEST_PAIRING.subscriberId, 5)
+        repeat(600) { repository.queueCreate(ContactDto(fn = "Contact $it")) }
+
+        assertTrue(repository.sync() is ContactSyncOutcome.Retry)
+        assertTrue(repository.sync() is ContactSyncOutcome.Success)
+
+        assertEquals(0, db.pendingContactChangeDao().getAllPending().size)
+        assertEquals("the snapshot removes what the server no longer has", null, db.contactDao().getByUid("forgotten"))
+        assertEquals(600, db.contactDao().observeAll().first().size)
     }
 
     @Test

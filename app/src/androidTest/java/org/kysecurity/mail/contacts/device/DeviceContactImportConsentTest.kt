@@ -159,6 +159,22 @@ class DeviceContactImportConsentTest {
         assertEquals(0, queuedProbeCreates())
     }
 
+    /** An account consented while a scan runs rewinds the watermark so its existing contacts are
+     *  read; the scan, which started without that account, must not move the watermark past them
+     *  when it ends. The second account here holds no contacts: what is checked is the rewind. */
+    @Test
+    fun anAccountAddedDuringAScan_keepsItsRewind() = runBlocking {
+        val local = DeviceAccount(null, null).key
+        val other = DeviceAccount("org.example.invalid", "other").key
+        settings.setImportAccounts(destination, setOf(local))
+        val scan = deviceRepository(syncRepository) { settings.setImportAccounts(destination, setOf(local, other)) }
+
+        scan.syncAll()
+
+        assertEquals("the probe was imported; ${importState()}", 1, queuedProbeCreates())
+        assertEquals("the next scan reads everything again", 0L, settings.lastForeignScanAtEpochMs())
+    }
+
     /** A pairing replacement lands while a scan runs: the session ends, the outbox is purged and a
      *  new pairing becomes active. Nothing consented under the old one may reach the new outbox. */
     @Test
