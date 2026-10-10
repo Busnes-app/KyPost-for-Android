@@ -145,7 +145,9 @@ class EmailDetailActivity : LockedActivity() {
         val emailFolder = intent.getStringExtra("email_folder") ?: "INBOX"
         val emailSubject = intent.getStringExtra("email_subject") ?: "No subject"
         val emailSender = intent.getStringExtra("email_sender") ?: "Unknown sender"
-        val emailPreview = intent.getStringExtra("email_preview") ?: "No content"
+        // The inbox no longer sends one: a row preview is a 200-character summary, and quoting
+        // or rendering it would pass a fragment off as the whole message.
+        val emailPreview = intent.getStringExtra("email_preview").orEmpty()
         val emailBodyMode = intent.getStringExtra("email_body_mode").orEmpty()
         val hasAttachments = intent.getBooleanExtra("email_has_attachments", false)
         val pgpEncrypted = intent.getBooleanExtra("email_pgp_encrypted", false)

@@ -398,6 +398,15 @@ Owns production Android app code and resources.
   - Sign-only is impossible (the relay accepts `multipart/encrypted` only), so the two chips are
     coupled when `clientSide`.
 - Inbox tabs come from the relay's `tabs`/`label` response fields.
+- The inbox asks for `preview=1` (KyPost-Server #351): at most 200 characters of plain text the
+  server flattened from a body it already holds, shown muted under the sender in
+  `item_email.xml` as plain `TextView` text, never markup, with format characters (bidi
+  overrides, zero-width) dropped (`previewText`). A delta "updated" row carries none and keeps
+  its stored one; any other row takes what the server sent. It is never stored for a
+  `pgpEncrypted` row, whatever the server sends, and `clearServerDecryptedBodies` clears an
+  encrypted row's preview even without a cached body. An older server sends none and the row
+  shows no preview; a body is never used as one. The preview is not passed to the detail
+  screen: a summary must not be quoted or rendered as if it were the message.
 - The inbox is fetched with `bodies=0`, so **an inbox row never carries a body** and the `emails`
   table is a cache of the messages actually opened, not a mirror of the window. `fetchBody` fills a
   blank one from `GET /api/mail/body` and writes it back. Two rules hold this together, both with

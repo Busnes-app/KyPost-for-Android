@@ -206,7 +206,9 @@ internal fun reconcileFetchResult(emailDao: EmailDao, folder: String, mode: Stri
         val existing = emailDao.getById(incoming.messageId, folder) ?: return@mapNotNull null
         incoming.copy(
             body = existing.body,
-            preview = existing.preview,
+            // "updated" rows carry no preview (KyPost-Server #351); keep the stored one, never for
+            // encrypted mail.
+            preview = if (incoming.pgpEncrypted) "" else existing.preview,
             bodyMode = incoming.bodyMode.ifBlank { existing.bodyMode },
         )
     }

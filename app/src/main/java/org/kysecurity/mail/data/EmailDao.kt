@@ -49,9 +49,13 @@ interface EmailDao {
     @Query("UPDATE emails SET body = :body, bodyMode = :bodyMode WHERE messageId = :id AND folder = :folder")
     fun updateBody(id: String, folder: String, body: String, bodyMode: String)
 
-    /** Drops cached plaintext of mail the server decrypted. Subject is deliberately left alone. */
+    /** Drops cached plaintext of mail the server decrypted. Subject is deliberately left alone.
+     *  The preview is cleared even without a body: with bodies=0 most rows have none cached. */
     // `body IS NOT NULL` is not redundant: `body != ''` is NULL, not false, for a null body.
-    @Query("UPDATE emails SET body = '', preview = '' WHERE pgpEncrypted = 1 AND body IS NOT NULL AND body != ''")
+    @Query(
+        "UPDATE emails SET body = '', preview = '' WHERE pgpEncrypted = 1 AND " +
+            "((body IS NOT NULL AND body != '') OR preview != '')",
+    )
     fun clearServerDecryptedBodies(): Int
 
     @Transaction
