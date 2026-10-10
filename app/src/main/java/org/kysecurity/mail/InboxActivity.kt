@@ -100,9 +100,8 @@ class InboxActivity : LockedActivity() {
             }
             // Already confirmed by the relay and written to Room; this only repaints the row.
             val unreadId = result.data?.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_ID)
-            if (unreadId != null && result.data?.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_FOLDER) == currentFolder) {
-                showStatus(unreadId, "unread")
-            }
+            val unreadFolder = result.data?.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_FOLDER)
+            if (unreadId != null && unreadFolder != null) showStatus(unreadId, unreadFolder, "unread")
         }
     }
 
@@ -346,18 +345,25 @@ class InboxActivity : LockedActivity() {
     private fun setReadState(email: Email, read: Boolean) {
         val folder = email.sourceFolder()
         val label = getString(if (read) R.string.action_mark_read else R.string.action_mark_unread)
+        val repository = mailRepository
+        // Ordered with any read a detail screen left in flight, so this cannot be undone by it.
+        val setState = ReadStateLane.ordered {
+            if (read) repository.markRead(email.id, folder) else repository.markUnread(email.id, folder)
+        }
         MailBackgroundExecutor.submitReporting(this, label) {
-            val outcome = if (read) mailRepository.markRead(email.id, folder) else mailRepository.markUnread(email.id, folder)
+            val outcome = setState()
             if (outcome is MailOutcome.Success) {
-                runOnUiThread { if (folder == currentFolder) showStatus(email.id, if (read) "read" else "unread") }
+                runOnUiThread { showStatus(email.id, folder, if (read) "read" else "unread") }
             }
             outcome
         }
     }
 
-    private fun showStatus(id: String, status: String) {
+    /** Matches folder as well as id: after a folder switch the list can still hold another
+     *  mailbox's rows, and a UID repeats across mailboxes. */
+    private fun showStatus(id: String, folder: String, status: String) {
         if (redirectedToUnlock || isDestroyed) return
-        allEmails = allEmails.map { if (it.id == id) it.copy(status = status) else it }
+        allEmails = allEmails.map { if (it.id == id && it.sourceFolder() == folder) it.copy(status = status) else it }
         rebuildTabs(allEmails)
         renderFilteredEmails()
     }
