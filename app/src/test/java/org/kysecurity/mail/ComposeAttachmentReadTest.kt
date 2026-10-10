@@ -40,6 +40,17 @@ class ComposeAttachmentReadTest {
         assertEquals(true, counting.served < 1024 * 1024)
     }
 
+    @Test
+    fun isUnderAny_matchesTheDirectoryAndItsChildrenOnly() {
+        val dirs = listOf("/data/user/0/org.kysecurity.mail", "/data/data/org.kysecurity.mail")
+        assertEquals(true, isUnderAny("/data/data/org.kysecurity.mail/databases/kypost_mail.db", dirs))
+        assertEquals(true, isUnderAny("/data/user/0/org.kysecurity.mail", dirs))
+        assertEquals(true, isUnderAny("/data/data/org.kysecurity.mail/files/x (deleted)", dirs))
+        assertEquals(false, isUnderAny("/data/data/org.kysecurity.mail.github/files/x", dirs))
+        assertEquals(false, isUnderAny("/storage/emulated/0/Download/report.pdf", dirs))
+        assertEquals(false, isUnderAny("pipe:[12345]", dirs))
+    }
+
     private class CountingStream(private val totalBytes: Long) : InputStream() {
         var served = 0L
             private set

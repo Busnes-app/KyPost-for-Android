@@ -100,8 +100,12 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
 - External compose entry (`mailto:`, `ACTION_SEND`, `ACTION_SEND_MULTIPLE`) is normalized by
   `ComposeIntentParser.kt`; use Android's `MailTo` parser and keep public-Intent quirks out of
   `ComposeActivity`. Shared attachments still enter through the Activity's existing bounded
-  attachment reader. An external compose request starts a new draft and must not restore an
+  attachment reader, which accepts only `content:` URIs from other packages' providers and
+  refuses a descriptor whose `/proc/self/fd` path is under this app's data directories. An external compose request starts a new draft and must not restore an
   unrelated `ComposeDraftCache` entry left by an earlier internal compose screen.
+  In-app launches go through `ComposeActivity.internalIntent` (the non-exported
+  `InternalComposeActivity` alias); only those read the `compose_*` extras, including prefilled
+  HTML. Every launch of the exported `ComposeActivity` gets public extras only, as plain text.
 - Inbox freshness is success-only and folder-scoped for the visible Activity lifetime. A failed
   refresh leaves the last confirmed time intact; it must not replace it with a sticky error or let
   a late result from a previously selected folder paint the current folder.

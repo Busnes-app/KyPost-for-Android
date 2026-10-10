@@ -1,5 +1,6 @@
 package org.kysecurity.mail
 
+import android.content.ContentResolver
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -7,6 +8,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.system.Os
 import android.text.TextUtils
 import android.view.Menu
 import android.view.MenuItem
@@ -52,6 +54,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.Executors
@@ -269,7 +272,8 @@ class ComposeActivity : LockedActivity() {
             ForwardAttachmentHandoff.clear()
             Toast.makeText(this, R.string.compose_draft_restored, Toast.LENGTH_SHORT).show()
         } else {
-            val (to, subject, bodyHtml) = parseComposeIntent(intent, ::plainTextToHtml)
+            val internal = intent.component?.className == INTERNAL_COMPOSE
+            val (to, subject, bodyHtml) = parseComposeIntent(intent, internal, ::plainTextToHtml)
             subjectField.setText(subject)
             toInput.setInitialRecipients(to)
             mirroredBodyHtml = bodyHtml
@@ -277,7 +281,8 @@ class ComposeActivity : LockedActivity() {
 
             // A forward's attachments, handed over out-of-band because they are far too large for
             // an Intent extra — see [ForwardAttachmentHandoff].
-            val forwarded = ForwardAttachmentHandoff.take()
+            // Always taken so a leftover never outlives this screen; used only by in-app launches.
+            val forwarded = ForwardAttachmentHandoff.take().takeIf { internal }.orEmpty()
             if (forwarded.isNotEmpty()) {
                 // Re-checked HERE, not only in addAttachment: that guard covers files the user
                 // picks, and a forward walked straight past it with attachment sizes the relay
@@ -550,6 +555,7 @@ class ComposeActivity : LockedActivity() {
         val picked = withContext(Dispatchers.IO) {
             var name = "attachment"
             var declaredSize = -1L
+            if (!isForeignContentUri(uri)) return@withContext PickedAttachment.Unreadable(name)
             runCatching {
                 resolver.query(uri, null, null, null, null)?.use { cursor ->
                     if (cursor.moveToFirst()) {
@@ -564,7 +570,12 @@ class ComposeActivity : LockedActivity() {
             if (declaredSize > budget) return@withContext PickedAttachment.TooLarge(name)
 
             val bytes = try {
-                resolver.openInputStream(uri)?.use { readAtMost(it, budget, declaredSize) }
+                (openDescriptorForTest?.invoke(uri) ?: resolver.openAssetFileDescriptor(uri, "r"))?.use { afd ->
+                    // The provider is foreign, but the file it hands back may still be ours.
+                    val path = Os.readlink("/proc/self/fd/${afd.parcelFileDescriptor.fd}")
+                    if (isUnderAny(path, appPrivateDirs())) return@withContext PickedAttachment.Unreadable(name)
+                    afd.createInputStream().use { readAtMost(it, budget, declaredSize) }
+                }
             } catch (e: AttachmentTooLargeException) {
                 // The provider under-reported, or omitted, OpenableColumns.SIZE.
                 android.util.Log.i(TAG, "Picked attachment exceeded the remaining budget", e)
@@ -600,6 +611,20 @@ class ComposeActivity : LockedActivity() {
                 Toast.makeText(this, getString(R.string.compose_attachment_unreadable, picked.name), Toast.LENGTH_SHORT).show()
         }
     }
+
+    /** Attachments come from other apps' providers only, never `file:` or this app's own. */
+    private fun isForeignContentUri(uri: Uri): Boolean {
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
+        // ContentResolver also accepts `userId@authority`; strip it as it does.
+        val authority = uri.authority?.substringAfterLast('@') ?: return false
+        // Null is an invisible foreign provider; only this package's own are refused.
+        return packageManager.resolveContentProvider(authority, 0)?.packageName != packageName
+    }
+
+    private fun appPrivateDirs(): List<String> =
+        listOf(applicationInfo.dataDir, applicationInfo.deviceProtectedDataDir)
+            .flatMap { listOf(it, File(it).canonicalPath) }
+            .distinct()
 
     /** Outcome of reading one picked document — named rather than a nullable pair so the three
      *  cases stay distinguishable at the call site. */
@@ -1022,6 +1047,11 @@ class ComposeActivity : LockedActivity() {
     }
 
     companion object {
+        /** Null in production. Stands in for a provider's `openAssetFileDescriptor`; null falls through. */
+        @androidx.annotation.VisibleForTesting
+        @Volatile
+        internal var openDescriptorForTest: ((Uri) -> android.content.res.AssetFileDescriptor?)? = null
+
         const val EXTRA_TO = "compose_to"
         const val EXTRA_SUBJECT = "compose_subject"
         const val EXTRA_BODY = "compose_body"
@@ -1029,6 +1059,12 @@ class ComposeActivity : LockedActivity() {
         /** A ready-made HTML quote, for Reply/Forward of an HTML message. Kept separate from
          *  [EXTRA_BODY] because that one is plain text and gets html-escaped on the way in. */
         const val EXTRA_BODY_HTML = "compose_body_html"
+
+        /** Non-exported alias in the manifest; the EXTRA_* above are read only through it. */
+        private const val INTERNAL_COMPOSE = "org.kysecurity.mail.InternalComposeActivity"
+
+        fun internalIntent(context: android.content.Context): Intent =
+            Intent().setClassName(context, INTERNAL_COMPOSE)
 
         private const val TAG = "ComposeActivity"
 
@@ -1053,6 +1089,10 @@ internal class AttachmentTooLargeException : IOException("Attachment exceeds the
 /** Copy buffer for [readAtMost]. Large enough that a 25 MB attachment is a few hundred reads, small
  *  enough that the refusal below happens long before the heap notices. */
 private const val ATTACHMENT_COPY_BUFFER_BYTES = 64 * 1024
+
+/** True when [path] is one of [dirs] or inside one. */
+internal fun isUnderAny(path: String, dirs: List<String>): Boolean =
+    dirs.any { path == it || path.startsWith("$it/") }
 
 /** Reads [input] fully, or throws [AttachmentTooLargeException] past [limit] bytes. */
 internal fun readAtMost(input: InputStream, limit: Long, expectedSize: Long = -1L): ByteArray {

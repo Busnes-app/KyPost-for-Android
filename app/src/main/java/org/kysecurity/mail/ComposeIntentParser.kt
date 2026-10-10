@@ -12,8 +12,13 @@ internal data class ComposePrefill(
 internal fun Intent.isExternalComposeIntent(): Boolean =
     action == Intent.ACTION_SENDTO || action == Intent.ACTION_SEND || action == Intent.ACTION_SEND_MULTIPLE
 
-/** Normalizes Android's public compose intents before any value reaches the editor. */
-internal fun parseComposeIntent(intent: Intent, plainTextToHtml: (String) -> String): ComposePrefill {
+/** Normalizes compose intents before any value reaches the editor. Only [internal] launches
+ *  (the non-exported alias) may carry HTML; every other caller gets public extras as plain text. */
+internal fun parseComposeIntent(
+    intent: Intent,
+    internal: Boolean,
+    plainTextToHtml: (String) -> String,
+): ComposePrefill {
     if (intent.action == Intent.ACTION_SENDTO && intent.data?.scheme.equals("mailto", ignoreCase = true)) {
         val uri = intent.data!!
         // MailTo.parse decodes the whole query before splitting on older Android releases,
@@ -35,17 +40,17 @@ internal fun parseComposeIntent(intent: Intent, plainTextToHtml: (String) -> Str
         )
     }
 
-    val recipients = intent.getStringExtra(ComposeActivity.EXTRA_TO)
-        ?: intent.getStringArrayExtra(Intent.EXTRA_EMAIL)?.joinToString(", ")
-        ?: ""
-    val subject = intent.getStringExtra(ComposeActivity.EXTRA_SUBJECT)
-        ?: intent.getStringExtra(Intent.EXTRA_SUBJECT)
-        ?: ""
-    val bodyHtml = intent.getStringExtra(ComposeActivity.EXTRA_BODY_HTML)
-        ?: plainTextToHtml(
-            intent.getStringExtra(ComposeActivity.EXTRA_BODY)
-                ?: intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
-                ?: "",
+    if (internal) {
+        return ComposePrefill(
+            to = intent.getStringExtra(ComposeActivity.EXTRA_TO).orEmpty(),
+            subject = intent.getStringExtra(ComposeActivity.EXTRA_SUBJECT).orEmpty(),
+            bodyHtml = intent.getStringExtra(ComposeActivity.EXTRA_BODY_HTML)
+                ?: plainTextToHtml(intent.getStringExtra(ComposeActivity.EXTRA_BODY).orEmpty()),
         )
-    return ComposePrefill(recipients, subject, bodyHtml)
+    }
+    return ComposePrefill(
+        to = intent.getStringArrayExtra(Intent.EXTRA_EMAIL)?.joinToString(", ").orEmpty(),
+        subject = intent.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty(),
+        bodyHtml = plainTextToHtml(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()),
+    )
 }

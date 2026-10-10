@@ -1014,7 +1014,7 @@ class EmailDetailActivity : LockedActivity() {
         bodyHtml: String,
         attachments: List<org.kysecurity.mail.mail.OutgoingAttachment> = emptyList(),
     ) {
-        val intent = Intent(this, ComposeActivity::class.java)
+        val intent = ComposeActivity.internalIntent(this)
         intent.putExtra(ComposeActivity.EXTRA_TO, to)
         intent.putExtra(ComposeActivity.EXTRA_SUBJECT, subject)
         intent.putExtra(ComposeActivity.EXTRA_BODY_HTML, bodyHtml)
