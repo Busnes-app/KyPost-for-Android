@@ -8,8 +8,10 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.kysecurity.mail.mail.MailRuntime
 import org.kysecurity.mail.Email
 import org.kysecurity.mail.InboxActivity
 import org.kysecurity.mail.KeywordTabs
@@ -18,6 +20,12 @@ import org.kysecurity.mail.R
 /** #131: a refresh that lands mail above the visible rows must not leave it unseen off-screen. */
 @RunWith(AndroidJUnit4::class)
 class InboxNewMailTest {
+
+    /** The database stays with the suite; only the mail graph the Activity built is released. */
+    @After
+    fun releaseTheMailGraph() {
+        MailRuntime.invalidate()
+    }
 
     private fun rows(ids: List<String>) = ids.map {
         Email(id = it, subject = "Subject $it", sender = "sender@example.com", preview = "", folder = FOLDER)
