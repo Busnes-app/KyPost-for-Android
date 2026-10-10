@@ -30,6 +30,8 @@
     <string name="nav_junk">Junk</string>
     <string name="nav_trash">Trash</string>
     <string name="nav_archive">Archive</string>
+    <string name="nav_sent">Sent</string>
+    <string name="nav_drafts">Drafts</string>
     <string name="settings_title">Settings</string>
     <string name="settings_subtitle">Settings</string>
     <string name="settings_security_body">App lock, notifications, and encrypted mail</string>
@@ -396,6 +398,7 @@
     <string name="inbox_empty">No messages in %1$s</string>
     <string name="finding_email">Finding new email…</string>
     <string name="no_archive_folders">No archive folders found</string>
+    <string name="special_folder_missing">No %1$s folder on this account</string>
     <string name="email_not_found">Email no longer available</string>
 
     <string name="contacts_device_sync_enable">Enable device contact sync</string>

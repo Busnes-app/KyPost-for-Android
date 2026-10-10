@@ -371,6 +371,10 @@ Owns production Android app code and resources.
   - Sign-only is impossible (the relay accepts `multipart/encrypted` only), so the two chips are
     coupled when `clientSide`.
 - Inbox tabs come from the relay's `tabs`/`label` response fields.
+- The folder picker's Sent and Drafts entries never guess a mailbox name. Each tap lists the
+  top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
+  the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A localized name
+  with no alias match shows "No Sent folder", because the relay exposes no special-use flag.
 - The inbox is fetched with `bodies=0`, so **an inbox row never carries a body** and the `emails`
   table is a cache of the messages actually opened, not a mirror of the window. `fetchBody` fills a
   blank one from `GET /api/mail/body` and writes it back. Two rules hold this together, both with
