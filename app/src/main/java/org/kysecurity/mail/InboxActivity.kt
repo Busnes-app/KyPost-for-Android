@@ -219,7 +219,12 @@ class InboxActivity : LockedActivity() {
         loadingOverlay = findViewById(R.id.loadingOverlay)
         swipeRefresh = findViewById(R.id.inboxSwipeRefresh)
         // forceFullResync: a delta cannot repair a drifted cache, so a pull re-reads the folder.
-        swipeRefresh.setOnRefreshListener { refreshInbox(forceFullResync = true) }
+        swipeRefresh.setOnRefreshListener {
+            // Unknown until the relay answers again, so not "No messages" while it is asked.
+            loadedFolder = null
+            renderFilteredEmails()
+            refreshInbox(forceFullResync = true)
+        }
         loadingStatus = findViewById<TextView>(R.id.loadingStatus)
         cancelLoading = findViewById(R.id.cancelLoading)
         freshnessText = findViewById(R.id.inboxFreshness)
@@ -429,7 +434,8 @@ class InboxActivity : LockedActivity() {
         refreshedAt: Long? = null,
     ) {
         if (folder != currentFolder) return
-        if (refreshedAt != null) loadedFolder = folder
+        // A failed fetch un-confirms the folder: its emptiness is no longer known.
+        if (isFinal) loadedFolder = folder.takeIf { refreshedAt != null }
         // Snapshotted before rebuildTabs: a chip rebuild re-renders through the tab listener.
         val previous = adapter.currentEmails().takeIf { paintedFolder == folder }
         val tabBefore = selectedTab
