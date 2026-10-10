@@ -23,6 +23,7 @@ import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import org.kysecurity.mail.mail.FolderInfo
+import org.kysecurity.mail.mail.MailAccount
 import org.kysecurity.mail.mail.MailFetchResult
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRepository
@@ -65,6 +66,13 @@ class InboxActivity : LockedActivity() {
     /** Null in production. Called on the main thread once a failed row action has been shown. */
     @androidx.annotation.VisibleForTesting
     internal var rowActionFailureShownForTest: (() -> Unit)? = null
+
+    /** Null in production. Called on the main thread when an earlier account's outcome is dropped. */
+    @androidx.annotation.VisibleForTesting
+    internal var rowActionDroppedForTest: (() -> Unit)? = null
+
+    /** The account the rows on screen were read under; row actions carry it to the request. */
+    @Volatile private var shownAccount: MailAccount? = null
     private var lastAppliedThemeName: String = ""
     private var pendingScrollPosition: Int = 0
 
@@ -392,10 +400,14 @@ class InboxActivity : LockedActivity() {
     private fun refreshInboxOnIo(folder: String, showCacheFirst: Boolean, forceFullResync: Boolean) {
         // Already obsolete before it started: fetching a folder nobody is looking at buys nothing.
         if (folder != currentFolder) return
+        // Read before the rows: the account they are shown, and acted on, under.
+        val account = mailRepository.currentAccount()
         if (showCacheFirst) {
             val cached = mailRepository.cachedEmails(folder)
             if (cached.isNotEmpty()) {
-                runOnUiThread { applyRefreshedEmails(folder, cached, isFinal = false, errorMessage = null) }
+                runOnUiThread {
+                    applyRefreshedEmails(folder, cached, isFinal = false, errorMessage = null, account = account)
+                }
             }
         }
         val outcome: MailOutcome<MailFetchResult> =
@@ -410,6 +422,7 @@ class InboxActivity : LockedActivity() {
                 isFinal = true,
                 errorMessage = errorMessage,
                 refreshedAt = System.currentTimeMillis().takeIf { outcome is MailOutcome.Success },
+                account = account,
             )
         }
     }
@@ -424,8 +437,10 @@ class InboxActivity : LockedActivity() {
         isFinal: Boolean,
         errorMessage: String?,
         refreshedAt: Long? = null,
+        account: MailAccount? = shownAccount,
     ) {
         if (folder != currentFolder) return
+        shownAccount = account
         // Snapshotted before rebuildTabs: a chip rebuild re-renders through the tab listener.
         val previous = adapter.currentEmails().takeIf { paintedFolder == folder }
         val tabBefore = selectedTab
@@ -720,37 +735,45 @@ class InboxActivity : LockedActivity() {
     private fun submitRowAction(
         email: Email,
         label: String,
-        mutate: (id: String, folder: String) -> MailOutcome<Unit>,
+        mutate: RowMutation,
     ) {
         val sourceFolder = email.sourceFolder()
+        // Same reasoning as sourceFolder: the row belongs to the account it was painted under.
+        val account = shownAccount
         val index = allEmails.indexOfFirst { it.id == email.id }
         allEmails = allEmails.filter { it.id != email.id }
         renderFilteredEmails()
-        val onFailure = { reason: String -> restoreFailedRow(email, sourceFolder, index, label, reason, mutate) }
+        val onFailure = { reason: String -> restoreFailedRow(email, sourceFolder, account, index, label, reason, mutate) }
         MailBackgroundExecutor.submitReporting(this, label, onFailure) {
             rowActionObserverForTest?.invoke(email.id, sourceFolder)
             // [mutate] takes the folder as an argument: it has no way to reach for currentFolder.
-            mutate(email.id, sourceFolder)
+            mutate(email.id, sourceFolder, account)
         }
     }
 
     /** Puts a row whose action failed back where it was, with Retry. False once this screen is
-     *  gone, so the executor falls back to its toast. */
+     *  gone, so the executor falls back to its toast. An outcome from an earlier account is
+     *  dropped: neither its row nor a Retry belongs on this one. */
     private fun restoreFailedRow(
         email: Email,
         sourceFolder: String,
+        account: MailAccount?,
         index: Int,
         label: String,
         reason: String,
-        mutate: (id: String, folder: String) -> MailOutcome<Unit>,
+        mutate: RowMutation,
     ): Boolean {
         if (isFinishing || isDestroyed) return false
+        if (account != shownAccount) {
+            rowActionDroppedForTest?.invoke()
+            return true
+        }
         if (sourceFolder == currentFolder && allEmails.none { it.id == email.id }) {
             allEmails = allEmails.toMutableList().apply { add(index.coerceIn(0, size), email) }
             renderFilteredEmails()
         }
         Snackbar.make(recyclerView, getString(R.string.mail_action_failed, label, reason), Snackbar.LENGTH_LONG)
-            .setAction(R.string.action_retry) { submitRowAction(email, label, mutate) }
+            .setAction(R.string.action_retry) { if (account == shownAccount) submitRowAction(email, label, mutate) }
             // Above the phone's bottom bar; the w600dp rail runs the full height beside the list.
             .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
             .show()
@@ -791,6 +814,11 @@ class InboxActivity : LockedActivity() {
 
     @androidx.annotation.VisibleForTesting
     internal fun selectedTabForTest(): String = selectedTab
+
+    @androidx.annotation.VisibleForTesting
+    internal fun setShownAccountForTest(account: MailAccount?) {
+        shownAccount = account
+    }
 
     @androidx.annotation.VisibleForTesting
     internal fun setPendingScrollPositionForTest(position: Int) {
@@ -836,3 +864,6 @@ internal fun newRowsAbove(old: List<Email>, new: List<Email>): Int {
     val oldIds = old.mapTo(HashSet()) { it.id }
     return new.takeWhile { it.id !in oldIds }.size
 }
+
+/** (id, folder, account) -> outcome; the account is checked when the request is built. */
+private typealias RowMutation = (String, String, MailAccount?) -> MailOutcome<Unit>
