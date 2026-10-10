@@ -1,5 +1,6 @@
 package org.kysecurity.mail
 
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -7,6 +8,13 @@ import org.junit.Test
 
 /** A token captured before a session boundary must read as expired from the moment the reset begins. */
 class SessionGenerationTest {
+
+    /** resetAll seals the process-wide draft cache; only take() unseals it. Left sealed, a later
+     *  test class's save() silently does nothing. */
+    @After
+    fun unsealTheDraftCache() {
+        ComposeDraftCache.take()
+    }
 
     @Test
     fun aTokenIsCurrentUntilTheNextReset() {
