@@ -93,4 +93,18 @@ class LocalSignerKeyMappingTest {
         val mapped = contact(identityNeedsReview = true).toLocalSignerKey()
         assertEquals(LocalSignerKey(TestPgpKey.ARMORED, confirmed = false), mapped)
     }
+
+    /** The pin-only record keeps the same key, under each address, lowercased. */
+    @Test
+    fun recipientPins_carryTheRecordedKeyPerAddress() {
+        val pins = contact(emails = """[{"value":"Bob@Example.com"},{"value":"bob@work.example"}]""").recipientPins()
+
+        assertEquals(listOf("bob@example.com", "bob@work.example"), pins.map { it.address })
+        assertTrue(pins.all { it.publicKey == TestPgpKey.ARMORED && it.fingerprint == "AAAA BBBB CCCC DDDD" && it.confirmed })
+    }
+
+    @Test
+    fun recipientPins_noneWithoutARecordedKey() {
+        assertTrue(contact(pgpKey = null).recipientPins().isEmpty())
+    }
 }
