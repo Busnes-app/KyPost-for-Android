@@ -1193,4 +1193,42 @@ class RelayMailSourceTest {
 
         assertEquals(reason, (outcome as MailOutcome.BadRequest).message)
     }
+
+    // --- an action belongs to the account it was created under ------------------------------------
+
+    private fun actionSource(callFactory: FakeCallFactory) = RelayMailSource(
+        pairingProvider = { testPairing() },
+        cursorProvider = FakeMailCursorProvider(),
+        callFactory = callFactory,
+    )
+
+    @Test
+    fun anActionCreatedUnderAnotherAccountSendsNoRequest() {
+        val callFactory = FakeCallFactory { request -> jsonResponse(request, """{"processed":1,"failed":[]}""") }
+
+        val outcome = actionSource(callFactory).performAction(
+            MailAction.DELETE,
+            listOf("42"),
+            "INBOX",
+            account = MailAccount(subscriberId = "sub-0", serverUrl = "https://relay.example.com"),
+        )
+
+        assertTrue(callFactory.requests.isEmpty())
+        assertTrue(outcome is MailOutcome.Unauthorized)
+    }
+
+    @Test
+    fun anActionCreatedUnderTheCurrentAccountIsSent() {
+        val callFactory = FakeCallFactory { request -> jsonResponse(request, """{"processed":1,"failed":[]}""") }
+
+        val outcome = actionSource(callFactory).performAction(
+            MailAction.DELETE,
+            listOf("42"),
+            "INBOX",
+            account = testPairing().mailAccount(),
+        )
+
+        assertEquals(1, callFactory.requests.size)
+        assertTrue(outcome is MailOutcome.Success)
+    }
 }

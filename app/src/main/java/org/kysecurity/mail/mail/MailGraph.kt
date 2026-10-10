@@ -22,6 +22,7 @@ class MailGraph(context: Context) {
         relaySource = relaySource,
         // The source reads the checkpoint to build `since`; only the repository advances it.
         cursorProvider = mailCursorStore,
+        pending = PendingMailActions.process,
     )
 }
 

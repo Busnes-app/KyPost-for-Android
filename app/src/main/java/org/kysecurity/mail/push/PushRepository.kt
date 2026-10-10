@@ -45,6 +45,10 @@ class PushRepository(
 ) : PushStore {
     private val json = Json { ignoreUnknownKeys = true }
     private val hostileLocationSettings = SecurityRuntime.graph(context).hostileLocationSettings
+
+    /** Null in production. Called with each purge step's name just before the step runs. */
+    @androidx.annotation.VisibleForTesting
+    internal var purgeStepObserverForTest: ((String) -> Unit)? = null
     private val pullCursorValue = ScopedValue(
         dataStore = context.pushDataStore,
         scopeKey = KEY_PULL_CURSOR_SUB,
@@ -163,10 +167,14 @@ class PushRepository(
      *  the new account over the old one's mail. Naming the survivors is what lets
      *  [PushSyncCoordinator] refuse. */
     private suspend fun purgeAccountScopedData(): List<String> {
+        // Before any data is touched: work from the outgoing session reads as stale for the whole
+        // purge, not only after the processMemory step below.
+        org.kysecurity.mail.ProcessState.advanceGeneration()
         val residue = mutableListOf<String>()
 
         /** Runs [body] and records [name] if it throws or reports incomplete. */
         suspend fun step(name: String, body: suspend () -> Boolean) {
+            purgeStepObserverForTest?.invoke(name)
             val ok = runCatching { body() }
                 .onFailure { android.util.Log.e(TAG, "Failed to purge $name", it) }
                 .getOrDefault(false)
@@ -266,6 +274,17 @@ class PushRepository(
     }
 
     override suspend fun clearPairing(): List<String> {
+        // Mail work stays held until the outgoing pairing is gone: a task started after the purge's
+        // reset but before this clear would carry the new session yet send with the old credentials.
+        org.kysecurity.mail.MailBackgroundExecutor.quiesce()
+        try {
+            return clearPairingHeld()
+        } finally {
+            org.kysecurity.mail.MailBackgroundExecutor.resume()
+        }
+    }
+
+    private suspend fun clearPairingHeld(): List<String> {
         val residue = purgeAccountScopedData()
         securePairingStore.clearPairing()
         inMemoryHistory.value = emptyList()

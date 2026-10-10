@@ -17,10 +17,14 @@ import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.navigation.NavigationBarView
+import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import org.kysecurity.mail.mail.FolderInfo
+import org.kysecurity.mail.mail.MailAccount
+import org.kysecurity.mail.mail.PendingMail
 import org.kysecurity.mail.mail.MailFetchResult
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRepository
@@ -59,6 +63,25 @@ class InboxActivity : LockedActivity() {
      *  at the moment it actually runs, so a test can see the folder that action really used. */
     @androidx.annotation.VisibleForTesting
     internal var rowActionObserverForTest: ((String, String) -> Unit)? = null
+
+    /** Null in production. Called on the main thread once a failed row action has been shown. */
+    @androidx.annotation.VisibleForTesting
+    internal var rowActionFailureShownForTest: (() -> Unit)? = null
+
+    /** Null in production. Called on the main thread when an earlier account's outcome is dropped. */
+    @androidx.annotation.VisibleForTesting
+    internal var rowActionDroppedForTest: (() -> Unit)? = null
+
+    /** Null in production. Runs on the IO thread after the cache paint, before the network fetch. */
+    @androidx.annotation.VisibleForTesting
+    internal var beforeNetworkRefreshForTest: ((folder: String) -> Unit)? = null
+
+    /** Null in production. Stands in for the active pairing's account in a row action's check. */
+    @androidx.annotation.VisibleForTesting
+    internal var activeAccountForTest: (() -> MailAccount?)? = null
+
+    /** The account the rows on screen were read under; row actions carry it to the request. */
+    @Volatile private var shownAccount: MailAccount? = null
     private var lastAppliedThemeName: String = ""
     private var pendingScrollPosition: Int = 0
 
@@ -161,8 +184,19 @@ class InboxActivity : LockedActivity() {
     }
 
     override fun onStartUnlocked() {
+        // A failed read clears its overlay; repaint from the cache so the row shows unread again.
+        mailRepository.setOverlayListener { runOnUiThread { repaintFromCache() } }
         refreshInbox()
         scheduleNextRefresh()
+    }
+
+    private fun repaintFromCache() {
+        if (isFinishing || isDestroyed) return
+        val folder = currentFolder
+        ioExecutor.execute {
+            val cached = mailRepository.cachedEmails(folder)
+            runOnUiThread { applyRefreshedEmails(folder, cached, isFinal = false, errorMessage = null) }
+        }
     }
 
     override fun onResume() {
@@ -184,6 +218,7 @@ class InboxActivity : LockedActivity() {
     override fun onStop() {
         super.onStop()
         if (redirectedToUnlock) return
+        mailRepository.setOverlayListener(null)
         mainHandler.removeCallbacks(refreshRunnable)
         mainHandler.removeCallbacks(pendingMessagePollRunnable)
     }
@@ -386,12 +421,19 @@ class InboxActivity : LockedActivity() {
     private fun refreshInboxOnIo(folder: String, showCacheFirst: Boolean, forceFullResync: Boolean) {
         // Already obsolete before it started: fetching a folder nobody is looking at buys nothing.
         if (folder != currentFolder) return
-        if (showCacheFirst) {
+        // Read before the rows: the account they are shown, and acted on, under.
+        val account = mailRepository.currentAccount()
+        // Not only on a cold open: returning from a message must show its read overlay now, not
+        // after the network answers. A pull re-reads the folder and paints once.
+        if (showCacheFirst || !forceFullResync) {
             val cached = mailRepository.cachedEmails(folder)
             if (cached.isNotEmpty()) {
-                runOnUiThread { applyRefreshedEmails(folder, cached, isFinal = false, errorMessage = null) }
+                runOnUiThread {
+                    applyRefreshedEmails(folder, cached, isFinal = false, errorMessage = null, account = account)
+                }
             }
         }
+        beforeNetworkRefreshForTest?.invoke(folder)
         val outcome: MailOutcome<MailFetchResult> =
             mailRepository.refreshFolder(folder, forceFullResync = forceFullResync)
         val emails = mailRepository.cachedEmails(folder)
@@ -404,6 +446,7 @@ class InboxActivity : LockedActivity() {
                 isFinal = true,
                 errorMessage = errorMessage,
                 refreshedAt = System.currentTimeMillis().takeIf { outcome is MailOutcome.Success },
+                account = account,
             )
         }
     }
@@ -418,8 +461,10 @@ class InboxActivity : LockedActivity() {
         isFinal: Boolean,
         errorMessage: String?,
         refreshedAt: Long? = null,
+        account: MailAccount? = shownAccount,
     ) {
         if (folder != currentFolder) return
+        shownAccount = account
         // Snapshotted before rebuildTabs: a chip rebuild re-renders through the tab listener.
         val previous = adapter.currentEmails().takeIf { paintedFolder == folder }
         val tabBefore = selectedTab
@@ -714,16 +759,67 @@ class InboxActivity : LockedActivity() {
     private fun submitRowAction(
         email: Email,
         label: String,
-        mutate: (id: String, folder: String) -> MailOutcome<Unit>,
+        mutate: RowMutation,
     ) {
         val sourceFolder = email.sourceFolder()
-        allEmails = allEmails.filter { it.id != email.id }
+        // Same reasoning as sourceFolder: the row belongs to the account it was painted under.
+        val account = shownAccount
+        // Claimed now, before queueing: the row stays hidden from any refresh, and the action
+        // belongs to the session current at the swipe, not when a worker picks it up.
+        val claim = mailRepository.beginRemoval(email.id, sourceFolder)
+        val session = claim.session
+        // (folder, id): a Retry tapped after switching folders must not hide another folder's UID.
+        fun isTheRow(row: Email) = row.id == email.id && row.sourceFolder() == sourceFolder
+        val index = allEmails.indexOfFirst(::isTheRow)
+        allEmails = allEmails.filterNot(::isTheRow)
         renderFilteredEmails()
-        MailBackgroundExecutor.submitReporting(this, label) {
-            rowActionObserverForTest?.invoke(email.id, sourceFolder)
-            // [mutate] takes the folder as an argument: it has no way to reach for currentFolder.
-            mutate(email.id, sourceFolder)
+        // Decided on the worker: reading the pairing is disk and crypto. Until the next repaint
+        // [shownAccount] still names the old account, so it cannot answer this alone.
+        val pairingChanged = java.util.concurrent.atomic.AtomicBoolean(false)
+        val onFailure = { reason: String ->
+            restoreFailedRow(email, sourceFolder, account, session, pairingChanged.get(), index, label, reason, mutate)
         }
+        MailBackgroundExecutor.submitReporting(this, label, onFailure, onDropped = { mailRepository.abandon(claim) }) {
+            rowActionObserverForTest?.invoke(email.id, sourceFolder)
+            // [mutate] takes the folder through the claim: it has no way to reach for currentFolder.
+            mutate(claim, account).also {
+                val active = activeAccountForTest?.invoke() ?: mailRepository.currentAccount()
+                pairingChanged.set(account != active)
+            }
+        }
+    }
+
+    /** Puts a row whose action failed back where it was, with Retry. False once this screen is
+     *  gone, so the executor falls back to its toast. An outcome from an earlier account is
+     *  dropped: neither its row nor a Retry belongs on this one. */
+    private fun restoreFailedRow(
+        email: Email,
+        sourceFolder: String,
+        account: MailAccount?,
+        session: Long,
+        pairingChanged: Boolean,
+        index: Int,
+        label: String,
+        reason: String,
+        mutate: RowMutation,
+    ): Boolean {
+        if (isFinishing || isDestroyed) return false
+        fun stillOurs() = !pairingChanged && ProcessState.isCurrent(session) && account == shownAccount
+        if (!stillOurs()) {
+            rowActionDroppedForTest?.invoke()
+            return true
+        }
+        if (sourceFolder == currentFolder && allEmails.none { it.id == email.id }) {
+            allEmails = allEmails.toMutableList().apply { add(index.coerceIn(0, size), email) }
+            renderFilteredEmails()
+        }
+        Snackbar.make(recyclerView, getString(R.string.mail_action_failed, label, reason), Snackbar.LENGTH_LONG)
+            .setAction(R.string.action_retry) { if (stillOurs()) submitRowAction(email, label, mutate) }
+            // Above the phone's bottom bar; the w600dp rail runs the full height beside the list.
+            .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
+            .show()
+        rowActionFailureShownForTest?.invoke()
+        return true
     }
 
     @androidx.annotation.VisibleForTesting
@@ -759,6 +855,11 @@ class InboxActivity : LockedActivity() {
 
     @androidx.annotation.VisibleForTesting
     internal fun selectedTabForTest(): String = selectedTab
+
+    @androidx.annotation.VisibleForTesting
+    internal fun setShownAccountForTest(account: MailAccount?) {
+        shownAccount = account
+    }
 
     @androidx.annotation.VisibleForTesting
     internal fun setPendingScrollPositionForTest(position: Int) {
@@ -804,3 +905,6 @@ internal fun newRowsAbove(old: List<Email>, new: List<Email>): Int {
     val oldIds = old.mapTo(HashSet()) { it.id }
     return new.takeWhile { it.id !in oldIds }.size
 }
+
+/** (claim, account) -> outcome; the account is checked when the request is built. */
+private typealias RowMutation = (PendingMail, MailAccount?) -> MailOutcome<Unit>
