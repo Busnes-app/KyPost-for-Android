@@ -16,6 +16,7 @@ import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.view.ActionMode
 import androidx.appcompat.widget.SearchView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
@@ -26,6 +27,7 @@ import com.google.android.material.navigation.NavigationBarView
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import org.kysecurity.mail.mail.FolderInfo
+import org.kysecurity.mail.mail.MailAction
 import org.kysecurity.mail.mail.MailFetchResult
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRepository
@@ -80,6 +82,8 @@ class InboxActivity : LockedActivity() {
     /** Non-null while searching; results are shown instead of the folder once they arrive. */
     private var searchQuery: String? = null
     private var searchResults: List<Email>? = null
+    private val selectedIds = linkedSetOf<String>()
+    private var selectionMode: ActionMode? = null
 
     private val refreshRunnable = object : Runnable {
         override fun run() {
@@ -280,8 +284,8 @@ class InboxActivity : LockedActivity() {
     }
 
     private fun setupRecyclerView() {
-        adapter = EmailAdapter(emptyList()) { email ->
-            openEmailDetail(email)
+        adapter = EmailAdapter(emptyList(), onEmailLongClick = ::toggleSelected) { email ->
+            if (selectionMode != null) toggleSelected(email) else openEmailDetail(email)
         }
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
@@ -528,6 +532,7 @@ class InboxActivity : LockedActivity() {
     private fun switchFolder(folder: String) {
         currentFolder = folder
         selectedTab = KeywordTabs.ALL
+        selectionMode?.finish()
         exitSearch()
         emptyText.visibility = View.GONE
         applyFolderTitle()
@@ -575,6 +580,7 @@ class InboxActivity : LockedActivity() {
 
     /** Results land only if this query is still the one on screen, in the folder it searched. */
     private fun runSearch(query: String) {
+        selectionMode?.finish()
         searchQuery = query
         val folder = currentFolder
         ioExecutor.execute {
@@ -595,6 +601,7 @@ class InboxActivity : LockedActivity() {
     }
 
     private fun endSearch() {
+        selectionMode?.finish()
         searchQuery = null
         searchResults = null
         renderFilteredEmails()
@@ -602,6 +609,71 @@ class InboxActivity : LockedActivity() {
 
     private fun exitSearch() {
         if (searchItem?.isActionViewExpanded == true) searchItem?.collapseActionView() else endSearch()
+    }
+
+    private fun toggleSelected(email: Email) {
+        if (!selectedIds.remove(email.id)) selectedIds.add(email.id)
+        if (selectedIds.isEmpty()) {
+            selectionMode?.finish()
+            return
+        }
+        if (selectionMode == null) selectionMode = startSupportActionMode(selectionCallback)
+        selectionMode?.title = resources.getQuantityString(R.plurals.selection_count, selectedIds.size, selectedIds.size)
+        adapter.setSelection(selectedIds)
+    }
+
+    private val selectionCallback = object : ActionMode.Callback {
+        override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+            val ink = com.google.android.material.color.MaterialColors.getColor(
+                this@InboxActivity, android.R.attr.textColorPrimary, Color.WHITE,
+            )
+            fun add(id: Int, label: Int, icon: Int) = menu.add(0, id, id, label).apply {
+                this.icon = ContextCompat.getDrawable(this@InboxActivity, icon)?.mutate()?.apply { setTint(ink) }
+                setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+            }
+            add(MENU_BULK_ARCHIVE, R.string.action_archive, R.drawable.ic_archive)
+            add(MENU_BULK_MOVE, R.string.action_move, R.drawable.ic_move)
+            add(MENU_BULK_JUNK, R.string.action_junk, R.drawable.ic_spam)
+            add(MENU_BULK_DELETE, R.string.action_delete, R.drawable.ic_delete)
+            return true
+        }
+
+        override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
+
+        override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
+            val chosen = adapter.shownEmails().filter { it.id in selectedIds }
+            when (item.itemId) {
+                MENU_BULK_ARCHIVE -> submitRowsAction(chosen, getString(R.string.action_archive), MailAction.ARCHIVE)
+                MENU_BULK_JUNK -> submitRowsAction(chosen, getString(R.string.action_junk), MailAction.SPAM)
+                MENU_BULK_DELETE -> submitRowsAction(chosen, getString(R.string.action_delete), MailAction.DELETE)
+                MENU_BULK_MOVE -> pickMoveTarget(this@InboxActivity, mailRepository, ioExecutor, currentFolder) { target ->
+                    submitRowsAction(chosen, getString(R.string.action_move), MailAction.MOVE, target)
+                }
+                else -> return false
+            }
+            mode.finish()
+            return true
+        }
+
+        override fun onDestroyActionMode(mode: ActionMode) {
+            selectionMode = null
+            selectedIds.clear()
+            adapter.setSelection(emptySet())
+        }
+    }
+
+    /** [submitRowAction] for several rows: one relay call per source folder. */
+    private fun submitRowsAction(emails: List<Email>, label: String, action: MailAction, target: String? = null) {
+        if (emails.isEmpty()) return
+        val ids = emails.map { it.id }.toSet()
+        allEmails = allEmails.filter { it.id !in ids }
+        searchResults = searchResults?.filter { it.id !in ids }
+        renderFilteredEmails()
+        emails.groupBy { it.sourceFolder() }.forEach { (folder, rows) ->
+            MailBackgroundExecutor.submitReporting(this, label) {
+                mailRepository.mutateAll(action, rows.map { it.id }, folder, target)
+            }
+        }
     }
 
     private fun showFolderPickerPopup(anchor: View) {
@@ -730,6 +802,9 @@ class InboxActivity : LockedActivity() {
             0,
             ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT
         ) {
+            override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int =
+                if (selectionMode != null) 0 else super.getSwipeDirs(recyclerView, viewHolder)
+
             override fun onMove(
                 recyclerView: RecyclerView,
                 viewHolder: RecyclerView.ViewHolder,
@@ -856,7 +931,19 @@ class InboxActivity : LockedActivity() {
     internal fun exitSearchForTest() = exitSearch()
 
     @androidx.annotation.VisibleForTesting
-    internal fun shownEmailsForTest(): List<Email> = List(adapter.itemCount) { adapter.getEmailAt(it) }
+    internal fun shownEmailsForTest(): List<Email> = adapter.shownEmails()
+
+    @androidx.annotation.VisibleForTesting
+    internal fun toggleSelectedForTest(email: Email) = toggleSelected(email)
+
+    @androidx.annotation.VisibleForTesting
+    internal fun selectedIdsForTest(): Set<String> = selectedIds.toSet()
+
+    @androidx.annotation.VisibleForTesting
+    internal fun inSelectionModeForTest(): Boolean = selectionMode != null
+
+    @androidx.annotation.VisibleForTesting
+    internal fun switchFolderForTest(folder: String) = switchFolder(folder)
 
     @androidx.annotation.VisibleForTesting
     internal fun setPendingScrollPositionForTest(position: Int) {
@@ -872,6 +959,10 @@ class InboxActivity : LockedActivity() {
         private const val PENDING_MESSAGE_TIMEOUT_MS = 30_000L
         private const val ARCHIVE_PARENT_FOLDER = "Archive"
         private const val MENU_SEARCH = 1
+        private const val MENU_BULK_ARCHIVE = 10
+        private const val MENU_BULK_MOVE = 11
+        private const val MENU_BULK_JUNK = 12
+        private const val MENU_BULK_DELETE = 13
         const val STATE_FOLDER = "inbox_folder"
         const val STATE_TAB = "inbox_tab"
         const val STATE_SCROLL = "inbox_scroll"

@@ -70,6 +70,27 @@ class MailRepository(
         return outcome
     }
 
+    /** Several messages in one [folder], one relay call. Drops only the rows the relay confirmed.
+     *  `processed` is a count, so a total that `failed[]` does not account for confirms none. */
+    fun mutateAll(
+        action: MailAction,
+        ids: List<String>,
+        folder: String,
+        targetFolder: String? = null,
+    ): MailOutcome<Unit> {
+        if (ids.isEmpty()) return MailOutcome.Success(Unit)
+        val outcome = relaySource.performAction(action, ids, folder, targetFolder)
+        if (outcome !is MailOutcome.Success) return outcome.toUnitOutcome()
+        val failed = outcome.value.failed
+        val confirmed = ids.filter { id -> failed.none { it.first == id } }
+        if (outcome.value.processed != confirmed.size) {
+            return MailOutcome.ActionRejected(ids.first(), "The server reported an incomplete change")
+        }
+        confirmed.forEach { emailDao.deleteById(it, folder) }
+        val first = failed.firstOrNull() ?: return MailOutcome.Success(Unit)
+        return MailOutcome.ActionRejected(first.first, "${failed.size} of ${ids.size} not changed: ${first.second}")
+    }
+
     fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> =
         relaySource.saveClientEncryptedDraft(draft)
 
