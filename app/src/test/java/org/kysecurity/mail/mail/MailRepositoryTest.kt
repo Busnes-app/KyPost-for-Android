@@ -20,11 +20,27 @@ private class FakeEmailDao : EmailDao {
     /** Throws on the next write, to stand in for "Room failed / storage filled / process died". */
     var failNextWrite = false
 
+    /** Throws when an upsert carries this id, to fail one write among several. */
+    var failUpsertOf: String? = null
+
+    /** Mirrors Room: a throw inside rolls every write back. */
+    override fun inTransaction(block: () -> Unit) {
+        val before = LinkedHashMap(rows)
+        try {
+            block()
+        } catch (e: Exception) {
+            rows.clear()
+            rows.putAll(before)
+            throw e
+        }
+    }
+
     private fun key(id: String, folder: String) = folder to id
 
     override fun getByFolder(folder: String): List<EmailEntity> = rows.values.filter { it.folder == folder }
     override fun upsertAll(emails: List<EmailEntity>) {
         if (failNextWrite) throw IllegalStateException("simulated Room failure")
+        if (emails.any { it.messageId == failUpsertOf }) throw IllegalStateException("simulated Room failure")
         emails.forEach { rows[key(it.messageId, it.folder)] = it }
     }
     override fun updateStatus(id: String, folder: String, status: String) {
@@ -936,7 +952,7 @@ class MailRepositoryTest {
 
         assertTrue(repo.refreshFolder("INBOX") is MailOutcome.UpstreamFailure)
         assertTrue(cursors.saved.isEmpty())
-        assertEquals(setOf("held", "n1"), dao.rows.keys.map { it.second }.toSet())
+        assertEquals(setOf("held"), dao.rows.keys.map { it.second }.toSet())
 
         source.befores.clear()
         source.olderPages += page("o1", next = "o1")
@@ -977,6 +993,22 @@ class MailRepositoryTest {
         assertEquals(listOf("w3", "w2", "o1"), source.befores)
         assertEquals(setOf("held", "w3", "w2", "o1", "o2"), dao.rows.keys.map { it.second }.toSet())
         assertEquals(listOf(Triple("sub-1", "INBOX", "c-2")), cursors.saved)
+    }
+
+    /** A crash while storing the walk must not leave the window behind as held mail. */
+    @Test
+    fun windowAndOverflowAreStoredTogetherOrNotAtAll() {
+        val dao = FakeEmailDao()
+        dao.put(row("held", "INBOX"))
+        dao.failUpsertOf = "o1"
+        val cursors = FakeCursorProvider()
+        val source = FakeMailSource(fetchOutcome = MailOutcome.Success(overflowDelta()))
+        source.olderPages += page("o1", "held", next = "held")
+
+        runCatching { repository(dao, source, cursors).refreshFolder("INBOX") }
+
+        assertEquals(setOf("held"), dao.rows.keys.map { it.second }.toSet())
+        assertTrue(cursors.saved.isEmpty())
     }
 
     /** Overflow with nowhere to page from cannot be reached, so the cursor must not pass it. */

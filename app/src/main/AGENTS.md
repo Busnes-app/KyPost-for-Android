@@ -107,8 +107,10 @@ Owns production Android app code and resources.
   out-of-window row is never cached: a paged row has no `pgpEncrypted`, which is what
   `clearServerDecryptedBodies` keys on at enrollment. A delta with `hasMore`
   pages down from `nextBefore` until a page holds an id Room already had, stores those rows, and
-  only then commits the cursor. A failed or contradictory walk (no `nextBefore`, a page without
-  `hasMore`) stores none of its pages and keeps the old cursor, so the retry walks them all. `delta: false` answering a
+  only then commits the cursor. The window and the walk are written in one Room transaction
+  (`EmailDao.inTransaction`). A failed or contradictory walk (no `nextBefore`, a page without
+  `hasMore`) stores nothing, not even the window, and keeps the old cursor: any stored row would
+  count as held, and a retry after newer mail would stop at it and commit past the gap. `delta: false` answering a
   cursor is a snapshot. A `before=` answer without `hasMore` is a server that ignored it; it is
   refused, never stored. Known gaps: the relay tracks deletions only inside its window, so an
   out-of-window row stays until the user acts on it; such rows are not healed by the daily resync
