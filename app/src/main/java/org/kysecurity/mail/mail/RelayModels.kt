@@ -123,6 +123,9 @@ data class RelayMailRequestDto(
     val sign: Boolean = false,
     val encrypt: Boolean = false,
     val allowPickupFallback: Boolean = false,
+    /** Send only, and omitted when null, so an older relay sees the request it always did. */
+    val replyToMessageId: String? = null,
+    val replyToMailbox: String? = null,
 ) {
     /** Redacted: the body is the user's outgoing message. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "RelayMailRequestDto(redacted)"

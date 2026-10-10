@@ -1345,4 +1345,81 @@ class RelayMailSourceTest {
     fun preview_dropsFormatCharacters() {
         assertEquals("abc", previewText("a\u202Eb\u2066c\u200D"))
     }
+
+    // --- Reply threading (KyPost-Server #352) ----------------------------------------------------
+
+    private val reply = MailDraft(
+        to = "bob@example.com", subject = "Re: hi", body = "hello",
+        replyToMessageId = "42", replyToMailbox = "Archive",
+    )
+
+    private fun sendAnswering(code: Int, body: String, draft: MailDraft = reply): MailOutcome<MailSendOutcome> {
+        val calls = FakeCallFactory { request -> jsonResponse(request, body, code) }
+        return RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls).sendMail(draft)
+    }
+
+    @Test
+    fun reply_namesTheAnsweredMessageOnSendButNeverOnADraft() {
+        val calls = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true}""") }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        source.sendMail(reply)
+        source.sendMail(reply.copy(replyToMessageId = null, replyToMailbox = null))
+        source.saveDraft(reply)
+
+        val (threaded, unthreaded, draft) = calls.bodies
+        assertTrue(threaded, threaded.contains("\"replyToMessageId\":\"42\""))
+        assertTrue(threaded, threaded.contains("\"replyToMailbox\":\"Archive\""))
+        // An older relay must see the request it always did.
+        assertFalse(unthreaded, unthreaded.contains("replyTo"))
+        assertFalse(draft, draft.contains("replyTo"))
+    }
+
+    @Test
+    fun reply_threadingRefusalsAreTheirOwnOutcome() {
+        val refusals = listOf(
+            400 to "invalid replyToMessageId; refresh the mailbox",
+            400 to "invalid replyToMailbox",
+            404 to "the message being replied to was not found; nothing was sent",
+            502 to "could not read the message being replied to; nothing was sent",
+        )
+        for ((code, body) in refusals) {
+            val outcome = sendAnswering(code, "$body\n")
+            assertEquals("$code", body, (outcome as MailOutcome.ReplyThreadingRefused).message)
+        }
+    }
+
+    /** A 502 that is not a threading refusal may have delivered something (SMTP failure, partial
+     *  pickup delivery); offering a re-send there risks a double send. */
+    @Test
+    fun reply_otherFailuresAreNeverOfferedAsSafeToResend() {
+        val afterDelivery = listOf(
+            "failed to send email: 554 rejected",
+            // The server's own post-delivery wordings.
+            "failed to send email: smtp: message was accepted but the session did not close cleanly: 421 bye",
+            "delivery could not be confirmed for 1 of 1 secure links; some may already have arrived; " +
+                "check provider evidence before retrying to avoid duplicates",
+            // SMTP text quoting a recipient whose address merely contains the words.
+            "failed to send email: 550 replyto@corp.example: the message being replied to is unknown",
+        )
+        for (body in afterDelivery) {
+            assertTrue(body, sendAnswering(502, body) is MailOutcome.UpstreamFailure)
+        }
+        assertTrue(sendAnswering(400, "invalid from address") is MailOutcome.BadRequest)
+        assertTrue(sendAnswering(404, "404 page not found") !is MailOutcome.ReplyThreadingRefused)
+        val unthreaded = reply.copy(replyToMessageId = null)
+        assertTrue(sendAnswering(404, "the message being replied to was not found; nothing was sent", unthreaded) !is MailOutcome.ReplyThreadingRefused)
+    }
+
+    /** A timeout says nothing about whether the relay sent the message. */
+    @Test
+    fun reply_aTimeoutIsNotARefusal() {
+        val source = RelayMailSource(
+            { testPairing() },
+            FakeMailCursorProvider(),
+            callFactory = ThrowingCallFactory(java.net.SocketTimeoutException("timeout")),
+        )
+
+        assertTrue(source.sendMail(reply) is MailOutcome.UpstreamFailure)
+    }
 }

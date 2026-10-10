@@ -39,6 +39,10 @@ sealed class MailOutcome<out T> {
      *  request reached the server, so this must never be worded as a connectivity problem. */
     data class ActionRejected(val messageId: String, val message: String) : MailOutcome<Nothing>()
 
+    /** The relay refused to thread a reply (400/404/502 naming the answered message) and sent
+     *  nothing. Re-sending without the reply fields is safe, but only when the user asks. */
+    data class ReplyThreadingRefused(val message: String) : MailOutcome<Nothing>()
+
     /** Relay 429 with Retry-After — the server's per-device lockout after repeated bad
      *  credentials. [retryAfterSeconds] is null when the header was absent or unparseable;
      *  callers should still back off rather than retrying immediately. */
@@ -66,6 +70,7 @@ fun MailOutcome<*>.userFacingMessage(): String? = when (this) {
     // The relay's own words for why this one message could not be actioned; the caller already
     // prefixes the action ("Archive failed: ...").
     is MailOutcome.ActionRejected -> message
+    is MailOutcome.ReplyThreadingRefused -> message
     is MailOutcome.RateLimited -> retryAfterSeconds
         ?.let { "Too many failed attempts — try again in ${formatRetryAfter(it)}" }
         ?: "Too many failed attempts — try again later"
@@ -133,6 +138,9 @@ data class MailDraft(
     val encrypt: Boolean = false,
     /** Per-message opt-in: the fallback stores this plaintext on the server for up to seven days. */
     val allowPickupFallback: Boolean = false,
+    /** The answered message, for server-side threading (KyPost-Server #352). Send only. */
+    val replyToMessageId: String? = null,
+    val replyToMailbox: String? = null,
 ) {
     /** Redacted: the body is the user's outgoing message. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "MailDraft(redacted)"
