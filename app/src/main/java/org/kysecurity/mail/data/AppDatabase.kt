@@ -16,8 +16,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GroupEntity::class,
         GroupLinkEntity::class,
         ContactSyncStateEntity::class,
+        RecipientPinEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -30,6 +31,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun groupDao(): GroupDao
     abstract fun groupLinkDao(): GroupLinkDao
     abstract fun contactSyncStateDao(): ContactSyncStateDao
+    abstract fun recipientPinDao(): RecipientPinDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -158,6 +160,17 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                 db.execSQL("DROP TABLE `emails`")
                 db.execSQL("ALTER TABLE `emails_new` RENAME TO `emails`")
+            }
+        }
+
+        /** Recorded keys kept when sync removes the contact that held them. */
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `recipient_pins` (`address` TEXT NOT NULL, " +
+                        "`fingerprint` TEXT NOT NULL, `publicKey` TEXT NOT NULL, `confirmed` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`address`, `fingerprint`))",
+                )
             }
         }
     }

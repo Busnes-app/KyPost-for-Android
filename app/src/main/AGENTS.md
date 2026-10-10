@@ -458,6 +458,12 @@ Owns production Android app code and resources.
   A `since=0` pull is a snapshot: after tombstone GC the server can no longer list what it
   deleted, so `applyDelta(snapshot = true)` removes every Room contact absent from it except
   uids still in the outbox. `ContactFullResyncTest` covers both.
+  **A recorded key outlives the contact sync removes.** Before `applyDelta` deletes a contact
+  (tombstone or snapshot) or applies an update that leaves it without its key, the key is copied
+  to `recipient_pins` (`ContactEntity.recipientPins`, `MIGRATION_12_13`), and `RoomLocalSignerKeys`
+  reads that table beside the contacts, so the sender's pin check and the reader keep it. Only a
+  local wipe (the database file) or unpair (`purgeAccountScopedData`) clears it; the server's word
+  never does. `RecipientPinRetentionTest` pins the send-side refusal.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
