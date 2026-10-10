@@ -185,4 +185,21 @@ class DeviceContactUpdatePlanTest {
         assertTrue(plan.isEmpty())
         assertFalse(plan.leavesDeviceMatching(dto, device))
     }
+
+    /** CP2 reads TYPE_HOME back as "Home"; the base recorded Room's "home". Same email, so the
+     *  phone did not change it and Room's clear must win. */
+    @Test
+    fun aLabelCp2SpellsDifferently_isNotADeviceChange() {
+        val base = ContactDto(uid = "u1", fn = "Ada Lovelace", emails = listOf(ContactFieldDto(label = "home", value = "ada@example.com")))
+
+        val plan = DeviceContactUpdatePlan.of(
+            dto = base.copy(emails = emptyList()),
+            snapshot = snapshot(emails = listOf(ContactFieldDto(label = "Home", value = "ada@example.com"))),
+            roomUpdatedAtEpochMs = roomNewer,
+            deviceUpdatedAtEpochMs = deviceOlder,
+            base = base,
+        )
+
+        assertEquals(emptyList(), plan.emails)
+    }
 }
