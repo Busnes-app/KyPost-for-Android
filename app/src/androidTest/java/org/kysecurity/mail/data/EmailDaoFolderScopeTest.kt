@@ -142,4 +142,27 @@ class EmailDaoFolderScopeTest {
         assertEquals(false, dao.getById("4", "INBOX")?.inWindow)
         assertEquals(setOf("6", "4", "1"), dao.getIds("INBOX").toSet())
     }
+
+    /** Only absent rows dated before the snapshot's oldest leave the window; an undated row and a
+     *  row the snapshot lists stay in it, and another folder is untouched. */
+    @Test
+    fun markAgedOutBeforeComparesRelayTimestampsAndSkipsListedRows() {
+        dao.upsertAll(
+            listOf(
+                row("old", "INBOX", null).copy(atUtc = "2026-01-01T00:00:00Z"),
+                row("listed", "INBOX", null).copy(atUtc = "2025-01-01T00:00:00Z"),
+                row("newer", "INBOX", null).copy(atUtc = "2026-06-01T00:00:00Z"),
+                row("undated", "INBOX", null),
+                row("old", "Archive", null).copy(atUtc = "2026-01-01T00:00:00Z"),
+            ),
+        )
+
+        dao.markAgedOutBefore("INBOX", "2026-05-01T00:00:00Z", listOf("listed"))
+
+        assertEquals(false, dao.getById("old", "INBOX")?.inWindow)
+        assertEquals(true, dao.getById("listed", "INBOX")?.inWindow)
+        assertEquals(true, dao.getById("newer", "INBOX")?.inWindow)
+        assertEquals(true, dao.getById("undated", "INBOX")?.inWindow)
+        assertEquals(true, dao.getById("old", "Archive")?.inWindow)
+    }
 }

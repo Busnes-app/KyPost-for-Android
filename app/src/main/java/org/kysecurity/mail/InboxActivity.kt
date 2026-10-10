@@ -25,6 +25,7 @@ import org.kysecurity.mail.mail.MailFetchResult
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRepository
 import org.kysecurity.mail.mail.MailRuntime
+import org.kysecurity.mail.mail.OLDER_MAIL_UNSUPPORTED
 import org.kysecurity.mail.mail.isFlaggedPhishing
 import org.kysecurity.mail.mail.notifiedMessage
 import org.kysecurity.mail.mail.userFacingMessage
@@ -279,25 +280,30 @@ class InboxActivity : LockedActivity() {
     private fun loadOlderMail() {
         if (olderFooter.loading) return
         val folder = currentFolder
-        val before = olderFrontier[folder] ?: allEmails.lastOrNull()?.id ?: return
+        val frontier = olderFrontier[folder]
         olderFooter.loading = true
         ioExecutor.execute {
-            val outcome = mailRepository.loadOlder(folder, before)
+            // Read from Room, not allEmails: right after a folder switch that is still the old folder.
+            val before = frontier ?: mailRepository.cachedEmails(folder).lastOrNull()?.id
+            val outcome = before?.let { mailRepository.loadOlder(folder, it) }
             val emails = mailRepository.cachedEmails(folder)
             runOnUiThread {
                 olderFooter.loading = false
-                if (outcome is MailOutcome.Success) {
-                    val next = outcome.value.nextBefore
-                    if (outcome.value.hasMore == true && next != null) olderFrontier[folder] = next else olderExhausted += folder
-                } else {
+                when {
+                    outcome is MailOutcome.Success -> {
+                        val next = outcome.value.nextBefore
+                        if (outcome.value.hasMore == true && next != null) olderFrontier[folder] = next else olderExhausted += folder
+                    }
+                    outcome == null || (outcome as? MailOutcome.BadRequest)?.message == OLDER_MAIL_UNSUPPORTED ->
+                        olderExhausted += folder
                     // A stale frontier answers 400 forever; retry from the oldest row instead.
-                    olderFrontier.remove(folder)
+                    else -> olderFrontier.remove(folder)
                 }
                 if (folder != currentFolder) return@runOnUiThread
                 allEmails = emails
                 rebuildTabs(emails)
                 renderFilteredEmails()
-                outcome.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
+                outcome?.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
             }
         }
     }

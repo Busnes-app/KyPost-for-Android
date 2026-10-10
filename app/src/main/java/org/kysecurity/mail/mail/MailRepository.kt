@@ -23,14 +23,15 @@ class MailRepository(
         val result = outcome.value
         // Fetched before anything is written, so "held" means held before this refresh.
         val (overflow, overflowFailure) =
-            if (result.hasMore) fetchOverflow(folder, result.nextBefore) else emptyList<Email>() to null
+            if (result.isDelta && result.hasMore) fetchOverflow(folder, result.nextBefore) else emptyList<Email>() to null
         // Order is the whole point: Room first, checkpoint second. Room and DataStore cannot
         // share a transaction, so a crash between them replays this window — upserts and
         // deletes are idempotent — whereas the old order dropped it.
         reconcileFetchResult(emailDao, folder, "relay", result)
-        reconcileOlderMail(emailDao, folder, "relay", overflow)
-        // Advancing past overflow that never arrived would skip it for good; retry next refresh.
+        // A partial walk is not stored: its rows would count as held, and the retry from the old
+        // cursor would stop at them and commit past the pages that never arrived.
         if (overflowFailure != null) return overflowFailure
+        reconcileOlderMail(emailDao, folder, "relay", overflow)
         commitCheckpoint(folder, result.checkpoint)
         return outcome
     }
@@ -41,12 +42,13 @@ class MailRepository(
         val pages = mutableListOf<Email>()
         var before = from
         repeat(MAX_OVERFLOW_PAGES) {
-            val at = before ?: return pages to null
+            val at = before ?: return pages to MailOutcome.UpstreamFailure(OVERFLOW_UNREACHABLE)
             val page = relaySource.fetchOlder(folder, WINDOW_LIMIT, at)
             if (page !is MailOutcome.Success) return pages to page.failureOrNull()
-            if (page.value.hasMore == null) return pages to null
+            // This server announced overflow, so a page without hasMore contradicts it.
+            val hasMore = page.value.hasMore ?: return pages to MailOutcome.UpstreamFailure(OVERFLOW_UNREACHABLE)
             pages += page.value.messages
-            if (page.value.hasMore != true || page.value.messages.any { it.id in held }) return pages to null
+            if (!hasMore || page.value.messages.any { it.id in held }) return pages to null
             before = page.value.nextBefore?.takeIf { it != at }
         }
         return pages to null
@@ -180,6 +182,12 @@ internal fun reconcileFetchResult(emailDao: EmailDao, folder: String, mode: Stri
         val existing = emailDao.getById(messageId, folder) ?: return this
         return copy(body = existing.body, bodyMode = bodyMode.ifBlank { existing.bodyMode })
     }
+    // A snapshot is the newest mail. An absent row older than all of it aged out unreported (a
+    // forgotten cursor, an older relay); it still exists, so it leaves the window rather than Room.
+    if (!result.isDelta || result.isFullWindow) {
+        result.messages.mapNotNull { it.atUtc }.minOrNull()
+            ?.let { oldest -> emailDao.markAgedOutBefore(folder, oldest, result.messages.map { it.id }) }
+    }
     if (!result.isDelta) {
         emailDao.replaceFolderSnapshot(folder, result.messages.map { it.toEntity(folder, mode).keepingCachedBody() })
         return
@@ -227,6 +235,8 @@ internal const val WINDOW_LIMIT = 50
 /** ponytail: overflow paging stops after this many pages and commits the cursor anyway, leaving
  *  anything older unlisted. Upgrade path: persist the paging frontier and resume from it. */
 private const val MAX_OVERFLOW_PAGES = 20
+
+private const val OVERFLOW_UNREACHABLE = "The server reported more new mail than it would page"
 
 internal const val OLDER_MAIL_UNSUPPORTED = "This server can't load older mail. Update KyPost Server to use this."
 

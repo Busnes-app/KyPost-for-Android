@@ -97,17 +97,22 @@ Owns production Android app code and resources.
   keeps one window and cursor per `limit`. `EmailEntity.inWindow` is false for rows older than the
   window — paged in by "Load older mail" (`MailRepository.loadOlder`, `before=`) or reported
   `agedOut` — and snapshots prune only `inWindow` rows, so the daily since=0 resync never drops
-  paged-in mail. `removed` still deletes any row. A page row is metadata only, so a held row keeps
+  paged-in mail. A snapshot first takes absent rows dated before its oldest row out of the window
+  (they aged out unreported, e.g. under a forgotten cursor); it prunes only absent rows inside its
+  date range. `removed` still deletes any row. A page row is metadata only, so a held row keeps
   its body and PGP/attachment flags and takes only status and labels. A body opened on an
   out-of-window row is never cached: a paged row has no `pgpEncrypted`, which is what
   `clearServerDecryptedBodies` keys on at enrollment. A delta with `hasMore`
   pages down from `nextBefore` until a page holds an id Room already had, stores those rows, and
-  only then commits the cursor; a failed page keeps the old cursor. `delta: false` answering a
+  only then commits the cursor. A failed or contradictory walk (no `nextBefore`, a page without
+  `hasMore`) stores none of its pages and keeps the old cursor, so the retry walks them all. `delta: false` answering a
   cursor is a snapshot. A `before=` answer without `hasMore` is a server that ignored it; it is
   refused, never stored. Known gaps: the relay tracks deletions only inside its window, so an
   out-of-window row stays until the user acts on it; such rows are not healed by the daily resync
-  after a UIDVALIDITY reset; paged-in encrypted mail lacks its PGP flags (the page carries none);
-  overflow paging stops after `MAX_OVERFLOW_PAGES`.
+  after a UIDVALIDITY reset; encrypted mail stored from a page (older mail, or delta overflow)
+  lacks its PGP flags because the page carries none, so it opens through `/api/mail/body` with no
+  webmail handoff; a row deleted locally while a page is in flight can be written back (no
+  pending-action set yet); overflow paging stops after `MAX_OVERFLOW_PAGES`.
 - **`emails` is keyed on (folder, messageId), not messageId.** The relay's id is an IMAP UID,
   unique only within one mailbox, so INBOX and Archive can both hold `42`; under the old
   single-column key a refresh of either folder overwrote or relocated the other's row, and a

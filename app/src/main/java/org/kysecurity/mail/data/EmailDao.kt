@@ -39,6 +39,10 @@ interface EmailDao {
     @Query("UPDATE emails SET inWindow = 0 WHERE folder = :folder AND messageId IN (:ids)")
     fun markAgedOut(folder: String, ids: List<String>)
 
+    /** `atUtc` is RFC 3339 UTC from the relay, so text order is time order. */
+    @Query("UPDATE emails SET inWindow = 0 WHERE folder = :folder AND atUtc < :oldest AND messageId NOT IN (:keepIds)")
+    fun markAgedOutBefore(folder: String, oldest: String, keepIds: List<String>)
+
     /** Fills in a body fetched on open. Scoped to the columns the fetch actually answers for, not
      *  an `@Upsert` of the whole row: the metadata already there came from the inbox window and is
      *  fresher than anything this call knows. */

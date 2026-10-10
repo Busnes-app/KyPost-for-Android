@@ -39,6 +39,10 @@ private class FakeEmailDao : EmailDao {
         rows.values.filter { it.folder == folder && it.inWindow && it.messageId !in keep }
             .forEach { rows.remove(key(it.messageId, it.folder)) }
     }
+    override fun markAgedOutBefore(folder: String, oldest: String, keepIds: List<String>) {
+        rows.values.filter { it.folder == folder && (it.atUtc ?: return@filter false) < oldest && it.messageId !in keepIds }
+            .forEach { rows[key(it.messageId, it.folder)] = it.copy(inWindow = false) }
+    }
     override fun markAgedOut(folder: String, ids: List<String>) {
         ids.forEach { id -> rows[key(id, folder)]?.let { rows[key(id, folder)] = it.copy(inWindow = false) } }
     }
@@ -917,20 +921,62 @@ class MailRepositoryTest {
         assertEquals(listOf(Triple("sub-1", "INBOX", "c-2")), cursors.saved)
     }
 
-    /** The skipped mail is only reachable from the old cursor, so a failed page must not advance it. */
+    /** The skipped mail is only reachable from the old cursor, so a failed page must not advance
+     *  it — and the pages that did arrive must not be stored, or the retry would stop at them as
+     *  "held" and commit past the page that failed. */
     @Test
-    fun deltaOverflowWithAFailedPageKeepsTheCursorAndReportsTheFailure() {
+    fun deltaOverflowWithAFailedPageKeepsTheCursorAndTheRetryWalksEveryPage() {
         val dao = FakeEmailDao()
+        dao.put(row("held", "INBOX"))
         val cursors = FakeCursorProvider()
         val source = FakeMailSource(fetchOutcome = MailOutcome.Success(overflowDelta()))
         source.olderPages += page("o1", next = "o1")
         source.olderPages += MailOutcome.UpstreamFailure("imap down")
+        val repo = repository(dao, source, cursors)
 
-        val outcome = repository(dao, source, cursors).refreshFolder("INBOX")
-
-        assertTrue(outcome is MailOutcome.UpstreamFailure)
+        assertTrue(repo.refreshFolder("INBOX") is MailOutcome.UpstreamFailure)
         assertTrue(cursors.saved.isEmpty())
-        assertEquals(setOf("n1", "o1"), dao.rows.keys.map { it.second }.toSet())
+        assertEquals(setOf("held", "n1"), dao.rows.keys.map { it.second }.toSet())
+
+        source.befores.clear()
+        source.olderPages += page("o1", next = "o1")
+        source.olderPages += page("o2", "held", next = "held")
+        assertTrue(repo.refreshFolder("INBOX") is MailOutcome.Success)
+
+        assertEquals(listOf("n1", "o1"), source.befores)
+        assertEquals(setOf("held", "n1", "o1", "o2"), dao.rows.keys.map { it.second }.toSet())
+        assertEquals(listOf(Triple("sub-1", "INBOX", "c-2")), cursors.saved)
+    }
+
+    /** Overflow with nowhere to page from cannot be reached, so the cursor must not pass it. */
+    @Test
+    fun deltaOverflowWithoutAUsableNextBeforeKeepsTheCursor() {
+        val cursors = FakeCursorProvider()
+        val source = FakeMailSource(fetchOutcome = MailOutcome.Success(overflowDelta().copy(nextBefore = null)))
+
+        assertTrue(repository(FakeEmailDao(), source, cursors).refreshFolder("INBOX") is MailOutcome.UpstreamFailure)
+        assertTrue(cursors.saved.isEmpty())
+    }
+
+    /** `delta: false` answering a cursor (the window forgot it) is a snapshot: it replaces the
+     *  window, and a window row older than all of it aged out unreported, so it is kept. */
+    @Test
+    fun snapshotForAForgottenCursorKeepsOlderRowsAndPrunesOnlyAbsentNewerOnes() {
+        val dao = FakeEmailDao()
+        dao.put(row("gone", "INBOX").copy(atUtc = "2026-05-02T00:00:00Z"))
+        dao.put(row("aged", "INBOX").copy(atUtc = "2026-01-01T00:00:00Z"))
+        dao.put(row("paged", "INBOX").copy(atUtc = "2025-01-01T00:00:00Z", inWindow = false))
+        val snapshot = MailFetchResult(
+            tabs = emptyList(),
+            messages = listOf(email("w1", body = null).copy(atUtc = "2026-05-01T00:00:00Z")),
+            isDelta = false,
+            checkpoint = MailCheckpoint(subscriberId = "sub-1", cursor = "c-new", wasFullResync = false),
+        )
+
+        repository(dao, FakeMailSource(fetchOutcome = MailOutcome.Success(snapshot))).refreshFolder("INBOX")
+
+        assertEquals(setOf("w1", "aged", "paged"), dao.rows.keys.map { it.second }.toSet())
+        assertEquals(false, dao.getById("aged", "INBOX")?.inWindow)
     }
 
     /** The relay keeps a window and cursor per limit; a cursor sent with another limit is unknown. */
