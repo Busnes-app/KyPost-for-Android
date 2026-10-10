@@ -63,6 +63,10 @@ class ContactsListActivity : LockedActivity() {
 
     private val accountSetup: Boolean by lazy { intent.getBooleanExtra(EXTRA_ACCOUNT_SETUP, false) }
 
+    /** The account-setup confirmation, while shown. */
+    @androidx.annotation.VisibleForTesting
+    internal var setupDialog: androidx.appcompat.app.AlertDialog? = null
+
 
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
         pendingScrollPosition = savedInstanceState?.getInt(STATE_SCROLL, 0) ?: 0
