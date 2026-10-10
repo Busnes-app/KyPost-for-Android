@@ -396,6 +396,7 @@
     <string name="finding_email">Finding new email…</string>
     <string name="no_archive_folders">No archive folders found</string>
     <string name="email_not_found">Email no longer available</string>
+    <string name="load_older_mail">Load older mail</string>
 
     <string name="contacts_device_sync_enable">Enable device contact sync</string>
     <string name="contacts_device_sync_disable">Disable device contact sync</string>

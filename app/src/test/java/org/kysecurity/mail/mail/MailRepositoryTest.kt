@@ -33,10 +33,14 @@ private class FakeEmailDao : EmailDao {
     override fun deleteById(id: String, folder: String) { rows.remove(key(id, folder)) }
     override fun clearAll() { rows.clear() }
     override fun getById(id: String, folder: String): EmailEntity? = rows[key(id, folder)]
+    override fun getIds(folder: String): List<String> = getByFolder(folder).map { it.messageId }
     override fun pruneStaleInFolder(folder: String, keepIds: List<String>) {
         val keep = keepIds.toSet()
-        rows.values.filter { it.folder == folder && it.messageId !in keep }
+        rows.values.filter { it.folder == folder && it.inWindow && it.messageId !in keep }
             .forEach { rows.remove(key(it.messageId, it.folder)) }
+    }
+    override fun markAgedOut(folder: String, ids: List<String>) {
+        ids.forEach { id -> rows[key(id, folder)]?.let { rows[key(id, folder)] = it.copy(inWindow = false) } }
     }
 
     /** Mirrors the real query. The authority on the SQL itself is `EmailDaoLazyBodyTest`. */
@@ -96,8 +100,22 @@ private class FakeMailSource(
     var actionOutcome: MailOutcome<MailActionOutcome> = MailOutcome.Success(MailActionOutcome(1, emptyList())),
 ) : MailSource {
     val actions = mutableListOf<Triple<MailAction, List<String>, String>>()
+    val limits = mutableListOf<Int>()
 
-    override fun fetchInbox(mailbox: String, limit: Int, forceFullResync: Boolean) = fetchOutcome
+    /** Answers `before=` requests in order; the befores asked for are recorded. */
+    val olderPages = ArrayDeque<MailOutcome<MailPage>>()
+    val befores = mutableListOf<String>()
+
+    override fun fetchInbox(mailbox: String, limit: Int, forceFullResync: Boolean): MailOutcome<MailFetchResult> {
+        limits += limit
+        return fetchOutcome
+    }
+
+    override fun fetchOlder(mailbox: String, limit: Int, before: String): MailOutcome<MailPage> {
+        limits += limit
+        befores += before
+        return olderPages.removeFirstOrNull() ?: unsupported()
+    }
 
     override fun performAction(
         action: MailAction,
@@ -786,5 +804,164 @@ class MailRepositoryTest {
 
         assertTrue(repository(dao, source).markRead("42", "INBOX") is MailOutcome.Success)
         assertEquals("read", dao.getById("42", "INBOX")?.status)
+    }
+
+    // --- Older mail and reliable deltas (KyPost-Server #348, #349) -------------------------------
+
+    private fun snapshotOf(vararg ids: String) =
+        MailFetchResult(tabs = emptyList(), messages = ids.map { email(it, body = null) }, isDelta = false)
+
+    private fun page(vararg ids: String, hasMore: Boolean? = true, next: String? = "next-${ids.lastOrNull()}") =
+        MailOutcome.Success(MailPage(ids.map { email(it, body = null) }, hasMore, next))
+
+    /** agedOut is mail that still exists below the window. Deleting it lost real mail on every
+     *  arrival; keeping it as a window row let the next snapshot prune it instead. */
+    @Test
+    fun agedOutRowIsKeptAndSurvivesTheNextSnapshot() {
+        val dao = FakeEmailDao()
+        dao.put(row("old", "INBOX"))
+
+        reconcileFetchResult(
+            dao, "INBOX", "relay",
+            MailFetchResult(tabs = emptyList(), messages = listOf(email("new")), isDelta = true, agedOutMessageIds = listOf("old")),
+        )
+        reconcileFetchResult(dao, "INBOX", "relay", snapshotOf("new"))
+
+        assertEquals(setOf("INBOX" to "old", "INBOX" to "new"), dao.rows.keys)
+    }
+
+    @Test
+    fun removedStillDeletesARowOutsideTheWindow() {
+        val dao = FakeEmailDao()
+        dao.put(row("old", "INBOX").copy(inWindow = false))
+
+        reconcileFetchResult(
+            dao, "INBOX", "relay",
+            MailFetchResult(tabs = emptyList(), messages = emptyList(), isDelta = true, removedMessageIds = listOf("old")),
+        )
+
+        assertTrue(dao.rows.isEmpty())
+    }
+
+    /** The daily since=0 snapshot lists only the window; mail the user paged in is older than it. */
+    @Test
+    fun pagedInMailSurvivesTheDailySnapshot() {
+        val dao = FakeEmailDao()
+        dao.put(row("w1", "INBOX"))
+        val source = FakeMailSource(fetchOutcome = MailOutcome.Success(snapshotOf("w1")))
+        source.olderPages += page("p1", "p2")
+        val repo = repository(dao, source)
+
+        assertTrue(repo.loadOlder("INBOX", "w1") is MailOutcome.Success)
+        repo.refreshFolder("INBOX", forceFullResync = true)
+
+        assertEquals(setOf("INBOX" to "w1", "INBOX" to "p1", "INBOX" to "p2"), dao.rows.keys)
+    }
+
+    /** A page row is metadata only. Taking it whole would clear the PGP flags that keep a
+     *  client-protected message from being fetched, and a cached body. */
+    @Test
+    fun anOlderPageRefreshesReadStateButKeepsWhatOnlyTheWindowCarries() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX", body = "cached", pgpEncrypted = true).copy(hasAttachments = true))
+        val source = FakeMailSource()
+        source.olderPages += MailOutcome.Success(MailPage(listOf(email("42", body = null, status = "read")), true, "41"))
+
+        repository(dao, source).loadOlder("INBOX", "43")
+
+        val kept = dao.getById("42", "INBOX")!!
+        assertEquals("read", kept.status)
+        assertEquals("cached", kept.body)
+        assertTrue(kept.pgpEncrypted)
+        assertTrue(kept.hasAttachments)
+        assertTrue("a held window row stays a window row", kept.inWindow)
+    }
+
+    /** A server without before= answers with its newest window. That is not older mail. */
+    @Test
+    fun olderPageFromAServerWithoutPagingIsRefusedAndStoresNothing() {
+        val dao = FakeEmailDao()
+        val source = FakeMailSource()
+        source.olderPages += page("w1", hasMore = null, next = null)
+
+        val outcome = repository(dao, source).loadOlder("INBOX", "w9")
+
+        assertEquals(OLDER_MAIL_UNSUPPORTED, (outcome as MailOutcome.BadRequest).message)
+        assertTrue(dao.rows.isEmpty())
+    }
+
+    private fun overflowDelta() = MailFetchResult(
+        tabs = emptyList(),
+        messages = listOf(email("n1", body = null)),
+        isDelta = true,
+        hasMore = true,
+        nextBefore = "n1",
+        checkpoint = MailCheckpoint(subscriberId = "sub-1", cursor = "c-2", wasFullResync = false),
+    )
+
+    /** More new mail than the window holds: page down to mail already held, then commit. */
+    @Test
+    fun deltaOverflowPagesDownToHeldMailBeforeCommittingTheCursor() {
+        val dao = FakeEmailDao()
+        dao.put(row("held", "INBOX"))
+        val cursors = FakeCursorProvider()
+        val source = FakeMailSource(fetchOutcome = MailOutcome.Success(overflowDelta()))
+        source.olderPages += page("o1", next = "o1")
+        source.olderPages += page("o2", "held", next = "held")
+
+        val outcome = repository(dao, source, cursors).refreshFolder("INBOX")
+
+        assertTrue(outcome is MailOutcome.Success)
+        assertEquals(listOf("n1", "o1"), source.befores)
+        assertEquals(setOf("held", "n1", "o1", "o2"), dao.rows.keys.map { it.second }.toSet())
+        assertEquals(listOf(Triple("sub-1", "INBOX", "c-2")), cursors.saved)
+    }
+
+    /** The skipped mail is only reachable from the old cursor, so a failed page must not advance it. */
+    @Test
+    fun deltaOverflowWithAFailedPageKeepsTheCursorAndReportsTheFailure() {
+        val dao = FakeEmailDao()
+        val cursors = FakeCursorProvider()
+        val source = FakeMailSource(fetchOutcome = MailOutcome.Success(overflowDelta()))
+        source.olderPages += page("o1", next = "o1")
+        source.olderPages += MailOutcome.UpstreamFailure("imap down")
+
+        val outcome = repository(dao, source, cursors).refreshFolder("INBOX")
+
+        assertTrue(outcome is MailOutcome.UpstreamFailure)
+        assertTrue(cursors.saved.isEmpty())
+        assertEquals(setOf("n1", "o1"), dao.rows.keys.map { it.second }.toSet())
+    }
+
+    /** The relay keeps a window and cursor per limit; a cursor sent with another limit is unknown. */
+    @Test
+    fun windowAndPagesAlwaysAskForTheSameLimit() {
+        val source = FakeMailSource(fetchOutcome = MailOutcome.Success(overflowDelta()))
+        source.olderPages += page("o1", hasMore = false, next = null)
+        source.olderPages += page("o0", hasMore = false, next = null)
+        val repo = repository(FakeEmailDao(), source)
+
+        repo.refreshFolder("INBOX")
+        repo.loadOlder("INBOX", "o1")
+
+        assertEquals(listOf(WINDOW_LIMIT, WINDOW_LIMIT, WINDOW_LIMIT), source.limits)
+    }
+
+    /** Enrollment drops server-decrypted plaintext by the pgpEncrypted flag, which an older page
+     *  never carries. A body cached on such a row would outlive that purge. */
+    @Test
+    fun aBodyOpenedOnAnOutOfWindowRowIsNotCached() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX", body = null).copy(inWindow = false))
+        val source = FakeMailSource().apply {
+            bodyOutcome = MailOutcome.Success(
+                MailMessageBody(html = "decrypted by the server", toAddresses = emptyList(), ccAddresses = emptyList()),
+            )
+        }
+
+        val body = (repository(dao, source).fetchBody("42", "INBOX") as MailOutcome.Success).value
+
+        assertEquals("decrypted by the server", body.html)
+        assertNull(dao.getById("42", "INBOX")?.body)
     }
 }

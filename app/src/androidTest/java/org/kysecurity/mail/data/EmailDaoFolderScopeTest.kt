@@ -102,6 +102,7 @@ class EmailDaoFolderScopeTest {
             upserts = listOf(row("1", "INBOX", "new")),
             removedIds = listOf("7"),
             pruneKeepIds = listOf("1"),
+            agedOutIds = emptyList(),
         )
 
         assertEquals(listOf("1"), dao.getByFolder("INBOX").map { it.messageId })
@@ -117,8 +118,28 @@ class EmailDaoFolderScopeTest {
             upserts = listOf(row("1", "INBOX", "new")),
             removedIds = emptyList(),
             pruneKeepIds = null,
+            agedOutIds = emptyList(),
         )
 
         assertEquals(setOf("1", "9"), dao.getByFolder("INBOX").map { it.messageId }.toSet())
+    }
+
+    /** A snapshot lists only the window. Rows below it, aged out or paged in, are not its to prune. */
+    @Test
+    fun snapshotPrunesOnlyWindowRowsAndAgedOutRowsLeaveTheWindow() {
+        dao.upsertAll(listOf(row("5", "INBOX", null), row("4", "INBOX", null), row("1", "INBOX", null).copy(inWindow = false)))
+
+        dao.applyFolderDelta(
+            folder = "INBOX",
+            upserts = listOf(row("6", "INBOX", null)),
+            removedIds = emptyList(),
+            pruneKeepIds = null,
+            agedOutIds = listOf("4"),
+        )
+        dao.replaceFolderSnapshot("INBOX", listOf(row("6", "INBOX", null)))
+
+        assertEquals(setOf("6", "4", "1"), dao.getByFolder("INBOX").map { it.messageId }.toSet())
+        assertEquals(false, dao.getById("4", "INBOX")?.inWindow)
+        assertEquals(setOf("6", "4", "1"), dao.getIds("INBOX").toSet())
     }
 }

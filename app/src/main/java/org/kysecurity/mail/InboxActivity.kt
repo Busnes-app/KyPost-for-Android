@@ -47,6 +47,10 @@ class InboxActivity : LockedActivity() {
     private lateinit var inboxRoot: View
     private lateinit var inboxContent: View
     private lateinit var adapter: EmailAdapter
+    private val olderFooter = LoadOlderAdapter { loadOlderMail() }
+    /** Per folder: where the next older page starts, and folders with nothing older left. */
+    private val olderFrontier = mutableMapOf<String, String>()
+    private val olderExhausted = mutableSetOf<String>()
     private val ioExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var mailRepository: MailRepository
@@ -268,7 +272,34 @@ class InboxActivity : LockedActivity() {
             openEmailDetail(email)
         }
         recyclerView.layoutManager = LinearLayoutManager(this)
-        recyclerView.adapter = adapter
+        recyclerView.adapter = androidx.recyclerview.widget.ConcatAdapter(adapter, olderFooter)
+    }
+
+    /** Pages from the last page's `nextBefore`; the first page starts at the oldest row held. */
+    private fun loadOlderMail() {
+        if (olderFooter.loading) return
+        val folder = currentFolder
+        val before = olderFrontier[folder] ?: allEmails.lastOrNull()?.id ?: return
+        olderFooter.loading = true
+        ioExecutor.execute {
+            val outcome = mailRepository.loadOlder(folder, before)
+            val emails = mailRepository.cachedEmails(folder)
+            runOnUiThread {
+                olderFooter.loading = false
+                if (outcome is MailOutcome.Success) {
+                    val next = outcome.value.nextBefore
+                    if (outcome.value.hasMore == true && next != null) olderFrontier[folder] = next else olderExhausted += folder
+                } else {
+                    // A stale frontier answers 400 forever; retry from the oldest row instead.
+                    olderFrontier.remove(folder)
+                }
+                if (folder != currentFolder) return@runOnUiThread
+                allEmails = emails
+                rebuildTabs(emails)
+                renderFilteredEmails()
+                outcome.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
+            }
+        }
     }
 
     /** The row's own mailbox, not the screen's. An IMAP UID is unique only within one folder, so
@@ -492,6 +523,7 @@ class InboxActivity : LockedActivity() {
     private fun renderFilteredEmails() {
         val filtered = KeywordTabs.filterEmails(allEmails, selectedTab)
         adapter.updateEmails(filtered)
+        olderFooter.shown = allEmails.isNotEmpty() && currentFolder !in olderExhausted
         if (pendingScrollPosition > 0 && adapter.itemCount > 0) {
             val target = pendingScrollPosition.coerceAtMost(adapter.itemCount - 1)
             pendingScrollPosition = 0
@@ -607,6 +639,9 @@ class InboxActivity : LockedActivity() {
                 target: RecyclerView.ViewHolder
             ): Boolean = false
 
+            override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int =
+                if (viewHolder.bindingAdapter === adapter) super.getSwipeDirs(recyclerView, viewHolder) else 0
+
             override fun onChildDraw(
                 c: Canvas,
                 recyclerView: RecyclerView,
@@ -651,7 +686,7 @@ class InboxActivity : LockedActivity() {
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                 val position = viewHolder.bindingAdapterPosition
-                if (position < 0 || position >= adapter.itemCount) return
+                if (viewHolder.bindingAdapter !== adapter || position < 0 || position >= adapter.itemCount) return
                 val email = adapter.getEmailAt(position)
                 when (direction) {
                     ItemTouchHelper.LEFT ->

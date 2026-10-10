@@ -65,6 +65,11 @@ data class RelayInboxResponseDto(
     val cursor: String = "",
     val delta: Boolean = false,
     val removed: List<String> = emptyList(),
+    /** Fell below the window but still exists: keep (KyPost-Server #349). */
+    val agedOut: List<String> = emptyList(),
+    /** Null when absent: a pre-#348 server, which ignores `before=` entirely. */
+    val hasMore: Boolean? = null,
+    val nextBefore: String? = null,
 )
 
 @Serializable

@@ -100,6 +100,35 @@ class EmailAdapter(
     }
 }
 
+/** "Load older mail" after the last row; no item at all while hidden. */
+class LoadOlderAdapter(private val onClick: () -> Unit) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+    var shown = false
+        set(value) {
+            if (field == value) return
+            field = value
+            if (value) notifyItemInserted(0) else notifyItemRemoved(0)
+        }
+    var loading = false
+        set(value) {
+            field = value
+            if (shown) notifyItemChanged(0)
+        }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder =
+        object : RecyclerView.ViewHolder(
+            LayoutInflater.from(parent.context).inflate(R.layout.item_load_older, parent, false),
+        ) {}
+
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        val button = holder.itemView.findViewById<android.widget.Button>(R.id.loadOlderButton)
+        applyGhostButtonTheme(button.context, button)
+        button.isEnabled = !loading
+        button.setOnClickListener { onClick() }
+    }
+
+    override fun getItemCount(): Int = if (shown) 1 else 0
+}
+
 /** Not notifyDataSetChanged(): NO_POSITION holders strand ItemTouchHelper's swipe animation. */
 internal fun dispatchEmailListUpdate(
     old: List<Email>,

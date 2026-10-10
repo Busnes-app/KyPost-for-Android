@@ -1193,4 +1193,85 @@ class RelayMailSourceTest {
 
         assertEquals(reason, (outcome as MailOutcome.BadRequest).message)
     }
+
+    private fun sourceAnswering(body: String, cursor: String? = null): Pair<RelayMailSource, FakeCallFactory> {
+        val callFactory = FakeCallFactory { request -> jsonResponse(request, body) }
+        return RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(storedCursor = cursor),
+            callFactory = callFactory,
+        ) to callFactory
+    }
+
+    @Test
+    fun fetchOlder_asksForMetadataBeforeTheGivenRowWithoutACursor() {
+        val (source, calls) = sourceAnswering(
+            """{"tabs": ["Uncategorized"], "byTab": {"Uncategorized": [{"messageId": "40", "subject": "S", "status": "read"}]}, "hasMore": true, "nextBefore": "40"}""",
+            cursor = "c-9",
+        )
+
+        val page = (source.fetchOlder("Archive", 50, "41") as MailOutcome.Success).value
+
+        val url = calls.requests.single().url
+        assertEquals("/api/inbox", url.encodedPath)
+        assertEquals("41", url.queryParameter("before"))
+        assertEquals("50", url.queryParameter("limit"))
+        assertEquals("Archive", url.queryParameter("mailbox"))
+        assertEquals("0", url.queryParameter("bodies"))
+        assertNull("a page never sends or moves the cursor", url.queryParameter("since"))
+        assertEquals(listOf("40"), page.messages.map { it.id })
+        assertEquals(true, page.hasMore)
+        assertEquals("40", page.nextBefore)
+    }
+
+    /** A pre-#348 server ignores before= and answers with its window, without hasMore. */
+    @Test
+    fun fetchOlder_reportsAServerThatIgnoredBefore() {
+        val (source, _) = sourceAnswering("""{"tabs": [], "byTab": {}, "cursor": "c1", "delta": false, "removed": []}""")
+
+        val page = (source.fetchOlder("INBOX", 50, "41") as MailOutcome.Success).value
+
+        assertNull(page.hasMore)
+    }
+
+    @Test
+    fun fetchOlder_staleReferenceIsTheServersBadRequest() {
+        val callFactory = FakeCallFactory { request ->
+            jsonResponse(request, "invalid before message reference; refresh the mailbox", code = 400)
+        }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = callFactory)
+
+        val outcome = source.fetchOlder("INBOX", 50, "x")
+
+        assertEquals("invalid before message reference; refresh the mailbox", (outcome as MailOutcome.BadRequest).message)
+    }
+
+    @Test
+    fun deltaPoll_parsesAgedOutAndOverflow() {
+        val (source, _) = sourceAnswering(
+            """{"tabs": [], "byTab": {}, "cursor": "c2", "delta": true, "removed": ["r1"], "agedOut": ["a1"], "hasMore": true, "nextBefore": "77"}""",
+            cursor = "c1",
+        )
+
+        val result = (source.fetchInbox("INBOX", 50) as MailOutcome.Success).value
+
+        assertEquals(listOf("r1"), result.removedMessageIds)
+        assertEquals(listOf("a1"), result.agedOutMessageIds)
+        assertTrue(result.hasMore)
+        assertEquals("77", result.nextBefore)
+    }
+
+    /** `delta: false` answering a cursor means the window did not recognise it: a full snapshot. */
+    @Test
+    fun unrecognisedCursorAnswerIsASnapshotNotADelta() {
+        val (source, calls) = sourceAnswering(
+            """{"tabs": [], "byTab": {}, "cursor": "c-new", "delta": false, "removed": []}""",
+            cursor = "c-foreign",
+        )
+
+        val result = (source.fetchInbox("INBOX", 50) as MailOutcome.Success).value
+
+        assertEquals("c-foreign", calls.requests.single().url.queryParameter("since"))
+        assertFalse(result.isDelta)
+    }
 }
