@@ -460,8 +460,10 @@ Owns production Android app code and resources.
   uids still in the outbox. `ContactFullResyncTest` covers both.
   **Per address, a key verified on this device is authoritative; a synced key never is.** The PGP
   QR flow's two saves (`queueCreate`/`queueUpdate` with `verifiedInPerson`) are the only writers of
-  `recipient_pins` (`MIGRATION_12_13`), and each replaces the pins for that contact's addresses —
-  re-scanning is how a pin changes. `RoomLocalSignerKeys` (`authoritativeKeys`) returns ONLY the pins
+  `recipient_pins` after `MIGRATION_12_13`, and each replaces the pins for that contact's addresses
+  — re-scanning is how a pin changes. The migration itself seeds the table with exactly what the
+  lookup before it trusted (`legacyPins`: every contact key per address, with its confirmation), so
+  an upgrade never turns a trusted key into an untrusted one. `LegacyKeyMigrationTest`. `RoomLocalSignerKeys` (`authoritativeKeys`) returns ONLY the pins
   for a pinned address, so a contact key the server delivers, on a replacement contact or as an
   update, cannot satisfy `ClientEncryptedSender.applyPins` and the send is `KeyChanged`. Sync never
   writes the table, so removing or rewriting the contact does not touch the pin; a wipe (database

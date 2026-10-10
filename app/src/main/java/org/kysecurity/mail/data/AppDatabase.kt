@@ -163,7 +163,9 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
-        /** Recorded keys kept when sync removes the contact that held them. */
+        /** Recipient pins, seeded with exactly what the lookup before them trusted: every contact
+         *  key, per address, with its confirmation. An upgrade must not turn a trusted key into an
+         *  untrusted one, and from here on only this device's verification adds to the table. */
         val MIGRATION_12_13 = object : Migration(12, 13) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(
@@ -171,6 +173,27 @@ abstract class AppDatabase : RoomDatabase() {
                         "`fingerprint` TEXT NOT NULL, `publicKey` TEXT NOT NULL, `confirmed` INTEGER NOT NULL, " +
                         "PRIMARY KEY(`address`, `fingerprint`))",
                 )
+                db.query(
+                    "SELECT emailsJson, pgpKey, pgpKeyFingerprint, pgpKeyNeedsReverification, identityNeedsReview " +
+                        "FROM contacts",
+                ).use { row ->
+                    while (row.moveToNext()) {
+                        legacyPins(
+                            emailsJson = row.getString(0),
+                            publicKey = row.getString(1),
+                            fingerprint = row.getString(2),
+                            confirmed = row.getInt(3) == 0 && row.getInt(4) == 0,
+                        ).forEach { pin ->
+                            // The old lookup confirmed a signer if ANY matching key was confirmed.
+                            db.execSQL(
+                                "INSERT INTO recipient_pins (address, fingerprint, publicKey, confirmed) " +
+                                    "VALUES (?, ?, ?, ?) ON CONFLICT(address, fingerprint) " +
+                                    "DO UPDATE SET confirmed = max(confirmed, excluded.confirmed)",
+                                arrayOf(pin.address, pin.fingerprint, pin.publicKey, if (pin.confirmed) 1 else 0),
+                            )
+                        }
+                    }
+                }
             }
         }
 
