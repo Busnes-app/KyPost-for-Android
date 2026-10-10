@@ -75,6 +75,33 @@ class PinnedKeyRevocationMergeTest {
         assertTrue(transport.sent.isEmpty())
     }
 
+    /** The relay's view of the key (unusable, or a changed-key tier) must not hide that this
+     *  device's own pin was revoked. */
+    @Test
+    fun aRevokedPin_isReportedEvenWhenTheRelayCallsTheKeyUnusableOrChanged() = runBlocking {
+        val revokedPin = withVerifiedRevocation(public(A), revoked(A, signer = A))!!
+        for (relayKey in listOf(
+            ResolvedRecipientKey(ALICE, revoked(A, signer = A), "", "discovered", usable = false),
+            ResolvedRecipientKey(ALICE, public(B), "", "key_changed", usable = true),
+        )) {
+            val opener = FakeVaultOpener()
+            val transport = FakeClientEncryptedTransport()
+            val sender = ClientEncryptedSender(
+                opener = opener,
+                resolver = FakeRecipientKeyResolver(ResolveResult.Success(listOf(relayKey))),
+                transport = transport,
+                localKeys = FakePinnedKeys(mapOf(ALICE to listOf(LocalSignerKey(revokedPin, confirmed = true)))),
+                accountAddress = "me@example.invalid",
+            )
+
+            val outcome = sender.send(MailDraft(to = ALICE, subject = "s", body = "b", mode = "plain"), sign = false)
+
+            assertEquals("relay said ${relayKey.tier}/${relayKey.usable}", ClientSendOutcome.RecipientKeyRevoked(listOf(ALICE)), outcome)
+            assertEquals(0, opener.opened)
+            assertTrue(transport.sent.isEmpty())
+        }
+    }
+
     private companion object {
         const val ALICE = "alice@example.invalid"
         val A: PGPSecretKeyRing by lazy { generator("A <a@example.invalid>").generateSecretKeyRing() }
