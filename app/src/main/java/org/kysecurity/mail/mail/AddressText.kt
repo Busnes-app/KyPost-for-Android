@@ -20,3 +20,12 @@ fun addressFromHeader(raw: String): String {
     }
     return if (candidate.contains('@')) candidate else ""
 }
+
+/** Sender, To and Cc without the user's [own] addresses, unless nobody else is left. */
+fun replyAllRecipients(sender: String, to: List<String>, cc: List<String>, own: List<String>): List<String> {
+    val all = (listOf(sender) + to + cc).map(::addressFromHeader)
+        .filter { it.isNotBlank() }
+        .distinctBy { it.lowercase() }
+    val mine = own.mapTo(HashSet()) { addressFromHeader(it).lowercase() }
+    return all.filterNot { it.lowercase() in mine }.ifEmpty { all }
+}

@@ -368,7 +368,8 @@ Owns production Android app code and resources.
     the server-side one works by storing plaintext, which is what client custody exists to prevent.
   - `accountAddress` is bootstrap's `suggestedUserIDs[0]` and nothing else — the server derives it
     from the same expression `handleMailSendPGP` feeds to `resolveMailFrom`. Do not derive it from
-    the public key's User ID or the self-contact.
+    the public key's User ID or the self-contact. The whole list (account address plus verified
+    send-as aliases) is `ownAddresses`, which Reply All (`replyAllRecipients`) leaves out.
   - `ComposePgpController` caches the **bootstrap**, not the composed state: custody is fixed at key
     creation but enrollment can change mid-process, so it is re-probed on every `composeState()`.
   - Sign-only is impossible (the relay accepts `multipart/encrypted` only), so the two chips are
