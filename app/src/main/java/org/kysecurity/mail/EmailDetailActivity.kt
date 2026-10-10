@@ -277,6 +277,7 @@ class EmailDetailActivity : LockedActivity() {
                     to = extractAddress(emailSender),
                     subject = withPrefix(emailSubject, "Re:"),
                     bodyHtml = quoteForReply(emailSender, quoted),
+                    replyTo = ReplyRef(emailId, emailFolder),
                 )
             }
         }
@@ -293,6 +294,7 @@ class EmailDetailActivity : LockedActivity() {
                         to = recipients.joinToString(", "),
                         subject = withPrefix(emailSubject, "Re:"),
                         bodyHtml = quoteForReply(emailSender, quoted),
+                        replyTo = ReplyRef(emailId, emailFolder),
                     )
                 }
             }
@@ -1288,11 +1290,13 @@ class EmailDetailActivity : LockedActivity() {
         subject: String,
         bodyHtml: String,
         attachments: List<org.kysecurity.mail.mail.OutgoingAttachment> = emptyList(),
+        replyTo: ReplyRef? = null,
     ) {
         val intent = ComposeActivity.internalIntent(this)
         intent.putExtra(ComposeActivity.EXTRA_TO, to)
         intent.putExtra(ComposeActivity.EXTRA_SUBJECT, subject)
         intent.putExtra(ComposeActivity.EXTRA_BODY_HTML, bodyHtml)
+        replyTo?.let { intent.putExtra(ComposeActivity.EXTRA_REPLY_TOKEN, ReplyThreadHandoff.put(it)) }
         // Process-scoped handoff, not an Intent extra: 25 MB is far past Binder's ~1 MB limit.
         if (attachments.isNotEmpty()) ForwardAttachmentHandoff.put(attachments)
         startActivity(intent)
