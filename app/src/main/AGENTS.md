@@ -449,6 +449,12 @@ Owns production Android app code and resources.
   because the create may already be on the server from a push whose reply is in flight. Rows are
   replaced with new ids, never edited in place — a running sync acks by the ids it read, and
   in-place edits would be acked unsent. `ContactOutboxCoalesceTest` covers both races.
+  Pushes go in batches under the server's caps (`pushBatches`: 500 changes, 900 KiB of change
+  JSON against its 1 MiB body limit), each acked and advancing the cursor on its own. 400/413 is
+  "this request is too big": the batch is halved, and a single change still refused stays queued
+  while the rest go out. Once a reply says `tooOld`, the remaining batches keep the stale cursor
+  (cheap `tooOld` replies with no lists) and one `since=0` pull ends the sync.
+  `ContactPushBatchingTest` pins all three.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`

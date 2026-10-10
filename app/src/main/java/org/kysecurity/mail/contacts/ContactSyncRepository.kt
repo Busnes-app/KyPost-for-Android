@@ -47,7 +47,7 @@ class ContactSyncRepository(
         val deviceSecret = pairing.deviceSecret
         if (deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return@withLock ContactSyncOutcome.NotPaired
         val pendingChanges = db.pendingContactChangeDao().getAllPending()
-        val cursor = cursorStore.cursor(pairing.subscriberId)
+        var cursor = cursorStore.cursor(pairing.subscriberId)
 
         // Fail closed BEFORE the network call. A row this app cannot encode used to become an
         // empty ContactDto, which the server accepts as a real update and applyDelta then clears
@@ -61,28 +61,61 @@ class ContactSyncRepository(
             )
         }
 
-        val result = if (pendingChanges.isEmpty()) {
-            client.pull(pairing.serverUrl, deviceId, deviceSecret, cursor)
-        } else {
-            client.push(
+        // Each batch is atomic server-side and acked here on its own, so a failure keeps the
+        // batches before it. A rejected batch (413 over the count cap, 400 over the body cap)
+        // is split; a single change still rejected stays queued and the rest go on.
+        val sendable = wireChanges.map { (row, dto) -> row to requireNotNull(dto) }
+        val batches = ArrayDeque(pushBatches(sendable) { (_, dto) -> wireBytes(dto) })
+        val refused = mutableListOf<String>()
+        var tooOld = false
+        while (batches.isNotEmpty()) {
+            val batch = batches.removeFirst()
+            val result = client.push(
                 serverUrl = pairing.serverUrl,
                 deviceId = deviceId,
                 deviceSecret = deviceSecret,
                 baseCursor = cursor,
-                changes = wireChanges.mapNotNull { it.second },
+                changes = batch.map { it.second },
             )
+            if (result is ContactSyncResult.BadRequest) {
+                if (batch.size > 1) batches.addAll(0, batch.chunked((batch.size + 1) / 2)) else refused += result.message
+                continue
+            }
+            val response = (result as? ContactSyncResult.Success)?.response ?: return@withLock failureOutcome(result)
+            applyDelta(pairing.subscriberId, response, batch.map { it.first })
+            // Keep pushing on the stale cursor once tooOld: the server keeps answering tooOld
+            // without contact lists, and one full pull below replaces them all.
+            tooOld = tooOld || response.tooOld
+            if (!tooOld) cursor = response.cursor
         }
 
-        when (result) {
-            is ContactSyncResult.Success -> {
-                applyDelta(pairing.subscriberId, result.response, pendingChanges)
-                ContactSyncOutcome.Success
-            }
-            is ContactSyncResult.Unauthorized -> ContactSyncOutcome.Unauthorized
-            is ContactSyncResult.ServiceUnavailable -> ContactSyncOutcome.ServiceUnavailable(result.message)
-            is ContactSyncResult.BadRequest -> ContactSyncOutcome.Retry(result.message)
-            is ContactSyncResult.Retryable -> ContactSyncOutcome.Retry(result.message)
+        var pullFrom: Long? = if (tooOld) 0L else cursor.takeIf { pendingChanges.isEmpty() }
+        while (pullFrom != null) {
+            val result = client.pull(pairing.serverUrl, deviceId, deviceSecret, pullFrom)
+            val response = (result as? ContactSyncResult.Success)?.response ?: return@withLock failureOutcome(result)
+            applyDelta(pairing.subscriberId, response, emptyList())
+            pullFrom = if (response.tooOld && pullFrom != 0L) 0L else null
         }
+
+        if (refused.isEmpty()) {
+            ContactSyncOutcome.Success
+        } else {
+            ContactSyncOutcome.Retry(
+                "The server refused ${refused.size} queued contact change(s); they stay queued " +
+                    "(${refused.first()}).",
+            )
+        }
+    }
+
+    private fun wireBytes(dto: ContactDto): Int =
+        json.encodeToString(ContactDto.serializer(), dto).toByteArray(Charsets.UTF_8).size + 1
+
+    private fun failureOutcome(result: ContactSyncResult): ContactSyncOutcome = when (result) {
+        is ContactSyncResult.Success -> ContactSyncOutcome.Success
+        is ContactSyncResult.Unauthorized -> ContactSyncOutcome.Unauthorized
+        is ContactSyncResult.ServiceUnavailable -> ContactSyncOutcome.ServiceUnavailable(result.message)
+        is ContactSyncResult.BadRequest -> ContactSyncOutcome.Retry(result.message)
+        is ContactSyncResult.Retryable -> ContactSyncOutcome.Retry(result.message)
     }
 
     /** Deliberately does not call [sync]; the caller must trigger the follow-up sync itself. */
@@ -206,6 +239,28 @@ internal fun PendingContactChangeEntity.toWireDtoOrNull(json: Json): ContactDto?
     ContactSyncRepository.CHANGE_CREATE -> decodePayload(json)?.copy(uid = localUid)
     ContactSyncRepository.CHANGE_UPDATE -> decodePayload(json)?.copy(uid = localUid, rev = rev)
     else -> null
+}
+
+/** kypost-server answers 413 above 500 changes and 400 above a 1 MiB body. */
+internal const val MAX_PUSH_CHANGES = 500
+internal const val MAX_PUSH_BYTES = 900 * 1024
+
+/** Greedy, order-preserving split under both caps. A change over the byte cap travels alone. */
+internal fun <T> pushBatches(items: List<T>, sizeOf: (T) -> Int): List<List<T>> {
+    val batches = mutableListOf<MutableList<T>>()
+    var bytes = 0
+    for (item in items) {
+        val size = sizeOf(item)
+        val last = batches.lastOrNull()
+        if (last == null || last.size == MAX_PUSH_CHANGES || bytes + size > MAX_PUSH_BYTES) {
+            batches += mutableListOf(item)
+            bytes = size
+        } else {
+            last += item
+            bytes += size
+        }
+    }
+    return batches
 }
 
 /** An update to an unsynced create stays a create carrying the new payload. A delete stays a
