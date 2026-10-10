@@ -4,6 +4,8 @@ import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.text.TextUtils
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -16,6 +18,7 @@ import android.widget.Toast
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import org.kysecurity.mail.mail.AttachmentInfo
+import org.kysecurity.mail.mail.CalendarInvite
 import org.kysecurity.mail.mail.MailMessageBody
 import org.kysecurity.mail.mail.displayHeaderText
 import org.kysecurity.mail.mail.MailOutcome
@@ -86,6 +89,12 @@ class EmailDetailActivity : LockedActivity() {
     /** The message's real body, once the background fetch has answered. Reply/Forward quote this;
      *  see [quoteForReply] for why the 140-character preview was never an acceptable substitute. */
     private var fetchedBodyHtml: String? = null
+    private var fetchedBodyMode: String = ""
+
+    /** The intent's subject: a decrypted protected subject never leaves for another app. */
+    private var envelopeSubject: String = ""
+    private var senderHeader: String = ""
+    private var phishingFlagged = false
 
     /** The relay's signature verdict, overwritten by the local one once a local decrypt finishes. */
     private var pgpSignatureState: PgpSignatureState = PgpSignatureState.NONE
@@ -157,7 +166,9 @@ class EmailDetailActivity : LockedActivity() {
             pgpVerified = intent.getBooleanExtra("email_pgp_verified", false),
             pgpSignerFingerprint = intent.getStringExtra("email_pgp_signer_fingerprint").orEmpty(),
         )
-        val phishingFlagged = intent.getBooleanExtra("email_suspicious", false)
+        phishingFlagged = intent.getBooleanExtra("email_suspicious", false)
+        envelopeSubject = emailSubject
+        senderHeader = emailSender
 
         setTitle(R.string.email_title)
 
@@ -374,6 +385,7 @@ class EmailDetailActivity : LockedActivity() {
             lastRenderedHtml = htmlWithImages
             // A local decrypt must never reach this property; not `bodyToRender`, which is blanked.
             fetchedBodyHtml = content?.html?.takeIf { pgpState != PgpMessageState.CLIENT_PROTECTED }
+            fetchedBodyMode = bodyMode
             val plainTextBody = content?.html?.takeIf { it.isNotBlank() }
                 ?: emailPreview.takeIf { mayFallBackToPreview(outcome) }.orEmpty()
             val plainText = plainTextBody.takeIf { isPlainTextBody(it, bodyMode) }
@@ -761,12 +773,92 @@ class EmailDetailActivity : LockedActivity() {
     private fun loadAttachments(emailId: String, emailFolder: String) {
         ioExecutor.execute {
             val outcome = mailRepository.listAttachments(emailId, emailFolder)
+            val infos = (outcome as? MailOutcome.Success)?.value.orEmpty()
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                val infos = (outcome as? MailOutcome.Success)?.value.orEmpty()
                 renderAttachments(emailId, emailFolder, infos)
             }
+            // After the chips: a slow or hostile invite must not hold up the attachment list.
+            val invite = runCatching { loadInvite(emailId, emailFolder, infos) }
+                .onFailure { android.util.Log.w(TAG, "Invite not shown", it) }
+                .getOrNull() ?: return@execute
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                renderInvite(invite)
+            }
         }
+    }
+
+    private fun loadInvite(emailId: String, emailFolder: String, infos: List<AttachmentInfo>): CalendarInvite? {
+        val info = org.kysecurity.mail.mail.inviteAttachment(infos) ?: return null
+        val bytes = (mailRepository.downloadAttachment(emailId, emailFolder, info.index) as? MailOutcome.Success)
+            ?.value?.bytes ?: return null
+        return org.kysecurity.mail.mail.parseCalendarInvite(bytes, java.time.ZoneId.systemDefault()) { windowsId ->
+            android.icu.util.TimeZone.getIDForWindowsID(windowsId, "001")
+        }
+    }
+
+    /** Shows the invite; adding it is always the user's tap, never automatic. */
+    private fun renderInvite(invite: CalendarInvite) {
+        val event = invite.primary
+        findViewById<TextView>(R.id.inviteMethod).text = invite.method.takeIf { it.isNotEmpty() }
+            ?.let { getString(R.string.invite_label_method, it) } ?: getString(R.string.invite_label)
+        findViewById<TextView>(R.id.inviteTitle).text = event.summary.ifEmpty { getString(R.string.invite_untitled) }
+        findViewById<TextView>(R.id.inviteDetails).text = listOfNotNull(
+            inviteWhenText(event, java.time.ZoneId.systemDefault(), java.util.Locale.getDefault()),
+            getString(R.string.invite_repeats).takeIf { event.rrule.isNotEmpty() },
+            event.location.takeIf { it.isNotEmpty() }?.let { getString(R.string.invite_where, it) },
+            event.organizer.takeIf { it.isNotEmpty() }?.let { getString(R.string.invite_organizer, it) },
+        ).joinToString("\n")
+        val notice = listOfNotNull(
+            getString(R.string.invite_phishing).takeIf { phishingFlagged },
+            // The organizer address is the sender's own claim; say when the From header disagrees.
+            getString(R.string.invite_organizer_not_sender, event.organizer).takeIf {
+                event.organizer.isNotEmpty() && !event.organizer.equals(extractAddress(senderHeader), ignoreCase = true)
+            },
+            getString(R.string.invite_cancelled).takeIf { invite.isCancelled },
+            getString(R.string.invite_updated).takeIf { invite.isUpdate },
+            event.unknownZone?.let { getString(R.string.invite_unknown_zone, it) },
+        ).joinToString("\n\n")
+        findViewById<TextView>(R.id.inviteNotice).apply {
+            text = notice
+            visibility = if (notice.isEmpty()) View.GONE else View.VISIBLE
+        }
+        findViewById<Button>(R.id.btnInviteAdd).apply {
+            visibility = if (invite.offersAdd) View.VISIBLE else View.GONE
+            setOnClickListener { handOffToCalendar(calendarInsertExtras(event)) }
+        }
+        findViewById<View>(R.id.emailInviteCard).visibility = View.VISIBLE
+        applyInviteChrome()
+    }
+
+    private fun applyInviteChrome() {
+        applyOutlinedPanelBackground(this, findViewById(R.id.emailInviteCard))
+        applySectionEyebrowLabel(this, findViewById(R.id.inviteMethod))
+        applyWarningCalloutTheme(this, findViewById(R.id.inviteNotice))
+        applyPrimaryButtonTheme(this, findViewById(R.id.btnInviteAdd))
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        if (redirectedToUnlock) return false
+        menu.add(0, MENU_CREATE_EVENT, 0, R.string.calendar_create_event)
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        return super.onCreateOptionsMenu(menu)
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId != MENU_CREATE_EVENT) return super.onOptionsItemSelected(item)
+        val subject = envelopeSubject
+        val body = fetchedBodyHtml
+        val mode = fetchedBodyMode
+        // Off Main: the body can be megabytes of HTML for jsoup.
+        ioExecutor.execute {
+            val extras = runCatching { emailEventExtras(subject, body, mode) }.getOrElse { emailEventExtras(subject, null, mode) }
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) handOffToCalendar(extras)
+            }
+        }
+        return true
     }
 
     private fun renderAttachments(emailId: String, emailFolder: String, infos: List<AttachmentInfo>) {
@@ -996,6 +1088,7 @@ class EmailDetailActivity : LockedActivity() {
         // notice uses, so a security warning looks the same everywhere.
         applyWarningCalloutTheme(this, phishingBar)
         actionButtons.forEach { applyIconButtonTheme(this, it) }
+        applyInviteChrome()
     }
 
     private fun runMailActionAndFinish(actionLabel: String, emailId: String, action: (MailRepository) -> MailOutcome<Unit>) {
@@ -1083,6 +1176,7 @@ class EmailDetailActivity : LockedActivity() {
 
         private const val STATE_MARK_READ_SUBMITTED = "mark_read_submitted"
         private const val STATE_MARK_READ_COUNT = "mark_read_count"
+        private const val MENU_CREATE_EVENT = 1
 
         /** `intent:`, `file:`, `content:` and any app's custom scheme are refused. */
         private val SAFE_LINK_SCHEMES = setOf("http", "https", "mailto", "tel")

@@ -100,6 +100,23 @@
     <!-- Shown when the server flagged a message with the $Phishing IMAP keyword. Wording
          matches the webmail and Linux clients. -->
     <string name="email_phishing_warning">This message impersonates KyPost. Links to KyPost app addresses have been blocked. KyPost will never ask you to confirm a pairing request by email — never approve one you did not start yourself, on this device.</string>
+    <string name="invite_label">Calendar invite</string>
+    <string name="invite_label_method">Calendar invite · %1$s</string>
+    <string name="invite_untitled">Untitled event</string>
+    <string name="invite_where">Where: %1$s</string>
+    <string name="invite_organizer">Organizer: %1$s</string>
+    <string name="invite_repeats">Repeats</string>
+    <string name="invite_cancelled">This event was cancelled. Check your calendar.</string>
+    <string name="invite_updated">This invite was updated. Check your calendar.</string>
+    <string name="invite_phishing">This message is flagged as phishing. Check the invite before you add it.</string>
+    <string name="invite_organizer_not_sender">The organizer (%1$s) is not the sender of this email. Anyone can name any organizer.</string>
+    <string name="invite_unknown_zone">Time zone \"%1$s\" isn\'t recognised, so this time is read as your own zone and may be wrong.</string>
+    <string name="invite_add">Add to calendar</string>
+    <string name="calendar_create_event">Create event from this email</string>
+    <string name="calendar_no_app">No calendar app can add this event</string>
+    <string name="calendar_handoff_confirm_title">Hand off to your calendar app?</string>
+    <string name="calendar_handoff_confirm_message">Hostile Location Protection is on. Your calendar app will store this event outside KyPost, where a wipe can\'t remove it.</string>
+    <string name="calendar_handoff_confirm_positive">Open calendar</string>
     <string name="email_pgp_client_protected">This message is end-to-end encrypted. The server holds no key for it.</string>
     <string name="email_pgp_open_webmail_button">Open in webmail</string>
     <string name="email_pgp_decrypt_button">Decrypt Email</string>

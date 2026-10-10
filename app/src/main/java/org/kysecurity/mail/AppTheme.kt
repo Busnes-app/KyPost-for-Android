@@ -758,3 +758,11 @@ private fun actionBarSize(activity: Activity): Int {
         typedArray.recycle()
     }
 }
+
+/** [applyPanelBackground] plus a 1dp `line` stroke, for a card on a panel-coloured screen. */
+fun applyOutlinedPanelBackground(context: Context, view: View) {
+    val palette = getStoredThemePalette(context)
+    view.background = panelBackground(context, palette).apply {
+        setStroke(dpToPx(1), Color.parseColor(palette.line))
+    }
+}
