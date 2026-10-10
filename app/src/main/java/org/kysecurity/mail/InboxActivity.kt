@@ -71,6 +71,9 @@ class InboxActivity : LockedActivity() {
     private val refreshedAtByFolder = mutableMapOf<String, Long>()
     private var newMailCount = 0
 
+    // Chips outlive refreshes, and setTypeface(current, NORMAL) keeps a bold current face.
+    private val chipTypeface: Typeface by lazy { Chip(this).typeface }
+
     /** The folder the list last painted from a refresh; only a repaint of it can bring new mail. */
     private var paintedFolder: String? = null
 
@@ -174,7 +177,6 @@ class InboxActivity : LockedActivity() {
 
         applyThemeToActivity(this)
         applyInboxThemeChrome()
-        adapter.notifyDataSetChanged()
         rebuildTabs(allEmails)
         renderFilteredEmails()
     }
@@ -495,7 +497,7 @@ class InboxActivity : LockedActivity() {
             val hasUnread = emails.any {
                 it.status == "unread" && (keyword == KeywordTabs.ALL || it.keywords.contains(keyword))
             }
-            chip.setTypeface(chip.typeface, if (hasUnread) Typeface.BOLD else Typeface.NORMAL)
+            chip.typeface = Typeface.create(chipTypeface, if (hasUnread) Typeface.BOLD else Typeface.NORMAL)
             chip.isChipIconVisible = hasUnread
             if (hasUnread) {
                 chip.chipIconSize = dotSizePx.toFloat()
