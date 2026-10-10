@@ -19,7 +19,7 @@
         android:layout_height="wrap_content"
         android:autofillHints="url"
         android:hint="@string/password_pairing_server"
-        android:imeOptions="actionDone"
+        android:imeOptions="actionDone|flagNoPersonalizedLearning"
         android:inputType="textUri"
         android:singleLine="true" />
 

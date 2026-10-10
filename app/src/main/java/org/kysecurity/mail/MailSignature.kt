@@ -30,6 +30,7 @@ internal fun withSignature(bodyHtml: String, signatureHtml: String): String =
 
 fun showSignatureDialog(activity: Activity) {
     val input = EditText(activity).apply {
+        noPersonalizedLearning()
         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
             InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
         minLines = 3

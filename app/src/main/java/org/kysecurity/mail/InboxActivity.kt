@@ -549,6 +549,7 @@ class InboxActivity : LockedActivity() {
         if (redirectedToUnlock) return false
         val ink = readableOn(Color.parseColor(getStoredThemePalette(this).bg))
         val searchView = SearchView(this).apply {
+            imeOptions = imeOptions or android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
             queryHint = getString(R.string.search_hint)
             // The query is mail content; keep it out of the system-managed state Bundle.
             isSaveFromParentEnabled = false

@@ -13,6 +13,7 @@
 
         <EditText
             android:id="@+id/rowAddressLabel"
+            android:imeOptions="flagNoPersonalizedLearning"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
@@ -22,6 +23,7 @@
 
         <EditText
             android:id="@+id/rowAddressStreet"
+            android:imeOptions="flagNoPersonalizedLearning"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
@@ -31,6 +33,7 @@
 
         <EditText
             android:id="@+id/rowAddressCity"
+            android:imeOptions="flagNoPersonalizedLearning"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
@@ -40,6 +43,7 @@
 
         <EditText
             android:id="@+id/rowAddressRegion"
+            android:imeOptions="flagNoPersonalizedLearning"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
@@ -49,6 +53,7 @@
 
         <EditText
             android:id="@+id/rowAddressPostalCode"
+            android:imeOptions="flagNoPersonalizedLearning"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
@@ -58,6 +63,7 @@
 
         <EditText
             android:id="@+id/rowAddressCountry"
+            android:imeOptions="flagNoPersonalizedLearning"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="@string/contacts_address_country_hint"
