@@ -556,8 +556,8 @@ class ComposeActivity : LockedActivity() {
         return TextUtils.htmlEncode(text).replace("\n", "<br>")
     }
 
-    /** Sequential, not concurrent: each is checked against the remaining budget before adding.
-     *  The lock extends that across calls; two picks in flight both saw the full budget. */
+    /** One [attachmentLock] covers every call: computing the remaining budget, reading the file and
+     *  adding it happen as one step, so concurrent picks are checked against each other's bytes. */
     private fun addAttachments(uris: List<Uri>): Job = lifecycleScope.launch {
         attachmentLock.withLock {
             for (uri in uris) {
