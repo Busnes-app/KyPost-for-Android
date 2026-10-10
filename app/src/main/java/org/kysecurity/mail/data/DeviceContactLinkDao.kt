@@ -21,10 +21,6 @@ interface DeviceContactLinkDao {
     @Query("DELETE FROM device_contact_links WHERE uid = :uid")
     suspend fun deleteByUid(uid: String)
 
-    /** Link rows key on uid, so they must follow reconciliation's temp-uid to server-uid rename. */
-    @Query("UPDATE device_contact_links SET uid = :serverUid WHERE uid = :localUid")
-    suspend fun remapUid(localUid: String, serverUid: String)
-
     /** Sweeps legacy rows that linked a uid to another account's raw contact (Google, Samsung). */
     @Query("DELETE FROM device_contact_links WHERE rawContactId IN (:rawContactIds)")
     suspend fun deleteByRawContactIds(rawContactIds: List<Long>)

@@ -400,6 +400,10 @@
     <string name="inbox_empty">No messages in %1$s</string>
     <string name="search_hint">Search mail</string>
     <string name="search_no_results">No matching messages</string>
+    <plurals name="inbox_new_mail">
+        <item quantity="one">%1$d new message</item>
+        <item quantity="other">%1$d new messages</item>
+    </plurals>
     <string name="finding_email">Finding new email…</string>
     <string name="no_archive_folders">No archive folders found</string>
     <string name="special_folder_missing">No %1$s folder on this account</string>
