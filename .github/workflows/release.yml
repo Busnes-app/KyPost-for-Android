@@ -30,15 +30,68 @@ jobs:
     permissions:
       # Only for creating the Release and attaching the APK. Everything else stays read-only.
       contents: write
+      # Reading ci.yml's run for the tagged commit.
+      actions: read
 
     steps:
+      # Full history: the gate below needs origin/main and every v* tag.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Before any secret is decoded. Play rejects a reused versionCode and Android refuses to
+      # install over a higher one, so the new code must exceed every other v* tag's. A tag whose
+      # versionCode cannot be read fails the release rather than being skipped.
+      - name: tag is on main, passed CI and raises versionCode
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "$sha" refs/remotes/origin/main; then
+            echo "${TAG} (${sha}) is not on main." >&2
+            exit 1
+          fi
+          passed=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${sha}&branch=main&event=push&status=success" \
+            --jq '.total_count')
+          if ! [ "$passed" -ge 1 ]; then
+            echo "No successful ci.yml push run on main for ${sha}. Tag a main commit CI passed." >&2
+            exit 1
+          fi
+
+          version_code() {
+            git show "$1:app/build.gradle.kts" \
+              | sed -nE 's/^[[:space:]]*versionCode[[:space:]]*=[[:space:]]*([0-9]+)[[:space:]]*$/\1/p'
+          }
+          current=$(version_code HEAD) || current=
+          if ! [[ "$current" =~ ^[0-9]+$ ]]; then
+            echo "Cannot read versionCode from app/build.gradle.kts." >&2
+            exit 1
+          fi
+          while read -r tag; do
+            [ "$tag" = "$TAG" ] && continue
+            previous=$(version_code "refs/tags/${tag}") || previous=
+            if ! [[ "$previous" =~ ^[0-9]+$ ]]; then
+              echo "Cannot read versionCode at ${tag}; refusing to guess." >&2
+              exit 1
+            fi
+            if [ "$current" -le "$previous" ]; then
+              echo "versionCode ${current} does not exceed ${previous} at ${tag}." >&2
+              exit 1
+            fi
+          done < <(git tag -l 'v*')
+          echo "versionCode=${current} on main at ${sha}, CI passed"
+          echo "version_code=${current}" >> "$GITHUB_OUTPUT"
+
       - uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      # No Gradle cache: a cache written by another workflow must not feed the signing build.
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: '25'
-          cache: gradle
 
       # The real Firebase config, not the CI placeholder. This is the difference between a
       # published build where push notifications work and one where they fail silently — the
@@ -127,6 +180,7 @@ jobs:
       - name: tag matches the versioned manifest
         env:
           TAG: ${{ github.ref_name }}
+          GATED_VERSION_CODE: ${{ steps.gate.outputs.version_code }}
         run: |
           set -euo pipefail
           metadata=app/build/outputs/apk/github/release/output-metadata.json
@@ -135,6 +189,11 @@ jobs:
           echo "tag=${TAG} versionName=${version_name} versionCode=${version_code}"
           if [ "${TAG#v}" != "${version_name}" ]; then
             echo "Tag ${TAG} does not match versionName ${version_name} in app/build.gradle.kts." >&2
+            exit 1
+          fi
+          # The gate parsed the source; this proves the APK carries what it checked.
+          if [ "${version_code}" != "${GATED_VERSION_CODE}" ]; then
+            echo "APK versionCode ${version_code} is not the gated ${GATED_VERSION_CODE}." >&2
             exit 1
           fi
 
