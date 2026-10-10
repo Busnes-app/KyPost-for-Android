@@ -95,7 +95,10 @@ Owns production Android app code and resources.
      forgets both when the call fails. A confirmed removal stays in `removed`, and refresh writes
      drop those ids: an IMAP UID is never reused in its mailbox, so a refresh that read the window
      before the removal must not resurrect it. The inbox puts a row whose swipe failed back in
-     place with a Retry snackbar.
+     place with a Retry snackbar. A row action carries the `MailAccount` (subscriberId, serverUrl)
+     its rows were read under; `RelayMailSource.performAction` sends nothing when the pairing it
+     builds the request from is a different account, and the inbox drops a failure (no row, no
+     Retry) that arrives after the account changed.
 - **`emails` is keyed on (folder, messageId), not messageId.** The relay's id is an IMAP UID,
   unique only within one mailbox, so INBOX and Archive can both hold `42`; under the old
   single-column key a refresh of either folder overwrote or relocated the other's row, and a

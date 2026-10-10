@@ -107,12 +107,14 @@ private class FakeMailSource(
         messageIds: List<String>,
         mailbox: String,
         targetMailbox: String?,
+        account: MailAccount?,
     ): MailOutcome<MailActionOutcome> {
         actions += Triple(action, messageIds, mailbox)
         duringAction?.invoke()
         return actionOutcome
     }
 
+    override fun currentAccount(): MailAccount? = null
     override fun listFolders(parent: String?) = unsupported()
     override fun createFolder(parent: String, name: String) = unsupported()
     override fun renameFolder(folder: String, name: String) = unsupported()

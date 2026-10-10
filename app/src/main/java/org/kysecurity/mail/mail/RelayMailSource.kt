@@ -120,6 +120,8 @@ class RelayMailSource(
         return if (forced) FULL_RESYNC_SINCE else cursorProvider.cursor(subscriberId, folder) ?: FULL_RESYNC_SINCE
     }
 
+    override fun currentAccount(): MailAccount? = pairingProvider()?.mailAccount()
+
     override fun listFolders(parent: String?): MailOutcome<FolderListResult> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
         val base = baseUrl(pairing, "/api/inbox/folders") ?: return MailOutcome.BadRequest("Server URL is not valid")
@@ -173,8 +175,13 @@ class RelayMailSource(
         messageIds: List<String>,
         mailbox: String,
         targetMailbox: String?,
+        account: MailAccount?,
     ): MailOutcome<MailActionOutcome> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        // Same read that authenticates the request, so the check and the credentials agree.
+        if (account != null && account != pairing.mailAccount()) {
+            return MailOutcome.Unauthorized("The action belongs to a different account")
+        }
         val base = baseUrl(pairing, "/api/inbox/actions") ?: return MailOutcome.BadRequest("Server URL is not valid")
         val requestDto = RelayActionRequestDto(
             action = action.wireValue(),
