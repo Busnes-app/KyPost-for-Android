@@ -13,27 +13,29 @@ private const val QUIESCE_TIMEOUT_MS = 2_000L
 
 private const val TAG = "MailBackground"
 
-/** A mutation a later one of the same message may supersede. The pool runs two tasks at once, so
- *  nothing else orders them. */
-internal class Supersedable(private val work: () -> Unit) : Runnable {
-    private val claimed = java.util.concurrent.atomic.AtomicBoolean(false)
-    private val finished = java.util.concurrent.CountDownLatch(1)
+/** Mark read and Mark unread reach the relay in the order they were asked for, from any screen.
+ *  The pool runs two tasks at once, so an unread could otherwise land before a read still in
+ *  flight and be undone by it. Call [ordered] when the user acts; the task it returns waits for
+ *  the one ordered before it, up to [WAIT_SECONDS] (a hung call must not wedge the pool). An
+ *  interrupt (a wipe quiescing the pool) propagates, and the block does not run. */
+internal object ReadStateLane {
+    const val WAIT_SECONDS = 30L
 
-    override fun run() {
-        if (!claimed.compareAndSet(false, true)) return
-        try {
-            work()
-        } finally {
-            finished.countDown()
+    private var last: java.util.concurrent.CountDownLatch? = null
+
+    @Synchronized
+    fun <T> ordered(waitSeconds: Long = WAIT_SECONDS, block: () -> T): () -> T {
+        val previous = last
+        val done = java.util.concurrent.CountDownLatch(1)
+        last = done
+        return {
+            try {
+                previous?.await(waitSeconds, TimeUnit.SECONDS)
+                block()
+            } finally {
+                done.countDown()
+            }
         }
-    }
-
-    /** Runs [block] in this task's place: at once if it never started (now it never will), else
-     *  once it finishes or [timeoutSeconds] pass. An interrupt (a wipe quiescing the pool)
-     *  propagates, and [block] does not run. */
-    fun <T> supersede(timeoutSeconds: Long, block: () -> T): T {
-        if (!claimed.compareAndSet(false, true)) finished.await(timeoutSeconds, TimeUnit.SECONDS)
-        return block()
     }
 }
 
