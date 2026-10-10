@@ -76,7 +76,9 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   (`data/AppDatabase`) is the UI's read model for mail and the persistence layer for contacts.
 - A push notification tap must force a full inbox resync before opening its target message. The
   Room row may have stale body HTML or `bodyMode`; showing that cached row is fine for the list, but
-  opening it before the resync can render the detail screen with the wrong mode.
+  opening it before the resync can render the detail screen with the wrong mode. The tap is
+  consumed once: `InboxActivity` strips the extras from its Intent and ignores them on a recreate,
+  or a rotation reopens the message and resets the folder.
 - Avoid hardcoded secrets in committed files.
 - For user-visible behavior changes, update this file or a closer child AGENTS.md.
 - Settings ends with a Support KyPost action. The `play` flavor opens `TipActivity`, which sells
