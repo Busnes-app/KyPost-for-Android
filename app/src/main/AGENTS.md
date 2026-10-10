@@ -458,6 +458,12 @@ Owns production Android app code and resources.
   A `since=0` pull is a snapshot: after tombstone GC the server can no longer list what it
   deleted, so `applyDelta(snapshot = true)` removes every Room contact absent from it except
   uids still in the outbox. `ContactFullResyncTest` covers both.
+  **A recorded key outlives the contact sync removes.** Before `applyDelta` deletes a contact
+  (tombstone or snapshot) or applies an update that leaves it without its key, the key is copied
+  to `recipient_pins` (`ContactEntity.recipientPins`, `MIGRATION_12_13`), and `RoomLocalSignerKeys`
+  reads that table beside the contacts, so the sender's pin check and the reader keep it. Only a
+  local wipe (the database file) or unpair (`purgeAccountScopedData`) clears it; the server's word
+  never does. `RecipientPinRetentionTest` pins the send-side refusal.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
@@ -473,7 +479,7 @@ Owns production Android app code and resources.
   `pushRoomChangesToDevice` adopts a live row of our account whose SOURCE_ID is the uid, so a
   death between insert and link write, or cleared app data, rebuilds the link instead of
   duplicating the contact. Linked rows from before SOURCE_ID are backfilled on the next pass.
-  `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_12_13` indexes the link table's
+  `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_13_14` indexes the link table's
   `rawContactId`.
 - **The periodic `DeviceContactSyncWorker` is the only background path to the server**, so it runs
   `ContactSyncRepository.sync()` before `syncAll()` (`runContactSync`). A server failure is the
@@ -486,7 +492,7 @@ Owns production Android app code and resources.
   edit stays dirty. The foreign-import watermark is the scan's start time, not its end.
   `makeContactsVisible` writes only when `UNGROUPED_VISIBLE` is off: each write notifies the
   contacts observer, which used to trigger the next sync, which wrote again.
-- **Device merges are three-way.** `device_contact_links.syncedJson` (`MIGRATION_13_14`) holds the
+- **Device merges are three-way.** `device_contact_links.syncedJson` (`MIGRATION_14_15`) holds the
   `ContactDto` both sides agreed on after the last sync, written on create, on an applied or
   already-agreeing update, and after a device pull. `DeviceContactFieldMerge.againstBase` gives
   each field to the side that changed it since then, so a field emptied on either side stays
@@ -498,7 +504,11 @@ Owns production Android app code and resources.
   `importNewDeviceContacts` reads only raw contacts whose `DeviceAccount` (type, name; both null
   for the phone's own storage) is in `DeviceContactSyncSettings.importAccounts()`, which is empty
   by default and stored under a key no earlier build wrote — installs that imported everything
-  start with nothing chosen. Adding an account rewinds the scan watermark so its existing contacts
+  start with nothing chosen. Consent is bound to the pairing it was given under
+  (`ContactSyncRepository.destination`: the relay's canonical origin and the subscriber id); any
+  other pairing reads none. It is checked again for each contact just before it is queued, inside
+  `whileConsented`, which shares a lock with `setImportAccounts`, so withdrawing consent stops a
+  scan already running. Adding an account rewinds the scan watermark so its existing contacts
   are seen. The choice is the Contacts menu's "Import from other accounts…" dialog, whose copy
   says the contacts go to the user's KyPost server. `DeviceContactImportConsentTest`.
 - **Deletes reach the phone through Room.** `syncAll`'s `removeDeletedContacts` stage removes the
