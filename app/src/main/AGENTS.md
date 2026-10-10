@@ -458,6 +458,12 @@ Owns production Android app code and resources.
   A `since=0` pull is a snapshot: after tombstone GC the server can no longer list what it
   deleted, so `applyDelta(snapshot = true)` removes every Room contact absent from it except
   uids still in the outbox. `ContactFullResyncTest` covers both.
+  **A recorded key outlives the contact sync removes.** Before `applyDelta` deletes a contact
+  (tombstone or snapshot) or applies an update that leaves it without its key, the key is copied
+  to `recipient_pins` (`ContactEntity.recipientPins`, `MIGRATION_12_13`), and `RoomLocalSignerKeys`
+  reads that table beside the contacts, so the sender's pin check and the reader keep it. Only a
+  local wipe (the database file) or unpair (`purgeAccountScopedData`) clears it; the server's word
+  never does. `RecipientPinRetentionTest` pins the send-side refusal.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
@@ -473,7 +479,7 @@ Owns production Android app code and resources.
   `pushRoomChangesToDevice` adopts a live row of our account whose SOURCE_ID is the uid, so a
   death between insert and link write, or cleared app data, rebuilds the link instead of
   duplicating the contact. Linked rows from before SOURCE_ID are backfilled on the next pass.
-  `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_12_13` indexes the link table's
+  `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_13_14` indexes the link table's
   `rawContactId`.
 - **Deletes reach the phone through Room.** `syncAll`'s `removeDeletedContacts` stage removes the
   raw contact of every link whose Room contact is gone, so server tombstones, snapshot prunes and

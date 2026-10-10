@@ -193,6 +193,7 @@ class PushRepository(
             if (db != null) {
                 db.emailDao().clearAll()
                 db.contactDao().clearAll()
+                db.recipientPinDao().clearAll()
                 db.pendingContactChangeDao().clearAll()
                 db.groupDao().clearAll()
                 db.groupLinkDao().clearAll()
