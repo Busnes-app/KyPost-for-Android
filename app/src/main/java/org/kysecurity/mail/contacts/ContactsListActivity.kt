@@ -22,9 +22,11 @@ import org.kysecurity.mail.applyPrimaryNavigationInsets
 import org.kysecurity.mail.applyPrimaryNavigationTheme
 import org.kysecurity.mail.applyThemeToActivity
 import org.kysecurity.mail.applyTopInsetWithHeader
+import org.kysecurity.mail.contacts.device.DeviceContactAccount
 import org.kysecurity.mail.contacts.device.DeviceContactsRuntime
 import org.kysecurity.mail.contacts.device.DeviceContactSyncEnabler
 import org.kysecurity.mail.contacts.device.DeviceContactSyncScheduler
+import org.kysecurity.mail.contacts.device.PendingAccountSetup
 import org.kysecurity.mail.data.ContactEntity
 import org.kysecurity.mail.pgp.hasPgpIdentity
 import org.kysecurity.mail.setupPrimaryNavigation
@@ -53,8 +55,13 @@ class ContactsListActivity : LockedActivity() {
     private val syncEnabler = DeviceContactSyncEnabler(
         activity = this,
         permissionLauncher = contactPermissionLauncher,
-        onEnabled = { invalidateOptionsMenu() },
+        onEnabled = {
+            invalidateOptionsMenu()
+            if (accountSetup) finish()
+        },
     )
+
+    private val accountSetup: Boolean by lazy { intent.getBooleanExtra(EXTRA_ACCOUNT_SETUP, false) }
 
 
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
@@ -121,6 +128,23 @@ class ContactsListActivity : LockedActivity() {
                 }
             }
         }
+
+        // Opened for Settings' "Add account": turning device sync on is how the account is added.
+        if (accountSetup && savedInstanceState == null) {
+            if (DeviceContactsRuntime.graph(this).settings.isEnabled()) {
+                PendingAccountSetup.complete(DeviceContactAccount.ACCOUNT_NAME)
+                finish()
+            } else {
+                syncEnabler.checkAndEnable()
+            }
+        }
+    }
+
+    /** Leaving the add-account flow without turning sync on answers the waiting caller. Not on the
+     *  lock redirect: the request is kept for after unlock (see MainActivity). */
+    override fun onDestroy() {
+        super.onDestroy()
+        if (accountSetup && isFinishing && !redirectedToUnlock) PendingAccountSetup.cancel()
     }
 
     override fun onStartUnlocked() {
@@ -356,6 +380,9 @@ class ContactsListActivity : LockedActivity() {
 
         /** When true, a tap returns the uid via [EXTRA_RESULT_UID] instead of opening the editor. */
         const val EXTRA_PICK_MODE = "pick_mode"
+
+        /** Opened by the contacts account's "Add account"; see [PendingAccountSetup]. */
+        const val EXTRA_ACCOUNT_SETUP = "account_setup"
         const val EXTRA_RESULT_UID = "result_uid"
 
         private const val STATE_SCROLL = "contacts_scroll"

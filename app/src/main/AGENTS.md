@@ -497,10 +497,15 @@ Owns production Android app code and resources.
   raw contacts as editable. `KyPostContactSyncService` is a non-exported stub: SyncManager binds it
   from system_server, as AccountManager binds the authenticator, so neither enters the
   exported-components allowlist; a system-initiated pass does nothing, because the coordinator and
-  worker own sync and its gates. `KyPostContactAuthenticator.addAccount` answers with the Contacts
-  screen, where turning device sync on creates the account; `editProperties` answers null.
-  `ContactSyncAdapterDeclarationTest`. Unverified on hardware: whether stock Contacts apps then
-  offer editing (AOSP may also want a `CONTACTS_STRUCTURE` schema; none is declared).
+  worker own sync and its gates. The same service carries `android.provider.CONTACTS_STRUCTURE`
+  (`res/xml/contacts.xml`): AOSP Contacts treats an account without an `EditSchema` as read-only
+  and discards a schema that breaks any of its parser rules, which `ContactsStructureSchemaTest`
+  mirrors. `KyPostContactAuthenticator.addAccount` answers with the existing account, or holds the
+  caller's response in `PendingAccountSetup` and opens the Contacts screen in account-setup mode;
+  turning device sync on answers it with the account, leaving without doing so cancels it, and the
+  app-lock redirect keeps it (MainActivity resumes the flow after unlock). `editProperties` answers
+  an empty bundle. `ContactSyncAdapterDeclarationTest`, `ContactAccountFlowsTest`. Unverified on
+  hardware: how stock Contacts apps render and edit these contacts with the schema.
 - **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
   `applyBatch` as the insert. `device_contact_links` is a cache of that: before creating a row,
   `pushRoomChangesToDevice` adopts a live row of our account whose SOURCE_ID is the uid, so a

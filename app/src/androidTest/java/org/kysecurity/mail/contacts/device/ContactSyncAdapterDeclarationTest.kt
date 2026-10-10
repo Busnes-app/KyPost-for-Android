@@ -32,11 +32,13 @@ class ContactSyncAdapterDeclarationTest {
 
     @Test
     fun addAccount_opensTheContactsScreen() {
+        DeviceContactAccountManager(context).removeAccountBlocking()
         val result = KyPostContactAuthenticator(context)
             .addAccount(null, DeviceContactAccount.ACCOUNT_TYPE, null, null, null)
 
         @Suppress("DEPRECATION")
-        val intent = result.getParcelable<Intent>(AccountManager.KEY_INTENT)
+        val intent = result!!.getParcelable<Intent>(AccountManager.KEY_INTENT)
+        assertTrue(intent!!.getBooleanExtra(org.kysecurity.mail.contacts.ContactsListActivity.EXTRA_ACCOUNT_SETUP, false))
         assertEquals(
             "org.kysecurity.mail.contacts.ContactsListActivity",
             intent?.component?.className,
