@@ -109,8 +109,9 @@ Owns production Android app code and resources.
      completion writes the removal set or Room only while it is current, under the lock the reset
      takes. Refresh filtering and writes take that same lock. A task the executor refuses or
      discards unrun calls `abandon`. `PushRepository.clearPairing` holds mail work
-     (`MailBackgroundExecutor.quiesce`) until the outgoing pairing is cleared. A failed read or
-     action notifies `setOverlayListener`, and the inbox repaints from the cache; it also paints the
+     (`MailBackgroundExecutor.quiesce`) until the outgoing pairing is cleared. A failed read
+     notifies `setOverlayListener`, and the inbox repaints from the cache (a failed removal is the
+     inbox's own failure path to restore or drop, never a cache repaint); it also paints the
      cache before every non-pull network refresh, so a row opened and marked read shows read at once.
 - **`emails` is keyed on (folder, messageId), not messageId.** The relay's id is an IMAP UID,
   unique only within one mailbox, so INBOX and Archive can both hold `42`; under the old
