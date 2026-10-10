@@ -407,6 +407,10 @@ Owns production Android app code and resources.
   The Inbox freshness label stays centered immediately below those tabs. Before the first
   successful refresh it reads "Not updated yet", so its row never appears empty and the first
   success does not shift the message list.
+  A refresh that lands mail above the top row scrolls to it when the list is at the top;
+  otherwise a "N new messages" pill (`inbox_new_mail` plurals, polite live region) over the list
+  counts it and scrolls up on tap. Only a repaint of the folder and tab already painted counts,
+  and a pending saved-position restore wins. `InboxNewMailTest` covers both branches.
 - Theme selection is managed in `ThemesActivity` and uses the shared theme name list based on
   `theme.ts` palettes, led by `Busnes Light`/`Busnes Dark` from `busnes-color-theme-handoff.md`.
   `AppTheme.DEFAULT_THEME` (`Busnes Light`) is the only place the fallback name lives — the
