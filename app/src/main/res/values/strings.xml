@@ -65,6 +65,9 @@
     <!-- Subject line prefixed by its PGP and attachment markers. Ordered, so a locale that
          reads right-to-left can put them where they belong. -->
     <string name="email_row_subject_marked">%1$s %2$s</string>
+    <string name="email_row_unread">Unread</string>
+    <string name="email_row_from">from %1$s</string>
+    <string name="email_row_has_attachments">has attachments</string>
     <string name="attachment_chip_label">👁 %1$s</string>
     <string name="email_to">To:</string>
     <string name="email_cc">Cc:</string>
