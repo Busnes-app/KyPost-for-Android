@@ -115,8 +115,7 @@ class EmailAdapter(
 
     fun getEmailAt(position: Int): Email = emails[position]
 
-    fun shownEmails(): List<Email> = emails
-
+    fun currentEmails(): List<Email> = emails
     fun setSelection(ids: Set<String>) {
         selectedIds = ids.toSet()
         notifyItemRangeChanged(0, itemCount)
