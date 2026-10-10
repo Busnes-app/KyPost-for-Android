@@ -331,9 +331,12 @@ class DeviceContactRepository(
         val destination = syncRepository.destination() ?: return@withContext
         // The session this scan belongs to; a pairing replacement or wipe ends it.
         val session = org.kysecurity.mail.ProcessState.generation()
+        val revision = settings.consentRevision()
         val consented = settings.importAccounts(destination)
         if (consented.isEmpty()) return@withContext
         val watermarkMs = settings.lastForeignScanAtEpochMs()
+        // Taken before the query: a contact edited while the scan runs is newer, and read next time.
+        val scanStartedAtMs = System.currentTimeMillis()
 
         val projection = arrayOf(
             ContactsContract.RawContacts._ID,
@@ -425,7 +428,7 @@ class DeviceContactRepository(
             }
         }
 
-        settings.setLastForeignScanAtEpochMs(System.currentTimeMillis())
+        settings.advanceScanWatermark(revision, scanStartedAtMs)
     }
 
     /** Accounts other than ours holding live contacts, for the import consent screen. */
