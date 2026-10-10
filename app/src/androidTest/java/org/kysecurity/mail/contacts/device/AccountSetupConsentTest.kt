@@ -1,8 +1,12 @@
 package org.kysecurity.mail.contacts.device
 
 import android.Manifest
+import android.accounts.AccountAuthenticatorResponse
+import android.accounts.AccountManager
 import android.content.Intent
 import android.content.DialogInterface
+import android.os.Binder
+import android.os.Parcel
 import android.provider.ContactsContract
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -20,6 +24,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /** An "Add account" request, from Settings or any app that asks AccountManager, never turns device
  *  sync on by itself: even with contacts permission already granted, nothing reaches the shared
@@ -146,5 +151,70 @@ class AccountSetupConsentTest {
             assertFalse(settings.isEnabled())
             assertFalse(accounts.accountExists())
         }
+    }
+
+    /** Records what the authenticator answers on one AccountManager response. The transaction
+     *  codes are IAccountAuthenticatorResponse's, in declaration order: onResult, then
+     *  onRequestContinued, then onError. */
+    private class RecordingResponse : Binder() {
+        val results = AtomicInteger()
+        val errors = AtomicInteger()
+        val answered = CountDownLatch(1)
+
+        override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
+            when (code) {
+                FIRST_CALL_TRANSACTION -> results.incrementAndGet()
+                FIRST_CALL_TRANSACTION + 2 -> errors.incrementAndGet()
+                else -> return true
+            }
+            answered.countDown()
+            return true
+        }
+
+        fun asResponse(): AccountAuthenticatorResponse {
+            val parcel = Parcel.obtain()
+            try {
+                parcel.writeStrongBinder(this)
+                parcel.setDataPosition(0)
+                return AccountAuthenticatorResponse.CREATOR.createFromParcel(parcel)
+            } finally {
+                parcel.recycle()
+            }
+        }
+    }
+
+    @Suppress("DEPRECATION") // getParcelable(String, Class) needs API 33.
+    private fun requestSetup(authenticator: KyPostContactAuthenticator, response: RecordingResponse): Intent =
+        authenticator.addAccount(response.asResponse(), DeviceContactAccount.ACCOUNT_TYPE, null, null, null)!!
+            .getParcelable(AccountManager.KEY_INTENT)!!
+
+    /** A screen opened for a request a newer one displaced must not cancel the newer one when it
+     *  closes: each caller gets exactly one answer, its own. */
+    @Test
+    fun closingADisplacedSetupScreen_leavesTheNewRequestWaiting() {
+        val authenticator = KyPostContactAuthenticator(context)
+        val first = RecordingResponse()
+        val second = RecordingResponse()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        lateinit var secondIntent: Intent
+        ActivityScenario.launch<ContactsListActivity>(requestSetup(authenticator, first)).use {
+            instrumentation.waitForIdleSync()
+            secondIntent = requestSetup(authenticator, second)
+        }
+        instrumentation.waitForIdleSync()
+
+        ActivityScenario.launch<ContactsListActivity>(secondIntent).use { scenario ->
+            instrumentation.waitForIdleSync()
+            scenario.onActivity { activity ->
+                val dialog = activity.setupDialog
+                assertNotNull("the newer request is still waiting", dialog)
+                dialog!!.getButton(DialogInterface.BUTTON_POSITIVE).performClick()
+            }
+            assertTrue(second.answered.await(15, TimeUnit.SECONDS))
+        }
+
+        assertEquals("the displaced request: one cancel", 1 to 0, first.errors.get() to first.results.get())
+        assertEquals("the newer request: one account", 0 to 1, second.errors.get() to second.results.get())
     }
 }
