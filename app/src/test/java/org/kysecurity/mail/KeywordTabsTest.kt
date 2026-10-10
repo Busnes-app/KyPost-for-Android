@@ -18,6 +18,19 @@ class KeywordTabsTest {
         assertEquals(listOf("All", "Finance", "finance", "Important", "Travel"), tabs)
     }
 
+    /** IMAP flags and server keywords ($Phishing, $Junk, \Seen) are state, not the user's labels. */
+    @Test
+    fun buildTabs_dropsImapSystemKeywords() {
+        val emails = listOf(
+            Email(
+                id = "1", subject = "A", sender = "a", preview = "p",
+                keywords = setOf("\$Phishing", "\\Seen", "\$Junk", "Work"),
+            ),
+        )
+
+        assertEquals(listOf("All", "Work"), KeywordTabs.buildTabs(emails))
+    }
+
     @Test
     fun visibleTabs_putsAllFirst_whenShown() {
         assertEquals(listOf("All", "Finance"), KeywordTabs.visibleTabs(showAll = true, keywords = listOf("Finance")))
