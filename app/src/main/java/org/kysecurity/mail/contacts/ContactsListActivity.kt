@@ -287,37 +287,46 @@ class ContactsListActivity : LockedActivity() {
                 return@launch
             }
             val chosen = graph.settings.importAccounts(destination).toMutableSet()
-            val padding = (16 * resources.displayMetrics.density).toInt()
-            val container = android.widget.LinearLayout(this@ContactsListActivity).apply {
-                orientation = android.widget.LinearLayout.VERTICAL
-                setPadding(padding, padding, padding, 0)
-                addView(android.widget.TextView(context).apply { setText(R.string.contacts_import_message) })
-                for (account in accounts) {
-                    addView(
-                        android.widget.CheckBox(context).apply {
-                            text = account.name?.let { "$it (${account.type})" }
-                                ?: getString(R.string.contacts_import_local_account)
-                            isChecked = account.key in chosen
-                            setOnCheckedChangeListener { _, checked ->
-                                if (checked) chosen += account.key else chosen -= account.key
-                            }
-                        },
-                    )
+            importAccountsDialog(accounts, chosen) {
+                lifecycleScope.launch {
+                    graph.settings.setImportAccounts(destination, chosen)
+                    graph.coordinator.syncNowAsync()
                 }
-            }
-            androidx.appcompat.app.AlertDialog.Builder(this@ContactsListActivity)
-                .setTitle(R.string.contacts_import_title)
-                .setView(android.widget.ScrollView(this@ContactsListActivity).apply { addView(container) })
-                .setPositiveButton(R.string.contacts_import_save) { _, _ ->
-                    lifecycleScope.launch {
-                        graph.settings.setImportAccounts(destination, chosen)
-                        graph.coordinator.syncNowAsync()
-                    }
-                }
-                .setNegativeButton(R.string.cancel, null)
-                .create()
-                .showSecurely()
+            }.showSecurely()
         }
+    }
+
+    /** One checkbox per account, ticked for those in [chosen], which tracks the ticks. */
+    @androidx.annotation.VisibleForTesting
+    internal fun importAccountsDialog(
+        accounts: List<org.kysecurity.mail.contacts.device.DeviceAccount>,
+        chosen: MutableSet<String>,
+        onSave: () -> Unit,
+    ): androidx.appcompat.app.AlertDialog {
+        val padding = (16 * resources.displayMetrics.density).toInt()
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(padding, padding, padding, 0)
+            addView(android.widget.TextView(context).apply { setText(R.string.contacts_import_message) })
+            for (account in accounts) {
+                addView(
+                    android.widget.CheckBox(context).apply {
+                        text = account.name?.let { "$it (${account.type})" }
+                            ?: getString(R.string.contacts_import_local_account)
+                        isChecked = account.key in chosen
+                        setOnCheckedChangeListener { _, checked ->
+                            if (checked) chosen += account.key else chosen -= account.key
+                        }
+                    },
+                )
+            }
+        }
+        return androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.contacts_import_title)
+            .setView(android.widget.ScrollView(this).apply { addView(container) })
+            .setPositiveButton(R.string.contacts_import_save) { _, _ -> onSave() }
+            .setNegativeButton(R.string.cancel, null)
+            .create()
     }
 
     private fun disableDeviceSync() {
