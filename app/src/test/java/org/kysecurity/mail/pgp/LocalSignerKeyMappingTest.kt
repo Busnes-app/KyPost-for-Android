@@ -93,4 +93,21 @@ class LocalSignerKeyMappingTest {
         val mapped = contact(identityNeedsReview = true).toLocalSignerKey()
         assertEquals(LocalSignerKey(TestPgpKey.ARMORED, confirmed = false), mapped)
     }
+
+    /** A key verified on this device decides alone; the contact's synced key is not added. */
+    @Test
+    fun authoritativeKeys_aPinExcludesTheContactKey() {
+        val pin = org.kysecurity.mail.data.RecipientPinEntity("bob@example.com", "F", "PINNED", confirmed = true)
+        val synced = LocalSignerKey("SYNCED", confirmed = true)
+
+        assertEquals(listOf(LocalSignerKey("PINNED", confirmed = true)), authoritativeKeys(listOf(pin), listOf(synced)))
+    }
+
+    /** No pin: the contact's key is used exactly as before pins existed. */
+    @Test
+    fun authoritativeKeys_noPinKeepsTheContactKey() {
+        val synced = LocalSignerKey("SYNCED", confirmed = false)
+
+        assertEquals(listOf(synced), authoritativeKeys(emptyList(), listOf(synced)))
+    }
 }

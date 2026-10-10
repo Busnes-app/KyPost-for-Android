@@ -3,6 +3,8 @@ package org.kysecurity.mail.contacts
 import org.kysecurity.mail.data.AppDatabase
 import org.kysecurity.mail.data.ContactEntity
 import org.kysecurity.mail.data.PendingContactChangeEntity
+import org.kysecurity.mail.data.RecipientPinEntity
+import org.kysecurity.mail.pgp.PgpFingerprint
 import org.kysecurity.mail.push.PairingData
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
@@ -93,7 +95,7 @@ class ContactSyncRepository(
         while (pullFrom != null) {
             val result = client.pull(pairing.serverUrl, deviceId, deviceSecret, pullFrom)
             val response = (result as? ContactSyncResult.Success)?.response ?: return@withLock failureOutcome(result)
-            applyDelta(pairing.subscriberId, response, emptyList())
+            applyDelta(pairing.subscriberId, response, emptyList(), snapshot = pullFrom == 0L)
             pullFrom = if (response.tooOld && pullFrom != 0L) 0L else null
         }
 
@@ -130,12 +132,13 @@ class ContactSyncRepository(
     }
 
     /** The local uid is permanent: the server stores an unknown uid as a create, so a replayed
-     *  push lands on the same contact. */
-    suspend fun queueCreate(contact: ContactDto): String {
+     *  push lands on the same contact. [verifiedInPerson] as for [queueUpdate]. */
+    suspend fun queueCreate(contact: ContactDto, verifiedInPerson: Boolean = false): String {
         val localUid = UUID.randomUUID().toString()
         val localCopy = contact.copy(uid = localUid)
         db.withTransaction {
-            db.contactDao().upsertAll(listOf(localCopy.toEntity()))
+            db.contactDao().upsertAll(listOf(localCopy.toEntity(verifiedInPerson = verifiedInPerson)))
+            if (verifiedInPerson) recordVerifiedKey(localCopy)
             db.pendingContactChangeDao().enqueue(
                 PendingContactChangeEntity(
                     localUid = localUid,
@@ -149,7 +152,9 @@ class ContactSyncRepository(
         return localUid
     }
 
-    /** [verifiedInPerson] is set only by the PGP QR flow, after an out-of-band comparison. */
+    /** [verifiedInPerson] is set only by the PGP QR flow, after an out-of-band comparison. It is
+     *  the one way a key becomes this device's pin for the contact's addresses, replacing any
+     *  earlier pin for them; see [recordVerifiedKey]. */
     suspend fun queueUpdate(
         contact: ContactDto,
         identityChanged: Boolean,
@@ -158,6 +163,7 @@ class ContactSyncRepository(
         db.withTransaction {
             val previous = db.contactDao().getByUid(contact.uid)
             db.contactDao().upsertAll(listOf(contact.toEntity(previous, verifiedInPerson, identityChanged)))
+            if (verifiedInPerson) recordVerifiedKey(contact)
             enqueueCoalesced(
                 PendingContactChangeEntity(
                     localUid = contact.uid,
@@ -185,6 +191,19 @@ class ContactSyncRepository(
         }
     }
 
+    /** Pins [contact]'s key for each of its addresses, replacing what was pinned there. Sync never
+     *  calls this: a key the server supplies is not this device's verification. A key that will
+     *  not fingerprint is pinned with an empty fingerprint, which the sender refuses. */
+    private suspend fun recordVerifiedKey(contact: ContactDto) {
+        val key = contact.pgpKey?.takeIf { it.isNotBlank() } ?: return
+        val addresses = contact.emails.map { it.value.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()
+        if (addresses.isEmpty()) return
+        val fingerprint = PgpFingerprint.compute(key).orEmpty()
+        val dao = db.recipientPinDao()
+        dao.deleteForAddresses(addresses)
+        dao.upsertAll(addresses.map { RecipientPinEntity(it, fingerprint, key, confirmed = true) })
+    }
+
     /** One pending row per uid. The old rows are replaced, never edited in place: a sync may
      *  already have read them, and its ack clears by row id. */
     private suspend fun enqueueCoalesced(change: PendingContactChangeEntity) {
@@ -194,15 +213,17 @@ class ContactSyncRepository(
         dao.enqueue(coalescedChange(existing, change))
     }
 
+    /** [snapshot] marks a since=0 reply: every live contact, so absence means deleted. */
     private suspend fun applyDelta(
         subscriberId: String,
         response: ContactSyncPullResponseDto,
         flushedChanges: List<PendingContactChangeEntity>,
+        snapshot: Boolean = false,
     ) {
         if (response.tooOld) {
             // Wire contract: the server applies the pushed changes BEFORE it computes tooOld, so
             // they are already persisted and the outbox rows are cleared. Only the cursor is
-            // discarded, which makes the next sync a full since=0 re-pull.
+            // discarded; sync() follows with a since=0 snapshot.
             db.withTransaction {
                 cursorStore.resetCursor(subscriberId)
                 if (flushedChanges.isNotEmpty()) {
@@ -213,11 +234,19 @@ class ContactSyncRepository(
         }
 
         db.withTransaction {
+            // Keys verified on this device live in recipient_pins, which nothing here touches.
             val incomingEntities = response.changed.map { dto ->
                 dto.toEntity(previous = db.contactDao().getByUid(dto.uid))
             }
             db.contactDao().upsertAll(incomingEntities)
-            db.contactDao().deleteByUids(response.deleted.map { it.uid })
+            val removed = response.deleted.map { it.uid }.toMutableSet()
+            if (snapshot) {
+                // Queued changes are not on the server yet; everything else absent was deleted there.
+                val keep = response.changed.mapTo(HashSet()) { it.uid } +
+                    db.pendingContactChangeDao().getAllPending().map { it.localUid }
+                removed += db.contactDao().allUids().filterNot { it in keep }
+            }
+            db.contactDao().deleteByUids(removed.toList())
             if (flushedChanges.isNotEmpty()) {
                 db.pendingContactChangeDao().clearFlushed(flushedChanges.map { it.id })
             }

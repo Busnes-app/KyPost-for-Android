@@ -455,6 +455,19 @@ Owns production Android app code and resources.
   while the rest go out. Once a reply says `tooOld`, the remaining batches keep the stale cursor
   (cheap `tooOld` replies with no lists) and one `since=0` pull ends the sync.
   `ContactPushBatchingTest` pins all three.
+  A `since=0` pull is a snapshot: after tombstone GC the server can no longer list what it
+  deleted, so `applyDelta(snapshot = true)` removes every Room contact absent from it except
+  uids still in the outbox. `ContactFullResyncTest` covers both.
+  **Per address, a key verified on this device is authoritative; a synced key never is.** The PGP
+  QR flow's two saves (`queueCreate`/`queueUpdate` with `verifiedInPerson`) are the only writers of
+  `recipient_pins` (`MIGRATION_12_13`), and each replaces the pins for that contact's addresses —
+  re-scanning is how a pin changes. `RoomLocalSignerKeys` (`authoritativeKeys`) returns ONLY the pins
+  for a pinned address, so a contact key the server delivers, on a replacement contact or as an
+  update, cannot satisfy `ClientEncryptedSender.applyPins` and the send is `KeyChanged`. Sync never
+  writes the table, so removing or rewriting the contact does not touch the pin; a wipe (database
+  file) or unpair (`purgeAccountScopedData`) clears it. An address with no pin keeps the earlier
+  behaviour: the contact's key, whatever its origin. Server-side provenance (`pgpKeySource`,
+  `pgpKeyVerified`) is not read: it is the relay's claim. `RecipientPinRetentionTest`.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`

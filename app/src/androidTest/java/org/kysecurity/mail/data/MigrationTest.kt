@@ -211,6 +211,20 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate12To13_createsTheRecipientPinTable() {
+        helper.createDatabase(TEST_DB, 12).close()
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 13, true, AppDatabase.MIGRATION_12_13)
+
+        migrated.execSQL(
+            "INSERT INTO recipient_pins (address, fingerprint, publicKey, confirmed) VALUES ('a@example.invalid', 'F', 'K', 1)",
+        )
+        migrated.query("SELECT publicKey FROM recipient_pins WHERE address = 'a@example.invalid'").use { cursor ->
+            assertEquals(1, cursor.count)
+        }
+    }
+
     private fun insertV11Email(messageId: String, folder: String, subject: String) =
         "INSERT INTO emails " +
             "(messageId, folder, sender, sentTo, cc, bcc, subject, preview, bodyMode, label, " +
