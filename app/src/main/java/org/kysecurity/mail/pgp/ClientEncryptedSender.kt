@@ -31,6 +31,10 @@ internal sealed class ClientSendOutcome {
      *  from [KeysMissing] and checked before it — see the KDoc on the check itself. */
     data class KeyChanged(val addresses: List<String>) : ClientSendOutcome()
 
+    /** Every key this device trusts for these recipients was revoked by its owner. Checked before
+     *  the vault opens, and never answered by falling back to a synced key. */
+    data class RecipientKeyRevoked(val addresses: List<String>) : ClientSendOutcome()
+
     data class KeysMissing(val addresses: List<String>) : ClientSendOutcome()
     data class TooManyRecipients(val message: String) : ClientSendOutcome()
     data class ResolveFailed(val message: String) : ClientSendOutcome()
@@ -89,6 +93,7 @@ internal class ClientEncryptedSender(
 
         // The tier above is bookkeeping the relay controls; a pinned fingerprint is not.
         val pinned = applyPins(addresses, byAddress)
+        if (pinned.revoked.isNotEmpty()) return ClientSendOutcome.RecipientKeyRevoked(pinned.revoked)
         if (pinned.mismatched.isNotEmpty()) return ClientSendOutcome.KeyChanged(pinned.mismatched)
         val keys = pinned.byAddress
 
@@ -166,6 +171,7 @@ internal class ClientEncryptedSender(
     private data class PinnedRecipientKeys(
         val byAddress: Map<String, ResolvedRecipientKey>,
         val mismatched: List<String>,
+        val revoked: List<String>,
     )
 
     /** Fingerprints are computed from the key bytes on both sides: the relay's `fingerprint` field
@@ -177,6 +183,7 @@ internal class ClientEncryptedSender(
     ): PinnedRecipientKeys {
         val merged = byAddress.toMutableMap()
         val mismatched = mutableListOf<String>()
+        val revoked = mutableListOf<String>()
         for (address in addresses) {
             val lower = address.lowercase()
             val relayKey = merged[lower] ?: continue
@@ -188,8 +195,14 @@ internal class ClientEncryptedSender(
             // not fingerprint — and treating that as never-pinned let a relay erase an in-person pin
             // by serving a broken key, then substitute any key it liked. A pin we cannot verify is
             // a refusal.
-            val recorded = localKeys.keysFor(address).filter { it.publicKey.isNotBlank() }
-            if (recorded.isEmpty()) continue
+            val trusted = localKeys.keysFor(address).filter { it.publicKey.isNotBlank() }
+            if (trusted.isEmpty()) continue
+            // A revoked key is still the key this device trusts; it just may not be used.
+            val recorded = trusted.filterNot { isPrimaryRevoked(it.publicKey) }
+            if (recorded.isEmpty()) {
+                revoked += address
+                continue
+            }
             val pins = recorded
                 .mapNotNull { pin -> PgpFingerprint.compute(pin.publicKey)?.let { it to pin.publicKey } }
             if (pins.isEmpty()) {
@@ -201,7 +214,7 @@ internal class ClientEncryptedSender(
             val match = pins.firstOrNull { it.first == relayFingerprint }
             if (match == null) mismatched += address else merged[lower] = relayKey.copy(publicKey = match.second)
         }
-        return PinnedRecipientKeys(merged, mismatched)
+        return PinnedRecipientKeys(merged, mismatched, revoked)
     }
 
     private sealed class EncryptedBundle {
