@@ -62,6 +62,7 @@ class DeviceContactRepository(
                 reconcileGroups(removeGone = refreshed)
                 check(refreshed) { "Group refresh: $outcome" }
             },
+            stage("adoptLostLinks") { adoptLostLinks() },
             stage("pullDeviceChanges") { pullDeviceChangesForOwnAccount() },
             stage("removeDeletedContacts") { removeRowsOfDeletedContacts() },
             stage("importNewDeviceContacts") { importNewDeviceContacts() },
@@ -280,6 +281,7 @@ class DeviceContactRepository(
         val destination = syncRepository.destination() ?: return@withContext
         // The session this scan belongs to; a pairing replacement or wipe ends it.
         val session = org.kysecurity.mail.ProcessState.generation()
+        val revision = settings.consentRevision()
         val consented = settings.importAccounts(destination)
         if (consented.isEmpty()) return@withContext
         val watermarkMs = settings.lastForeignScanAtEpochMs()
@@ -376,7 +378,7 @@ class DeviceContactRepository(
             }
         }
 
-        settings.setLastForeignScanAtEpochMs(scanStartedAtMs)
+        settings.advanceScanWatermark(revision, scanStartedAtMs)
     }
 
     /** Accounts other than ours holding live contacts, for the import consent screen. */
@@ -424,7 +426,8 @@ class DeviceContactRepository(
             if (!syncPermitted()) return@withContext
 
             val dto = entity.toDto()
-            // A row whose link was lost (death before the link write, cleared data) is adopted.
+            // adoptLostLinks already ran; this catches a row it missed, as a failed stage, so a
+            // lost link never becomes a duplicate.
             val existingLink = linksByUid[dto.uid] ?: rowsByUid[dto.uid]?.let { rawContactId ->
                 org.kysecurity.mail.data.DeviceContactLinkEntity(dto.uid, rawContactId, 0L)
                     .also { db.deviceContactLinkDao().upsert(it) }
@@ -581,7 +584,10 @@ class DeviceContactRepository(
                     uid = dto.uid,
                     rawContactId = rawContactId,
                     deviceUpdatedAtEpochMs = System.currentTimeMillis(),
-                    syncedJson = syncedJsonOf(dto),
+                    // Title and department ride on the Organization row, written only with an org.
+                    syncedJson = syncedJsonOf(
+                        if (dto.org.isNullOrBlank()) dto.copy(title = null, department = null) else dto,
+                    ),
                 ),
             )
         }
@@ -599,19 +605,19 @@ class DeviceContactRepository(
             return@withContext
         }
 
+        val base = baseOf(link)
         val plan = DeviceContactUpdatePlan.of(
             dto = dto,
             snapshot = currentSnapshot,
             roomUpdatedAtEpochMs = dto.updatedAt?.let { DeviceContactConflictResolver.parseIso(it) },
             deviceUpdatedAtEpochMs = link.deviceUpdatedAtEpochMs,
-            base = baseOf(link),
+            base = base,
         )
-        // The base advances only when the phone will hold Room's value for every planned field; an
-        // empty plan alone may mean the merge kept a device value Room does not have.
-        val agreed = plan.leavesDeviceMatching(dto, currentSnapshot)
+        // Each field's base advances only once the phone holds Room's value for it; an empty plan
+        // alone may mean the merge kept a device value Room does not have.
+        val synced = plan.nextBase(dto, currentSnapshot, base)?.let(::syncedJsonOf) ?: link.syncedJson
         if (plan.isEmpty()) {
-            val synced = syncedJsonOf(dto)
-            if (agreed && link.syncedJson != synced) db.deviceContactLinkDao().upsert(link.copy(syncedJson = synced))
+            if (link.syncedJson != synced) db.deviceContactLinkDao().upsert(link.copy(syncedJson = synced))
             return@withContext
         }
 
@@ -790,7 +796,7 @@ class DeviceContactRepository(
             db.deviceContactLinkDao().upsert(
                 link.copy(
                     deviceUpdatedAtEpochMs = System.currentTimeMillis(),
-                    syncedJson = if (agreed) syncedJsonOf(dto) else link.syncedJson,
+                    syncedJson = synced,
                 ),
             )
         }
@@ -977,6 +983,22 @@ class DeviceContactRepository(
                 .onFailure { android.util.Log.e("DeviceContactSync", "Could not backfill SOURCE_ID", it) }
         }
         bySourceId
+    }
+
+    /** Relinks our rows whose link was lost (death before the link write, cleared data) before the
+     *  pull, so a phone edit made meanwhile is merged rather than overwritten by the push. The
+     *  pull takes the device's timestamp from the row itself; an unedited row holds what we last
+     *  wrote, so the zero timestamp lets Room win there. */
+    private suspend fun adoptLostLinks() {
+        val links = db.deviceContactLinkDao().getAll()
+        val linkedUids = links.mapTo(HashSet()) { it.uid }
+        val linkedRows = links.mapTo(HashSet()) { it.rawContactId }
+        val rowsByUid = ownRawContactsBySourceId(links)
+        for (uid in db.contactDao().allUids()) {
+            val rawContactId = rowsByUid[uid] ?: continue
+            if (uid in linkedUids || rawContactId in linkedRows) continue
+            db.deviceContactLinkDao().upsert(org.kysecurity.mail.data.DeviceContactLinkEntity(uid, rawContactId, 0L))
+        }
     }
 
     /** Sweeps legacy link rows pointing at another account's raw contacts, before the first sync. */
