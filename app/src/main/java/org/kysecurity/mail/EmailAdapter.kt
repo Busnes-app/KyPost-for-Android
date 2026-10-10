@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.cardview.widget.CardView
+import androidx.core.view.ViewCompat
 import androidx.recyclerview.widget.AdapterListUpdateCallback
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListUpdateCallback
@@ -20,10 +21,16 @@ import org.kysecurity.mail.pgp.pgpSignatureStateOf
 
 class EmailAdapter(
     private var emails: List<Email>,
-    private val onEmailClick: ((Email) -> Unit)? = null
+    private val onEmailClick: ((Email) -> Unit)? = null,
+    /** (label, action): the screen-reader stand-ins for the row's swipes. */
+    private val rowActions: List<Pair<Int, (Email) -> Unit>> = emptyList(),
 ) : RecyclerView.Adapter<EmailAdapter.EmailViewHolder>() {
 
-    class EmailViewHolder(view: View, private val onEmailClick: ((Email) -> Unit)?) : RecyclerView.ViewHolder(view) {
+    class EmailViewHolder(
+        view: View,
+        private val onEmailClick: ((Email) -> Unit)?,
+        private val rowActions: List<Pair<Int, (Email) -> Unit>>,
+    ) : RecyclerView.ViewHolder(view) {
         private val cardView: CardView = view as CardView
         private val contentLayout: LinearLayout = view.findViewById(R.id.emailItemContent)
         private val unreadDot: View = view.findViewById(R.id.unreadDot)
@@ -32,6 +39,9 @@ class EmailAdapter(
 
         // setTypeface(current, NORMAL) keeps a bold current face; derive from the inflated one.
         private val subjectTypeface: Typeface = subjectTextView.typeface
+
+        /** Removed on rebind: a recycled row must not keep acting on the email it showed before. */
+        private var actionIds: List<Int> = emptyList()
 
         fun bind(email: Email, palette: ThemePalette) {
             // A message this app can't render is worth knowing before tapping it — otherwise the
@@ -50,25 +60,39 @@ class EmailAdapter(
                 context.getString(R.string.email_row_subject_marked, markers.joinToString(" "), email.subject)
             }
             // Emoji markers are announced inconsistently by screen readers; spell the state out.
-            subjectTextView.contentDescription = when {
+            val spokenSubject = when {
                 signatureState == PgpSignatureState.INVALID ->
-                    itemView.context.getString(R.string.email_row_pgp_bad_signature_description, email.subject)
+                    context.getString(R.string.email_row_pgp_bad_signature_description, email.subject)
                 // Unreachable today: pgpSignatureStateOf cannot produce KEY_CHANGED.
                 signatureState == PgpSignatureState.KEY_CHANGED ->
-                    itemView.context.getString(R.string.email_row_pgp_key_changed_description, email.subject)
+                    context.getString(R.string.email_row_pgp_key_changed_description, email.subject)
                 pgpState == PgpMessageState.CLIENT_PROTECTED ->
-                    itemView.context.getString(R.string.email_row_pgp_locked_description, email.subject)
+                    context.getString(R.string.email_row_pgp_locked_description, email.subject)
                 pgpState == PgpMessageState.DECRYPT_FAILED ->
-                    itemView.context.getString(R.string.email_row_pgp_failed_description, email.subject)
-                else -> null
+                    context.getString(R.string.email_row_pgp_failed_description, email.subject)
+                else -> email.subject
             }
             senderTextView.text = email.sender
+            val isUnread = email.status == "unread"
+            // The whole row is one focus stop; the unread dot and the 📎 have no voice of their own.
+            itemView.contentDescription = listOfNotNull(
+                context.getString(R.string.email_row_unread).takeIf { isUnread },
+                spokenSubject,
+                context.getString(R.string.email_row_from, email.sender),
+                context.getString(R.string.email_row_has_attachments).takeIf { email.hasAttachments },
+            ).joinToString(", ")
+            actionIds.forEach { ViewCompat.removeAccessibilityAction(itemView, it) }
+            actionIds = rowActions.map { (label, action) ->
+                ViewCompat.addAccessibilityAction(itemView, context.getString(label)) { _, _ ->
+                    action(email)
+                    true
+                }
+            }
 
             val panel = Color.parseColor(palette.panel)
             cardView.setCardBackgroundColor(panel)
             contentLayout.setBackgroundColor(panel)
 
-            val isUnread = email.status == "unread"
             unreadDot.visibility = if (isUnread) View.VISIBLE else View.GONE
             if (isUnread) {
                 unreadDot.background = unreadDotDrawable(itemView.context)
@@ -84,7 +108,7 @@ class EmailAdapter(
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EmailViewHolder {
         val view = LayoutInflater.from(parent.context)
             .inflate(R.layout.item_email, parent, false)
-        return EmailViewHolder(view, onEmailClick)
+        return EmailViewHolder(view, onEmailClick, rowActions)
     }
 
     override fun onBindViewHolder(holder: EmailViewHolder, position: Int) {

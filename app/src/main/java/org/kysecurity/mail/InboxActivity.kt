@@ -277,9 +277,18 @@ class InboxActivity : LockedActivity() {
     }
 
     private fun setupRecyclerView() {
-        adapter = EmailAdapter(emptyList()) { email ->
-            openEmailDetail(email)
-        }
+        adapter = EmailAdapter(
+            emptyList(),
+            onEmailClick = ::openEmailDetail,
+            rowActions = listOf(
+                R.string.action_archive to { email: Email ->
+                    submitRowAction(email, getString(R.string.action_archive), mailRepository::archive)
+                },
+                R.string.action_delete to { email: Email ->
+                    submitRowAction(email, getString(R.string.action_delete), mailRepository::delete)
+                },
+            ),
+        )
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = adapter
         recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {

@@ -258,8 +258,9 @@ Owns production Android app code and resources.
   `pgpRowMarker` marks inbox rows for the two states that yield nothing readable (🔒 client-protected,
   ⚠ decrypt failed) and deliberately leaves server-decrypted rows unmarked — those open normally, so
   a marker would sit on most rows of a server-mode mailbox carrying nothing actionable. `EmailAdapter`
-  also sets a spelled-out `contentDescription` for those two, because screen readers announce emoji
-  inconsistently.
+  spells those two out in the row's `contentDescription`, because screen readers announce emoji
+  inconsistently, together with unread and attachment state (the dot and 📎 have no voice). Inbox
+  rows also carry Archive and Delete accessibility actions, the screen-reader form of the swipes.
   A failed signature or a CHANGED signer key (`PgpSignatureState.KEY_CHANGED`) outranks both with
   ⚠. `SIGNER_UNKNOWN` deliberately does not mark: it is the ordinary state for a correspondent not
   yet in the address book, and a glyph on most rows carries nothing actionable.
