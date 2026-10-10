@@ -82,7 +82,7 @@ Owns production Android app code and resources.
      daily since=0 self-heal — a day of silently missing messages. The delta itself lands through
      `EmailDao.applyFolderDelta`, one transaction, so it cannot half-apply.
   2. HTTP 200 from `/api/inbox/actions` is transport success, not operation success: the relay
-     answers 200 with per-id `failed[]` (Mobile_Mail_Relay.md Part 2). `MailOutcome<MailActionOutcome>
+     answers 200 with per-id `failed[]` (docs/Mobile_Mail_Relay.md Part 2). `MailOutcome<MailActionOutcome>
      .appliedTo(id)` is the only gate on touching the local row — archive/spam/delete/move drop the
      cached row and `markRead` sets `status`, both **after** the relay confirms that id, never
      before. A rejection becomes `MailOutcome.ActionRejected`, not `UpstreamFailure`: the request

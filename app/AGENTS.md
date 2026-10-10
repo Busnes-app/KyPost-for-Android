@@ -90,7 +90,7 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   cancellation. Never render purchase options until both INAPP and SUBS ownership queries succeed.
 - Settings links to the canonical KyPost privacy policy at
   `https://www.kypost.org/privacy.html`, immediately before the final Support KyPost action.
-- Contact autocomplete (ContactAutocomplete.md): `ComposeActivity`'s TO/CC/BCC fields are
+- Contact autocomplete (docs/ContactAutocomplete.md): `ComposeActivity`'s TO/CC/BCC fields are
   `RecipientInputView`s backed by `ContactDao.search` (name/email substring match, debounced
   150ms, top 5 shown). The address-book icon on the TO row opens `AddressBookSheet`
   (`contacts/` package), a `BottomSheetDialogFragment` offering TO/CC/BCC actions per contact.

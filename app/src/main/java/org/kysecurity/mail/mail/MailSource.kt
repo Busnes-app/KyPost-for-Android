@@ -45,7 +45,7 @@ sealed class MailOutcome<out T> {
     data class RateLimited(val message: String, val retryAfterSeconds: Long?) : MailOutcome<Nothing>()
 }
 
-/** Wording tailored per failure kind, per Mobile_Mail_Relay.md's error table — never auto-clears
+/** Wording tailored per failure kind, per docs/Mobile_Mail_Relay.md's error table — never auto-clears
  *  pairing on 401/503, only points the user at the places that would (Settings/PushPairingActivity). */
 fun MailOutcome<*>.userFacingMessage(): String? = when (this) {
     is MailOutcome.Success -> null
@@ -93,7 +93,7 @@ data class MailCheckpoint(
 data class MailFetchResult(
     val tabs: List<String>,
     val messages: List<Email>,
-    // The rest only matter when isDelta is true (Mobile_Mail_Relay.md Part 5 v2); a false/default
+    // The rest only matter when isDelta is true (docs/Mobile_Mail_Relay.md Part 5 v2); a false/default
     // value means `messages` is a full snapshot, exactly like the pre-delta response shape.
     val isDelta: Boolean = false,
     val updatedMessageIds: Set<String> = emptySet(),
