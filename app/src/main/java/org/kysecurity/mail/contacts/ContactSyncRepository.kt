@@ -133,11 +133,11 @@ class ContactSyncRepository(
 
     /** The local uid is permanent: the server stores an unknown uid as a create, so a replayed
      *  push lands on the same contact. */
-    suspend fun queueCreate(contact: ContactDto): String {
+    suspend fun queueCreate(contact: ContactDto, verifiedInPerson: Boolean = false): String {
         val localUid = UUID.randomUUID().toString()
         val localCopy = contact.copy(uid = localUid)
         db.withTransaction {
-            db.contactDao().upsertAll(listOf(localCopy.toEntity()))
+            db.contactDao().upsertAll(listOf(localCopy.toEntity(verifiedInPerson = verifiedInPerson)))
             db.pendingContactChangeDao().enqueue(
                 PendingContactChangeEntity(
                     localUid = localUid,
