@@ -105,6 +105,20 @@ class PgpBootstrapClientTest {
         assertEquals("me@example.invalid", (result as PgpBootstrapResult.Success).accountAddress)
     }
 
+    /** Reply All drops every one of these, verified send-as aliases included. */
+    @Test
+    fun keepsEveryOwnAddress() = runBlocking {
+        val body = """{"hasIdentity":false,"protection":"","suggestedUserIDs":["me@example.invalid","alias@example.invalid"]}"""
+        val client = PgpBootstrapClient(callFactory = FakeCallFactory { request -> response(request, body, 200) })
+
+        val result = client.fetch("https://relay.example.com", "device-1", "secret-1")
+
+        assertEquals(
+            listOf("me@example.invalid", "alias@example.invalid"),
+            (result as PgpBootstrapResult.Success).ownAddresses,
+        )
+    }
+
     /** No mail account configured server-side, so there is no valid `From` to build. Compose must
      *  degrade to the webmail handoff rather than offer a send that is guaranteed to 403. */
     @Test

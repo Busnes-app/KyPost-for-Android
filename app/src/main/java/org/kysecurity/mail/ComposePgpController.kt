@@ -56,6 +56,9 @@ class ComposePgpController(
      *  [pgpComposeStateOf] already degrades to the webmail handoff. */
     suspend fun accountAddress(): String = bootstrap()?.accountAddress.orEmpty()
 
+    /** Empty when bootstrap is unavailable; Reply All then keeps the user's own address. */
+    suspend fun ownAddresses(): List<String> = bootstrap()?.ownAddresses.orEmpty()
+
     /** The cached bootstrap, or null when unpaired or the fetch failed. */
     private suspend fun bootstrap(): PgpBootstrapResult.Success? {
         cachedBootstrap?.let { return it }
