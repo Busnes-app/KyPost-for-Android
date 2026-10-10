@@ -405,7 +405,9 @@ Owns production Android app code and resources.
   fires `ACTION_INSERT` on `Events.CONTENT_URI` (no calendar permission) and only on a tap;
   CANCEL and REPLY offer no Add. Under Hostile Location Protection every calendar handoff,
   including the "Create event from this email" overflow item (subject and body only, no date
-  guessing, never the decrypted body or protected subject), is confirmed first. The card is
+  guessing, never the decrypted body or protected subject), is confirmed first. A "Create
+  event" tap during the body fetch waits for it (`BodyFetchGate`) rather than going out
+  subject-only. The card is
   only as reliable as the relay's listing: invites appear only when `hasAttachments` is true.
 - `pgp/deliverReadOutcome` owns completed attachment arrays inside the worker until rendering
   accepts them. Cancellation across the dispatcher return, render rejection, or a rendering
