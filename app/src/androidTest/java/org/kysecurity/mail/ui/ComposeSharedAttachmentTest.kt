@@ -50,7 +50,12 @@ class ComposeSharedAttachmentTest {
                 type = "text/plain"
                 putParcelableArrayListExtra(
                     Intent.EXTRA_STREAM,
-                    arrayListOf(Uri.fromFile(privateFile), ownProviderUri, foreignUri),
+                    arrayListOf(
+                        Uri.fromFile(privateFile),
+                        ownProviderUri,
+                        ownProviderUri!!.buildUpon().encodedAuthority("0@${ownProviderUri.authority}").build(),
+                        foreignUri,
+                    ),
                 )
                 setClass(context, ComposeActivity::class.java)
             }

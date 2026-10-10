@@ -615,7 +615,8 @@ class ComposeActivity : LockedActivity() {
     /** Attachments come from other apps' providers only, never `file:` or this app's own. */
     private fun isForeignContentUri(uri: Uri): Boolean {
         if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
-        val authority = uri.authority ?: return false
+        // ContentResolver also accepts `userId@authority`; strip it as it does.
+        val authority = uri.authority?.substringAfterLast('@') ?: return false
         // Null is an invisible foreign provider; only this package's own are refused.
         return packageManager.resolveContentProvider(authority, 0)?.packageName != packageName
     }
