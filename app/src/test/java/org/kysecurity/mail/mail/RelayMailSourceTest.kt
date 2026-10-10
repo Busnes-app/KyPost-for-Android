@@ -1345,4 +1345,19 @@ class RelayMailSourceTest {
     fun preview_dropsFormatCharacters() {
         assertEquals("abc", previewText("a\u202Eb\u2066c\u200D"))
     }
+
+    /** U+E0001 (LANGUAGE TAG) is a format character outside the BMP: classifying its two
+     *  surrogates one at a time let it through. */
+    @Test
+    fun preview_dropsSupplementaryFormatCharacters() {
+        assertEquals("ab", previewText("a\uDB40\uDC01b"))
+    }
+
+    /** The bound never cuts a code point in half. */
+    @Test
+    fun preview_boundNeverSplitsASurrogatePair() {
+        val bounded = previewText("x".repeat(399) + "\uD83D\uDE00")
+
+        assertEquals("x".repeat(399), bounded)
+    }
 }
