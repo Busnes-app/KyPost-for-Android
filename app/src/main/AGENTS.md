@@ -455,6 +455,9 @@ Owns production Android app code and resources.
   while the rest go out. Once a reply says `tooOld`, the remaining batches keep the stale cursor
   (cheap `tooOld` replies with no lists) and one `since=0` pull ends the sync.
   `ContactPushBatchingTest` pins all three.
+  A `since=0` pull is a snapshot: after tombstone GC the server can no longer list what it
+  deleted, so `applyDelta(snapshot = true)` removes every Room contact absent from it except
+  uids still in the outbox. `ContactFullResyncTest` covers both.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`

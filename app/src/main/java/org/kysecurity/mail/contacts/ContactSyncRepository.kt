@@ -93,7 +93,7 @@ class ContactSyncRepository(
         while (pullFrom != null) {
             val result = client.pull(pairing.serverUrl, deviceId, deviceSecret, pullFrom)
             val response = (result as? ContactSyncResult.Success)?.response ?: return@withLock failureOutcome(result)
-            applyDelta(pairing.subscriberId, response, emptyList())
+            applyDelta(pairing.subscriberId, response, emptyList(), snapshot = pullFrom == 0L)
             pullFrom = if (response.tooOld && pullFrom != 0L) 0L else null
         }
 
@@ -194,15 +194,17 @@ class ContactSyncRepository(
         dao.enqueue(coalescedChange(existing, change))
     }
 
+    /** [snapshot] marks a since=0 reply: every live contact, so absence means deleted. */
     private suspend fun applyDelta(
         subscriberId: String,
         response: ContactSyncPullResponseDto,
         flushedChanges: List<PendingContactChangeEntity>,
+        snapshot: Boolean = false,
     ) {
         if (response.tooOld) {
             // Wire contract: the server applies the pushed changes BEFORE it computes tooOld, so
             // they are already persisted and the outbox rows are cleared. Only the cursor is
-            // discarded, which makes the next sync a full since=0 re-pull.
+            // discarded; sync() follows with a since=0 snapshot.
             db.withTransaction {
                 cursorStore.resetCursor(subscriberId)
                 if (flushedChanges.isNotEmpty()) {
@@ -218,6 +220,12 @@ class ContactSyncRepository(
             }
             db.contactDao().upsertAll(incomingEntities)
             db.contactDao().deleteByUids(response.deleted.map { it.uid })
+            if (snapshot) {
+                // Queued changes are not on the server yet; everything else absent was deleted there.
+                val keep = response.changed.mapTo(HashSet()) { it.uid } +
+                    db.pendingContactChangeDao().getAllPending().map { it.localUid }
+                db.contactDao().deleteByUids(db.contactDao().allUids().filterNot { it in keep })
+            }
             if (flushedChanges.isNotEmpty()) {
                 db.pendingContactChangeDao().clearFlushed(flushedChanges.map { it.id })
             }
