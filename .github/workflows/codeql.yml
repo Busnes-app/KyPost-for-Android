@@ -64,7 +64,7 @@ jobs:
       - uses: ./.github/actions/placeholder-google-services
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@2d92b76c45b91eb80fc44c74ce3fce0ee94e8f9d # v3.30.0
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           languages: ${{ matrix.language }}
           build-mode: manual
@@ -75,6 +75,6 @@ jobs:
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@2d92b76c45b91eb80fc44c74ce3fce0ee94e8f9d # v3.30.0
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           category: "/language:${{ matrix.language }}"
