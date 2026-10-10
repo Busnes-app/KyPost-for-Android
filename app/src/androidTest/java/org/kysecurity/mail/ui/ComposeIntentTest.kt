@@ -17,6 +17,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.kysecurity.mail.ComposeActivity
 import org.kysecurity.mail.ComposeDraftCache
+import org.kysecurity.mail.ForwardAttachmentHandoff
+import org.kysecurity.mail.mail.OutgoingAttachment
+import com.google.android.material.chip.ChipGroup
 import org.kysecurity.mail.R
 import org.kysecurity.mail.RecipientInputView
 
@@ -95,6 +98,24 @@ class ComposeIntentTest {
                 assertFalse(activity.mirroredBodyHtmlForTest().contains("<b>"))
             }
         }
+    }
+
+    @Test
+    fun externalSendDoesNotTakeForwardedAttachments() {
+        ForwardAttachmentHandoff.put(listOf(OutgoingAttachment("left.txt", "text/plain", byteArrayOf(1))))
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            putExtra(Intent.EXTRA_TEXT, "Shared text")
+            setType("text/plain")
+            setClass(context, ComposeActivity::class.java)
+        }
+
+        ActivityScenario.launch<ComposeActivity>(intent).use { scenario ->
+            scenario.onActivity { activity ->
+                assertEquals(0, activity.findViewById<ChipGroup>(R.id.composeAttachmentsCard).childCount)
+            }
+        }
+        assertTrue(ForwardAttachmentHandoff.take().isEmpty())
     }
 
     @Test

@@ -278,7 +278,8 @@ class ComposeActivity : LockedActivity() {
 
             // A forward's attachments, handed over out-of-band because they are far too large for
             // an Intent extra — see [ForwardAttachmentHandoff].
-            val forwarded = ForwardAttachmentHandoff.take()
+            // Always taken so a leftover never outlives this screen; used only by in-app launches.
+            val forwarded = ForwardAttachmentHandoff.take().takeIf { internal }.orEmpty()
             if (forwarded.isNotEmpty()) {
                 // Re-checked HERE, not only in addAttachment: that guard covers files the user
                 // picks, and a forward walked straight past it with attachment sizes the relay
