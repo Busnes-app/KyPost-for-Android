@@ -196,6 +196,11 @@ data class AttachmentInfo(val index: Int, val name: String, val mimeType: String
 /** Not a `data class`: the generated equals/hashCode would compare [bytes] by identity. */
 class DownloadedAttachment(val name: String, val mimeType: String, val bytes: ByteArray)
 
+/** The account a pairing speaks for; the same pair `isAccountReplacement` compares. */
+data class MailAccount(val subscriberId: String, val serverUrl: String)
+
+fun org.kysecurity.mail.push.PairingData.mailAccount() = MailAccount(subscriberId, serverUrl)
+
 interface MailSource {
     /** [forceFullResync] requests since=0 (full re-fetch reported in delta shape) regardless of
      *  any persisted cursor — the documented self-heal for a missed removal notification. */
@@ -204,11 +209,18 @@ interface MailSource {
     fun createFolder(parent: String, name: String): MailOutcome<Unit>
     fun renameFolder(folder: String, name: String): MailOutcome<Unit>
     fun deleteFolder(folder: String): MailOutcome<Unit>
+
+    /** Null when unpaired. */
+    fun currentAccount(): MailAccount?
+
+    /** A non-null [account] is checked against the pairing the request is built from; on a
+     *  mismatch nothing is sent. */
     fun performAction(
         action: MailAction,
         messageIds: List<String>,
         mailbox: String,
         targetMailbox: String? = null,
+        account: MailAccount? = null,
     ): MailOutcome<MailActionOutcome>
     fun saveDraft(draft: MailDraft): MailOutcome<Unit>
     fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit>

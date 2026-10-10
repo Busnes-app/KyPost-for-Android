@@ -68,11 +68,16 @@ class MailRepository(
         }
     }
 
-    fun archive(id: String, folder: String): MailOutcome<Unit> = mutate(MailAction.ARCHIVE, id, folder)
+    fun currentAccount(): MailAccount? = relaySource.currentAccount()
+
+    /** [account], when given, must still be the paired account when the request is built. */
+    fun archive(id: String, folder: String, account: MailAccount? = null): MailOutcome<Unit> =
+        mutate(MailAction.ARCHIVE, id, folder, account = account)
 
     fun spam(id: String, folder: String): MailOutcome<Unit> = mutate(MailAction.SPAM, id, folder)
 
-    fun delete(id: String, folder: String): MailOutcome<Unit> = mutate(MailAction.DELETE, id, folder)
+    fun delete(id: String, folder: String, account: MailAccount? = null): MailOutcome<Unit> =
+        mutate(MailAction.DELETE, id, folder, account = account)
 
     fun move(id: String, folder: String, targetFolder: String): MailOutcome<Unit> =
         mutate(MailAction.MOVE, id, folder, targetFolder)
@@ -85,11 +90,12 @@ class MailRepository(
         id: String,
         folder: String,
         targetFolder: String? = null,
+        account: MailAccount? = null,
     ): MailOutcome<Unit> {
         val key = folder to id
         removing.add(key)
         try {
-            val outcome = relaySource.performAction(action, listOf(id), folder, targetFolder).appliedTo(id)
+            val outcome = relaySource.performAction(action, listOf(id), folder, targetFolder, account).appliedTo(id)
             if (outcome is MailOutcome.Success) {
                 removed.add(key)
                 emailDao.deleteById(id, folder)
