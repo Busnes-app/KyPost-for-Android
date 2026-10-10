@@ -69,7 +69,16 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   A successful PIN or biometric unlock clears any pending grace deadline before exposing the app;
   otherwise an expired deadline can immediately re-lock the just-authenticated session.
   `ComposeDraftCache` is the in-memory backstop; it is deliberately never written to disk so
-  Hostile Location Protection needs no special case.
+  Hostile Location Protection needs no special case. The relay send runs in `KyPostApp.appScope`
+  through `ComposeSend` (process-scoped). Its session reset, run by `ProcessState.resetAll` at the
+  start of a wipe or account purge, cancels every running send and its OkHttp `Call` (handed over
+  through `MailSource.sendMail`'s `onCall`), waits up to 2 s for it to stop and zeroes its
+  attachments; a send queued before the reset never runs. The composer captures
+  `ProcessState.generation()` before the editor's asynchronous export; `ComposeSend.start` refuses
+  a submission whose generation has ended, or that arrives while a reset is still tearing down,
+  without calling the transport, and zeroes its attachments. A Compose that restores the
+  draft adopts a send still in flight and keeps Send disabled instead of sending it again. The
+  client-encrypted send still lives in `lifecycleScope`: its unlock prompt is bound to the Activity.
 - MFA approval (`push/MfaApprovalActivity`) must show the sign-in's context (IP, location, user
   agent, time) and, whenever the server supplies `matchDigits`, require a number match instead of
   a bare Approve button. A contentless approval prompt is what MFA-fatigue attacks harvest. All

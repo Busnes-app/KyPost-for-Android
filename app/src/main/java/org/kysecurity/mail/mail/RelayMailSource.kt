@@ -229,14 +229,14 @@ class RelayMailSource(
         }
     }
 
-    override fun sendMail(draft: MailDraft): MailOutcome<MailSendOutcome> {
+    override fun sendMail(draft: MailDraft, onCall: (Call) -> Unit): MailOutcome<MailSendOutcome> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
         val base = baseUrl(pairing, "/api/mail/send") ?: return MailOutcome.BadRequest("Server URL is not valid")
         val body = json.encodeToString(draft.toSendWireDto())
         val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
             .authed(pairing)
             .build()
-        return execute(request) { code, rawBody ->
+        return execute(request, onCall) { code, rawBody ->
             if (code != 200) return@execute mapErrorCode(code, rawBody)
             val parsed = runCatching { json.decodeFromString<RelaySendResponseDto>(rawBody) }.getOrNull()
                 ?: return@execute MailOutcome.UpstreamFailure("Malformed send response")
@@ -447,8 +447,14 @@ class RelayMailSource(
         return onResponse(response.code, response.decoded, response.errorBody)
     }
 
-    private fun <T> execute(request: Request, onResponse: (code: Int, body: String) -> MailOutcome<T>): MailOutcome<T> {
-        val result = effectiveCallFactory().executeSync(request) { response ->
+    private fun <T> execute(
+        request: Request,
+        onCall: (Call) -> Unit = {},
+        onResponse: (code: Int, body: String) -> MailOutcome<T>,
+    ): MailOutcome<T> {
+        val factory = effectiveCallFactory()
+        val observed = Call.Factory { factory.newCall(it).also(onCall) }
+        val result = observed.executeSync(request) { response ->
             Triple(response.code, response.body?.string().orEmpty(), response.header(HEADER_RETRY_AFTER))
         }
         val exception = result.exceptionOrNull()
