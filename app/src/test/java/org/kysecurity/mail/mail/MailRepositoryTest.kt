@@ -20,10 +20,14 @@ private class FakeEmailDao : EmailDao {
     /** Throws on the next write, to stand in for "Room failed / storage filled / process died". */
     var failNextWrite = false
 
+    /** Runs at the start of [upsertAll], so a test can hold a refresh mid-write. */
+    var beforeUpsert: (() -> Unit)? = null
+
     private fun key(id: String, folder: String) = folder to id
 
     override fun getByFolder(folder: String): List<EmailEntity> = rows.values.filter { it.folder == folder }
     override fun upsertAll(emails: List<EmailEntity>) {
+        beforeUpsert?.invoke()
         if (failNextWrite) throw IllegalStateException("simulated Room failure")
         emails.forEach { rows[key(it.messageId, it.folder)] = it }
     }
@@ -970,6 +974,108 @@ class MailRepositoryTest {
         repository.delete("42", "INBOX")
 
         assertTrue(pending.removing.containsKey("INBOX" to "42"))
+    }
+
+    // --- actions begun on the caller's thread, run later on a worker ------------------------------
+
+    /** Queued under the old account; by the time a worker runs it, the purge has reset the session
+     *  and a replacement row with the same folder and UID is cached, while the old pairing is not
+     *  yet cleared and would still authenticate a request. */
+    @Test
+    fun aDeleteQueuedBeforeAnAccountReplacementSendsNothingAndKeepsTheReplacementRow() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val pending = PendingMailActions()
+        val source = FakeMailSource()
+        val repository = MailRepository(dao, source, FakeCursorProvider(), pending)
+        val queued = repository.beginRemoval("42", "INBOX")
+
+        org.kysecurity.mail.ProcessState.advanceGeneration()
+        org.kysecurity.mail.ProcessState.resetAll()
+        pending.resetForNewSession()
+        dao.rows.clear()
+        dao.put(row("42", "INBOX").copy(subject = "replacement"))
+        repository.delete(queued)
+
+        assertTrue("the old session's request was sent", source.actions.isEmpty())
+        assertEquals("replacement", dao.getById("42", "INBOX")?.subject)
+        assertEquals(listOf("42"), repository.cachedEmails("INBOX").map { it.id })
+        assertTrue(pending.removed.isEmpty())
+    }
+
+    /** The row is hidden from the moment the action is begun, not from when a worker picks it up. */
+    @Test
+    fun aRemovalBegunButNotYetRunIsHiddenFromARefresh() {
+        val dao = FakeEmailDao()
+        val repository = repository(dao, FakeMailSource(fetchOutcome = snapshot("42", "7")))
+
+        repository.beginRemoval("42", "INBOX")
+        repository.refreshFolder("INBOX")
+
+        assertEquals(listOf("7"), repository.cachedEmails("INBOX").map { it.id })
+    }
+
+    @Test
+    fun aReadBegunButNotYetRunShowsTheRowRead() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val repository = repository(dao, FakeMailSource())
+
+        repository.beginRead("42", "INBOX")
+
+        assertEquals("read", repository.cachedEmails("INBOX").single().status)
+    }
+
+    @Test
+    fun anAbandonedRemovalShowsTheRowAgain() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val repository = repository(dao, FakeMailSource())
+
+        repository.abandon(repository.beginRemoval("42", "INBOX"))
+
+        assertEquals(listOf("42"), repository.cachedEmails("INBOX").map { it.id })
+    }
+
+    /** A failed read clears its overlay, and the list showing it has to repaint to say so. */
+    @Test
+    fun aFailedReadTellsTheListToRepaint() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val repository = repository(dao, FakeMailSource(actionOutcome = MailOutcome.ServiceUnavailable("down")))
+        var repaints = 0
+        repository.setOverlayListener { repaints++ }
+
+        repository.markRead(repository.beginRead("42", "INBOX"))
+
+        assertEquals(1, repaints)
+        assertEquals("unread", repository.cachedEmails("INBOX").single().status)
+    }
+
+    /** A refresh that filtered before the delete landed, and writes after it, must not write the
+     *  row back: the removal waits for a refresh write already under way. */
+    @Test
+    fun aConfirmedDeleteIsNotUndoneByARefreshWriteAlreadyUnderWay() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val repository = repository(dao, FakeMailSource(fetchOutcome = snapshot("42", "7")))
+        val writing = java.util.concurrent.CountDownLatch(1)
+        val resume = java.util.concurrent.CountDownLatch(1)
+        dao.beforeUpsert = {
+            dao.beforeUpsert = null
+            writing.countDown()
+            resume.await(5, java.util.concurrent.TimeUnit.SECONDS)
+        }
+        val refresh = Thread { repository.refreshFolder("INBOX") }.apply { start() }
+        assertTrue(writing.await(5, java.util.concurrent.TimeUnit.SECONDS))
+
+        val delete = Thread { repository.delete(repository.beginRemoval("42", "INBOX")) }.apply { start() }
+        delete.join(500) // Without the shared lock the delete finishes here, ahead of the write.
+        resume.countDown()
+        refresh.join(5_000)
+        delete.join(5_000)
+
+        assertTrue("the deleted row was written back", !dao.rows.containsKey("INBOX" to "42"))
     }
 
     @Test
