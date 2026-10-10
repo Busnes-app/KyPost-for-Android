@@ -1013,8 +1013,9 @@ class DeviceContactRepository(
                         ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE -> {
                             val given = data2?.takeIf { it.isNotBlank() }
                             val family = data3?.takeIf { it.isNotBlank() }
-                            val middle = data4?.takeIf { it.isNotBlank() }
-                            val prefix = data5?.takeIf { it.isNotBlank() }
+                            // StructuredName.PREFIX is DATA4 and MIDDLE_NAME is DATA5.
+                            val prefix = data4?.takeIf { it.isNotBlank() }
+                            val middle = data5?.takeIf { it.isNotBlank() }
                             val suffix = data6?.takeIf { it.isNotBlank() }
                             fn = listOfNotNull(prefix, given, middle, family, suffix).joinToString(" ")
                             if (fn.isBlank()) fn = data1
