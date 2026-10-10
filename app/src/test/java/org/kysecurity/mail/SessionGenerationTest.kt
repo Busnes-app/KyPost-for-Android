@@ -27,6 +27,16 @@ class SessionGenerationTest {
         assertTrue(ProcessState.isCurrent(ProcessState.generation()))
     }
 
+    /** A teardown advances first and resets holders later; a token must be stale from the first. */
+    @Test
+    fun advancingExpiresATokenBeforeAnyReset() {
+        val token = ProcessState.generation()
+
+        ProcessState.advanceGeneration()
+
+        assertFalse(ProcessState.isCurrent(token))
+    }
+
     /** Holders run after the bump, so a callback racing the reset already sees its token expired. */
     @Test
     fun theGenerationAdvancesBeforeAnyHolderIsReset() {
