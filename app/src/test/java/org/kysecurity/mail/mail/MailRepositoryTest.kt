@@ -165,6 +165,13 @@ private fun repository(
 
 class MailRepositoryTest {
 
+    /** Some tests here run resetAll, which seals the process-wide draft cache; only take()
+     *  unseals it. Left sealed, a later test class's save() silently does nothing. */
+    @org.junit.After
+    fun unsealTheDraftCache() {
+        org.kysecurity.mail.ComposeDraftCache.take()
+    }
+
     @Test
     fun nonDeltaResult_replacesFolderSnapshotWholesale() {
         val dao = FakeEmailDao()
