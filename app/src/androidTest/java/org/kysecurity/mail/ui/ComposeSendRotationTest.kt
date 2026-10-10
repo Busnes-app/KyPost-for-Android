@@ -62,13 +62,27 @@ class ComposeSendRotationTest {
 
             release.countDown()
             runBlocking { inFlight.outcome.await() }
-            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
 
-            // Success finishes the screen; the draft is not left behind to be sent twice.
-            assertEquals(Lifecycle.State.DESTROYED, scenario.state)
+            // Success finishes the screen; the draft is not left behind to be sent twice. finish()
+            // is asynchronous: system_server destroys the Activity after the idle sync returns.
+            assertEquals(Lifecycle.State.DESTROYED, awaitDestroyed(scenario))
         }
         assertEquals(1, sends.get())
         assertNull(ComposeSend.current())
         assertNull(ComposeDraftCache.take())
+    }
+
+    private fun awaitDestroyed(scenario: ActivityScenario<ComposeActivity>): Lifecycle.State {
+        val deadline = System.currentTimeMillis() + DESTROY_TIMEOUT_MS
+        while (scenario.state != Lifecycle.State.DESTROYED && System.currentTimeMillis() < deadline) {
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            Thread.sleep(POLL_MS)
+        }
+        return scenario.state
+    }
+
+    private companion object {
+        const val DESTROY_TIMEOUT_MS = 10_000L
+        const val POLL_MS = 100L
     }
 }
