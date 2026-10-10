@@ -723,6 +723,8 @@ class ComposeActivity : LockedActivity() {
         is ClientSendOutcome.NoAccountAddress -> getString(R.string.compose_pgp_no_account_address)
         is ClientSendOutcome.TooManyRecipients -> outcome.message
         is ClientSendOutcome.ResolveFailed -> getString(R.string.compose_pgp_resolve_failed, outcome.message)
+        is ClientSendOutcome.RecipientKeyRevoked ->
+            getString(R.string.compose_pgp_key_revoked, outcome.addresses.joinToString(", "))
         is ClientSendOutcome.EncryptFailed -> getString(R.string.compose_pgp_encrypt_failed, outcome.message)
         is ClientSendOutcome.SendFailed -> outcome.outcome.userFacingMessage().orEmpty()
         else -> getString(R.string.compose_pgp_encrypt_failed, "")

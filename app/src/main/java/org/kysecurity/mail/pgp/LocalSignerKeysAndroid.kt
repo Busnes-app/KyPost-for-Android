@@ -17,16 +17,18 @@ internal class RoomLocalSignerKeys(private val database: () -> AppDatabase) : Lo
         if (needle.isBlank()) return emptyList()
         return withContext(Dispatchers.IO) {
             val db = database()
-            val pins = db.recipientPinDao().forAddress(needle.lowercase())
             // pinnedForEmail, never search: search is capped at five name-ordered rows, which let
             // relay-supplied contacts evict the pin. Exact match in Kotlin, not the SQL LIKE, so a
-            // substring cannot admit a lookalike. Skipped when pinned: those keys are not used.
-            val contactKeys = if (pins.isNotEmpty()) {
-                emptyList()
-            } else {
-                db.contactDao().pinnedForEmail(needle)
-                    .filter { it.hasEmail(needle) }
-                    .mapNotNull { it.toLocalSignerKey() }
+            // substring cannot admit a lookalike.
+            val contactKeys = db.contactDao().pinnedForEmail(needle)
+                .filter { it.hasEmail(needle) }
+                .mapNotNull { it.toLocalSignerKey() }
+            // A pinned address uses its pins alone; the synced copies can only revoke them, and a
+            // revocation taken is saved so it outlasts the synced copy.
+            val pins = db.recipientPinDao().forAddress(needle.lowercase()).map { pin ->
+                contactKeys.firstNotNullOfOrNull { withVerifiedRevocation(pin.publicKey, it.publicKey) }
+                    ?.let { revoked -> pin.copy(publicKey = revoked).also { db.recipientPinDao().upsertAll(listOf(it)) } }
+                    ?: pin
             }
             authoritativeKeys(pins, contactKeys)
         }
