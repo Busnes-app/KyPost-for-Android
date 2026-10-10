@@ -140,8 +140,9 @@ object DeviceContactFieldCoding {
      *  to `TYPE_CUSTOM`. */
     fun eventCustomLabel(label: String?): String? = if (eventType(label) == Event.TYPE_CUSTOM) label else null
 
-    /** Inverse of [relationType]; TYPE_CUSTOM collapses to "other" — the DTO has no freeform slot. */
-    fun relationLabelFromType(type: Int?): String = when (type) {
+    /** Inverse of [relationType] and [relationCustomLabel]: a custom type reads back its LABEL,
+     *  and only a row with neither becomes "other". */
+    fun relationLabelFromType(type: Int?, customLabel: String? = null): String = when (type) {
         Relation.TYPE_SPOUSE -> "spouse"
         Relation.TYPE_CHILD -> "child"
         Relation.TYPE_PARENT -> "parent"
@@ -150,7 +151,7 @@ object DeviceContactFieldCoding {
         Relation.TYPE_ASSISTANT -> "assistant"
         Relation.TYPE_FRIEND -> "friend"
         Relation.TYPE_RELATIVE -> "relative"
-        else -> "other"
+        else -> customLabel?.takeIf { it.isNotBlank() } ?: "other"
     }
 
     /** Inverse of [eventType] for the recognized (`TYPE_ANNIVERSARY`) case only; returns null for

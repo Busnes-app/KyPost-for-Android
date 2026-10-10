@@ -29,9 +29,12 @@ data class DeviceRawContactSnapshot(
     val phoneticGivenName: String? = null,
     val phoneticFamilyName: String? = null,
     val department: String? = null,
-    /** Read only so an update that rewrites the Organization row does not erase a title typed on
-     *  the device; nothing carries it into Room yet. */
     val title: String? = null,
+    val givenName: String? = null,
+    val familyName: String? = null,
+    val middleName: String? = null,
+    val prefix: String? = null,
+    val suffix: String? = null,
 )
 
 data class DeviceContactCandidate(
