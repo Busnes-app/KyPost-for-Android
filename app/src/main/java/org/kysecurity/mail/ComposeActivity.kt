@@ -794,7 +794,9 @@ class ComposeActivity : LockedActivity() {
     private fun dispatchSend(draft: MailDraft) {
         val app = application as KyPostApp
         // The graph lookup inside: building it opens the database, which is not main-thread work.
-        awaitSend(ComposeSend.start(app.appScope, draft) { MailRuntime.graph(app).repository.send(it) })
+        awaitSend(
+            ComposeSend.start(app.appScope, draft) { d, onCall -> MailRuntime.graph(app).repository.send(d, onCall) },
+        )
     }
 
     /** Renders [sending], whether this screen started it or the one a rotation replaced did. */
@@ -803,12 +805,17 @@ class ComposeActivity : LockedActivity() {
         sentDraft = sending.draft
         sendMenuItem?.isEnabled = false
         lifecycleScope.launch {
-            val outcome = sending.outcome.await()
+            sending.outcome.join()
             ComposeSend.clear(sending)
             this@ComposeActivity.sending = null
             // An AlertDialog on a finishing Activity throws.
             if (isFinishing || isDestroyed) return@launch
-            renderSendOutcome(outcome)
+            // Cancelled by a session reset: there is no result to show.
+            if (sending.outcome.isCancelled) {
+                applySendAvailability()
+                return@launch
+            }
+            renderSendOutcome(sending.outcome.await())
         }
     }
 
