@@ -55,6 +55,7 @@ class DeviceContactRepository(
                 groupSyncRepository.sync()
                 reconcileGroupRenames()
             },
+            stage("adoptLostLinks") { adoptLostLinks() },
             stage("pullDeviceChanges") { pullDeviceChangesForOwnAccount() },
             stage("removeDeletedContacts") { removeRowsOfDeletedContacts() },
             stage("importNewDeviceContacts") { importNewDeviceContacts() },
@@ -433,7 +434,8 @@ class DeviceContactRepository(
             if (!syncPermitted()) return@withContext
 
             val dto = entity.toDto()
-            // A row whose link was lost (death before the link write, cleared data) is adopted.
+            // adoptLostLinks already ran; this catches a row it missed, as a failed stage, so a
+            // lost link never becomes a duplicate.
             val existingLink = linksByUid[dto.uid] ?: rowsByUid[dto.uid]?.let { rawContactId ->
                 org.kysecurity.mail.data.DeviceContactLinkEntity(dto.uid, rawContactId, 0L)
                     .also { db.deviceContactLinkDao().upsert(it) }
@@ -921,6 +923,22 @@ class DeviceContactRepository(
                 .onFailure { android.util.Log.e("DeviceContactSync", "Could not backfill SOURCE_ID", it) }
         }
         bySourceId
+    }
+
+    /** Relinks our rows whose link was lost (death before the link write, cleared data) before the
+     *  pull, so a phone edit made meanwhile is merged rather than overwritten by the push. The
+     *  pull takes the device's timestamp from the row itself; an unedited row holds what we last
+     *  wrote, so the zero timestamp lets Room win there. */
+    private suspend fun adoptLostLinks() {
+        val links = db.deviceContactLinkDao().getAll()
+        val linkedUids = links.mapTo(HashSet()) { it.uid }
+        val linkedRows = links.mapTo(HashSet()) { it.rawContactId }
+        val rowsByUid = ownRawContactsBySourceId(links)
+        for (uid in db.contactDao().allUids()) {
+            val rawContactId = rowsByUid[uid] ?: continue
+            if (uid in linkedUids || rawContactId in linkedRows) continue
+            db.deviceContactLinkDao().upsert(org.kysecurity.mail.data.DeviceContactLinkEntity(uid, rawContactId, 0L))
+        }
     }
 
     /** Sweeps legacy link rows pointing at another account's raw contacts, before the first sync. */
