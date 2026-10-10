@@ -1526,6 +1526,7 @@ internal fun extensionForMimeType(mimeType: String): String? = when (
     "image/webp" -> "webp"
     "image/heic" -> "heic"
     "text/plain" -> "txt"
+    "text/vcard" -> "vcf"
     "audio/mpeg" -> "mp3"
     "audio/mp4" -> "m4a"
     "audio/ogg" -> "ogg"

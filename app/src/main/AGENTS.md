@@ -449,6 +449,13 @@ Owns production Android app code and resources.
   latest failure's first line appears once a queued change is over an hour old or
   `STUCK_AFTER_FAILURES` syncs in a row failed. `ContactSyncHealth` keeps that failure count in
   memory only, so a restart forgets it; the outbox age does not. `NotPaired` is not a failure.
+  vCard export (`contacts/VCard.kt` writer, `VCardShare.kt`): one contact from the detail screen
+  or all from the list, as 4.0 or 3.0, shared as `text/vcard` through
+  `EphemeralAttachmentBytes` (never storage; its 60 s TTL applies to the share sheet too).
+  Refused under Hostile Location Protection by the same `attachmentSaveOffered` rule as saving an
+  attachment, because the receiving app can persist it. The writer escapes every text value and
+  strips control characters from URLs and TYPE labels, so a field cannot inject a property;
+  `VCardWriterTest` holds that. The server uid is not exported.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
   is DATA2, and the free-text name belongs in the paired `LABEL` (DATA3) with `TYPE_CUSTOM`;
   `DeviceContactFieldCoding` owns both directions of that mapping for every field kind. A label
