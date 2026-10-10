@@ -475,6 +475,11 @@ Owns production Android app code and resources.
   duplicating the contact. Linked rows from before SOURCE_ID are backfilled on the next pass.
   `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_12_13` indexes the link table's
   `rawContactId`.
+- **The periodic `DeviceContactSyncWorker` is the only background path to the server**, so it runs
+  `ContactSyncRepository.sync()` before `syncAll()` (`runContactSync`). A server failure is the
+  `serverSync` stage and does not skip the local device pass; device edits queued by a pass reach
+  the server on the next one. `refreshGroups` fails when the group refresh did not succeed — the
+  repository reports that as an outcome, not a throw.
 - **Device merges are three-way.** `device_contact_links.syncedJson` (`MIGRATION_13_14`) holds the
   `ContactDto` both sides agreed on after the last sync, written on create, on an applied or
   already-agreeing update, and after a device pull. `DeviceContactFieldMerge.againstBase` gives

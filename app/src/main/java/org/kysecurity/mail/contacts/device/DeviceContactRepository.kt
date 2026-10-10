@@ -53,8 +53,10 @@ class DeviceContactRepository(
             stage("ensureAccountVisible") { ensureAccountContactsVisible() },
             stage("pruneForeignLinks") { pruneForeignLinks() },
             stage("refreshGroups") {
-                groupSyncRepository.sync()
+                // sync() reports failure as an outcome, not a throw; the stage must still fail.
+                val outcome = groupSyncRepository.sync()
                 reconcileGroupRenames()
+                check(outcome is org.kysecurity.mail.contacts.GroupSyncOutcome.Success) { "Group refresh: $outcome" }
             },
             stage("pullDeviceChanges") { pullDeviceChangesForOwnAccount() },
             stage("removeDeletedContacts") { removeRowsOfDeletedContacts() },
