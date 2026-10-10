@@ -139,6 +139,9 @@ class ComposeActivity : LockedActivity() {
     /** The draft as sent, so the post-409 re-send reuses it byte-for-byte with one flag flipped. */
     private var sentDraft: MailDraft? = null
 
+    /** The session [sentDraft] was composed in; its pickup re-send must come from the same one. */
+    private var sentSession = 0L
+
     /** Set once the relay confirms delivery, so [onStop] does not re-cache a message that has
      *  already been sent — which would otherwise reappear as a "restored draft" next time. */
     private var sendSucceeded = false
@@ -652,6 +655,8 @@ class ComposeActivity : LockedActivity() {
         }
 
         sendMenuItem?.isEnabled = false
+        // Captured before the async export: a session that ends while it runs refuses the send.
+        val session = ProcessState.generation()
 
         bodyEditor.exportHtml { html ->
             // exportHtml's main-looper callback can fire after onDestroy.
@@ -666,11 +671,12 @@ class ComposeActivity : LockedActivity() {
                 allowPickupFallback = false,
             )
             sentDraft = draft
+            sentSession = session
             // A client-custody account encrypts here, not on the relay; both chips unchecked is deliberate.
             if (clientSideAccount && (draft.sign || draft.encrypt)) {
                 dispatchClientSend(draft)
             } else {
-                dispatchSend(draft)
+                dispatchSend(draft, session)
             }
         }
     }
@@ -781,11 +787,13 @@ class ComposeActivity : LockedActivity() {
     }
 
     /** Shared by the first attempt and the confirmed re-send, so the re-send cannot drift. */
-    private fun dispatchSend(draft: MailDraft) {
+    private fun dispatchSend(draft: MailDraft, session: Long) {
         val app = application as KyPostApp
         // The graph lookup inside: building it opens the database, which is not main-thread work.
         awaitSend(
-            ComposeSend.start(app.appScope, draft) { d, onCall -> MailRuntime.graph(app).repository.send(d, onCall) },
+            ComposeSend.start(app.appScope, draft, session) { d, onCall ->
+                MailRuntime.graph(app).repository.send(d, onCall)
+            },
         )
     }
 
@@ -793,6 +801,7 @@ class ComposeActivity : LockedActivity() {
     private fun awaitSend(sending: ComposeSend.InFlight) {
         this.sending = sending
         sentDraft = sending.draft
+        sentSession = sending.session
         sendMenuItem?.isEnabled = false
         lifecycleScope.launch {
             sending.outcome.join()
@@ -847,7 +856,7 @@ class ComposeActivity : LockedActivity() {
                 sendMenuItem?.isEnabled = false
                 // The same draft, one flag flipped. Not rebuilt: no re-export of the editor HTML,
                 // no re-encoded attachments, no second preflight.
-                dispatchSend(draft.copy(allowPickupFallback = true))
+                dispatchSend(draft.copy(allowPickupFallback = true), sentSession)
             }
             // FLAG_SECURE: this dialog names recipients and gates storing plaintext on the server.
             .create()

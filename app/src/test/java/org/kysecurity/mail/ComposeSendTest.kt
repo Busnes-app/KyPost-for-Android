@@ -61,7 +61,7 @@ class ComposeSendTest {
         val entered = CountDownLatch(1)
         val finished = CountDownLatch(1)
         val bytes = byteArrayOf(1, 2, 3)
-        val sending = ComposeSend.start(CoroutineScope(Dispatchers.IO), draft(bytes)) { _, onCall ->
+        val sending = ComposeSend.start(CoroutineScope(Dispatchers.IO), draft(bytes), ProcessState.generation()) { _, onCall ->
             try {
                 onCall(call)
                 entered.countDown()
@@ -91,7 +91,7 @@ class ComposeSendTest {
         executor.execute { gate.await(5, TimeUnit.SECONDS) }
         val ran = AtomicInteger()
         try {
-            ComposeSend.start(CoroutineScope(executor.asCoroutineDispatcher()), draft(byteArrayOf(1))) { _, _ ->
+            ComposeSend.start(CoroutineScope(executor.asCoroutineDispatcher()), draft(byteArrayOf(1)), ProcessState.generation()) { _, _ ->
                 ran.incrementAndGet()
                 MailOutcome.Success(MailSendOutcome(sentSaved = true, warning = ""))
             }
@@ -106,10 +106,64 @@ class ComposeSendTest {
         }
     }
 
+    /** The composer captured its session, then the session ended before its async export landed. */
+    @Test
+    fun aSubmissionFromAnEndedSessionIsRefusedAndZeroed() {
+        val session = ProcessState.generation()
+        ProcessState.resetAll()
+        val bytes = byteArrayOf(1, 2, 3)
+        val transportCalls = AtomicInteger()
+
+        val sending = ComposeSend.start(CoroutineScope(Dispatchers.IO), draft(bytes), session) { _, _ ->
+            transportCalls.incrementAndGet()
+            MailOutcome.Success(MailSendOutcome(sentSaved = true, warning = ""))
+        }
+
+        assertTrue(sending.outcome.isCancelled)
+        assertEquals(0, transportCalls.get())
+        assertArrayEquals(ByteArray(3), bytes)
+        assertNull(ComposeSend.current())
+    }
+
+    /** A submission arriving while a reset is still tearing down is refused, not slipped past it. */
+    @Test
+    fun aSubmissionDuringTeardownIsRefusedAndZeroed() {
+        // A send that ignores cancellation keeps the reset waiting, which holds teardown open.
+        val release = CountDownLatch(1)
+        val stopping = CountDownLatch(1)
+        val stubborn = object : Call by BlockingCall() {
+            override fun cancel() = stopping.countDown()
+        }
+        val entered = CountDownLatch(1)
+        ComposeSend.start(CoroutineScope(Dispatchers.IO), draft(byteArrayOf(9)), ProcessState.generation()) { _, onCall ->
+            onCall(stubborn)
+            entered.countDown()
+            release.await(10, TimeUnit.SECONDS)
+            MailOutcome.UpstreamFailure("stopped")
+        }
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+        val reset = Thread { ProcessState.resetAll() }.apply { start() }
+        assertTrue("teardown never began", stopping.await(5, TimeUnit.SECONDS))
+
+        val bytes = byteArrayOf(4, 5, 6)
+        val transportCalls = AtomicInteger()
+        val late = ComposeSend.start(CoroutineScope(Dispatchers.IO), draft(bytes), ProcessState.generation()) { _, _ ->
+            transportCalls.incrementAndGet()
+            MailOutcome.Success(MailSendOutcome(sentSaved = true, warning = ""))
+        }
+        release.countDown()
+        reset.join(5_000)
+
+        assertTrue(late.outcome.isCancelled)
+        assertEquals(0, transportCalls.get())
+        assertArrayEquals(ByteArray(3), bytes)
+        assertNull(ComposeSend.current())
+    }
+
     /** What a rotation relies on: with no reset, the replacement screen finds the same send. */
     @Test
     fun withoutAResetTheSendIsAdoptedAndCompletes() = runBlocking {
-        val sending = ComposeSend.start(CoroutineScope(Dispatchers.IO), draft(byteArrayOf(7))) { _, _ ->
+        val sending = ComposeSend.start(CoroutineScope(Dispatchers.IO), draft(byteArrayOf(7)), ProcessState.generation()) { _, _ ->
             MailOutcome.Success(MailSendOutcome(sentSaved = true, warning = ""))
         }
 
