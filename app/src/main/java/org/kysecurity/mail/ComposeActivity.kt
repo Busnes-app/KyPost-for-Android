@@ -570,7 +570,7 @@ class ComposeActivity : LockedActivity() {
             if (declaredSize > budget) return@withContext PickedAttachment.TooLarge(name)
 
             val bytes = try {
-                resolver.openAssetFileDescriptor(uri, "r")?.use { afd ->
+                (openDescriptorForTest?.invoke(uri) ?: resolver.openAssetFileDescriptor(uri, "r"))?.use { afd ->
                     // The provider is foreign, but the file it hands back may still be ours.
                     val path = Os.readlink("/proc/self/fd/${afd.parcelFileDescriptor.fd}")
                     if (isUnderAny(path, appPrivateDirs())) return@withContext PickedAttachment.Unreadable(name)
@@ -1047,6 +1047,11 @@ class ComposeActivity : LockedActivity() {
     }
 
     companion object {
+        /** Null in production. Stands in for a provider's `openAssetFileDescriptor`; null falls through. */
+        @androidx.annotation.VisibleForTesting
+        @Volatile
+        internal var openDescriptorForTest: ((Uri) -> android.content.res.AssetFileDescriptor?)? = null
+
         const val EXTRA_TO = "compose_to"
         const val EXTRA_SUBJECT = "compose_subject"
         const val EXTRA_BODY = "compose_body"

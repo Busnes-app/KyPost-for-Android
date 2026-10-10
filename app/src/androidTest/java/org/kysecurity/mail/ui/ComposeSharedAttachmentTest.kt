@@ -70,6 +70,54 @@ class ComposeSharedAttachmentTest {
         }
     }
 
+    /** A foreign URI passes the URI checks; the descriptor its provider returns still names one of
+     *  this app's private files. The reader must refuse it on the resolved path. */
+    @Test
+    fun aForeignUriWhoseDescriptorIsPrivateIsRefusedByTheReader() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val privateFile = File(context.filesDir, "descriptor-check.txt").apply { writeText("private") }
+        val resolver = context.contentResolver
+        fun download(name: String): Uri = resolver.insert(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+            ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, name)
+                put(MediaStore.Downloads.MIME_TYPE, "text/plain")
+            },
+        )!!.also { uri -> resolver.openOutputStream(uri)!!.use { it.write("public".toByteArray()) } }
+        val disguised = download(DISGUISED_NAME)
+        val sentinel = download(FOREIGN_NAME)
+        val sentinelName = resolver.query(sentinel, arrayOf(MediaStore.Downloads.DISPLAY_NAME), null, null, null)!!
+            .use { it.moveToFirst(); it.getString(0) }
+        ComposeActivity.openDescriptorForTest = { uri ->
+            if (uri != disguised) {
+                null
+            } else {
+                android.content.res.AssetFileDescriptor(
+                    android.os.ParcelFileDescriptor.open(privateFile, android.os.ParcelFileDescriptor.MODE_READ_ONLY),
+                    0,
+                    android.content.res.AssetFileDescriptor.UNKNOWN_LENGTH,
+                )
+            }
+        }
+        try {
+            val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "text/plain"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(disguised, sentinel))
+                setClass(context, ComposeActivity::class.java)
+            }
+
+            // Streams are read in order, so the sentinel's chip means the disguised one was decided.
+            ActivityScenario.launch<ComposeActivity>(intent).use { scenario ->
+                assertEquals(listOf(sentinelName), awaitChipNames(scenario, sentinelName))
+            }
+        } finally {
+            ComposeActivity.openDescriptorForTest = null
+            resolver.delete(disguised, null, null)
+            resolver.delete(sentinel, null, null)
+            privateFile.delete()
+        }
+    }
+
     private fun awaitChipNames(scenario: ActivityScenario<ComposeActivity>, expected: String): List<String> {
         val deadline = System.currentTimeMillis() + TIMEOUT_MS
         var names = emptyList<String>()
@@ -86,6 +134,7 @@ class ComposeSharedAttachmentTest {
 
     private companion object {
         const val FOREIGN_NAME = "kypost-shared-attachment-check.txt"
+        const val DISGUISED_NAME = "kypost-descriptor-check.txt"
         const val TIMEOUT_MS = 15_000L
         const val POLL_MS = 200L
     }
