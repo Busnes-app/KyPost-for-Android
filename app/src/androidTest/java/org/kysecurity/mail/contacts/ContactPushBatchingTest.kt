@@ -81,10 +81,10 @@ class ContactPushBatchingTest {
 
         assertTrue(repository.sync() is ContactSyncOutcome.Retry)
         assertTrue(repository.sync() is ContactSyncOutcome.Retry)
-        server.requests.clear()
+        val before = server.requests.size
         assertTrue(repository.sync() is ContactSyncOutcome.Success)
 
-        assertEquals(listOf("GET since=0"), server.requests)
+        assertEquals(listOf("GET since=0"), server.requests.drop(before))
         assertEquals("the snapshot removes what the server no longer has", null, db.contactDao().getByUid("forgotten"))
         assertEquals(0, db.pendingContactChangeDao().getAllPending().size)
     }
