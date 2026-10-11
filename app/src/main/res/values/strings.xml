@@ -77,6 +77,8 @@
 
     <string name="action_archive">Archive</string>
     <string name="action_junk">Mark as junk</string>
+    <string name="action_move">Move to folder</string>
+    <string name="move_to_title">Move to</string>
     <string name="action_delete">Delete</string>
     <string name="action_reply">Reply</string>
     <string name="action_reply_all">Reply all</string>
