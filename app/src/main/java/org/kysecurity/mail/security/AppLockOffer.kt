@@ -13,11 +13,12 @@ object AppLockOffer {
     private const val PREFS_NAME = "org.kysecurity.mail.app_lock_offer"
     private const val KEY_OFFERED = "offered"
 
-    /** Spent when shown, not when answered, so a rotation or Back cannot turn it into a nag. */
-    fun showIfDue(activity: Activity) {
+    /** Spent when shown, not when answered, so a rotation or Back cannot turn it into a nag.
+     *  Returns whether it was shown. */
+    fun showIfDue(activity: Activity): Boolean {
         val prefs = activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val lockEnabled = SecurityRuntime.graph(activity).appLockStore.isLockEnabled()
-        if (!shouldOfferAppLock(lockEnabled, prefs.getBoolean(KEY_OFFERED, false))) return
+        if (!shouldOfferAppLock(lockEnabled, prefs.getBoolean(KEY_OFFERED, false))) return false
         // commit(): an offer recorded asynchronously can be lost to a process death and repeated.
         prefs.edit().putBoolean(KEY_OFFERED, true).commit()
         AlertDialog.Builder(activity)
@@ -28,6 +29,7 @@ object AppLockOffer {
             }
             .setNegativeButton(R.string.app_lock_offer_decline, null)
             .showThemed()
+        return true
     }
 }
 
