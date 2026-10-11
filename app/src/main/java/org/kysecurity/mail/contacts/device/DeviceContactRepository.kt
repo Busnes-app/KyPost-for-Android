@@ -933,23 +933,30 @@ class DeviceContactRepository(
         } ?: false
     }
 
-    /** Our live raw contacts keyed by SOURCE_ID (the contact uid). Linked rows written before
-     *  SOURCE_ID existed get it backfilled, so they can be adopted after a lost link too. */
+    /** Our raw contacts keyed by SOURCE_ID (the contact uid): live ones, plus tombstones with
+     *  [includeDeleted], a live row winning over a tombstone of the same uid. Linked rows written
+     *  before SOURCE_ID existed get it backfilled, so they can be adopted after a lost link too. */
     private suspend fun ownRawContactsBySourceId(
         links: Collection<org.kysecurity.mail.data.DeviceContactLinkEntity>,
+        includeDeleted: Boolean = false,
     ): Map<String, Long> = withContext(Dispatchers.IO) {
         val bySourceId = mutableMapOf<String, Long>()
         val unstamped = mutableSetOf<Long>()
         contentResolver.query(
             ContactsContract.RawContacts.CONTENT_URI,
-            arrayOf(ContactsContract.RawContacts._ID, ContactsContract.RawContacts.SOURCE_ID),
-            "${ContactsContract.RawContacts.ACCOUNT_TYPE} = ? AND ${ContactsContract.RawContacts.DELETED} = 0",
+            arrayOf(ContactsContract.RawContacts._ID, ContactsContract.RawContacts.SOURCE_ID, ContactsContract.RawContacts.DELETED),
+            "${ContactsContract.RawContacts.ACCOUNT_TYPE} = ?" +
+                if (includeDeleted) "" else " AND ${ContactsContract.RawContacts.DELETED} = 0",
             arrayOf(DeviceContactAccount.ACCOUNT_TYPE),
             null,
         )?.use { cursor ->
             while (cursor.moveToNext()) {
                 val sourceId = cursor.getString(1)
-                if (sourceId.isNullOrEmpty()) unstamped += cursor.getLong(0) else bySourceId[sourceId] = cursor.getLong(0)
+                val live = cursor.getInt(2) == 0
+                when {
+                    sourceId.isNullOrEmpty() -> if (live) unstamped += cursor.getLong(0)
+                    live || sourceId !in bySourceId -> bySourceId[sourceId] = cursor.getLong(0)
+                }
             }
         }
         val uri = ContactsContract.RawContacts.CONTENT_URI.buildUpon()
@@ -968,17 +975,16 @@ class DeviceContactRepository(
         bySourceId
     }
 
-    /** Relinks our rows whose link was lost (death before the link write, cleared data) before the
-     *  pull, so a phone edit made meanwhile is merged rather than overwritten by the push. The
-     *  pull takes the device's timestamp from the row itself; an unedited row holds what we last
-     *  wrote, so the zero timestamp lets Room win there. */
+    /** Relinks every row of ours whose link was lost (death before the link write, cleared data)
+     *  before the pull: a phone edit is then merged rather than overwritten, a phone delete
+     *  (tombstone) is queued rather than replaced, and a row whose contact left Room is removed.
+     *  The pull takes the device's timestamp from the row itself; an unedited row holds what we
+     *  last wrote, so the zero timestamp lets Room win there. */
     private suspend fun adoptLostLinks() {
         val links = db.deviceContactLinkDao().getAll()
         val linkedUids = links.mapTo(HashSet()) { it.uid }
         val linkedRows = links.mapTo(HashSet()) { it.rawContactId }
-        val rowsByUid = ownRawContactsBySourceId(links)
-        for (uid in db.contactDao().allUids()) {
-            val rawContactId = rowsByUid[uid] ?: continue
+        for ((uid, rawContactId) in ownRawContactsBySourceId(links, includeDeleted = true)) {
             if (uid in linkedUids || rawContactId in linkedRows) continue
             db.deviceContactLinkDao().upsert(org.kysecurity.mail.data.DeviceContactLinkEntity(uid, rawContactId, 0L))
         }

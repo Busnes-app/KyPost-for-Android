@@ -103,4 +103,42 @@ class DeviceContactDeleteTest {
             db.pendingContactChangeDao().getByUid(uid).map { it.changeType },
         )
     }
+
+    /** The link is gone before the contact leaves Room: the row is still ours by SOURCE_ID, and
+     *  still has to leave the phone. */
+    @Test
+    fun aContactRemovedFromRoomAfterItsLinkWasLost_isRemovedFromThePhone() = runBlocking {
+        val uid = syncRepository.queueCreate(ContactDto(fn = "Unlinked Remote Delete Probe"))
+        repository.syncAll()
+        assertEquals(1, rowsFor(uid))
+
+        db.deviceContactLinkDao().deleteAll()
+        db.contactDao().deleteByUids(listOf(uid))
+        repository.syncAll()
+
+        assertEquals(0, rowsFor(uid))
+    }
+
+    /** The link is gone before the phone deletes the row: its tombstone is still ours by
+     *  SOURCE_ID, so the delete is queued and the tombstone purged, not replaced by a new row. */
+    @Test
+    fun aDeleteMadeOnThePhoneAfterItsLinkWasLost_isQueuedAndPurged() = runBlocking {
+        val uid = syncRepository.queueCreate(ContactDto(fn = "Unlinked Device Delete Probe"))
+        repository.syncAll()
+        val rawContactId = db.deviceContactLinkDao().getByUid(uid)!!.rawContactId
+
+        db.deviceContactLinkDao().deleteAll()
+        context.contentResolver.delete(
+            ContactsContract.RawContacts.CONTENT_URI,
+            "${ContactsContract.RawContacts._ID} = ?",
+            arrayOf(rawContactId.toString()),
+        )
+        repository.syncAll()
+
+        assertEquals("the tombstone must be purged, not replaced", 0, rowsFor(uid))
+        assertEquals(
+            listOf(ContactSyncRepository.CHANGE_DELETE),
+            db.pendingContactChangeDao().getByUid(uid).map { it.changeType },
+        )
+    }
 }
