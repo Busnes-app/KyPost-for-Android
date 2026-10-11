@@ -407,7 +407,7 @@ Owns production Android app code and resources.
 - The inbox asks for `preview=1` (KyPost-Server #351): at most 200 characters of plain text the
   server flattened from a body it already holds, shown muted under the sender in
   `item_email.xml` as plain `TextView` text, never markup, with format characters (bidi
-  overrides, zero-width) dropped (`previewText`). A delta "updated" row carries none and keeps
+  overrides, zero-width, tags; whole code points) dropped (`previewText`). A delta "updated" row carries none and keeps
   its stored one; any other row takes what the server sent. It is never stored for a
   `pgpEncrypted` row, whatever the server sends, and `clearServerDecryptedBodies` clears an
   encrypted row's preview even without a cached body. An older server sends none and the row
