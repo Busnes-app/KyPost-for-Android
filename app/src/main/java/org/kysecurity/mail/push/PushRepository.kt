@@ -275,6 +275,13 @@ class PushRepository(
         }
     }
 
+    /** Empties `push_state` through DataStore, cache included. Deleting the file alone does not:
+     *  DataStore keeps serving its cached values, and a later edit re-reads the empty file, sees
+     *  no change, and leaves the cache as it was. */
+    suspend fun clearPersistedState() {
+        context.pushDataStore.edit { it.clear() }
+    }
+
     override suspend fun clearPairing(): List<String> {
         val residue = purgeAccountScopedData()
         securePairingStore.clearPairing()

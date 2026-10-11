@@ -165,6 +165,9 @@ object SecurityWipe {
         step("database") { closeAndDeleteDatabase(appContext) }
         step("datastores") {
             // Checked, like every other step: `push_state` holds 30 sender/subject pairs.
+            // Cleared through DataStore first: the process survives the relaunch, and DataStore's
+            // cache outlives a deleted file.
+            PushRuntime.graph(appContext).repository.clearPersistedState()
             val undeleted = DATASTORE_NAMES.map { name ->
                 name to File(appContext.filesDir, "datastore/$name.preferences_pb")
             }.filter { (_, file) -> file.exists() && !file.delete() }
