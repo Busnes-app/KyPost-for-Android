@@ -264,5 +264,6 @@ private fun MailOutcome<*>.failureOrNull(): MailOutcome<Nothing>? = when (this) 
     is MailOutcome.ClientSideNeeded -> this
     is MailOutcome.PickupFallbackNeeded -> this
     is MailOutcome.ActionRejected -> this
+    is MailOutcome.ReplyThreadingRefused -> this
     is MailOutcome.RateLimited -> this
 }

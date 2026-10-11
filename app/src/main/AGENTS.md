@@ -336,6 +336,19 @@ Owns production Android app code and resources.
   itself. It is launched as an `ACTION_VIEW` intent so an installed PWA or the user's browser handles
   it, with the session it already has; **never** an in-app WebView, which would share no session and
   would put an account-password field inside this app.
+- **Reply threading (KyPost-Server #352).** Reply and Reply All send `replyToMessageId` and
+  `replyToMailbox` (the row's id and folder) on `/api/mail/send` only, never on drafts or
+  `/api/mail/send-pgp`; the fields are omitted when null, so an older relay sees the request it
+  always did and sends unthreaded. The reference reaches Compose through `ReplyThreadHandoff`, a
+  process-scoped map keyed by a random token on the Intent, because `ComposeActivity` is exported
+  and a plain extra would let any app thread its prefilled message onto mail in this mailbox. It
+  survives the lock in `CachedDraft.replyTo`. `MailOutcome.ReplyThreadingRefused` is one of the
+  relay's four exact refusal sentences (`isReplyThreadingRefusal`), matched whole: other 502s on
+  this endpoint can follow a delivery and quote SMTP text, so a word match could offer to re-send
+  mail that already went out. On a refusal (sent before any delivery) Compose asks whether to send
+  unthreaded and only re-sends on a yes. Any other failure, and every timeout, is reported and
+  never re-sent. `dispatchSend` allows one send in flight and records the draft it sent, so the
+  pickup and unthreaded dialogs re-send from each other's result rather than looping.
 - `MailOutcome.ClientSideNeeded` is relay 409 carrying `clientSideNeeded` on `/api/mail/send` — a
   client-protected account asked the server to sign or encrypt and it refused rather than silently
   sending in the clear. `MailOutcome.RateLimited` is relay 429 with `Retry-After` (the per-device

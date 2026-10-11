@@ -189,6 +189,9 @@
     <string name="compose_pickup_dialog_title">Send an unencrypted link?</string>
     <string name="compose_pickup_dialog_body">We don\'t have a PGP key for %1$s. They\'ll get an email with a one-time link instead.\n\nTo make that work, this message\'s contents are stored on your KyPost server — unencrypted — for up to 7 days or until the link is opened. Everyone else on this message still gets it encrypted.</string>
     <string name="compose_pickup_dialog_confirm">Send link anyway</string>
+    <string name="compose_unthreaded_title">Send as a new conversation?</string>
+    <string name="compose_unthreaded_body">The server could not link this reply to the message it answers, so nothing was sent.\n\n%1$s\n\nYou can send it anyway; it will start a new conversation for the recipients.</string>
+    <string name="compose_unthreaded_confirm">Send anyway</string>
     <string name="compose_handoff_dialog_title">Finish this in webmail</string>
     <string name="compose_handoff_dialog_body">This composition won\'t be transferred to webmail. Open webmail and recreate it there. Your current fields and attachments will remain here when you return.</string>
     <string name="compose_send_needs_webmail">This account\'s PGP key is held only by your browser, so this app can\'t encrypt or sign. Use “Continue in webmail” to send it protected.</string>

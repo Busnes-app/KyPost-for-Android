@@ -120,6 +120,15 @@ class ComposeActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun discardPromptCountForTest(): Int = discardPromptCount
 
+    @androidx.annotation.VisibleForTesting
+    internal fun bodyReadyForTest(): Boolean = bodyEditor.isEmptyFlow.value == false
+
+    @androidx.annotation.VisibleForTesting
+    internal fun sendForTest() = sendEmail()
+
+    @androidx.annotation.VisibleForTesting
+    internal fun activeDialogForTest(): AlertDialog? = activeDialog
+
     private val bodyMirror = object : Runnable {
         override fun run() {
             bodyEditor.exportHtml { mirroredBodyHtml = it }
@@ -133,6 +142,13 @@ class ComposeActivity : LockedActivity() {
 
     /** The draft as sent, so the post-409 re-send reuses it byte-for-byte with one flag flipped. */
     private var sentDraft: MailDraft? = null
+
+    /** One /api/mail/send at a time: a double tap on a re-send dialog would otherwise send twice. */
+    private var sendInFlight = false
+
+    /** The message this composition answers; null for a new message or once the user chose to
+     *  send it unthreaded. */
+    private var replyTo: ReplyRef? = null
 
     /** Set once the relay confirms delivery, so [onStop] does not re-cache a message that has
      *  already been sent — which would otherwise reappear as a "restored draft" next time. */
@@ -249,6 +265,9 @@ class ComposeActivity : LockedActivity() {
         } else {
             ComposeDraftCache.take()
         }
+        // Taken either way, so a token cannot linger for a later composition.
+        val handedOff = ReplyThreadHandoff.take(intent.getStringExtra(EXTRA_REPLY_TOKEN))
+        replyTo = if (restored != null) restored.replyTo else handedOff.takeUnless { intent.isExternalComposeIntent() }
         restoredDraftForTest = restored
         if (restored != null) {
             subjectField.setText(restored.subject)
@@ -652,6 +671,8 @@ class ComposeActivity : LockedActivity() {
                 // Never on for a first attempt. Only the post-409 re-send sets it, and only after
                 // the user confirmed the dialog naming the addresses.
                 allowPickupFallback = false,
+                replyToMessageId = replyTo?.messageId,
+                replyToMailbox = replyTo?.mailbox,
             )
             sentDraft = draft
             // A client-custody account encrypts here, not on the relay; both chips unchecked is deliberate.
@@ -770,9 +791,14 @@ class ComposeActivity : LockedActivity() {
 
     /** Shared by the first attempt and the confirmed re-send, so the re-send cannot drift. */
     private fun dispatchSend(draft: MailDraft) {
+        if (sendInFlight) return
+        sendInFlight = true
+        // What a re-send dialog re-sends: after one dialog's change, the other must keep it.
+        sentDraft = draft
         ioExecutor.execute {
             val outcome = MailRuntime.graph(this).repository.send(draft)
             runOnUiThread {
+                sendInFlight = false
                 // runOnUiThread still runs after finish(); an AlertDialog on a finishing Activity throws.
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 when (outcome) {
@@ -793,6 +819,10 @@ class ComposeActivity : LockedActivity() {
                     is MailOutcome.ClientSideNeeded -> {
                         sendMenuItem?.isEnabled = true
                         handOffToWebmail()
+                    }
+                    is MailOutcome.ReplyThreadingRefused -> {
+                        sendMenuItem?.isEnabled = true
+                        confirmUnthreadedSend(outcome.message)
                     }
                     else -> {
                         sendMenuItem?.isEnabled = true
@@ -817,6 +847,23 @@ class ComposeActivity : LockedActivity() {
                 dispatchSend(draft.copy(allowPickupFallback = true))
             }
             // FLAG_SECURE: this dialog names recipients and gates storing plaintext on the server.
+            .create()
+            .showSecurely()
+    }
+
+    /** Nothing was sent: the relay refuses a reply it cannot thread before any delivery. Re-sending
+     *  is the user's call, never automatic, and only ever follows this refusal (not a timeout). */
+    private fun confirmUnthreadedSend(reason: String) {
+        val draft = sentDraft ?: return
+        activeDialog = AlertDialog.Builder(this)
+            .setTitle(R.string.compose_unthreaded_title)
+            .setMessage(getString(R.string.compose_unthreaded_body, reason))
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.compose_unthreaded_confirm) { _, _ ->
+                sendMenuItem?.isEnabled = false
+                replyTo = null
+                dispatchSend(draft.copy(replyToMessageId = null, replyToMailbox = null))
+            }
             .create()
             .showSecurely()
     }
@@ -966,6 +1013,7 @@ class ComposeActivity : LockedActivity() {
         attachments = attachments.toList(),
         encrypt = encryptChip.isChecked,
         sign = signChip.isChecked,
+        replyTo = replyTo,
     )
 
     /** Back on a finishing Activity drops the draft in [onStop]; typed mail must not go in silence.
@@ -1029,6 +1077,9 @@ class ComposeActivity : LockedActivity() {
         /** A ready-made HTML quote, for Reply/Forward of an HTML message. Kept separate from
          *  [EXTRA_BODY] because that one is plain text and gets html-escaped on the way in. */
         const val EXTRA_BODY_HTML = "compose_body_html"
+
+        /** A [ReplyThreadHandoff] token, never the message id itself. */
+        const val EXTRA_REPLY_TOKEN = "compose_reply_token"
 
         private const val TAG = "ComposeActivity"
 
