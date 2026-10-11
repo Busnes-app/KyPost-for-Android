@@ -110,6 +110,7 @@ private class FakeMailSource(
     }
 
     override fun listFolders(parent: String?) = unsupported()
+    override fun searchMail(query: String, mailbox: String, limit: Int) = unsupported()
     override fun createFolder(parent: String, name: String) = unsupported()
     override fun renameFolder(folder: String, name: String) = unsupported()
     override fun deleteFolder(folder: String) = unsupported()
@@ -238,7 +239,7 @@ class MailRepositoryTest {
         val dao = FakeEmailDao()
         dao.put(row("m2", "INBOX", body = "cached full body").copy(preview = "cached preview"))
 
-        // An "updated" entry never carries a body (Mobile_Mail_Relay.md Part 5) — only status changed.
+        // An "updated" entry never carries a body (docs/Mobile_Mail_Relay.md Part 5) — only status changed.
         val result = MailFetchResult(
             tabs = listOf("Work"),
             messages = listOf(email("m2", body = null, status = "read")),
@@ -750,6 +751,21 @@ class MailRepositoryTest {
         assertTrue(outcome is MailOutcome.ActionRejected)
         assertEquals(MailAction.MOVE, source.actions.single().first)
         assertEquals(setOf("INBOX" to "42"), dao.rows.keys)
+    }
+
+    /** A search result never reaches Room; the caller's copy of its recipients must survive. */
+    @Test
+    fun fetchBodyWithoutARow_keepsTheCallersRecipients() {
+        val source = FakeMailSource().apply {
+            bodyOutcome = MailOutcome.Success(MailMessageBody("<p>hi</p>", "html", emptyList(), emptyList()))
+        }
+
+        val outcome = repository(FakeEmailDao(), source)
+            .fetchBody("42", "INBOX", knownTo = listOf("me@example.com"), knownCc = listOf("carol@example.com"))
+
+        val body = (outcome as MailOutcome.Success).value
+        assertEquals(listOf("me@example.com"), body.toAddresses)
+        assertEquals(listOf("carol@example.com"), body.ccAddresses)
     }
 
     @Test
