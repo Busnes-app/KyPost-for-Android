@@ -16,6 +16,19 @@ object KeywordTabs {
     fun visibleTabs(showAll: Boolean, keywords: List<String>): List<String> =
         (if (showAll) listOf(ALL) else emptyList()) + keywords
 
+    /** Unread rows per tab, [ALL] included, in one pass over [emails]. */
+    fun unreadCounts(emails: List<Email>): Map<String, Int> {
+        val counts = HashMap<String, Int>()
+        emails.filter { it.status == "unread" }.forEach { email ->
+            (email.keywords + ALL).forEach { counts.merge(it, 1, Int::plus) }
+        }
+        return counts
+    }
+
+    /** Unread rows in [folder] and every folder below it. */
+    fun unreadInFolderTree(counts: Map<String, Int>, folder: String): Int =
+        counts.entries.sumOf { (path, unread) -> if (path == folder || path.startsWith("$folder/")) unread else 0 }
+
     fun filterEmails(emails: List<Email>, selectedTab: String): List<Email> {
         if (selectedTab == ALL) {
             return emails
