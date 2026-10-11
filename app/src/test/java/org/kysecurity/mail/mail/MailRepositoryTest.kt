@@ -116,7 +116,8 @@ private class FakeMailSource(
     override fun deleteFolder(folder: String) = unsupported()
     override fun saveDraft(draft: MailDraft) = unsupported()
     override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft) = unsupported()
-    override fun sendMail(draft: MailDraft) = unsupported()
+    override fun sendMail(draft: MailDraft, account: MailAccount?) = unsupported()
+    override fun currentAccount(): MailAccount? = null
     override fun sendClientEncrypted(message: ClientEncryptedMessage) = unsupported()
     /** Null keeps the old throwing behaviour, so tests asserting "must never reach the relay"
      *  still fail loudly rather than against a plausible-looking success. */
@@ -766,6 +767,60 @@ class MailRepositoryTest {
         val body = (outcome as MailOutcome.Success).value
         assertEquals(listOf("me@example.com"), body.toAddresses)
         assertEquals(listOf("carol@example.com"), body.ccAddresses)
+    }
+
+    @Test
+    fun bulkAction_dropsOnlyTheRowsTheRelayConfirmed() {
+        val dao = FakeEmailDao()
+        listOf("1", "2", "3").forEach { dao.put(row(it, "INBOX")) }
+        dao.put(row("2", "Archive"))
+        val source = FakeMailSource(
+            actionOutcome = MailOutcome.Success(MailActionOutcome(processed = 2, failed = listOf("2" to "gone"))),
+        )
+
+        val outcome = repository(dao, source).mutateAll(MailAction.ARCHIVE, listOf("1", "2", "3"), "INBOX")
+
+        assertEquals(listOf(Triple(MailAction.ARCHIVE, listOf("1", "2", "3"), "INBOX")), source.actions)
+        assertTrue(outcome is MailOutcome.ActionRejected)
+        assertEquals("1 of 3 not changed: gone", outcome.userFacingMessage())
+        assertEquals(setOf("INBOX" to "2", "Archive" to "2"), dao.rows.keys)
+    }
+
+    @Test
+    fun bulkAction_anUnexplainedShortfallConfirmsNothing() {
+        val dao = FakeEmailDao()
+        listOf("1", "2").forEach { dao.put(row(it, "INBOX")) }
+        // The relay stops early on a cancelled request: those ids are in neither list.
+        val source = FakeMailSource(actionOutcome = MailOutcome.Success(MailActionOutcome(processed = 1, failed = emptyList())))
+
+        val outcome = repository(dao, source).mutateAll(MailAction.DELETE, listOf("1", "2"), "INBOX")
+
+        assertTrue(outcome is MailOutcome.ActionRejected)
+        assertEquals(setOf("INBOX" to "1", "INBOX" to "2"), dao.rows.keys)
+    }
+
+    @Test
+    fun bulkAction_allProcessedDropsEveryRow() {
+        val dao = FakeEmailDao()
+        listOf("1", "2").forEach { dao.put(row(it, "INBOX")) }
+        val source = FakeMailSource(actionOutcome = MailOutcome.Success(MailActionOutcome(processed = 2, failed = emptyList())))
+
+        val outcome = repository(dao, source).mutateAll(MailAction.MOVE, listOf("1", "2"), "INBOX", "Work")
+
+        assertTrue(outcome is MailOutcome.Success)
+        assertTrue(dao.rows.isEmpty())
+    }
+
+    @Test
+    fun bulkAction_transportFailureKeepsEveryRow() {
+        val dao = FakeEmailDao()
+        listOf("1", "2").forEach { dao.put(row(it, "INBOX")) }
+        val source = FakeMailSource(actionOutcome = MailOutcome.UpstreamFailure("offline"))
+
+        val outcome = repository(dao, source).mutateAll(MailAction.SPAM, listOf("1", "2"), "INBOX")
+
+        assertTrue(outcome is MailOutcome.UpstreamFailure)
+        assertEquals(2, dao.rows.size)
     }
 
     @Test
