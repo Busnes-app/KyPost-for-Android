@@ -39,7 +39,9 @@ Owns JVM unit tests for app logic that can run without device/emulator.
 - `CalendarInviteTest` builds invites inline and covers zones (IANA, Mozilla path, Windows
   table, unknown), all-day, DST-nominal durations, RRULE, CANCEL/update, folding, VALARM
   scoping, the size and event caps, and malformed input. `CalendarHandoffTest` pins the
-  `ACTION_INSERT` extras by their platform key strings.
+  `ACTION_INSERT` extras by their platform key strings. `CalendarRsvpTest` checks every REPLY
+  against a port of KyPost-Server's `mailmsg.CalendarReply` rules (one METHOD:REPLY, one VEVENT,
+  no control chars, 75-octet lines); keep that port in step with the server.
 - Lifecycle-owned plaintext tests use pure holders such as `OwnedAttachmentSave`; prove admission,
   source cleanup isolation, and wiping without an emulator or timing-dependent threads.
   `ReadOutcomeDeliveryTest` queues the worker and consumer independently to prove completed
