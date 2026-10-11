@@ -5,7 +5,6 @@ import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
-import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.RootMatchers.isDialog
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
@@ -15,6 +14,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -38,13 +39,15 @@ class AppLockOfferFlowTest {
     @Test
     fun declinedOnceItIsNotAskedAgainAfterRecreation() {
         ActivityScenario.launch(SettingsActivity::class.java).use { scenario ->
-            scenario.onActivity { AppLockOffer.showIfDue(it) }
+            scenario.onActivity { assertTrue(AppLockOffer.showIfDue(it)) }
             onView(withText(R.string.app_lock_offer_title)).inRoot(isDialog()).check(matches(isDisplayed()))
             onView(withText(R.string.app_lock_offer_decline)).inRoot(isDialog()).perform(click())
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
 
             scenario.recreate()
-            scenario.onActivity { AppLockOffer.showIfDue(it) }
-            onView(withText(R.string.app_lock_offer_title)).check(doesNotExist())
+            // Asked of the offer, not of a window root: on API 31 a recreated Activity can take
+            // a while to regain focus, and Espresso's root lookup times out on that, not on us.
+            scenario.onActivity { assertFalse(AppLockOffer.showIfDue(it)) }
         }
     }
 
