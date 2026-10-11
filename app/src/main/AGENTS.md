@@ -515,6 +515,12 @@ Owns production Android app code and resources.
   edit stays dirty. The foreign-import watermark is the scan's start time, not its end.
   `makeContactsVisible` writes only when `UNGROUPED_VISIBLE` is off: each write notifies the
   contacts observer, which used to trigger the next sync, which wrote again.
+- **A backend group's lifetime is the device group's.** After a group refresh that succeeded,
+  `reconcileGroups` deletes, as the sync adapter and only within our account, the device group of
+  every link whose group the server no longer lists (`groupRemovals`), then drops the link. A failed
+  refresh removes nothing, since the Room groups were not refreshed. Title matching can link two
+  backend groups to one device row, so a row a live group still links to is kept and only the
+  obsolete link goes. `DeviceGroupDeleteTest` covers that and the account-type scoping.
 - **Device merges are three-way.** `device_contact_links.syncedJson` (`MIGRATION_14_15`) holds the
   `ContactDto` both sides agreed on after the last sync. It is written on create and by the push
   pass, per field: `DeviceContactUpdatePlan.nextBase` takes Room's value for each field the phone
