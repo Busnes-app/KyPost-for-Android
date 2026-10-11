@@ -101,6 +101,10 @@ class EmailDetailActivity : LockedActivity() {
     private var senderHeader: String = ""
     private var phishingFlagged = false
     private var rsvpDialog: android.app.Dialog? = null
+    private var rsvpInviteKey: String? = null
+
+    /** False after a configuration change: an unsure RSVP stays locked across a rotation. */
+    private var freshOpen = true
 
     /** The relay's signature verdict, overwritten by the local one once a local decrypt finishes. */
     private var pgpSignatureState: PgpSignatureState = PgpSignatureState.NONE
@@ -145,6 +149,9 @@ class EmailDetailActivity : LockedActivity() {
     }
 
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
+        freshOpen = savedInstanceState == null
+        // Cancelled on destroy, so only the live screen repaints.
+        lifecycleScope.launch { rsvpTracker.phases.collect { applyRsvpButtons() } }
         savedInstanceState?.let { state ->
             markReadSubmitted = state.getBoolean(STATE_MARK_READ_SUBMITTED, false)
             markReadSubmitCount = state.getInt(STATE_MARK_READ_COUNT, 0)
@@ -840,7 +847,8 @@ class EmailDetailActivity : LockedActivity() {
         findViewById<Button>(R.id.btnRsvpAccept).setOnClickListener { confirmRsvp(event, Rsvp.ACCEPTED) }
         findViewById<Button>(R.id.btnRsvpTentative).setOnClickListener { confirmRsvp(event, Rsvp.TENTATIVE) }
         findViewById<Button>(R.id.btnRsvpDecline).setOnClickListener { confirmRsvp(event, Rsvp.DECLINED) }
-        rsvpButtons().forEach { it.isEnabled = rsvpKey(event) !in rsvpInFlight }
+        rsvpInviteKey = org.kysecurity.mail.mail.rsvpKey(event).also { rsvpTracker.opened(it, freshOpen) }
+        applyRsvpButtons()
         findViewById<View>(R.id.emailInviteCard).visibility = View.VISIBLE
         applyInviteChrome()
     }
@@ -848,18 +856,18 @@ class EmailDetailActivity : LockedActivity() {
     private fun rsvpButtons(): List<Button> =
         listOf(R.id.btnRsvpAccept, R.id.btnRsvpTentative, R.id.btnRsvpDecline).map { findViewById(it) }
 
-    private fun rsvpKey(event: CalendarEvent) = event.uid + "\u0000" + event.recurrenceId.orEmpty()
+    /** From [rsvpTracker], so a send started by a screen a rotation destroyed still lands here. */
+    private fun applyRsvpButtons() {
+        val key = rsvpInviteKey ?: return
+        rsvpButtons().forEach { it.isEnabled = rsvpTracker.canAnswer(key) }
+    }
 
     /** Asks before every RSVP: it is mail the user sends, and it always goes unencrypted. */
     private fun confirmRsvp(event: CalendarEvent, answer: Rsvp) {
-        val key = rsvpKey(event)
+        val key = org.kysecurity.mail.mail.rsvpKey(event)
         // Process-wide, so a rotation mid-send cannot offer the same answer twice.
-        if (!rsvpInFlight.add(key)) return
-        rsvpButtons().forEach { it.isEnabled = false }
-        fun release() {
-            rsvpInFlight.remove(key)
-            rsvpButtons().forEach { it.isEnabled = true }
-        }
+        if (!rsvpTracker.begin(key)) return
+        fun release() = rsvpTracker.cancel(key)
         lifecycleScope.launch {
             var dialogOwnsKey = false
             try {
@@ -923,11 +931,8 @@ class EmailDetailActivity : LockedActivity() {
                     org.kysecurity.mail.mail.RsvpResult.MAYBE_SENT -> appContext.getString(R.string.rsvp_maybe_sent, reason)
                 }
                 Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
-                // Only a confirmed RSVP stays sent for this process. Reopening the message allows a retry.
-                if (result != org.kysecurity.mail.mail.RsvpResult.SENT) rsvpInFlight.remove(key)
-                if (isFinishing || isDestroyed) return@post
-                // Only a definite refusal re-arms this screen: anything else may already have gone out.
-                rsvpButtons().forEach { it.isEnabled = result == org.kysecurity.mail.mail.RsvpResult.REFUSED }
+                // Never this Activity: a rotation may have replaced it. The current one observes this.
+                rsvpTracker.finish(key, result)
             }
         }
     }
@@ -1278,15 +1283,14 @@ class EmailDetailActivity : LockedActivity() {
     companion object : ProcessScopedState {
         private const val TAG = "EmailDetailActivity"
 
-        /** RSVPs between the first tap and a send outcome, or sent; Main thread only. */
-        private val rsvpInFlight = HashSet<String>()
+        private val rsvpTracker = org.kysecurity.mail.mail.RsvpTracker()
 
         init {
             ProcessState.register(this)
         }
 
         override fun resetForNewSession() {
-            android.os.Handler(android.os.Looper.getMainLooper()).post { rsvpInFlight.clear() }
+            rsvpTracker.clear()
         }
 
         const val EXTRA_REMOVED_EMAIL_ID = "removed_email_id"

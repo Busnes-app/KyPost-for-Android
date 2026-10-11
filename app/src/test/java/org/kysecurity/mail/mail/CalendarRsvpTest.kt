@@ -145,6 +145,57 @@ class CalendarRsvpTest {
     }
 
     @Test
+    fun aNewRevisionIsANewRsvp() {
+        val seq4 = invite(*request).primary
+        val seq5 = invite(*request.map { if (it.startsWith("SEQUENCE")) "SEQUENCE:5" else it }.toTypedArray()).primary
+        assertFalse(rsvpKey(seq4) == rsvpKey(seq5))
+
+        val tracker = RsvpTracker()
+        assertTrue(tracker.begin(rsvpKey(seq4)))
+        tracker.finish(rsvpKey(seq4), RsvpResult.SENT)
+        assertFalse(tracker.canAnswer(rsvpKey(seq4)))
+        assertTrue(tracker.canAnswer(rsvpKey(seq5)))
+    }
+
+    @Test
+    fun aRefusalReachesTheScreenThatIsCurrentWhenItLands() {
+        val tracker = RsvpTracker()
+        val key = rsvpKey(invite(*request).primary)
+        assertTrue(tracker.begin(key))
+        // Rotation: the replacement screen opens the same invite while the send is blocked.
+        tracker.opened(key, freshOpen = false)
+        assertFalse(tracker.canAnswer(key))
+        assertFalse(tracker.begin(key))
+
+        tracker.finish(key, RsvpResult.REFUSED)
+
+        // Observed state, not a reference to whichever Activity started the send.
+        assertTrue(key !in tracker.phases.value)
+        assertTrue(tracker.canAnswer(key))
+    }
+
+    @Test
+    fun anUnsureSendStaysLockedAcrossRotationButAFreshOpenMayRetry() {
+        val tracker = RsvpTracker()
+        val key = rsvpKey(invite(*request).primary)
+        listOf(RsvpResult.MAYBE_SENT, RsvpResult.SENT_AS_PLAIN_MAIL).forEach { result ->
+            tracker.begin(key)
+            tracker.finish(key, result)
+            tracker.opened(key, freshOpen = false)
+            assertFalse(tracker.canAnswer(key), "$result")
+            tracker.opened(key, freshOpen = true)
+            assertTrue(tracker.canAnswer(key), "$result")
+        }
+        tracker.begin(key)
+        tracker.finish(key, RsvpResult.SENT)
+        tracker.opened(key, freshOpen = true)
+        assertFalse(tracker.canAnswer(key), "a confirmed RSVP stays sent")
+        tracker.begin(rsvpKey(invite(*request, "RECURRENCE-ID:20261019T100000Z").primary))
+        tracker.cancel(key)
+        assertFalse(tracker.canAnswer(key), "cancel releases only a pending send")
+    }
+
+    @Test
     fun aliasAnswerAlsoSendsFromTheAlias() {
         val event = invite(*request).primary
         assertEquals("alias@example.com", rsvpDraft(event, "alias@example.com", Rsvp.ACCEPTED, now, sendAs = "alias@example.com").from)

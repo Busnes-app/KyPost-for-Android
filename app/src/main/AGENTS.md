@@ -424,8 +424,11 @@ Owns production Android app code and resources.
     (`rsvpResult`). A 200 without it means the organizer got plain mail: the user is told to
     update the server, the RSVP is not marked sent, and nothing is retried.
   - A refusal shows the relay's reason; nothing else is sent instead. Only a definite refusal
-    (`refusedBeforeSending`) re-arms the buttons; a timeout says "may have been sent". The
-    in-flight set is process-wide so a rotation cannot double-send.
+    (`refusedBeforeSending`) re-arms the buttons; a timeout says "may have been sent".
+  - `RsvpTracker` (process-wide, keyed on UID + RECURRENCE-ID + SEQUENCE) owns RSVP state;
+    screens derive their buttons from its `phases` and a send never touches the Activity that
+    started it, so a rotation can neither double-send nor miss the outcome. A raised SEQUENCE
+    is answerable again. An unsure send stays locked across a rotation; a fresh open may retry.
 - `pgp/deliverReadOutcome` owns completed attachment arrays inside the worker until rendering
   accepts them. Cancellation across the dispatcher return, render rejection, or a rendering
   exception wipes unadopted bytes; successful adoption transfers cleanup to the detail Activity.
