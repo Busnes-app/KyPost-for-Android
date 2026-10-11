@@ -8,7 +8,6 @@ import androidx.appcompat.app.AlertDialog
 import org.kysecurity.mail.mail.CalendarEvent
 import org.kysecurity.mail.mail.MAX_DESCRIPTION_CHARS
 import org.kysecurity.mail.security.SecurityRuntime
-import org.kysecurity.mail.security.showSecurely
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -83,8 +82,7 @@ internal fun Activity.handOffToCalendar(extras: Map<String, Any>) {
         .setMessage(R.string.calendar_handoff_confirm_message)
         .setPositiveButton(R.string.calendar_handoff_confirm_positive) { _, _ -> launch() }
         .setNegativeButton(android.R.string.cancel, null)
-        .create()
-        .showSecurely()
+        .showThemed()
 }
 
 /** Holds a "Create event" tap until the body fetch has settled, so it is not sent subject-only.
