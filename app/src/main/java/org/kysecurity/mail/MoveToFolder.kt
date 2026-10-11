@@ -6,7 +6,6 @@ import androidx.appcompat.app.AlertDialog
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRepository
 import org.kysecurity.mail.mail.userFacingMessage
-import org.kysecurity.mail.security.showSecurely
 import java.util.concurrent.Executor
 
 /** INBOX, every top-level folder and every Archive subfolder, minus the one the mail is in. The
@@ -39,8 +38,7 @@ internal fun pickMoveTarget(
                 .setTitle(R.string.move_to_title)
                 .setItems(targets.toTypedArray()) { _, which -> onPicked(targets[which]) }
                 .setNegativeButton(android.R.string.cancel, null)
-                .create()
-                .showSecurely()
+                .showThemed()
         }
     }
 }
