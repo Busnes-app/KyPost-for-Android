@@ -537,6 +537,67 @@ class RelayMailSourceTest {
     }
 
     @Test
+    fun searchMail_queriesOneMailboxWithThisDevicesCredentials() {
+        val callFactory = FakeCallFactory { request -> jsonResponse(request, """{"results": []}""") }
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = callFactory,
+        )
+
+        source.searchMail("invoice & co", "INBOX.Sent", 50)
+
+        val request = callFactory.requests.single()
+        assertEquals("GET", request.method)
+        assertEquals("/api/mail/search", request.url.encodedPath)
+        assertEquals("invoice & co", request.url.queryParameter("q"))
+        assertEquals("INBOX.Sent", request.url.queryParameter("mailbox"))
+        assertEquals("50", request.url.queryParameter("limit"))
+        assertEquals("device-1", request.header(HEADER_DEVICE_ID))
+        assertEquals("secret-1", request.header(HEADER_DEVICE_SECRET))
+    }
+
+    @Test
+    fun searchMail_stampsResultsWithTheSearchedMailbox() {
+        val callFactory = FakeCallFactory { request ->
+            jsonResponse(
+                request,
+                """{"results": [{"messageId": "42", "sender": "a@example.com", "subject": "Invoice",
+                    "label": "Billing", "keywords": ["${'$'}Phishing"], "status": "read",
+                    "atUtc": "2026-10-09T12:00:00Z"}]}""",
+            )
+        }
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = callFactory,
+        )
+
+        val email = (source.searchMail("invoice", "Archive", 50) as MailOutcome.Success).value.single()
+
+        assertEquals("42", email.id)
+        assertEquals("Archive", email.folder)
+        assertEquals("read", email.status)
+        assertEquals("2026-10-09T12:00:00Z", email.atUtc)
+        assertEquals(setOf("${'$'}Phishing", "Billing"), email.keywords)
+        assertNull(email.body)
+    }
+
+    @Test
+    fun searchMail_failuresAreOutcomesNotExceptions() {
+        fun searchAgainst(code: Int, body: String): MailOutcome<List<org.kysecurity.mail.Email>> =
+            RelayMailSource(
+                pairingProvider = { testPairing() },
+                cursorProvider = FakeMailCursorProvider(),
+                callFactory = FakeCallFactory { request -> jsonResponse(request, body, code) },
+            ).searchMail("x", "INBOX", 50)
+
+        assertTrue(searchAgainst(503, "search failed") is MailOutcome.ServiceUnavailable)
+        assertTrue(searchAgainst(401, "") is MailOutcome.Unauthorized)
+        assertTrue(searchAgainst(200, "<html>") is MailOutcome.UpstreamFailure)
+    }
+
+    @Test
     fun createFolder_sendsPairingHeaders_notQueryParams() {
         val callFactory = FakeCallFactory { request -> jsonResponse(request, "", code = 200) }
         val source = RelayMailSource(

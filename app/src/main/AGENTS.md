@@ -85,7 +85,7 @@ Owns production Android app code and resources.
      daily since=0 self-heal — a day of silently missing messages. The delta itself lands through
      `EmailDao.applyFolderDelta`, one transaction, so it cannot half-apply.
   2. HTTP 200 from `/api/inbox/actions` is transport success, not operation success: the relay
-     answers 200 with per-id `failed[]` (Mobile_Mail_Relay.md Part 2). `MailOutcome<MailActionOutcome>
+     answers 200 with per-id `failed[]` (docs/Mobile_Mail_Relay.md Part 2). `MailOutcome<MailActionOutcome>
      .appliedTo(id)` is the only gate on touching the local row — archive/spam/delete/move drop the
      cached row and `markRead` sets `status`, both **after** the relay confirms that id, never
      before. A rejection becomes `MailOutcome.ActionRejected`, not `UpstreamFailure`: the request
@@ -374,6 +374,18 @@ Owns production Android app code and resources.
   - Sign-only is impossible (the relay accepts `multipart/encrypted` only), so the two chips are
     coupled when `clientSide`.
 - Inbox tabs come from the relay's `tabs`/`label` response fields.
+- Inbox search (`MailRepository.search` → `GET /api/mail/search?q=&mailbox=&limit=`) searches the
+  folder on screen, all fields. Results are never written to Room (they are a view of the folder,
+  not its sync window), each row is stamped with the searched mailbox, and they replace the list only while their query and folder are still on
+  screen (`applySearchResults`). A folder switch, a notification tap or editing the submitted text ends the search; a failed search shows the folder list. The query is
+  kept out of the saved-state Bundle. `InboxSearchTest` covers the stale-result guards.
+  Because a result has no Room row, opening one passes its To/Cc to the detail screen
+  (`email_sent_to`/`email_cc`). They seed Reply All and are handed to `fetchBody`, which uses them
+  when no row exists (`SearchResultReplyAllTest`).
+- The folder picker's Sent and Drafts entries never guess a mailbox name. Each tap lists the
+  top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
+  the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A localized name
+  with no alias match shows "No Sent folder", because the relay exposes no special-use flag.
 - The inbox is fetched with `bodies=0`, so **an inbox row never carries a body** and the `emails`
   table is a cache of the messages actually opened, not a mirror of the window. `fetchBody` fills a
   blank one from `GET /api/mail/body` and writes it back. Two rules hold this together, both with
@@ -428,6 +440,9 @@ Owns production Android app code and resources.
   The Inbox freshness label stays centered immediately below those tabs. Before the first
   successful refresh it reads "Not updated yet", so its row never appears empty and the first
   success does not shift the message list.
+  Each inbox row shows `atUtc` in the device zone (`inboxRowDate`: time for today, date otherwise,
+  blank if unparseable). The "No messages in {folder}" empty state shows only once that folder has
+  refreshed successfully (`inboxEmptyVisible`): a loading or unreachable folder never reads as empty.
   A refresh that lands mail above the top row scrolls to it when the list is at the top;
   otherwise a "N new messages" pill (`inbox_new_mail` plurals, polite live region) over the list
   counts it and scrolls up on tap. Only a repaint of the folder and tab already painted counts,
