@@ -83,7 +83,7 @@ class ComposeDiscardConfirmTest {
     }
 
     private fun composeIntent(): Intent =
-        Intent(InstrumentationRegistry.getInstrumentation().targetContext, ComposeActivity::class.java)
+        ComposeActivity.internalIntent(InstrumentationRegistry.getInstrumentation().targetContext)
 
     /** The prompt waits on the editor's async HTML export, so it is not up the instant back lands. */
     private fun awaitDialog() {

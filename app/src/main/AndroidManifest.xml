@@ -92,6 +92,12 @@
             </intent-filter>
         </activity>
 
+        <!-- In-app entry to compose; only it reads the compose_* extras. -->
+        <activity-alias
+            android:name=".InternalComposeActivity"
+            android:exported="false"
+            android:targetActivity=".ComposeActivity" />
+
         <activity
             android:name=".InboxActivity"
             android:exported="false"

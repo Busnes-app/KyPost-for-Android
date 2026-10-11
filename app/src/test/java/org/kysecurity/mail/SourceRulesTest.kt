@@ -148,6 +148,45 @@ class SourceRulesTest {
         )
     }
 
+    /** A dialog is its own window, so it needs [org.kysecurity.mail.security.showSecurely]. */
+    @Test
+    fun alertDialogBuildersAreShownSecurely() {
+        val offenders = mainSources().flatMap { file ->
+            val text = file.readText()
+            ALERT_DIALOG_BUILDER.findAll(text)
+                .filter { ".show()" in chainSkeleton(text, it.range.first) }
+                .map { "${file.path}:${text.substring(0, it.range.first).count { c -> c == '\n' } + 1}" }
+                .toList()
+        }
+        assertEquals(emptyList(), offenders, "Use .create().showSecurely(), not the builder's .show().")
+    }
+
+    /** The call chain starting at [start] with bracketed contents dropped, so a `.show()` inside a
+     *  button lambda (a Toast) is not read as the dialog's own. Ends at a line not starting `.`. */
+    private fun chainSkeleton(text: String, start: Int): String {
+        val out = StringBuilder()
+        var depth = 0
+        var i = start
+        while (i < text.length) {
+            val c = text[i]
+            when (c) {
+                '(', '{', '[' -> {
+                    if (depth == 0) out.append(c)
+                    depth++
+                }
+                ')', '}', ']' -> {
+                    depth--
+                    if (depth < 0) break
+                    if (depth == 0) out.append(c)
+                }
+                '\n' -> if (depth == 0 && !text.substring(i + 1).trimStart().startsWith('.')) break
+                else -> if (depth == 0 && !c.isWhitespace()) out.append(c)
+            }
+            i++
+        }
+        return out.toString()
+    }
+
     @Test
     fun composeCannotCallThePlaintextDraftTransport() {
         val compose = mainSources().single { it.relativePath.endsWith("/ComposeActivity.kt") }.readText()
@@ -259,6 +298,8 @@ class SourceRulesTest {
 
         /** SharedPreferences writes that may not have landed when the process dies. */
         val ASYNC_PREFS_WRITE = Regex("""\.edit\(\)[^\n]*\.apply\(\)|^\s*\.apply\(\)\s*$""")
+
+        val ALERT_DIALOG_BUILDER = Regex("""\bAlertDialog\.Builder\(""")
 
         val DATA_CLASS_HEADER = Regex("""\bdata class\s+(\w+)\s*\(""")
         val PROPERTY_DECL = Regex("""\bval\s+(\w+)\s*:""")

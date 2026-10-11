@@ -506,7 +506,8 @@ class SecuritySettingsActivity : LockedActivity() {
                 }
             }
             .setNegativeButton(android.R.string.cancel, null)
-            .show()
+            .create()
+            .showSecurely()
     }
 
     /** Same re-entrancy hazard as [revertLockSwitch], guarded the same way. */

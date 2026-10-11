@@ -18,6 +18,9 @@ interface ContactDao {
     @Upsert
     suspend fun upsertAll(contacts: List<ContactEntity>)
 
+    @Query("SELECT uid FROM contacts")
+    suspend fun allUids(): List<String>
+
     @Query("DELETE FROM contacts WHERE uid IN (:uids)")
     suspend fun deleteByUids(uids: List<String>)
 

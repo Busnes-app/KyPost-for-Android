@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.widget.TextView
 import android.widget.Toast
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -28,6 +29,7 @@ import org.kysecurity.mail.contacts.device.DeviceContactSyncScheduler
 import org.kysecurity.mail.data.ContactEntity
 import org.kysecurity.mail.pgp.hasPgpIdentity
 import org.kysecurity.mail.setupPrimaryNavigation
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.kysecurity.mail.security.LockedActivity
 
@@ -35,6 +37,9 @@ class ContactsListActivity : LockedActivity() {
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyText: View
+    private lateinit var syncBanner: View
+    private lateinit var syncStatusText: TextView
+    private lateinit var syncRetry: View
     private lateinit var bottomNav: NavigationBarView
     private lateinit var adapter: ContactAdapter
     private var pickMode: Boolean = false
@@ -67,6 +72,10 @@ class ContactsListActivity : LockedActivity() {
 
             recyclerView = findViewById(R.id.recyclerViewContacts)
             emptyText = findViewById(R.id.contactsEmptyText)
+            syncBanner = findViewById(R.id.contactsSyncBanner)
+            syncStatusText = findViewById(R.id.contactsSyncStatusText)
+            syncRetry = findViewById(R.id.contactsSyncRetry)
+            syncRetry.setOnClickListener { syncAndReport() }
             bottomNav = findViewById(R.id.bottomNavigation)
             if (pickMode) {
                 bottomNav.visibility = View.GONE
@@ -117,6 +126,14 @@ class ContactsListActivity : LockedActivity() {
                         android.util.Log.e("ContactsListActivity", "Error observing contacts", e)
                         Toast.makeText(this@ContactsListActivity, "Error loading contacts", Toast.LENGTH_SHORT).show()
                     }
+                }
+            }
+        }
+        if (!pickMode) {
+            lifecycleScope.launch {
+                repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    ContactsRuntime.graph(this@ContactsListActivity).repository.observeSyncStatus()
+                        .collect(::renderSyncStatus)
                 }
             }
         }
@@ -188,6 +205,7 @@ class ContactsListActivity : LockedActivity() {
         menu?.add(0, MENU_REFRESH, 0, R.string.contacts_refresh)
         menu?.add(0, MENU_DEVICE_SYNC, 0, R.string.contacts_device_sync_enable)
         menu?.add(0, MENU_DEDUPE, 0, R.string.contacts_dedupe)
+        menu?.add(0, MENU_EXPORT, 0, R.string.contacts_export_vcard)
         return super.onCreateOptionsMenu(menu)
     }
 
@@ -211,18 +229,7 @@ class ContactsListActivity : LockedActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             MENU_REFRESH -> {
-                // User-triggered, so — unlike the silent foreground/post-edit auto-sync — this one
-                // reports its outcome back, matching the error table in Mobile_Contact_Sync.md.
-                lifecycleScope.launch {
-                    val message = when (val outcome = ContactsRuntime.graph(this@ContactsListActivity).repository.sync()) {
-                        ContactSyncOutcome.Success -> getString(R.string.contacts_sync_success)
-                        ContactSyncOutcome.NotPaired -> getString(R.string.connection_mode_relay_not_paired)
-                        ContactSyncOutcome.Unauthorized -> getString(R.string.contacts_sync_unauthorized)
-                        is ContactSyncOutcome.ServiceUnavailable -> outcome.message
-                        is ContactSyncOutcome.Retry -> outcome.message
-                    }
-                    Toast.makeText(this@ContactsListActivity, message, Toast.LENGTH_SHORT).show()
-                }
+                syncAndReport()
                 true
             }
             MENU_DEVICE_SYNC -> {
@@ -259,7 +266,51 @@ class ContactsListActivity : LockedActivity() {
                 }
                 true
             }
+            MENU_EXPORT -> {
+                lifecycleScope.launch {
+                    val contacts = ContactsRuntime.graph(this@ContactsListActivity).repository.observeContacts().first()
+                    shareContactsAsVCard(this@ContactsListActivity, contacts.map { it.toDto() }, getString(R.string.contacts_title))
+                }
+                true
+            }
             else -> super.onOptionsItemSelected(item)
+        }
+    }
+
+    // User-triggered, so — unlike the silent foreground/post-edit auto-sync — this one reports its
+    // outcome back, matching the error table in Mobile_Contact_Sync.md.
+    private fun syncAndReport() {
+        lifecycleScope.launch {
+            val outcome = ContactsRuntime.graph(this@ContactsListActivity).repository.sync()
+            Toast.makeText(this@ContactsListActivity, syncOutcomeText(outcome), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun syncOutcomeText(outcome: ContactSyncOutcome): String = when (outcome) {
+        ContactSyncOutcome.Success -> getString(R.string.contacts_sync_success)
+        ContactSyncOutcome.NotPaired -> getString(R.string.connection_mode_relay_not_paired)
+        ContactSyncOutcome.Unauthorized -> getString(R.string.contacts_sync_unauthorized)
+        is ContactSyncOutcome.ServiceUnavailable -> outcome.message
+        is ContactSyncOutcome.Retry -> outcome.message
+    }
+
+    private fun renderSyncStatus(status: ContactSyncStatus) {
+        syncBanner.visibility = if (status == ContactSyncStatus.Idle) View.GONE else View.VISIBLE
+        syncRetry.visibility = if (status is ContactSyncStatus.Stuck) View.VISIBLE else View.GONE
+        syncStatusText.text = when (status) {
+            ContactSyncStatus.Idle -> ""
+            is ContactSyncStatus.Waiting ->
+                resources.getQuantityString(R.plurals.contacts_sync_waiting, status.pending, status.pending)
+            is ContactSyncStatus.Stuck -> {
+                val title = if (status.pending > 0) {
+                    resources.getQuantityString(R.plurals.contacts_sync_stuck_waiting, status.pending, status.pending)
+                } else {
+                    getString(R.string.contacts_sync_stuck)
+                }
+                // Server-supplied text: first line only, bounded.
+                val reason = status.reason?.let { syncOutcomeText(it).trim().lineSequence().first().take(200) }
+                "$title\n${reason ?: getString(R.string.contacts_sync_stuck_no_reason)}"
+            }
         }
     }
 
@@ -295,6 +346,7 @@ class ContactsListActivity : LockedActivity() {
         private const val MENU_REFRESH = 0
         private const val MENU_DEVICE_SYNC = 1
         private const val MENU_DEDUPE = 2
+        private const val MENU_EXPORT = 3
 
         /** When true, a tap returns the uid via [EXTRA_RESULT_UID] instead of opening the editor. */
         const val EXTRA_PICK_MODE = "pick_mode"

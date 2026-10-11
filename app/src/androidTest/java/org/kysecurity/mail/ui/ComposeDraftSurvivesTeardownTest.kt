@@ -1,6 +1,5 @@
 package org.kysecurity.mail.ui
 
-import android.content.Intent
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -28,7 +27,7 @@ class ComposeDraftSurvivesTeardownTest {
     @Test
     fun aDestroyThatOutrunsTheEditorExportStillLeavesTheDraft() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val intent = Intent(context, ComposeActivity::class.java)
+        val intent = ComposeActivity.internalIntent(context)
             .putExtra(ComposeActivity.EXTRA_TO, "recipient@example.com")
             .putExtra(ComposeActivity.EXTRA_SUBJECT, "Quarterly numbers")
             .putExtra(ComposeActivity.EXTRA_BODY, BODY)
