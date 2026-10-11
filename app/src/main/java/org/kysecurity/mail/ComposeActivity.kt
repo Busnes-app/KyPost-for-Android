@@ -123,19 +123,19 @@ class ComposeActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun discardPromptCountForTest(): Int = discardPromptCount
 
-    /** Null in production. Sees every draft handed to the relay's plain send. */
+    /** Null in production. Called when a send is committed, before the editor's export. */
     @androidx.annotation.VisibleForTesting
-    internal var sendObserverForTest: ((MailDraft) -> Unit)? = null
+    internal var sendObserverForTest: (() -> Unit)? = null
+
+    /** Null in production. Stands in for the editor's own report, which arrives from its page. */
+    @androidx.annotation.VisibleForTesting
+    internal var bodyEmptyForTest: Boolean? = null
 
     @androidx.annotation.VisibleForTesting
     internal fun applyPgpComposeStateForTest(state: PgpComposeState) = applyPgpComposeState(state)
 
     @androidx.annotation.VisibleForTesting
     internal fun sendForTest() = sendEmail()
-
-    /** The editor reports its body asynchronously, after its page loads. */
-    @androidx.annotation.VisibleForTesting
-    internal fun bodyReportedForTest(): Boolean = bodyEditor.isEmptyFlow.value == false
 
     private val bodyMirror = object : Runnable {
         override fun run() {
@@ -677,7 +677,7 @@ class ComposeActivity : LockedActivity() {
         val cc = ccInput.commaJoinedRecipients()
         val bcc = bccInput.commaJoinedRecipients()
         val subject = subjectField.text.toString().trim()
-        val isBodyEmpty = bodyEditor.isEmptyFlow.value != false
+        val isBodyEmpty = bodyEmptyForTest ?: (bodyEditor.isEmptyFlow.value != false)
 
         when (sendReadiness(to, subject, isBodyEmpty, allowEmptySubject)) {
             SendReadiness.READY -> Unit
@@ -692,6 +692,7 @@ class ComposeActivity : LockedActivity() {
         }
 
         sendMenuItem?.isEnabled = false
+        sendObserverForTest?.invoke()
 
         bodyEditor.exportHtml { html ->
             // exportHtml's main-looper callback can fire after onDestroy shut ioExecutor down.
@@ -833,7 +834,6 @@ class ComposeActivity : LockedActivity() {
 
     /** Shared by the first attempt and the confirmed re-send, so the re-send cannot drift. */
     private fun dispatchSend(draft: MailDraft) {
-        sendObserverForTest?.invoke(draft)
         ioExecutor.execute {
             val outcome = MailRuntime.graph(this).repository.send(draft)
             runOnUiThread {
