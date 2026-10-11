@@ -781,12 +781,25 @@ class InboxActivity : LockedActivity() {
                 if (heldActions.undoAll()) renderFilteredEmails()
             }
             .addCallback(object : Snackbar.Callback() {
-                override fun onDismissed(transientBottomBar: Snackbar?, event: Int) {
-                    if (commitsOnDismiss(event)) heldActions.flush()
-                }
+                override fun onDismissed(transientBottomBar: Snackbar?, event: Int) =
+                    onUndoBarDismissed(transientBottomBar, event)
             })
             .also { it.show() }
     }
+
+    /** Only the bar on screen speaks for what is held: a replaced bar can still time out late. */
+    private fun onUndoBarDismissed(bar: Snackbar?, event: Int) {
+        val current = bar != null && bar === undoBar
+        if (current) undoBar = null
+        if (commitsOnDismiss(event, current)) heldActions.flush()
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun undoBarForTest(): Snackbar? = undoBar
+
+    /** Delivers a dismissal as Android would, including one from a bar already replaced. */
+    @androidx.annotation.VisibleForTesting
+    internal fun dismissUndoBarForTest(bar: Snackbar?, event: Int) = onUndoBarDismissed(bar, event)
 
     private fun showFolderPickerPopup(anchor: View) {
         val popupMenu = PopupMenu(this, anchor)

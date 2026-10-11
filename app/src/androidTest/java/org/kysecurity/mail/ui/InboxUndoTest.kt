@@ -94,4 +94,33 @@ class InboxUndoTest {
             scenario.onActivity { it.rowActionObserverForTest = null }
         }
     }
+
+    /** Bar A can time out while B replaces it; A's late TIMEOUT must not send B's action. */
+    @Test
+    fun aReplacedBarsLateTimeoutDoesNotSendTheNewerAction() {
+        val ran = CountDownLatch(1)
+        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.rowActionObserverForTest = { _, _ -> ran.countDown() }
+                activity.setFolderForTest("INBOX", KeywordTabs.ALL)
+                activity.setEmailsForTest(listOf(email("1"), email("2")))
+                activity.submitDeleteForTest(email("1"))
+                val barA = activity.undoBarForTest()
+                activity.submitDeleteForTest(email("2"))
+                activity.dismissUndoBarForTest(
+                    barA,
+                    com.google.android.material.snackbar.BaseTransientBottomBar.BaseCallback.DISMISS_EVENT_TIMEOUT,
+                )
+                assertEquals(emptyList<String>(), activity.shownEmailsForTest().map { it.id })
+            }
+
+            onView(withText("Undo")).perform(click())
+
+            scenario.onActivity { activity ->
+                assertEquals(listOf("1", "2"), activity.shownEmailsForTest().map { it.id })
+            }
+            assertFalse("a stale dismissal sent the held deletes", ran.await(2, TimeUnit.SECONDS))
+            scenario.onActivity { it.rowActionObserverForTest = null }
+        }
+    }
 }

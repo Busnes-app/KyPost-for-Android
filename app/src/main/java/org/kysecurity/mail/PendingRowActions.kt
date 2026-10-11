@@ -37,6 +37,8 @@ internal class PendingRowActions {
 /** Whether the Undo bar going away commits what it covers. Its timeout follows the system's
  *  accessibility setting, so the bar, not a separate timer, decides when the window closes. A bar
  *  replaced by the next one hands its actions on; one the user acted on was an Undo. */
-internal fun commitsOnDismiss(event: Int): Boolean =
-    event == BaseTransientBottomBar.BaseCallback.DISMISS_EVENT_TIMEOUT ||
-        event == BaseTransientBottomBar.BaseCallback.DISMISS_EVENT_SWIPE
+internal fun commitsOnDismiss(event: Int, isCurrentBar: Boolean): Boolean =
+    isCurrentBar && (
+        event == BaseTransientBottomBar.BaseCallback.DISMISS_EVENT_TIMEOUT ||
+            event == BaseTransientBottomBar.BaseCallback.DISMISS_EVENT_SWIPE
+        )
