@@ -69,14 +69,19 @@ class LegacyKeyMigrationTest {
         context.deleteDatabase(TEST_DB)
     }
 
-    /** A v12 database whose only contact holds [KEY_A], upgraded to the current schema. */
-    private fun upgradedV12(): AppDatabase {
+    /** One v12 contact row for Alice: [key] stored beside [fingerprint], alarmed or not. */
+    private data class V12Row(val uid: String, val key: String, val fingerprint: String?, val alarmed: Boolean = false)
+
+    /** A v12 database holding [rows] in that order, upgraded to the current schema. */
+    private fun upgradedV12(rows: List<V12Row> = listOf(V12Row("alice", KEY_A, PgpFingerprint.compute(KEY_A)))): AppDatabase {
         helper.createDatabase(TEST_DB, 12).apply {
-            execSQL(
-                "INSERT INTO contacts (uid, rev, fn, emailsJson, phonesJson, addressesJson, pgpKey, pgpKeyFingerprint) " +
-                    "VALUES ('alice', 3, 'Alice', ?, '[]', '[]', ?, ?)",
-                arrayOf("""[{"value":"Alice@Example.invalid"}]""", KEY_A, PgpFingerprint.compute(KEY_A)),
-            )
+            for (row in rows) {
+                execSQL(
+                    "INSERT INTO contacts (uid, rev, fn, emailsJson, phonesJson, addressesJson, pgpKey, pgpKeyFingerprint, " +
+                        "pgpKeyNeedsReverification) VALUES (?, 3, 'Alice', ?, '[]', '[]', ?, ?, ?)",
+                    arrayOf(row.uid, """[{"value":"Alice@Example.invalid"}]""", row.key, row.fingerprint, if (row.alarmed) 1 else 0),
+                )
+            }
             close()
         }
         return Room.databaseBuilder(context, AppDatabase::class.java, TEST_DB)
@@ -116,6 +121,28 @@ class LegacyKeyMigrationTest {
         assertTrue("expected KeyChanged, got $outcome", outcome is ClientSendOutcome.KeyChanged)
         assertEquals(emptyList<ClientEncryptedMessage>(), sent)
         assertEquals(false, vaultOpened)
+    }
+
+    /** Two v12 rows share an address and a stored fingerprint, as after a key the fingerprint check
+     *  rejected kept the previous fingerprint: a confirmed valid key and an alarmed different key.
+     *  Whatever order they are read in, the alarmed key must not take the other row's confirmation. */
+    @Test
+    fun anAlarmedKeyNeverInheritsAnotherRowsConfirmation() = runBlocking {
+        val shared = PgpFingerprint.compute(KEY_A)
+        val confirmed = V12Row("alice", KEY_A, shared)
+        val alarmed = V12Row("alice-2", KEY_B, shared, alarmed = true)
+        for (rows in listOf(listOf(confirmed, alarmed), listOf(alarmed, confirmed))) {
+            val database = upgradedV12(rows)
+            val keys = RoomLocalSignerKeys { database }.keysFor("alice@example.invalid")
+            fun verdict(key: String) = signatureStateFor(RawSignature.Checked(ring(key).publicKey.keyID, verified = true), emptyList(), keys)
+            val order = rows.map { it.uid }
+
+            assertNotEquals("alarmed key, rows $order", PgpSignatureState.VERIFIED_CONFIRMED, verdict(KEY_B))
+            assertEquals("confirmed key, rows $order", PgpSignatureState.VERIFIED_CONFIRMED, verdict(KEY_A))
+            database.close()
+            db = null
+            context.deleteDatabase(TEST_DB)
+        }
     }
 
     /** A pin seeded by the migration takes a synced revocation of its own key exactly as a pin
@@ -165,6 +192,8 @@ class LegacyKeyMigrationTest {
         }
 
         fun publicRing(secret: PGPSecretKeyRing) = PGPPublicKeyRing(secret.publicKeys.asSequence().toList())
+
+        fun ring(armoredKey: String) = RevocationTestKeys.ring(armoredKey)
 
         fun armored(bytes: ByteArray): String {
             val out = ByteArrayOutputStream()
