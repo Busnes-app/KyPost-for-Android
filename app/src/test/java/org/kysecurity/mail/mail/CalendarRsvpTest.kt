@@ -135,6 +135,16 @@ class CalendarRsvpTest {
     }
 
     @Test
+    fun uidIsCopiedVerbatimIncludingSurroundingSpaces() {
+        val event = invite(*request.filterNot { it.startsWith("UID") }.toTypedArray(), "UID: event@example.com ").primary
+        assertEquals(" event@example.com ", event.uid)
+        val lines = unfold(rsvpDraft(event, "me@example.com", Rsvp.ACCEPTED, now).calendarReply!!).split("\r\n")
+        assertTrue("UID: event@example.com " in lines)
+        // Blank is no UID at all.
+        assertFalse(invite(*request.filterNot { it.startsWith("UID") }.toTypedArray(), "UID:   ").offersRsvp("REQUEST"))
+    }
+
+    @Test
     fun aliasAnswerAlsoSendsFromTheAlias() {
         val event = invite(*request).primary
         assertEquals("alias@example.com", rsvpDraft(event, "alias@example.com", Rsvp.ACCEPTED, now, sendAs = "alias@example.com").from)

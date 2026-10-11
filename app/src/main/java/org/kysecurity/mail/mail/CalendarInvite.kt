@@ -172,7 +172,8 @@ private fun toEvent(
     val end = endTime?.at
         ?: props["DURATION"]?.let { addDuration(start.at, it.value.trim()) }
         ?: if (start.allDay) start.at.plusDays(1) else start.at
-    val uid = props["UID"]?.value?.trim()?.takeIf { it.length <= 1_000 && it.none(Char::isISOControl) }.orEmpty()
+    // Untrimmed: the organizer matches the REPLY on the exact UID text.
+    val uid = props["UID"]?.value?.takeIf { it.isNotBlank() && it.length <= 1_000 && it.none(Char::isISOControl) }.orEmpty()
     val organizer = props["ORGANIZER"]?.value?.let(::mailtoAddress).orEmpty()
     val recurrence = props["RECURRENCE-ID"]
     val recurrenceId = recurrence?.let { recurrenceIdLine(it, localZone, windowsZone) }
