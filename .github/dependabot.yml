@@ -1,0 +1,27 @@
+version: 2
+
+# Gradle PRs fail CI until gradle/verification-metadata.xml is regenerated locally and reviewed;
+# see the comment at the top of gradle/libs.versions.toml. Never regenerate it in CI.
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    # A week for a compromised release to be noticed before it is proposed here.
+    cooldown:
+      default-days: 7
+    # Majors stay separate PRs; they need their own testing.
+    groups:
+      gradle-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
