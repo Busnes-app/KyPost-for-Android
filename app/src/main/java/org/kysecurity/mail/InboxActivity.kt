@@ -4,7 +4,6 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -91,9 +90,6 @@ class InboxActivity : LockedActivity() {
     private val heldActions = PendingRowActions()
     private var undoBar: Snackbar? = null
     private var newMailCount = 0
-
-    // Chips outlive refreshes, and setTypeface(current, NORMAL) keeps a bold current face.
-    private val chipTypeface: Typeface by lazy { Chip(this).typeface }
 
     /** The folder the list last painted from a refresh; only a repaint of it can bring new mail. */
     private var paintedFolder: String? = null
@@ -535,7 +531,7 @@ class InboxActivity : LockedActivity() {
             val hasUnread = emails.any {
                 it.status == "unread" && (keyword == KeywordTabs.ALL || it.keywords.contains(keyword))
             }
-            chip.typeface = Typeface.create(chipTypeface, if (hasUnread) Typeface.BOLD else Typeface.NORMAL)
+            chip.setBold(hasUnread)
             chip.isChipIconVisible = hasUnread
             if (hasUnread) {
                 chip.chipIconSize = dotSizePx.toFloat()
