@@ -753,6 +753,21 @@ class MailRepositoryTest {
         assertEquals(setOf("INBOX" to "42"), dao.rows.keys)
     }
 
+    /** A search result never reaches Room; the caller's copy of its recipients must survive. */
+    @Test
+    fun fetchBodyWithoutARow_keepsTheCallersRecipients() {
+        val source = FakeMailSource().apply {
+            bodyOutcome = MailOutcome.Success(MailMessageBody("<p>hi</p>", "html", emptyList(), emptyList()))
+        }
+
+        val outcome = repository(FakeEmailDao(), source)
+            .fetchBody("42", "INBOX", knownTo = listOf("me@example.com"), knownCc = listOf("carol@example.com"))
+
+        val body = (outcome as MailOutcome.Success).value
+        assertEquals(listOf("me@example.com"), body.toAddresses)
+        assertEquals(listOf("carol@example.com"), body.ccAddresses)
+    }
+
     @Test
     fun markReadFailure_leavesTheRowUnread() {
         val dao = FakeEmailDao()

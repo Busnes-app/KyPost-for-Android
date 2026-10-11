@@ -100,8 +100,18 @@ class MailRepository(
      *  BODY_UNAVAILABLE and drop the webmail handoff. Signed-but-not-encrypted mail is not
      *  `pgpEncrypted`, so it takes the fetch path and keeps the server's copy as the fallback for a
      *  signature this device cannot verify. */
-    fun fetchBody(id: String, folder: String): MailOutcome<MailMessageBody> {
-        val row = emailDao.getById(id, folder) ?: return relaySource.fetchMessageBody(id, folder)
+    /** [knownTo]/[knownCc] are the caller's copy, for a message with no Room row (a search
+     *  result): the relay's body endpoint carries no recipients. */
+    fun fetchBody(
+        id: String,
+        folder: String,
+        knownTo: List<String> = emptyList(),
+        knownCc: List<String> = emptyList(),
+    ): MailOutcome<MailMessageBody> {
+        val row = emailDao.getById(id, folder) ?: return when (val fetched = relaySource.fetchMessageBody(id, folder)) {
+            is MailOutcome.Success -> MailOutcome.Success(fetched.value.copy(toAddresses = knownTo, ccAddresses = knownCc))
+            else -> fetched
+        }
         // The cache is the only source of these: no relay response ever populates them — not the
         // inbox listing, and not /api/mail/body, which carries body and bodyMode alone. Taking the
         // response's empties is what makes Reply All reply to the sender alone.

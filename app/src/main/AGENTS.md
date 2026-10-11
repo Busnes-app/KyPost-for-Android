@@ -379,6 +379,9 @@ Owns production Android app code and resources.
   not its sync window), each row is stamped with the searched mailbox, and they replace the list only while their query and folder are still on
   screen (`applySearchResults`). A folder switch, a notification tap or editing the submitted text ends the search; a failed search shows the folder list. The query is
   kept out of the saved-state Bundle. `InboxSearchTest` covers the stale-result guards.
+  Because a result has no Room row, opening one passes its To/Cc to the detail screen
+  (`email_sent_to`/`email_cc`). They seed Reply All and are handed to `fetchBody`, which uses them
+  when no row exists (`SearchResultReplyAllTest`).
 - The folder picker's Sent and Drafts entries never guess a mailbox name. Each tap lists the
   top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
   the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A localized name
