@@ -491,8 +491,10 @@ Owns production Android app code and resources.
   is DATA2, and the free-text name belongs in the paired `LABEL` (DATA3) with `TYPE_CUSTOM`;
   `DeviceContactFieldCoding` owns both directions of that mapping for every field kind. A label
   written into DATA2 shows blank in the system Contacts app and round-trips back into Room as `"2"`.
-  `updateRawContactForDto` pushes all seven merged groups (name, org, notes, birthday, emails,
-  phones, addresses) through `DeviceContactUpdatePlan`, and advances the link's
+  `updateRawContactForDto` pushes every field `createRawContactForDto` writes (structured name and
+  phonetics, organization with title and department, notes, birthday, emails, phones, addresses,
+  IMs, websites, relations, other events) through `DeviceContactUpdatePlan`; the IM, website,
+  relation and event rows come from builders both paths share. It advances the link's
   `deviceUpdatedAtEpochMs` only when the batch actually landed — stamping it for a write that never
   happened tells the next merge the device is already current.
 - **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
@@ -524,8 +526,7 @@ Owns production Android app code and resources.
 - **Device merges are three-way.** `device_contact_links.syncedJson` (`MIGRATION_14_15`) holds the
   `ContactDto` both sides agreed on after the last sync. It is written on create and by the push
   pass, per field: `DeviceContactUpdatePlan.nextBase` takes Room's value for each field the phone
-  will then hold too and keeps the old base for the rest, including fields the push never
-  writes (websites, IMs, relations, events) — never by the pull, which runs before the phone has
+  will then hold too and keeps the old base for the rest — never by the pull, which runs before the phone has
   the merge. With no old base it needs every field to agree. `DeviceContactMergeBaseTest`.
   `DeviceContactFieldMerge.againstBase` gives each field to the side that changed it since then,
   so a field emptied on either side stays empty. `same` compares as CP2 stores: null, blank and
@@ -556,9 +557,13 @@ Owns production Android app code and resources.
   adapter: CP2 keeps `DELETED=1` rows until their adapter purges them. `deleteDeviceRawContact`
   drops the link only after CP2 confirms, so a failed delete is retried. `DeviceContactDeleteTest`.
 - **A CP2 row that is deleted and reinserted destroys every column the reinsert does not re-emit.**
-  `Organization.TITLE` and `DEPARTMENT` therefore both fall back to `DeviceRawContactSnapshot` —
-  nothing reads a device-typed value of either into Room, so the device's own is what keeps it, and
-  DEPARTMENT lacking that fallback silently erased it the first time Room's org won. Still unfixed
+  The Organization row is therefore rebuilt from all three of company, title and department, each
+  the plan's value or else the snapshot's; title and department are also merged into Room by the
+  device pull, so a value typed on the phone is not just kept but synced. Custom relation labels
+  read back from `Relation.LABEL` rather than collapsing to "other". IM and website rows are rebuilt
+  with the phone's own TYPE/LABEL, which Room has no slot for (`DeviceRawContactSnapshot.imTypes`,
+  keyed by the protocol the rebuild writes, so no protocol is "Other", and value; `websiteTypes`,
+  keyed by label and URL; `DeviceContactImTypeTest`). Still unfixed
   on the same shape: `JOB_DESCRIPTION`, `OFFICE_LOCATION`, `SYMBOL`, `PHONETIC_NAME` and
   `StructuredPostal`'s `POBOX`/`NEIGHBORHOOD` are not in the snapshot at all, so every replace drops
   them. Widen the snapshot before adding another replaced group.

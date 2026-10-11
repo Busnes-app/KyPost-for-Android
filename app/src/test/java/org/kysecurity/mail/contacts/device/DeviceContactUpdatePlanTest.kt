@@ -143,6 +143,41 @@ class DeviceContactUpdatePlanTest {
         assertTrue(plan.isEmpty())
     }
 
+    /** Every field createRawContactForDto writes must also be updatable, or an edit to it never
+     *  reaches a phone that already has the contact. */
+    @Test
+    fun roomEditsToEveryMappedField_arePlanned() {
+        val dto = ContactDto(
+            uid = "u1",
+            fn = "Ada Lovelace",
+            givenName = "Ada",
+            familyName = "Lovelace",
+            prefix = "Countess",
+            phoneticGivenName = "AY-da",
+            title = "Analyst",
+            department = "Engines",
+            ims = listOf(org.kysecurity.mail.contacts.ContactImDto(service = "matrix", value = "@ada:example.org")),
+            websites = listOf(org.kysecurity.mail.contacts.ContactUrlDto(label = "blog", value = "https://ada.example")),
+            relations = listOf(org.kysecurity.mail.contacts.ContactRelationDto(label = "Mentor", name = "Babbage")),
+            events = listOf(org.kysecurity.mail.contacts.ContactEventDto(label = "anniversary", date = "1835-07-08")),
+        )
+
+        val plan = DeviceContactUpdatePlan.of(dto, snapshot(), roomNewer, deviceOlder)
+
+        assertEquals("Ada", plan.givenName)
+        assertEquals("Lovelace", plan.familyName)
+        assertEquals("Countess", plan.prefix)
+        assertEquals("AY-da", plan.phoneticGivenName)
+        assertEquals("Analyst", plan.title)
+        assertEquals("Engines", plan.department)
+        assertEquals(dto.ims, plan.ims)
+        assertEquals(dto.websites, plan.websites)
+        assertEquals(dto.relations, plan.relations)
+        assertEquals(dto.events, plan.events)
+        assertTrue(plan.hasNameChange())
+        assertTrue(plan.hasOrganizationChange())
+    }
+
     /** Notes and an email removed on the server must leave the phone, not be re-uploaded from it. */
     @Test
     fun withABase_fieldsClearedInRoom_planAClear() {
@@ -204,16 +239,16 @@ class DeviceContactUpdatePlanTest {
         assertEquals(emptyList(), plan.emails)
     }
 
-    /** The push never writes websites: a website Room cleared is still on the phone, so its base
-     *  stays the old value while the fields that did reach the phone advance. */
+    /** A plan that leaves a field off, here the website Room cleared, leaves the phone holding the
+     *  old value, so that field's base stays put while the fields that did reach the phone advance. */
     @Test
-    fun nextBase_keepsTheOldBaseForAFieldThePushNeverWrites() {
+    fun nextBase_keepsTheOldBaseForAFieldThePlanLeavesOff() {
         val site = listOf(ContactUrlDto(value = "https://example.invalid"))
         val base = ContactDto(uid = "u1", fn = "Ada Lovelace", notes = "Old", websites = site)
         val dto = base.copy(notes = "New", websites = emptyList())
         val device = snapshot(notes = "Old").copy(websites = site)
 
-        val plan = DeviceContactUpdatePlan.of(dto, device, roomNewer, deviceOlder, base = base)
+        val plan = DeviceContactUpdatePlan(notes = "New")
         val next = plan.nextBase(dto, device, base)!!
 
         assertEquals("New", next.notes)
