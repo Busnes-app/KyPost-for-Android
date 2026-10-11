@@ -503,6 +503,11 @@ Owns production Android app code and resources.
   push repeats the lookup before any create. Linked rows from before SOURCE_ID are backfilled.
   `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_13_14` indexes the link table's
   `rawContactId`.
+- **The periodic `DeviceContactSyncWorker` is the only background path to the server**, so it runs
+  `ContactSyncRepository.sync()` before `syncAll()` (`runContactSync`). A server failure is the
+  `serverSync` stage and does not skip the local device pass; device edits queued by a pass reach
+  the server on the next one. `refreshGroups` fails when the group refresh did not succeed — the
+  repository reports that as an outcome, not a throw.
 - **Device merges are three-way.** `device_contact_links.syncedJson` (`MIGRATION_14_15`) holds the
   `ContactDto` both sides agreed on after the last sync. It is written on create and by the push
   pass, per field: `DeviceContactUpdatePlan.nextBase` takes Room's value for each field the phone

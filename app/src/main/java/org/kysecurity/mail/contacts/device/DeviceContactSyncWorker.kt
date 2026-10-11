@@ -30,7 +30,10 @@ class DeviceContactSyncWorker(
         // syncAll() reports failed stages rather than throwing, so the retry decision reads them
         // rather than a catch that no real failure reaches.
         return try {
-            val failedStages = graph.repository.syncAll()
+            val failedStages = runContactSync(
+                server = { org.kysecurity.mail.contacts.ContactsRuntime.graph(applicationContext).repository.sync() },
+                device = { graph.repository.syncAll() },
+            )
             if (failedStages.isEmpty()) {
                 Result.success()
             } else {
@@ -45,6 +48,25 @@ class DeviceContactSyncWorker(
             Result.retry()
         }
     }
+}
+
+/** The background pass: server first, so the phone gets the newest contacts and the outbox drains;
+ *  then the device. Device edits queued by this pass go to the server on the next one. A server
+ *  failure does not skip the device pass, which is local. Returns the failed stage names. */
+internal suspend fun runContactSync(
+    server: suspend () -> org.kysecurity.mail.contacts.ContactSyncOutcome,
+    device: suspend () -> List<String>,
+): List<String> {
+    // A throw is a failed stage like any other; it must not cost the local pass. Cancellation is
+    // not a failure and still ends the work.
+    val serverFailed = try {
+        server() !is org.kysecurity.mail.contacts.ContactSyncOutcome.Success
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        true
+    }
+    return listOfNotNull("serverSync".takeIf { serverFailed }) + device()
 }
 
 object DeviceContactSyncScheduler {
