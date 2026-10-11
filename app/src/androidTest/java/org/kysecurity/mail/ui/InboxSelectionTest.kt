@@ -111,4 +111,29 @@ class InboxSelectionTest {
             }
         }
     }
+
+    /** IMAP ids repeat across folders. A bulk Move answered after the user switched folders must
+     *  remove the INBOX row it moved, never the same id in the folder now on screen. */
+    @Test
+    fun aLateBulkMoveRemovesOnlyRowsFromTheirOwnFolder() {
+        val inbox42 = Email(id = "42", subject = "inbox", sender = "a@example.com", preview = "", folder = "INBOX")
+        val junk42 = Email(id = "42", subject = "junk", sender = "b@example.com", preview = "", folder = "Junk")
+        var answer: ((String) -> Unit)? = null
+        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.moveTargetPickerForTest = { _, then -> answer = then }
+                activity.setFolderForTest("INBOX", KeywordTabs.ALL)
+                activity.setEmailsForTest(listOf(inbox42))
+                activity.toggleSelectedForTest(inbox42)
+            }
+            scenario.onActivity { activity ->
+                activity.bulkMoveForTest()
+                activity.setFolderForTest("Junk", KeywordTabs.ALL)
+                activity.setEmailsForTest(listOf(junk42))
+                requireNotNull(answer) { "the move picker was never asked" }("Archive")
+                assertEquals(listOf("Junk"), activity.allEmailsForTest().map { it.folder })
+                activity.moveTargetPickerForTest = null
+            }
+        }
+    }
 }

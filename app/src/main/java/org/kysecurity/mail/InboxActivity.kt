@@ -717,12 +717,18 @@ class InboxActivity : LockedActivity() {
         override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
             // The whole list, not the visible tab: a row selected under another tab is still selected.
             val chosen = (searchResults ?: allEmails).filter { it.id in selectedIds }
+                // Pinned now: Move answers later, when the screen may show another folder.
+                .map { it.copy(folder = it.sourceFolder()) }
             when (item.itemId) {
                 MENU_BULK_ARCHIVE -> submitRowsAction(chosen, getString(R.string.action_archive), MailAction.ARCHIVE)
                 MENU_BULK_JUNK -> submitRowsAction(chosen, getString(R.string.action_junk), MailAction.SPAM)
                 MENU_BULK_DELETE -> submitRowsAction(chosen, getString(R.string.action_delete), MailAction.DELETE)
-                MENU_BULK_MOVE -> pickMoveTarget(this@InboxActivity, mailRepository, ioExecutor, currentFolder) { target ->
-                    submitRowsAction(chosen, getString(R.string.action_move), MailAction.MOVE, target)
+                MENU_BULK_MOVE -> {
+                    val pick = moveTargetPickerForTest
+                        ?: { from, then -> pickMoveTarget(this@InboxActivity, mailRepository, ioExecutor, from, then) }
+                    pick(currentFolder) { target ->
+                        submitRowsAction(chosen, getString(R.string.action_move), MailAction.MOVE, target)
+                    }
                 }
                 else -> return false
             }
@@ -1052,6 +1058,17 @@ class InboxActivity : LockedActivity() {
 
     @androidx.annotation.VisibleForTesting
     internal fun switchFolderForTest(folder: String) = switchFolder(folder)
+
+    /** Runs the selection bar's own Move handler, as tapping it would. */
+    @androidx.annotation.VisibleForTesting
+    internal fun bulkMoveForTest() {
+        val mode = selectionMode ?: return
+        selectionCallback.onActionItemClicked(mode, mode.menu.findItem(MENU_BULK_MOVE))
+    }
+
+    /** Null in production. Stands in for the folder picker, which answers asynchronously. */
+    @androidx.annotation.VisibleForTesting
+    internal var moveTargetPickerForTest: ((from: String, then: (String) -> Unit) -> Unit)? = null
 
     @androidx.annotation.VisibleForTesting
     internal fun setPendingScrollPositionForTest(position: Int) {
