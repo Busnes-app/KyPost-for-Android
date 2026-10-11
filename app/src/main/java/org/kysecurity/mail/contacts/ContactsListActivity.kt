@@ -29,6 +29,7 @@ import org.kysecurity.mail.contacts.device.DeviceContactSyncScheduler
 import org.kysecurity.mail.data.ContactEntity
 import org.kysecurity.mail.pgp.hasPgpIdentity
 import org.kysecurity.mail.setupPrimaryNavigation
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.kysecurity.mail.security.LockedActivity
 
@@ -204,6 +205,7 @@ class ContactsListActivity : LockedActivity() {
         menu?.add(0, MENU_REFRESH, 0, R.string.contacts_refresh)
         menu?.add(0, MENU_DEVICE_SYNC, 0, R.string.contacts_device_sync_enable)
         menu?.add(0, MENU_DEDUPE, 0, R.string.contacts_dedupe)
+        menu?.add(0, MENU_EXPORT, 0, R.string.contacts_export_vcard)
         return super.onCreateOptionsMenu(menu)
     }
 
@@ -261,6 +263,13 @@ class ContactsListActivity : LockedActivity() {
                         is ContactDedupeOutcome.Retry -> outcome.message
                     }
                     Toast.makeText(this@ContactsListActivity, message, Toast.LENGTH_SHORT).show()
+                }
+                true
+            }
+            MENU_EXPORT -> {
+                lifecycleScope.launch {
+                    val contacts = ContactsRuntime.graph(this@ContactsListActivity).repository.observeContacts().first()
+                    shareContactsAsVCard(this@ContactsListActivity, contacts.map { it.toDto() }, getString(R.string.contacts_title))
                 }
                 true
             }
@@ -337,6 +346,7 @@ class ContactsListActivity : LockedActivity() {
         private const val MENU_REFRESH = 0
         private const val MENU_DEVICE_SYNC = 1
         private const val MENU_DEDUPE = 2
+        private const val MENU_EXPORT = 3
 
         /** When true, a tap returns the uid via [EXTRA_RESULT_UID] instead of opening the editor. */
         const val EXTRA_PICK_MODE = "pick_mode"
