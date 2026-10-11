@@ -568,6 +568,12 @@ Owns production Android app code and resources.
     `AppLockStore.tripwire`'s KDoc in the same commit** — the previous change did not, and this
     file spent a release telling every reader the database was plaintext.
 - Compose's address-book and Send action icons use the active palette's `inkStrong` color.
+- Send needs a recipient and a body. A blank subject is legal (the relay doesn't require one), so
+  compose asks "Send without a subject?" instead of refusing (`sendReadiness`).
+  On the client-encrypted path the protected `Subject` header is always written, empty if need
+  be, and `PgpMimeReader` reads a present-but-blank header as an empty subject. An absent header
+  still means "none", so the outer placeholder never stands in for a subject the sender left
+  blank.
 - STYLE_GUIDE.md §7 gaps are closed: `EmailDetailActivity`'s WebView renders the body in the real
   IBM Plex Mono font via a base64-inlined `@font-face` (`AppTheme.ibmPlexMonoFontFaceCss`, backed
   by `assets/fonts/IBMPlexMono-Regular.ttf`) rather than a `file://` base URL, to avoid granting

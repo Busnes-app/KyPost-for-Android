@@ -272,7 +272,10 @@
     <string name="push_pairing_latest_keywords">Keywords: %1$s</string>
     <string name="push_pairing_notifications_denied">Notifications are off. Push still arrives in the in-app history.</string>
     <string name="push_pairing_qr_scan_failed">QR scan was cancelled or failed.</string>
-    <string name="compose_fill_all_fields">Fill in the recipient, subject and message.</string>
+    <string name="compose_fill_all_fields">Fill in the recipient and message.</string>
+    <string name="compose_empty_subject_title">Send without a subject?</string>
+    <string name="compose_empty_subject_add">Add subject</string>
+    <string name="compose_empty_subject_send">Send</string>
     <string name="push_pairing_status_not_paired">Not paired</string>
     <string name="push_pairing_resync">Re-sync token</string>
     <string name="push_pairing_unpair">Unpair device</string>

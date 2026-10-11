@@ -632,7 +632,7 @@ class ComposeActivity : LockedActivity() {
         }
     }
 
-    private fun sendEmail() {
+    private fun sendEmail(allowEmptySubject: Boolean = false) {
         if (handoffBusy) return
         val to = toInput.commaJoinedRecipients()
         val cc = ccInput.commaJoinedRecipients()
@@ -640,9 +640,16 @@ class ComposeActivity : LockedActivity() {
         val subject = subjectField.text.toString().trim()
         val isBodyEmpty = bodyEditor.isEmptyFlow.value != false
 
-        if (to.isBlank() || subject.isBlank() || isBodyEmpty) {
-            Toast.makeText(this, R.string.compose_fill_all_fields, Toast.LENGTH_SHORT).show()
-            return
+        when (sendReadiness(to, subject, isBodyEmpty, allowEmptySubject)) {
+            SendReadiness.READY -> Unit
+            SendReadiness.INCOMPLETE -> {
+                Toast.makeText(this, R.string.compose_fill_all_fields, Toast.LENGTH_SHORT).show()
+                return
+            }
+            SendReadiness.CONFIRM_EMPTY_SUBJECT -> {
+                confirmEmptySubject()
+                return
+            }
         }
 
         sendMenuItem?.isEnabled = false
@@ -667,6 +674,15 @@ class ComposeActivity : LockedActivity() {
                 dispatchSend(draft)
             }
         }
+    }
+
+    /** Mail without a subject is legal and sometimes meant; ask rather than refuse. */
+    private fun confirmEmptySubject() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.compose_empty_subject_title)
+            .setNegativeButton(R.string.compose_empty_subject_add) { _, _ -> subjectField.requestFocus() }
+            .setPositiveButton(R.string.compose_empty_subject_send) { _, _ -> sendEmail(allowEmptySubject = true) }
+            .showThemed()
     }
 
     /** Sender built on IO (Keystore), crypto on Default (Bouncy Castle); the prompt hops to Main. */
@@ -1075,3 +1091,12 @@ internal fun readAtMost(input: InputStream, limit: Long, expectedSize: Long = -1
         out.write(buffer, 0, read)
     }
 }
+
+internal enum class SendReadiness { READY, INCOMPLETE, CONFIRM_EMPTY_SUBJECT }
+
+internal fun sendReadiness(to: String, subject: String, bodyEmpty: Boolean, allowEmptySubject: Boolean): SendReadiness =
+    when {
+        to.isBlank() || bodyEmpty -> SendReadiness.INCOMPLETE
+        subject.isBlank() && !allowEmptySubject -> SendReadiness.CONFIRM_EMPTY_SUBJECT
+        else -> SendReadiness.READY
+    }

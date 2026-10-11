@@ -89,7 +89,9 @@ internal fun buildProtectedContent(
     val clean = sanitizeHeaderValue(subject)
     val boundary = "kypost-protected-${boundaryToken()}"
     val protectedHeaders = buildList {
-        if (clean.isNotEmpty()) add("Subject: $clean")
+        // Always written: a blank one must read back as blank, not as "no protected subject",
+        // which would leave the outer placeholder showing in its place.
+        add("Subject: $clean".trimEnd())
         for ((name, addresses) in listOf("To" to to, "Cc" to cc, "Bcc" to bcc)) {
             joinAddresses(addresses).takeIf { it.isNotEmpty() }?.let { add("$name: $it") }
         }
