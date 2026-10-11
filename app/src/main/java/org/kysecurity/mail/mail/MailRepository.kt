@@ -24,14 +24,16 @@ class MailRepository(
         // Fetched before anything is written, so "held" means held before this refresh.
         val (overflow, overflowFailure) =
             if (result.isDelta && result.hasMore) fetchOverflow(folder, result.nextBefore) else emptyList<Email>() to null
-        // Order is the whole point: Room first, checkpoint second. Room and DataStore cannot
-        // share a transaction, so a crash between them replays this window — upserts and
-        // deletes are idempotent — whereas the old order dropped it.
-        reconcileFetchResult(emailDao, folder, "relay", result)
-        // A partial walk is not stored: its rows would count as held, and the retry from the old
-        // cursor would stop at them and commit past the pages that never arrived.
+        // Nothing from a failed walk is stored, the window included: any row it left would count as
+        // held, and a retry would stop at it and commit past the pages that never arrived.
         if (overflowFailure != null) return overflowFailure
-        reconcileOlderMail(emailDao, folder, "relay", overflow)
+        // Window and walk land together for the same reason. Then the checkpoint: Room and
+        // DataStore cannot share a transaction, so a crash between them replays this fetch
+        // (upserts and deletes are idempotent), whereas the other order dropped it.
+        emailDao.inTransaction {
+            reconcileFetchResult(emailDao, folder, "relay", result)
+            reconcileOlderMail(emailDao, folder, "relay", overflow)
+        }
         commitCheckpoint(folder, result.checkpoint)
         return outcome
     }

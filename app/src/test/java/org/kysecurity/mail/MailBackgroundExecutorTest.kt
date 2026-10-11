@@ -118,70 +118,61 @@ class MailBackgroundExecutorTest {
 
     private val order = java.util.Collections.synchronizedList(mutableListOf<String>())
 
-    /** A markRead that is already running, held open until [release] counts down. */
-    private fun runningRead(release: CountDownLatch): Supersedable {
-        val started = CountDownLatch(1)
-        val read = Supersedable {
-            started.countDown()
-            release.await()
-            order += "read"
-        }
-        Thread(read).start()
-        assertTrue(started.await(2, TimeUnit.SECONDS))
-        return read
-    }
-
-    /** Mark unread on the detail screen must land after the markRead its open submitted; with two
-     *  pool threads, nothing else orders them. */
+    /** A read ordered first and still running holds back an unread ordered after it, whichever
+     *  pool thread each lands on: unordered, the unread would reach the relay first and be undone. */
     @Test
-    fun supersedeWaitsForARunningTask() {
+    fun anOrderedTaskWaitsForTheOneOrderedBeforeIt() {
         val release = CountDownLatch(1)
-        val read = runningRead(release)
-        val unread = Thread { read.supersede(5) { order += "unread" } }.apply { start() }
+        val read = ReadStateLane.ordered { release.await(); order += "read" }
+        val unread = ReadStateLane.ordered { order += "unread" }
+        val unreadThread = Thread { unread() }.apply { start() }
+        val readThread = Thread { read() }.apply { start() }
 
-        unread.join(200)
-        assertTrue("unread must wait for read", unread.isAlive)
+        unreadThread.join(200)
+        assertTrue("unread must wait for read", unreadThread.isAlive)
         release.countDown()
-        unread.join(2_000)
+        readThread.join(2_000)
+        unreadThread.join(2_000)
 
         assertEquals(listOf("read", "unread"), order)
     }
 
-    /** A markRead still queued never runs: the unread supersedes it, and waiting on it could hold a
-     *  pool thread for a task queued behind that same thread. */
+    /** Every request waits for the one before it, not just a read on the same screen. */
     @Test
-    fun supersedeDropsATaskThatNeverStarted() {
-        val read = Supersedable { order += "read" }
+    fun aChainOfOrderedTasksRunsInRequestOrder() {
+        val tasks = (1..4).map { n -> ReadStateLane.ordered { order += "$n" } }
+        val threads = tasks.reversed().map { task -> Thread { task() }.apply { start() } }
+        threads.forEach { it.join(2_000) }
 
-        read.supersede(5) { order += "unread" }
-        read.run()
-
-        assertEquals(listOf("unread"), order)
+        assertEquals(listOf("1", "2", "3", "4"), order)
     }
 
     @Test
-    fun supersedeGivesUpOnAHungTaskAndRunsAnyway() {
+    fun anOrderedTaskGivesUpOnAHungPredecessorAndRunsAnyway() {
         val release = CountDownLatch(1)
-        val read = runningRead(release)
+        val hung = ReadStateLane.ordered { release.await() }
+        val hungThread = Thread { hung() }.apply { start() }
 
-        assertEquals("ran", read.supersede(0) { "ran" })
+        assertEquals("ran", ReadStateLane.ordered(waitSeconds = 0) { "ran" }())
         release.countDown()
+        hungThread.join(2_000)
     }
 
-    /** A wipe quiesces the pool by interrupting it; the superseding mutation must not then run. */
+    /** A wipe quiesces the pool by interrupting it; the waiting mutation must not then run. */
     @Test
-    fun supersedeStopsWhenInterrupted() {
+    fun anOrderedTaskStopsWhenInterrupted() {
         val release = CountDownLatch(1)
-        val read = runningRead(release)
+        val read = ReadStateLane.ordered { release.await() }
+        val readThread = Thread { read() }.apply { start() }
+        val unread = ReadStateLane.ordered { order += "unread" }
         val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
-        val unread = Thread {
-            runCatching { read.supersede(5) { order += "unread" } }.onFailure(failure::set)
-        }.apply { start() }
+        val unreadThread = Thread { runCatching { unread() }.onFailure(failure::set) }.apply { start() }
 
-        unread.join(200)
-        unread.interrupt()
-        unread.join(2_000)
+        unreadThread.join(200)
+        unreadThread.interrupt()
+        unreadThread.join(2_000)
         release.countDown()
+        readThread.join(2_000)
 
         assertTrue(failure.get() is InterruptedException)
         assertFalse("unread" in order)

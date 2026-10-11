@@ -47,6 +47,7 @@ class InboxActivity : LockedActivity() {
     private lateinit var freshnessText: TextView
     private lateinit var inboxRoot: View
     private lateinit var inboxContent: View
+    private lateinit var newMailPill: Chip
     private lateinit var adapter: EmailAdapter
     private val olderFooter = LoadOlderAdapter { loadOlderMail() }
     /** Per folder: where the next older page starts, and folders with nothing older left. */
@@ -73,6 +74,10 @@ class InboxActivity : LockedActivity() {
     private var pendingSubject: String? = null
     private var pendingMessageDeadlineMs: Long = 0L
     private val refreshedAtByFolder = mutableMapOf<String, Long>()
+    private var newMailCount = 0
+
+    /** The folder the list last painted from a refresh; only a repaint of it can bring new mail. */
+    private var paintedFolder: String? = null
 
     private val refreshRunnable = object : Runnable {
         override fun run() {
@@ -95,9 +100,8 @@ class InboxActivity : LockedActivity() {
             }
             // Already confirmed by the relay and written to Room; this only repaints the row.
             val unreadId = result.data?.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_ID)
-            if (unreadId != null && result.data?.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_FOLDER) == currentFolder) {
-                showStatus(unreadId, "unread")
-            }
+            val unreadFolder = result.data?.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_FOLDER)
+            if (unreadId != null && unreadFolder != null) showStatus(unreadId, unreadFolder, "unread")
         }
     }
 
@@ -225,6 +229,11 @@ class InboxActivity : LockedActivity() {
         loadingStatus = findViewById<TextView>(R.id.loadingStatus)
         cancelLoading = findViewById(R.id.cancelLoading)
         freshnessText = findViewById(R.id.inboxFreshness)
+        newMailPill = findViewById(R.id.newMailPill)
+        newMailPill.setOnClickListener {
+            recyclerView.smoothScrollToPosition(0)
+            hideNewMailPill()
+        }
 
         cancelLoading.setOnClickListener {
             pendingMessageId = null
@@ -245,6 +254,7 @@ class InboxActivity : LockedActivity() {
 
         // Rounded panel bar behind the keyword pills — shared STYLE_GUIDE.md §3 Card/panel radius.
         applyPanelBackground(this, keywordChipScroll)
+        applyPillChipTheme(this, newMailPill)
 
         // Re-style every existing chip in place so a theme switch recolors them even when
         // rebuildTabs() short-circuits because the keyword set itself hasn't changed.
@@ -279,6 +289,11 @@ class InboxActivity : LockedActivity() {
         }
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = androidx.recyclerview.widget.ConcatAdapter(adapter, olderFooter)
+        recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                if (!recyclerView.canScrollVertically(-1)) hideNewMailPill()
+            }
+        })
     }
 
     /** Pages from the last page's `nextBefore`; the first page starts at the oldest row held. */
@@ -330,18 +345,25 @@ class InboxActivity : LockedActivity() {
     private fun setReadState(email: Email, read: Boolean) {
         val folder = email.sourceFolder()
         val label = getString(if (read) R.string.action_mark_read else R.string.action_mark_unread)
+        val repository = mailRepository
+        // Ordered with any read a detail screen left in flight, so this cannot be undone by it.
+        val setState = ReadStateLane.ordered {
+            if (read) repository.markRead(email.id, folder) else repository.markUnread(email.id, folder)
+        }
         MailBackgroundExecutor.submitReporting(this, label) {
-            val outcome = if (read) mailRepository.markRead(email.id, folder) else mailRepository.markUnread(email.id, folder)
+            val outcome = setState()
             if (outcome is MailOutcome.Success) {
-                runOnUiThread { if (folder == currentFolder) showStatus(email.id, if (read) "read" else "unread") }
+                runOnUiThread { showStatus(email.id, folder, if (read) "read" else "unread") }
             }
             outcome
         }
     }
 
-    private fun showStatus(id: String, status: String) {
+    /** Matches folder as well as id: after a folder switch the list can still hold another
+     *  mailbox's rows, and a UID repeats across mailboxes. */
+    private fun showStatus(id: String, folder: String, status: String) {
         if (redirectedToUnlock || isDestroyed) return
-        allEmails = allEmails.map { if (it.id == id) it.copy(status = status) else it }
+        allEmails = allEmails.map { if (it.id == id && it.sourceFolder() == folder) it.copy(status = status) else it }
         rebuildTabs(allEmails)
         renderFilteredEmails()
     }
@@ -399,7 +421,10 @@ class InboxActivity : LockedActivity() {
     private fun setupTabs() {
         keywordChips.setOnCheckedStateChangeListener { group, checkedIds ->
             val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
-            selectedTab = (group.findViewById<Chip>(checkedId))?.text?.toString().orEmpty().ifBlank { KeywordTabs.ALL }
+            val tab = (group.findViewById<Chip>(checkedId))?.text?.toString().orEmpty().ifBlank { KeywordTabs.ALL }
+            // A chip rebuild re-checks the same tab; only a real switch makes the count stale.
+            if (tab != selectedTab) hideNewMailPill()
+            selectedTab = tab
             renderFilteredEmails()
         }
 
@@ -479,9 +504,13 @@ class InboxActivity : LockedActivity() {
         refreshedAt: Long? = null,
     ) {
         if (folder != currentFolder) return
+        // Snapshotted before rebuildTabs: a chip rebuild re-renders through the tab listener.
+        val previous = adapter.currentEmails().takeIf { paintedFolder == folder }
+        val tabBefore = selectedTab
+        paintedFolder = folder
         allEmails = emails
         rebuildTabs(emails)
-        renderFilteredEmails()
+        renderFilteredEmails(previous?.takeIf { selectedTab == tabBefore })
         checkPendingMessage(emails, isFinal = isFinal)
         refreshedAt?.let { refreshedAtByFolder[folder] = it }
         renderFreshness()
@@ -563,18 +592,37 @@ class InboxActivity : LockedActivity() {
         }
     }
 
-    private fun renderFilteredEmails() {
+    /** Rows added above [previous]'s top row are scrolled to, or announced by the pill when the
+     *  user has scrolled away. A pending saved-position restore wins over both. */
+    private fun renderFilteredEmails(previous: List<Email>? = null) {
         val filtered = KeywordTabs.filterEmails(allEmails, selectedTab)
+        val added = previous?.let { newRowsAbove(it, filtered) } ?: 0
+        val wasAtTop = !recyclerView.canScrollVertically(-1)
         adapter.updateEmails(filtered)
         olderFooter.shown = allEmails.isNotEmpty() && currentFolder !in olderExhausted
         if (pendingScrollPosition > 0 && adapter.itemCount > 0) {
             val target = pendingScrollPosition.coerceAtMost(adapter.itemCount - 1)
             pendingScrollPosition = 0
             recyclerView.scrollToPosition(target)
+            return
+        }
+        if (added == 0) return
+        if (wasAtTop) {
+            recyclerView.scrollToPosition(0)
+        } else {
+            newMailCount += added
+            newMailPill.text = resources.getQuantityString(R.plurals.inbox_new_mail, newMailCount, newMailCount)
+            newMailPill.visibility = View.VISIBLE
         }
     }
 
+    private fun hideNewMailPill() {
+        newMailCount = 0
+        newMailPill.visibility = View.GONE
+    }
+
     private fun switchFolder(folder: String) {
+        hideNewMailPill()
         currentFolder = folder
         selectedTab = KeywordTabs.ALL
         applyFolderTitle()
@@ -802,6 +850,15 @@ class InboxActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun pendingScrollPositionForTest(): Int = pendingScrollPosition
 
+    @androidx.annotation.VisibleForTesting
+    internal fun firstVisiblePositionForTest(): Int =
+        (recyclerView.layoutManager as LinearLayoutManager).findFirstVisibleItemPosition()
+
+    /** Null while the pill is hidden. */
+    @androidx.annotation.VisibleForTesting
+    internal fun newMailPillTextForTest(): String? =
+        newMailPill.text.toString().takeIf { newMailPill.visibility == View.VISIBLE }
+
     companion object {
         private const val REFRESH_INTERVAL_MS = 90_000L
         private const val PENDING_MESSAGE_POLL_INTERVAL_MS = 3_000L
@@ -813,4 +870,11 @@ class InboxActivity : LockedActivity() {
         private val SWIPE_ARCHIVE_COLOR = Color.parseColor(COLOR_WARNING)
         private val SWIPE_DELETE_COLOR = Color.parseColor(COLOR_DANGER)
     }
+}
+
+/** Rows [new] puts above the first row [old] already had. Zero on a first load. */
+internal fun newRowsAbove(old: List<Email>, new: List<Email>): Int {
+    if (old.isEmpty()) return 0
+    val oldIds = old.mapTo(HashSet()) { it.id }
+    return new.takeWhile { it.id !in oldIds }.size
 }
