@@ -27,6 +27,7 @@ class ThemedDialogsTest {
             "MailSignature.kt" to "showSignatureDialog",
             "ComposeActivity.kt" to "confirmEmptySubject",
             "EmailDetailActivity.kt" to "confirmOpenLink",
+            "security/AppLockOffer.kt" to "showIfDue",
         )
     }
 }

@@ -7,11 +7,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -21,6 +24,10 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
 
     private val isWorking = MutableStateFlow(false)
     private val localMessage = MutableStateFlow<String?>(null)
+
+    /** One element per registration that succeeded; conflated, so a stopped screen still gets it. */
+    private val pairedChannel = Channel<Unit>(Channel.CONFLATED)
+    val paired: Flow<Unit> = pairedChannel.receiveAsFlow()
 
     val uiState: StateFlow<PushHomeUiState> = combine(
         graph.repository.state,
@@ -101,6 +108,7 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
                 if (result is NativeRegistrationResult.Success) {
                     // If the server put this user in pull mode, start fetching immediately.
                     graph.pullCoordinator.pullNowAsync()
+                    pairedChannel.trySend(Unit)
                 }
                 localMessage.value = when (result) {
                     is NativeRegistrationResult.Success ->

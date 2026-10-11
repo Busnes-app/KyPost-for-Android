@@ -186,6 +186,10 @@
         <item quantity="other">%1$d attachments are too large to forward from this device — they won\'t be attached</item>
     </plurals>
     <string name="cancel">Cancel</string>
+    <string name="app_lock_offer_title">Lock KyPost?</string>
+    <string name="app_lock_offer_message">Your mail now opens without a PIN. An app lock keeps it closed to anyone holding your unlocked phone. You can set it up later in Settings, Security.</string>
+    <string name="app_lock_offer_accept">Set up app lock</string>
+    <string name="app_lock_offer_decline">Not now</string>
     <string name="email_link_confirm_title">Open this link?</string>
     <string name="email_link_confirm_message">It goes to\n\n%1$s\n\nFull address: %2$s</string>
     <string name="email_link_confirm_phishing">This message was flagged as possible phishing. Check the address above, not the link text.</string>
