@@ -1,7 +1,6 @@
 package org.kysecurity.mail
 
 import android.graphics.Color
-import android.graphics.Typeface
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -88,7 +87,7 @@ class EmailAdapter(
             if (isUnread) {
                 unreadDot.background = unreadDotDrawable(itemView.context)
             }
-            subjectTextView.setTypeface(subjectTextView.typeface, if (isUnread) Typeface.BOLD else Typeface.NORMAL)
+            subjectTextView.setBold(isUnread)
             subjectTextView.setTextColor(Color.parseColor(if (isUnread) palette.inkStrong else palette.ink))
             senderTextView.setTextColor(Color.parseColor(palette.ink))
             dateTextView.setTextColor(Color.parseColor(palette.ink))
