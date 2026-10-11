@@ -44,10 +44,17 @@ class PendingRowActionsTest {
     /** The bar's own timeout follows the accessibility "time to take action" setting. */
     @Test
     fun onlyATimedOutOrSwipedAwayBarCommits() {
-        assertTrue(commitsOnDismiss(BaseCallback.DISMISS_EVENT_TIMEOUT))
-        assertTrue(commitsOnDismiss(BaseCallback.DISMISS_EVENT_SWIPE))
-        assertFalse(commitsOnDismiss(BaseCallback.DISMISS_EVENT_ACTION))
-        assertFalse(commitsOnDismiss(BaseCallback.DISMISS_EVENT_CONSECUTIVE))
-        assertFalse(commitsOnDismiss(BaseCallback.DISMISS_EVENT_MANUAL))
+        assertTrue(commitsOnDismiss(BaseCallback.DISMISS_EVENT_TIMEOUT, isCurrentBar = true))
+        assertTrue(commitsOnDismiss(BaseCallback.DISMISS_EVENT_SWIPE, isCurrentBar = true))
+        assertFalse(commitsOnDismiss(BaseCallback.DISMISS_EVENT_ACTION, isCurrentBar = true))
+        assertFalse(commitsOnDismiss(BaseCallback.DISMISS_EVENT_CONSECUTIVE, isCurrentBar = true))
+        assertFalse(commitsOnDismiss(BaseCallback.DISMISS_EVENT_MANUAL, isCurrentBar = true))
+    }
+
+    /** A replaced bar can still time out after its replacement shows; that speaks for nothing. */
+    @Test
+    fun aReplacedBarNeverCommits() {
+        assertFalse(commitsOnDismiss(BaseCallback.DISMISS_EVENT_TIMEOUT, isCurrentBar = false))
+        assertFalse(commitsOnDismiss(BaseCallback.DISMISS_EVENT_SWIPE, isCurrentBar = false))
     }
 }

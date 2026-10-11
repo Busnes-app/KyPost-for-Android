@@ -786,8 +786,11 @@ class InboxActivity : LockedActivity() {
             .also { it.show() }
     }
 
+    /** Only the bar on screen speaks for what is held: a replaced bar can still time out late. */
     private fun onUndoBarDismissed(bar: Snackbar?, event: Int) {
-        if (commitsOnDismiss(event)) heldActions.flush()
+        val current = bar != null && bar === undoBar
+        if (current) undoBar = null
+        if (commitsOnDismiss(event, current)) heldActions.flush()
     }
 
     @androidx.annotation.VisibleForTesting
