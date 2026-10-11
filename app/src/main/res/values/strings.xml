@@ -79,6 +79,7 @@
     <string name="action_junk">Mark as junk</string>
     <string name="action_move">Move to folder</string>
     <string name="selection_selected">Selected</string>
+    <string name="selection_limit">Up to %1$d messages at a time</string>
     <plurals name="selection_count">
         <item quantity="one">%d selected</item>
         <item quantity="other">%d selected</item>

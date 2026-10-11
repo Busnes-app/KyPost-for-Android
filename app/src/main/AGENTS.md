@@ -398,6 +398,9 @@ Owns production Android app code and resources.
   applies rule 2 above to a batch: it drops only ids absent from `failed[]`, and only when
   `processed` equals their count. A shortfall `failed[]` does not explain (the relay stops early on
   a cancelled request) confirms none.
+  A selection holds at most `MAX_ACTION_IDS` (500, the relay's per-request cap); `toggleSelected`
+  is the only entry point and refuses the 501st row with a toast. Search results replacing the
+  list end the selection, so a bulk action never covers rows the user can no longer see.
 - The folder picker's Sent and Drafts entries never guess a mailbox name. Each tap lists the
   top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
   the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A localized name

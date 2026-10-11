@@ -27,6 +27,7 @@ import com.google.android.material.navigation.NavigationBarView
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import org.kysecurity.mail.mail.FolderInfo
+import org.kysecurity.mail.mail.MAX_ACTION_IDS
 import org.kysecurity.mail.mail.MailAction
 import org.kysecurity.mail.mail.MailFetchResult
 import org.kysecurity.mail.mail.MailOutcome
@@ -649,6 +650,8 @@ class InboxActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun applySearchResults(query: String, folder: String, outcome: MailOutcome<List<Email>>) {
         if (searchQuery != query || folder != currentFolder) return
+        // Rows selected while this loaded may not be among the results; never act on unseen rows.
+        selectionMode?.finish()
         // A failure must not leave an earlier query's results under this one.
         searchResults = (outcome as? MailOutcome.Success)?.value
         renderFilteredEmails()
@@ -666,8 +669,15 @@ class InboxActivity : LockedActivity() {
         if (searchItem?.isActionViewExpanded == true) searchItem?.collapseActionView() else endSearch()
     }
 
+    /** The one way into the selection, so the relay's batch limit is enforced here and only here. */
     private fun toggleSelected(email: Email) {
-        if (!selectedIds.remove(email.id)) selectedIds.add(email.id)
+        if (!selectedIds.remove(email.id)) {
+            if (selectedIds.size >= MAX_ACTION_IDS) {
+                Toast.makeText(this, getString(R.string.selection_limit, MAX_ACTION_IDS), Toast.LENGTH_SHORT).show()
+                return
+            }
+            selectedIds.add(email.id)
+        }
         if (selectedIds.isEmpty()) {
             selectionMode?.finish()
             return
