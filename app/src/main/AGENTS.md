@@ -455,7 +455,9 @@ Owns production Android app code and resources.
   while the rest go out. Once a reply says `tooOld`, the remaining batches keep the stale cursor
   (cheap `tooOld` replies with no lists) and one `since=0` pull ends the sync. So does any sync
   that starts at cursor zero, pushes queued or not: a `tooOld` sync that failed before its pull
-  leaves only the reset cursor to say a snapshot is owed. `ContactPushBatchingTest` pins all four.
+  leaves only the reset cursor to say a snapshot is owed. Until that pull commits, pushes ack their
+  changes but leave the stored cursor at zero, so a failed pull is retried next sync.
+  `ContactPushBatchingTest` pins all five.
   A `since=0` pull is a snapshot: after tombstone GC the server can no longer list what it
   deleted, so `applyDelta(snapshot = true)` removes every Room contact absent from it except
   uids still in the outbox. `ContactFullResyncTest` covers both.
@@ -464,14 +466,17 @@ Owns production Android app code and resources.
   `recipient_pins` after `MIGRATION_12_13`, and each replaces the pins for that contact's addresses
   — re-scanning is how a pin changes. The migration itself seeds the table with exactly what the
   lookup before it trusted (`legacyPins`: every contact key per address, with its confirmation), so
-  an upgrade never turns a trusted key into an untrusted one. `LegacyKeyMigrationTest`. `RoomLocalSignerKeys` (`authoritativeKeys`) returns ONLY the pins
+  an upgrade never turns a trusted key into an untrusted one. Pins are keyed on the fingerprint of
+  their own bytes, and a confirmation stays only with a key its stored fingerprint names, bytes
+  included when rows merge; `authoritativeKeys` re-checks that on every read. `LegacyKeyMigrationTest`. `RoomLocalSignerKeys` (`authoritativeKeys`) returns ONLY the pins
   for a pinned address, so a contact key the server delivers, on a replacement contact or as an
   update, cannot satisfy `ClientEncryptedSender.applyPins` and the send is `KeyChanged`. Sync never
   writes the table, so removing or rewriting the contact does not touch the pin; a wipe (database
   file) or unpair (`purgeAccountScopedData`) clears it. An address with no pin keeps the earlier
   behaviour: the contact's key, whatever its origin. Server-side provenance (`pgpKeySource`,
   `pgpKeyVerified`) is not read: it is the relay's claim. `RecipientPinRetentionTest`.
-  The one thing a synced copy can do to a pin is revoke it: `withVerifiedRevocation` takes, from a
+  The one thing a synced copy can do to a pin is revoke it, recorded when a contact is saved
+  (sync or local), never by a lookup: `withVerifiedRevocation` takes, from a
   synced copy of the SAME primary key, revocations of that primary or of any subkey the pin holds
   (matched by fingerprint), each verified against the pinned primary, adds only those signatures
   to the pin and saves it. Encryption already skips a revoked subkey of the pinned bytes. A
