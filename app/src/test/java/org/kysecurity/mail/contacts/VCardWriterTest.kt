@@ -94,6 +94,34 @@ class VCardWriterTest {
     }
 
     @Test
+    fun aBirthdayThatIsNotACalendarDateIsLeftOut_bothVersions() {
+        VCardVersion.entries.forEach { version ->
+            listOf("2025-02-29", "2026-13-01", "+10000-01-01").forEach { date ->
+                assertFalse("$version $date", writeVCards(listOf(ContactDto(fn = "X", birthday = date)), version).contains("BDAY"))
+            }
+        }
+        assertTrue(writeVCards(listOf(ContactDto(fn = "X", birthday = "2024-02-29")), VCardVersion.V4).contains("\r\nBDAY:20240229\r\n"))
+        assertTrue(writeVCards(listOf(ContactDto(fn = "X", birthday = "2024-02-29")), VCardVersion.V3).contains("\r\nBDAY:2024-02-29\r\n"))
+    }
+
+    @Test
+    fun aCommaInAFreeTextLabelIsQuoted_whileFaxStaysTwoTypes() {
+        val card = writeVCards(
+            listOf(
+                ContactDto(
+                    fn = "X",
+                    emails = listOf(ContactFieldDto("home,work", "x@example.org")),
+                    phones = listOf(ContactFieldDto("Work Fax", "+1"), ContactFieldDto("a,b", "+2")),
+                ),
+            ),
+            VCardVersion.V4,
+        )
+        assertTrue(card.contains("\r\nEMAIL;TYPE=\"home,work\":x@example.org\r\n"))
+        assertTrue(card.contains("\r\nTEL;TYPE=work,fax:+1\r\n"))
+        assertTrue(card.contains("\r\nTEL;TYPE=\"a,b\":+2\r\n"))
+    }
+
+    @Test
     fun severalContactsAreConcatenated() {
         val card = writeVCards(listOf(ContactDto(fn = "A"), ContactDto(fn = "B")), VCardVersion.V3)
         assertEquals(2, Regex("BEGIN:VCARD").findAll(card).count())

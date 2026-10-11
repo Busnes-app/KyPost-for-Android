@@ -1,10 +1,13 @@
 package org.kysecurity.mail.contacts
 
+import java.time.LocalDate
+
 const val VCARD_MIME_TYPE = "text/vcard"
 
 enum class VCardVersion(val number: String) { V4("4.0"), V3("3.0") }
 
-private val ISO_DATE = Regex("""\d{4}-\d{2}-\d{2}""")
+/** YYYY-MM-DD that is a real date: `2025-02-29`, `2026-13-01` and `+10000-01-01` are refused. */
+private fun isCalendarDate(s: String): Boolean = s.length == 10 && runCatching { LocalDate.parse(s) }.isSuccess
 
 /** RFC 6350 / RFC 2426 text for [contacts]. ponytail: covers name, org, title, email, phone,
  *  address, URL, birthday and note; IMs, relations, events, custom fields, pronouns, phonetic
@@ -25,7 +28,7 @@ private fun StringBuilder.appendVCard(c: ContactDto, version: VCardVersion) {
     }
     c.title.ifPresent { line("TITLE:${escapeText(it)}") }
     c.emails.filter { it.value.isNotBlank() }.forEach { line("EMAIL${typeParam(it.label)}:${escapeText(it.value)}") }
-    c.phones.filter { it.value.isNotBlank() }.forEach { line("TEL${typeParam(phoneType(it.label))}:${escapeText(it.value)}") }
+    c.phones.filter { it.value.isNotBlank() }.forEach { line("TEL${phoneTypeParam(it.label)}:${escapeText(it.value)}") }
     c.addresses.forEach { a ->
         val parts = listOf("", "", a.street, a.city, a.region, a.postalCode, a.country)
         if (parts.any { !it.isNullOrBlank() }) {
@@ -33,7 +36,7 @@ private fun StringBuilder.appendVCard(c: ContactDto, version: VCardVersion) {
         }
     }
     c.websites.filter { it.value.isNotBlank() }.forEach { line("URL${typeParam(it.label)}:${stripControls(it.value)}") }
-    c.birthday?.takeIf { ISO_DATE.matches(it) }?.let {
+    c.birthday?.takeIf(::isCalendarDate)?.let {
         line("BDAY:" + if (version == VCardVersion.V4) it.replace("-", "") else it)
     }
     c.notes.ifPresent { line("NOTE:${escapeText(it)}") }
@@ -44,18 +47,19 @@ private inline fun String?.ifPresent(block: (String) -> Unit) {
     if (!isNullOrBlank()) block(this)
 }
 
-private fun phoneType(label: String?): String? = when (label?.trim()?.lowercase()) {
-    "mobile" -> "cell"
-    "work fax" -> "work,fax"
-    "home fax" -> "home,fax"
-    else -> label
+/** The fax labels map to two TYPE tokens on purpose; everything else is one free-text value. */
+private fun phoneTypeParam(label: String?): String = when (label?.trim()?.lowercase()) {
+    "mobile" -> ";TYPE=cell"
+    "work fax" -> ";TYPE=work,fax"
+    "home fax" -> ";TYPE=home,fax"
+    else -> typeParam(label)
 }
 
 /** A free-text label becomes one TYPE value, quoted when it holds a parameter delimiter. */
 private fun typeParam(label: String?): String {
     val clean = stripControls(label.orEmpty()).replace("\"", "").trim().lowercase()
     if (clean.isEmpty()) return ""
-    val bare = clean.all { it.isLetterOrDigit() || it == '-' || it == ',' }
+    val bare = clean.all { it.isLetterOrDigit() || it == '-' }
     return if (bare) ";TYPE=$clean" else ";TYPE=\"$clean\""
 }
 
