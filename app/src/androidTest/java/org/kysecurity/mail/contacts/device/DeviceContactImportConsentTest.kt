@@ -82,14 +82,14 @@ class DeviceContactImportConsentTest {
             beforeImport = beforeImport,
         )
 
-    /** A contact in the phone's own storage: no account at all. */
-    private fun insertLocalContact(name: String, email: String): Long {
+    /** A contact in the phone's own storage by default: no account at all. */
+    private fun insertLocalContact(name: String, email: String, account: DeviceAccount = DeviceAccount(null, null)): Long {
         val results = context.contentResolver.applyBatch(
             ContactsContract.AUTHORITY,
             arrayListOf(
                 ContentProviderOperation.newInsert(ContactsContract.RawContacts.CONTENT_URI)
-                    .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, null)
-                    .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, null)
+                    .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, account.type)
+                    .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, account.name)
                     .build(),
                 ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
                     .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
@@ -147,6 +147,30 @@ class DeviceContactImportConsentTest {
         val failed = repository.syncAll()
 
         assertEquals("failed stages $failed; ${importState()}", 1, queuedProbeCreates())
+    }
+
+    /** Consent is per account, type and name: a named account's contacts are imported when that
+     *  account is chosen, not dropped by the check made just before the write. */
+    @Test
+    fun consentingToANamedAccount_importsItsContact() = runBlocking {
+        val named = DeviceAccount("org.example.invalid", "probe@example.invalid")
+        val rawContactId = insertLocalContact(NAMED_PROBE, "named-probe@example.com", named)
+        try {
+            settings.setImportAccounts(destination, setOf(named.key))
+            val failed = repository.syncAll()
+
+            val created = db.pendingContactChangeDao().getAllPending()
+                .filter { it.changeType == ContactSyncRepository.CHANGE_CREATE }
+                .count { json.decodeFromString(ContactDto.serializer(), it.payloadJson).fn == NAMED_PROBE }
+            assertEquals("failed stages $failed; ${importState()}", 1, created)
+        } finally {
+            context.contentResolver.delete(
+                ContactsContract.RawContacts.CONTENT_URI.buildUpon()
+                    .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true").build(),
+                "${ContactsContract.RawContacts._ID} = ?",
+                arrayOf(rawContactId.toString()),
+            )
+        }
     }
 
     @Test
@@ -238,5 +262,6 @@ class DeviceContactImportConsentTest {
 
     private companion object {
         const val PROBE_NAME = "Import Consent Probe"
+        const val NAMED_PROBE = "Named Account Import Probe"
     }
 }
