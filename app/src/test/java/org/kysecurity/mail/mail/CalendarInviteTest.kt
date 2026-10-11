@@ -134,6 +134,11 @@ class CalendarInviteTest {
     }
 
     @Test
+    fun overrideOnlyInviteIsRefused() {
+        assertNull(parse(invite("REQUEST", "RECURRENCE-ID:20261019T100000Z", "DTSTART:20261019T110000Z")))
+    }
+
+    @Test
     fun oneUnparseableEventRefusesTheWholeInvite() {
         val bytes = ics(
             "BEGIN:VCALENDAR",

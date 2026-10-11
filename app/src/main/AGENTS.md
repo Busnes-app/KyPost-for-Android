@@ -408,7 +408,8 @@ Owns production Android app code and resources.
   part (else `application/ics` / `.ics`) and parses it on the device with a strict RFC 5545
   subset parser — no ical4j. Over 256 KiB, over 50 VEVENTs, or any structural error refuses the
   whole invite; a refusal or throw only hides the card. Only a VEVENT's own properties count
-  (a VALARM's DESCRIPTION does not); RECURRENCE-ID overrides are never the headline event.
+  (a VALARM's DESCRIPTION does not); RECURRENCE-ID overrides are never the headline event; an invite with no series master
+  (override-only, e.g. an Outlook single-occurrence update) does not parse and shows no card.
   Lines are unfolded as bytes before UTF-8 decoding; dates resolve STRICT; format characters
   (bidi, zero-width) are stripped from text and refused in addresses. The organizer is shown as
   its bare `mailto:` address, never CN, and the card says when it is not the From address — the
