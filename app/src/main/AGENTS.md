@@ -464,7 +464,8 @@ Owns production Android app code and resources.
   Refused under Hostile Location Protection by the same `attachmentSaveOffered` rule as saving an
   attachment, because the receiving app can persist it. The writer escapes every text value and
   strips control characters from URLs and TYPE labels, so a field cannot inject a property;
-  `VCardWriterTest` holds that. The server uid is not exported.
+  `VCardWriterTest` holds that. The server uid is not exported. `VCardShareTest`
+  (instrumentation) reads each dialog choice back through the provider as a receiver would.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
   is DATA2, and the free-text name belongs in the paired `LABEL` (DATA3) with `TYPE_CUSTOM`;
   `DeviceContactFieldCoding` owns both directions of that mapping for every field kind. A label
