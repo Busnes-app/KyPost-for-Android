@@ -270,10 +270,8 @@ class PushRepository(
             prefs.remove(KEY_LAST_SYNC_AT)
             prefs.remove(KEY_LAST_PUSH_AT)
             // Registration state that belongs to the credential being reset, not to the account.
+            // The UnifiedPush endpoint stays: the distributor is still registered, and re-pairing needs it.
             prefs.remove(KEY_TRANSPORT)
-            prefs.remove(KEY_UNIFIEDPUSH_ENDPOINT)
-            prefs.remove(KEY_UNIFIEDPUSH_P256DH)
-            prefs.remove(KEY_UNIFIEDPUSH_AUTH)
         }
     }
 
@@ -352,7 +350,7 @@ class PushRepository(
         }
     }
 
-    /** Persisted so a resync can resend them; they only ever arrive via onNewEndpoint. Null clears. */
+    /** Persisted so pairing and resyncs can send them; they only ever arrive via onNewEndpoint. Null clears. */
     override suspend fun updateUnifiedPushRegistration(endpoint: String?, p256dh: String?, auth: String?) {
         context.pushDataStore.edit { prefs ->
             if (endpoint.isNullOrBlank()) prefs.remove(KEY_UNIFIEDPUSH_ENDPOINT) else prefs[KEY_UNIFIEDPUSH_ENDPOINT] = endpoint
@@ -440,7 +438,14 @@ data class PushState(
     val deliveryMode: DeliveryMode = DeliveryMode.PUSH,
     val pullEndpoint: String? = null,
     val transport: PushTransport? = null,
+    /** The distributor's current endpoint, stored on arrival, paired or not. Known, not
+     *  necessarily registered: [transport] says what the server has. */
     val unifiedPushEndpoint: String? = null,
     val unifiedPushP256dh: String? = null,
     val unifiedPushAuth: String? = null,
-)
+) {
+    fun unifiedPushCredential(): PushRegistrationCredential? =
+        unifiedPushEndpoint?.takeIf { it.isNotBlank() }?.let {
+            PushRegistrationCredential(it, PushTransport.UNIFIED_PUSH, unifiedPushP256dh, unifiedPushAuth)
+        }
+}

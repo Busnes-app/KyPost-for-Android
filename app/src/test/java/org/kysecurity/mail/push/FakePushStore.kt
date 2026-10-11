@@ -61,7 +61,13 @@ internal class FakePushStore(
         // marker whether or not the purge it wraps could prove itself complete.
         reconnectMarker = null
         if (purgeResidue.isEmpty()) {
-            backing.value = backing.value.copy(pairing = null)
+            // As PushRepository.clearPairing: the UnifiedPush endpoint goes with the pairing.
+            backing.value = backing.value.copy(
+                pairing = null,
+                unifiedPushEndpoint = null,
+                unifiedPushP256dh = null,
+                unifiedPushAuth = null,
+            )
             storedPin = null
         }
         return purgeResidue

@@ -70,6 +70,7 @@ class KyPostUnifiedPushService : PushService() {
         UnifiedPush.removeDistributor(applicationContext)
         serviceScope.launch {
             graph.repository.updateSyncState(lastSyncAtEpochMs = null, syncError = message)
+            graph.syncCoordinator.forgetUnifiedPushEndpoint()
             graph.syncCoordinator.syncCurrentPairingToken()
         }
     }
@@ -81,6 +82,7 @@ class KyPostUnifiedPushService : PushService() {
             // this build does not have: that call fails, and the pairing screen would show the
             // generic "unable to obtain a token" rather than the fact the user unregistered.
             serviceScope.launch {
+                graph.syncCoordinator.forgetUnifiedPushEndpoint()
                 graph.repository.updateSyncState(
                     lastSyncAtEpochMs = null,
                     syncError = "No UnifiedPush distributor is selected, so notifications are stopped.",
@@ -91,6 +93,7 @@ class KyPostUnifiedPushService : PushService() {
         // Explicit unregistration (user switched distributor away, or picked "none"):
         // fall back to FCM so delivery keeps working without user intervention.
         serviceScope.launch {
+            graph.syncCoordinator.forgetUnifiedPushEndpoint()
             graph.syncCoordinator.syncCurrentPairingToken()
         }
     }

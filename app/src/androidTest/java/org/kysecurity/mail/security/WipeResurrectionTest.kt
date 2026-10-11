@@ -5,11 +5,13 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.kysecurity.mail.data.DataRuntime
 import org.kysecurity.mail.push.PairingData
 import org.kysecurity.mail.push.PushRuntime
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -95,6 +97,19 @@ class WipeResurrectionTest {
             "kypost_mail.db must not be recreated by the wipe's own later steps",
             dbFile().exists(),
         )
+    }
+
+    /** The endpoint is stored before pairing now; a wipe of an unpaired device must still drop it. */
+    @Test
+    fun wipe_dropsAUnifiedPushEndpointStoredBeforePairing(): Unit = runBlocking {
+        PushRuntime.graph(context).repository
+            .updateUnifiedPushRegistration("https://ntfy.example/up-topic", "p256dh", "auth")
+        assertTrue("precondition: push_state written", pushStateFile().exists())
+
+        SecurityWipe.wipeAndResetApp(context)
+
+        PushRuntime.invalidate()
+        assertNull(PushRuntime.graph(context).repository.state.first().unifiedPushEndpoint)
     }
 
     /** The other half of that ordering: work submitted WHILE the wipe runs.
