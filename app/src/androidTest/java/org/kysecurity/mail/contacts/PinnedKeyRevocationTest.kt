@@ -3,21 +3,6 @@ package org.kysecurity.mail.contacts
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import org.bouncycastle.bcpg.ArmoredOutputStream
-import org.bouncycastle.bcpg.HashAlgorithmTags
-import org.bouncycastle.bcpg.PublicKeyAlgorithmTags
-import org.bouncycastle.crypto.generators.RSAKeyPairGenerator
-import org.bouncycastle.crypto.params.RSAKeyGenerationParameters
-import org.bouncycastle.openpgp.PGPKeyRingGenerator
-import org.bouncycastle.openpgp.PGPPublicKey
-import org.bouncycastle.openpgp.PGPPublicKeyRing
-import org.bouncycastle.openpgp.PGPSecretKeyRing
-import org.bouncycastle.openpgp.PGPSignature
-import org.bouncycastle.openpgp.PGPSignatureGenerator
-import org.bouncycastle.openpgp.operator.bc.BcPBESecretKeyDecryptorBuilder
-import org.bouncycastle.openpgp.operator.bc.BcPGPContentSignerBuilder
-import org.bouncycastle.openpgp.operator.bc.BcPGPDigestCalculatorProvider
-import org.bouncycastle.openpgp.operator.bc.BcPGPKeyPair
 import org.kysecurity.mail.data.AppDatabase
 import org.kysecurity.mail.mail.ClientEncryptedMessage
 import org.kysecurity.mail.mail.MailDraft
@@ -43,10 +28,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.ByteArrayOutputStream
-import java.math.BigInteger
-import java.security.SecureRandom
-import java.util.Date
 
 /** The owner of a pinned key revokes it, and the revocation arrives on the synced copy of the same
  *  key. The pin must take on that revocation: no verified signature from it, and no send to it. */
@@ -144,48 +125,11 @@ class PinnedKeyRevocationTest {
 
     private companion object {
         const val ALICE = "alice@example.invalid"
-        private val SECRET: PGPSecretKeyRing by lazy { generator("Alice <alice@example.invalid>").generateSecretKeyRing() }
+        private val SECRET by lazy { RevocationTestKeys.secretRing("Alice <alice@example.invalid>") }
         val KEY_ID: Long get() = SECRET.publicKey.keyID
-        val PUBLIC: String by lazy { armored(publicRing(SECRET).encoded) }
+        val PUBLIC: String by lazy { RevocationTestKeys.public(SECRET) }
 
         /** The same ring with a key revocation made by its own primary key. */
-        val REVOKED: String by lazy {
-            val ring = publicRing(SECRET)
-            val primary = ring.publicKey
-            val privateKey = SECRET.secretKey.extractPrivateKey(BcPBESecretKeyDecryptorBuilder(BcPGPDigestCalculatorProvider()).build(null))
-            val generator = PGPSignatureGenerator(BcPGPContentSignerBuilder(primary.algorithm, HashAlgorithmTags.SHA256))
-            generator.init(PGPSignature.KEY_REVOCATION, privateKey)
-            val revoked = PGPPublicKey.addCertification(primary, generator.generateCertification(primary))
-            armored(PGPPublicKeyRing.insertPublicKey(ring, revoked).encoded)
-        }
-
-        fun publicRing(secret: PGPSecretKeyRing): PGPPublicKeyRing =
-            PGPPublicKeyRing(secret.publicKeys.asSequence().toList())
-
-        @Suppress("DEPRECATION")
-        fun generator(uid: String): PGPKeyRingGenerator {
-            val rsa = RSAKeyPairGenerator().apply {
-                init(RSAKeyGenerationParameters(BigInteger.valueOf(0x10001), SecureRandom(), 2048, 12))
-            }
-            val now = Date()
-            val primary = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), now)
-            val sub = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), now)
-            return PGPKeyRingGenerator(
-                PGPSignature.POSITIVE_CERTIFICATION,
-                primary,
-                uid,
-                BcPGPDigestCalculatorProvider().get(HashAlgorithmTags.SHA1),
-                null,
-                null,
-                BcPGPContentSignerBuilder(primary.publicKey.algorithm, HashAlgorithmTags.SHA256),
-                null,
-            ).apply { addSubKey(sub) }
-        }
-
-        fun armored(bytes: ByteArray): String {
-            val out = ByteArrayOutputStream()
-            ArmoredOutputStream(out).use { it.write(bytes) }
-            return out.toString(Charsets.UTF_8.name())
-        }
+        val REVOKED: String by lazy { RevocationTestKeys.primaryRevoked(SECRET, signer = SECRET) }
     }
 }
