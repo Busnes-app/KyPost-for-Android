@@ -1,6 +1,7 @@
 package org.kysecurity.mail
 
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicLong
 
 /** State in a process-scoped `object` that must be reset by hand at a session boundary. */
 interface ProcessScopedState {
@@ -13,12 +14,27 @@ object ProcessState {
 
     private val registered = CopyOnWriteArrayList<ProcessScopedState>()
 
+    private val generation = AtomicLong()
+
     fun register(state: ProcessScopedState) {
         registered.addIfAbsent(state)
     }
 
-    /** Resets every registered holder, isolating failures; returns the names that failed. */
+    /** The current session. Capture it when work starts; [isCurrent] says whether it has ended. */
+    fun generation(): Long = generation.get()
+
+    fun isCurrent(token: Long): Boolean = generation.get() == token
+
+    /** Ends the current session for every captured token. A teardown calls this before it touches
+     *  any data, so nothing from the outgoing session lands while it runs; advancing twice is harmless. */
+    fun advanceGeneration() {
+        generation.incrementAndGet()
+    }
+
+    /** Resets every registered holder, isolating failures; returns the names that failed.
+     *  The generation advances first, so work racing the reset already reads as expired. */
     fun resetAll(): List<String> {
+        advanceGeneration()
         val failed = mutableListOf<String>()
         registered.forEach { state ->
             runCatching { state.resetForNewSession() }.onFailure {
