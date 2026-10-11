@@ -509,10 +509,12 @@ Owns production Android app code and resources.
   happened tells the next merge the device is already current.
 - **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
   `applyBatch` as the insert. `device_contact_links` is a cache of that: `adoptLostLinks` runs
-  before the pull and relinks a live row of our account whose SOURCE_ID is the uid, so a death
-  between insert and link write, or cleared app data, rebuilds the link instead of duplicating
-  the contact, and a phone edit made while the link was gone is pulled, not overwritten. The
-  push repeats the lookup before any create. Linked rows from before SOURCE_ID are backfilled.
+  before the pull and relinks every row of our account by SOURCE_ID, tombstones included and
+  whether or not the uid is still in Room, so a death between insert and link write, or cleared
+  app data, rebuilds the link instead of duplicating the contact. A phone edit made while the link
+  was gone is then pulled, not overwritten; a phone delete is queued and purged, not replaced; a
+  row whose contact left Room is removed (`DeviceContactDeleteTest`). The push repeats the
+  live-row lookup before any create. Linked rows from before SOURCE_ID are backfilled.
   `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_13_14` indexes the link table's
   `rawContactId`.
 - **The periodic `DeviceContactSyncWorker` is the only background path to the server**, so it runs
