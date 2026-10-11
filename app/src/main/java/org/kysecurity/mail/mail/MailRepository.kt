@@ -19,6 +19,18 @@ class MailRepository(
     /** Unread rows per folder in the local cache: what this device holds, not a server total. */
     fun unreadCounts(): Map<String, Int> = emailDao.unreadCounts().associate { it.folder to it.unread }
 
+    /** [folder]'s rows and every folder's unread count from one read, so a change committing
+     *  between the two cannot make the list and the counts disagree. */
+    fun cachedEmailsAndUnread(folder: String): Pair<List<Email>, Map<String, Int>> {
+        var emails = emptyList<Email>()
+        var unread = emptyMap<String, Int>()
+        emailDao.inTransaction {
+            emails = cachedEmails(folder)
+            unread = unreadCounts()
+        }
+        return emails to unread
+    }
+
     /** [forceFullResync] asks for since=0; the daily self-heal runs regardless of this flag. */
     fun refreshFolder(folder: String, forceFullResync: Boolean = false): MailOutcome<MailFetchResult> {
         val outcome = relaySource.fetchInbox(folder, WINDOW_LIMIT, forceFullResync)

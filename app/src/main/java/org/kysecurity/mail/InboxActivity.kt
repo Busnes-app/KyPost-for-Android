@@ -97,7 +97,6 @@ class InboxActivity : LockedActivity() {
         if (result.resultCode == RESULT_OK) {
             val removedId = result.data?.getStringExtra(EmailDetailActivity.EXTRA_REMOVED_EMAIL_ID)
             if (removedId != null) {
-                allEmails.find { it.id == removedId }?.let { adjustUnread(currentFolder, it.status, null) }
                 allEmails = allEmails.filter { it.id != removedId }
                 rebuildTabs(allEmails)
                 renderFilteredEmails()
@@ -310,8 +309,7 @@ class InboxActivity : LockedActivity() {
             // Read from Room, not allEmails: right after a folder switch that is still the old folder.
             val before = frontier ?: mailRepository.cachedEmails(folder).lastOrNull()?.id
             val outcome = before?.let { mailRepository.loadOlder(folder, it) }
-            val emails = mailRepository.cachedEmails(folder)
-            val unread = mailRepository.unreadCounts()
+            val (emails, unread) = mailRepository.cachedEmailsAndUnread(folder)
             runOnUiThread {
                 unreadByFolder = unread
                 olderFooter.loading = false
@@ -369,7 +367,8 @@ class InboxActivity : LockedActivity() {
      *  mailbox's rows, and a UID repeats across mailboxes. */
     private fun showStatus(id: String, folder: String, status: String) {
         if (redirectedToUnlock || isDestroyed) return
-        allEmails.find { it.id == id && it.sourceFolder() == folder }?.let { adjustUnread(folder, it.status, status) }
+        // Whatever folder is on screen: the picker counts every folder.
+        recountUnread()
         allEmails = allEmails.map { if (it.id == id && it.sourceFolder() == folder) it.copy(status = status) else it }
         rebuildTabs(allEmails)
         renderFilteredEmails()
@@ -479,8 +478,7 @@ class InboxActivity : LockedActivity() {
         // Already obsolete before it started: fetching a folder nobody is looking at buys nothing.
         if (folder != currentFolder) return
         if (showCacheFirst) {
-            val cached = mailRepository.cachedEmails(folder)
-            val unread = mailRepository.unreadCounts()
+            val (cached, unread) = mailRepository.cachedEmailsAndUnread(folder)
             runOnUiThread { unreadByFolder = unread }
             if (cached.isNotEmpty()) {
                 runOnUiThread { applyRefreshedEmails(folder, cached, isFinal = false, errorMessage = null) }
@@ -488,8 +486,7 @@ class InboxActivity : LockedActivity() {
         }
         val outcome: MailOutcome<MailFetchResult> =
             mailRepository.refreshFolder(folder, forceFullResync = forceFullResync)
-        val emails = mailRepository.cachedEmails(folder)
-        val unread = mailRepository.unreadCounts()
+        val (emails, unread) = mailRepository.cachedEmailsAndUnread(folder)
         runOnUiThread { unreadByFolder = unread }
         val errorMessage = outcome.userFacingMessage()
         keywordSettings.rememberKeywords(emails.flatMap { it.keywords }.toSet())
@@ -644,9 +641,15 @@ class InboxActivity : LockedActivity() {
             label
         }
 
-    /** Keeps the picker's counts in step with a local change until the next refresh re-reads Room. */
-    private fun adjustUnread(folder: String, before: String, after: String?) {
-        unreadByFolder = KeywordTabs.adjustedUnread(unreadByFolder, folder, before, after)
+    /** Re-reads the picker's counts from Room after a confirmed change, never adjusting them by
+     *  arithmetic, which a snapshot taken after the change would count twice. On [ioExecutor],
+     *  which runs every refresh too, so an older snapshot cannot land after this one. */
+    private fun recountUnread() {
+        if (isDestroyed || ioExecutor.isShutdown) return
+        ioExecutor.execute {
+            val unread = mailRepository.unreadCounts()
+            runOnUiThread { unreadByFolder = unread }
+        }
     }
 
     private fun hideNewMailPill() {
@@ -841,14 +844,15 @@ class InboxActivity : LockedActivity() {
         mutate: (id: String, folder: String) -> MailOutcome<Unit>,
     ) {
         val sourceFolder = email.sourceFolder()
-        adjustUnread(sourceFolder, email.status, null)
         allEmails = allEmails.filter { it.id != email.id }
         rebuildTabs(allEmails)
         renderFilteredEmails()
         MailBackgroundExecutor.submitReporting(this, label) {
             rowActionObserverForTest?.invoke(email.id, sourceFolder)
             // [mutate] takes the folder as an argument: it has no way to reach for currentFolder.
-            mutate(email.id, sourceFolder)
+            mutate(email.id, sourceFolder).also { outcome ->
+                if (outcome is MailOutcome.Success) runOnUiThread { recountUnread() }
+            }
         }
     }
 

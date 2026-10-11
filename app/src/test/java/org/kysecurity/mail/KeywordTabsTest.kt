@@ -59,16 +59,4 @@ class KeywordTabsTest {
         assertEquals(6, KeywordTabs.unreadInFolderTree(counts, "Archive"))
         assertEquals(0, KeywordTabs.unreadInFolderTree(counts, "Trash"))
     }
-
-    /** The picker follows a read, an unread, or a row leaving the folder until Room is re-read. */
-    @Test
-    fun adjustedUnreadFollowsOneRowsChange() {
-        val counts = mapOf("INBOX" to 2, "Junk" to 1)
-
-        assertEquals(mapOf("INBOX" to 1, "Junk" to 1), KeywordTabs.adjustedUnread(counts, "INBOX", "unread", "read"))
-        assertEquals(mapOf("INBOX" to 3, "Junk" to 1), KeywordTabs.adjustedUnread(counts, "INBOX", "read", "unread"))
-        assertEquals(mapOf("INBOX" to 2, "Junk" to 0), KeywordTabs.adjustedUnread(counts, "Junk", "unread", null))
-        assertEquals(counts, KeywordTabs.adjustedUnread(counts, "INBOX", "read", null))
-        assertEquals(mapOf("INBOX" to 2, "Junk" to 1, "Trash" to 0), KeywordTabs.adjustedUnread(counts, "Trash", "unread", null))
-    }
 }
