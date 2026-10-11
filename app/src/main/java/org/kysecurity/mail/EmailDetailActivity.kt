@@ -1031,6 +1031,10 @@ class EmailDetailActivity : LockedActivity() {
 
     /** CATEGORY_BROWSABLE + NEW_TASK: an email link must not reach non-browsable activities. */
     /** Mail links lie about where they go; show the parsed host and open exactly what was shown. */
+    /** What a tapped http(s) link in the WebView runs. */
+    @androidx.annotation.VisibleForTesting
+    internal fun openLinkForTest(raw: String) = confirmOpenLink(raw)
+
     private fun confirmOpenLink(raw: String) {
         val target = org.kysecurity.mail.mail.linkTargetOf(raw)
         if (target == null) {
