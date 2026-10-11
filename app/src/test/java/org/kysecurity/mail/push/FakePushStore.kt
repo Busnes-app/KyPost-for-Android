@@ -91,6 +91,8 @@ internal class FakePushStore(
         auth: String?,
         generation: Long,
     ): Boolean {
+        // As PushRepository.storeUnifiedPushEndpoint: an ended session stores nothing.
+        if (!org.kysecurity.mail.ProcessState.isCurrent(generation)) return false
         updateUnifiedPushRegistration(endpoint, p256dh, auth)
         return true
     }

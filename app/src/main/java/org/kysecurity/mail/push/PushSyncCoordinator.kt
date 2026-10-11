@@ -1,10 +1,11 @@
 package org.kysecurity.mail.push
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -39,6 +40,24 @@ class PushSyncCoordinator(
      *  back except a re-pair. `NonCancellable` never addressed this: it protects a persist from
      *  cancellation, not from a competing registration. */
     private val registrationGate = Mutex()
+
+    /** UnifiedPush callback work, one at a time in arrival order. Separate launches let a
+     *  revocation run before the endpoint it revokes, which was then stored again. */
+    private val unifiedPushEvents = Channel<suspend PushSyncCoordinator.() -> Unit>(Channel.UNLIMITED)
+
+    init {
+        eventScope.launch {
+            for (event in unifiedPushEvents) {
+                try {
+                    event()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.e("PushSyncCoordinator", "UnifiedPush event failed", e)
+                }
+            }
+        }
+    }
 
     /** The error every deferred registration reports, so the pairing screen shows one explanation
      *  rather than a transport-specific one per entry point. */
@@ -149,9 +168,10 @@ class PushSyncCoordinator(
         return syncCurrentPairingToken()
     }
 
-    /** Runs UnifiedPush callback work off the callback thread. */
-    fun enqueueUnifiedPush(event: suspend PushSyncCoordinator.() -> Unit): Job =
-        eventScope.launch { event() }
+    /** Queues UnifiedPush callback work. Call it from the callback itself: arrival order is run order. */
+    fun enqueueUnifiedPush(event: suspend PushSyncCoordinator.() -> Unit) {
+        unifiedPushEvents.trySend(event)
+    }
 
     /** A new endpoint from the distributor, captured in session [generation]. Stored even when
      *  unpaired, since the distributor often answers before pairing, then registered if paired. */
@@ -161,7 +181,9 @@ class PushSyncCoordinator(
         auth: String?,
         generation: Long,
     ): NativeRegistrationResult = registrationGate.withLock {
-        repository.storeUnifiedPushEndpoint(endpoint, p256dh, auth, generation)
+        if (!repository.storeUnifiedPushEndpoint(endpoint, p256dh, auth, generation)) {
+            return NativeRegistrationResult.Error("The session ended before the endpoint arrived")
+        }
         syncLocked(endpoint, PushTransport.UNIFIED_PUSH, p256dh, auth)
     }
 

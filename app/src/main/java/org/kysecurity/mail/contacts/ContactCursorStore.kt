@@ -1,6 +1,8 @@
 package org.kysecurity.mail.contacts
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -8,7 +10,11 @@ import org.kysecurity.mail.ScopedValue
 import org.kysecurity.mail.data.AppDatabase
 import org.kysecurity.mail.data.ContactSyncStateEntity
 
-internal val Context.contactsDataStore by preferencesDataStore(name = "contacts_state")
+internal val Context.contactsDataStore by preferencesDataStore(
+    name = "contacts_state",
+    // Metadata only: a corrupt file reads as empty instead of blocking every wipe and unpair.
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 // Kept in Room so it commits with the outbox ack; the first read imports the legacy DataStore value.
 class ContactCursorStore(context: Context, private val db: AppDatabase) {

@@ -40,7 +40,8 @@ interface PushStore {
     suspend fun updateDelivery(mode: DeliveryMode, pullEndpoint: String?)
     suspend fun updateTransport(transport: PushTransport?)
     suspend fun updateUnifiedPushRegistration(endpoint: String?, p256dh: String?, auth: String?)
-    /** Stores a distributor endpoint captured in session [generation]; false if not stored. */
+    /** Stores a distributor endpoint captured in session [generation]; false, storing nothing,
+     *  once that session has ended. */
     suspend fun storeUnifiedPushEndpoint(endpoint: String, p256dh: String?, auth: String?, generation: Long): Boolean
     suspend fun updateSyncState(lastSyncAtEpochMs: Long?, syncError: String?)
     /** A push arrived over the transport; resets the heartbeat's quiet clock. */

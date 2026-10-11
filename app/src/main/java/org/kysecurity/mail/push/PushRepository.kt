@@ -1,6 +1,8 @@
 package org.kysecurity.mail.push
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
@@ -21,7 +23,11 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.IOException
 
-internal val Context.pushDataStore by preferencesDataStore(name = "push_state")
+internal val Context.pushDataStore by preferencesDataStore(
+    name = "push_state",
+    // Metadata only: a corrupt file reads as empty instead of blocking every wipe and unpair.
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 private val KEY_LAST_SYNC_AT = longPreferencesKey("sync_last_at")
 private val KEY_LAST_PUSH_AT = longPreferencesKey("push_last_received_at")
@@ -354,11 +360,13 @@ class PushRepository(
 
     /** Persisted so pairing and resyncs can send them; they only ever arrive via onNewEndpoint. Null clears. */
     override suspend fun updateUnifiedPushRegistration(endpoint: String?, p256dh: String?, auth: String?) {
-        context.pushDataStore.edit { prefs ->
-            if (endpoint.isNullOrBlank()) prefs.remove(KEY_UNIFIEDPUSH_ENDPOINT) else prefs[KEY_UNIFIEDPUSH_ENDPOINT] = endpoint
-            if (p256dh.isNullOrBlank()) prefs.remove(KEY_UNIFIEDPUSH_P256DH) else prefs[KEY_UNIFIEDPUSH_P256DH] = p256dh
-            if (auth.isNullOrBlank()) prefs.remove(KEY_UNIFIEDPUSH_AUTH) else prefs[KEY_UNIFIEDPUSH_AUTH] = auth
-        }
+        context.pushDataStore.edit { it.putUnifiedPush(endpoint, p256dh, auth) }
+    }
+
+    private fun MutablePreferences.putUnifiedPush(endpoint: String?, p256dh: String?, auth: String?) {
+        if (endpoint.isNullOrBlank()) remove(KEY_UNIFIEDPUSH_ENDPOINT) else this[KEY_UNIFIEDPUSH_ENDPOINT] = endpoint
+        if (p256dh.isNullOrBlank()) remove(KEY_UNIFIEDPUSH_P256DH) else this[KEY_UNIFIEDPUSH_P256DH] = p256dh
+        if (auth.isNullOrBlank()) remove(KEY_UNIFIEDPUSH_AUTH) else this[KEY_UNIFIEDPUSH_AUTH] = auth
     }
 
     override suspend fun storeUnifiedPushEndpoint(
@@ -367,8 +375,16 @@ class PushRepository(
         auth: String?,
         generation: Long,
     ): Boolean {
-        updateUnifiedPushRegistration(endpoint, p256dh, auth)
-        return true
+        var stored = false
+        // Checked inside the write: a purge or wipe advances the generation before its own
+        // clear, so this either lands before that clear or sees the session already over.
+        context.pushDataStore.edit { prefs ->
+            if (org.kysecurity.mail.ProcessState.isCurrent(generation)) {
+                prefs.putUnifiedPush(endpoint, p256dh, auth)
+                stored = true
+            }
+        }
+        return stored
     }
 
     /** The durable pull cursor for [subscriberId], scoped so a new subscriber starts clean. */

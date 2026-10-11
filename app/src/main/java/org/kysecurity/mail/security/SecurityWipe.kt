@@ -174,8 +174,12 @@ object SecurityWipe {
         step("datastores") {
             // Checked, like every other step: `push_state` holds 30 sender/subject pairs.
             // Through DataStore, not just the file: the process survives the relaunch.
-            val undeleted = dataStores(appContext)
-                .filterNot { (name, store) -> org.kysecurity.mail.clearAndDelete(appContext, name, store) }.keys
+            // Per store: one that fails must not stop the others from being cleared.
+            val undeleted = dataStores(appContext).filterNot { (name, store) ->
+                runCatching { org.kysecurity.mail.clearAndDelete(appContext, name, store) }
+                    .onFailure { android.util.Log.e(TAG, "Failed to clear datastore $name", it) }
+                    .getOrDefault(false)
+            }.keys
             if (undeleted.isNotEmpty()) {
                 throw IOException("Failed to delete datastores: $undeleted")
             }
