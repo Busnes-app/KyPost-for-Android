@@ -23,7 +23,9 @@ import androidx.core.graphics.ColorUtils
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.navigation.NavigationBarView
+import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import org.kysecurity.mail.mail.FolderInfo
@@ -85,6 +87,8 @@ class InboxActivity : LockedActivity() {
     private var searchResults: List<Email>? = null
     private val selectedIds = linkedSetOf<String>()
     private var selectionMode: ActionMode? = null
+    private val heldActions = PendingRowActions()
+    private var undoBar: Snackbar? = null
     private var newMailCount = 0
 
     /** The folder the list last painted from a refresh; only a repaint of it can bring new mail. */
@@ -199,6 +203,9 @@ class InboxActivity : LockedActivity() {
     override fun onStop() {
         super.onStop()
         if (redirectedToUnlock) return
+        heldActions.flush()
+        // Nothing is left for its Undo to take back.
+        undoBar?.dismiss()
         mainHandler.removeCallbacks(refreshRunnable)
         mainHandler.removeCallbacks(pendingMessagePollRunnable)
     }
@@ -541,10 +548,11 @@ class InboxActivity : LockedActivity() {
 
     /** Rows added above [previous]'s top row are scrolled to, or announced by the pill when the
      *  user has scrolled away. A pending saved-position restore wins over both. Search results
-     *  are not the folder, so they never count as new mail. */
+     *  are not the folder, so they never count as new mail. Rows held for Undo are hidden. */
     private fun renderFilteredEmails(previous: List<Email>? = null) {
-        val results = searchResults
-        val filtered = results ?: KeywordTabs.filterEmails(allEmails, selectedTab)
+        val held = heldActions.heldEmails().map { it.rowKey() }.toSet()
+        val results = searchResults?.filter { it.rowKey() !in held }
+        val filtered = results ?: KeywordTabs.filterEmails(allEmails, selectedTab).filter { it.rowKey() !in held }
         val added = if (results == null) previous?.let { newRowsAbove(it, filtered) } ?: 0 else 0
         val wasAtTop = !recyclerView.canScrollVertically(-1)
         adapter.updateEmails(filtered)
@@ -718,15 +726,46 @@ class InboxActivity : LockedActivity() {
     /** [submitRowAction] for several rows: one relay call per source folder. */
     private fun submitRowsAction(emails: List<Email>, label: String, action: MailAction, target: String? = null) {
         if (emails.isEmpty()) return
-        val ids = emails.map { it.id }.toSet()
-        allEmails = allEmails.filter { it.id !in ids }
-        searchResults = searchResults?.filter { it.id !in ids }
-        renderFilteredEmails()
-        emails.groupBy { it.sourceFolder() }.forEach { (folder, rows) ->
-            MailBackgroundExecutor.submitReporting(this, label) {
-                mailRepository.mutateAll(action, rows.map { it.id }, folder, target)
+        // Grouped now, not when the timer fires: by then the screen may show another folder.
+        val byFolder = emails.groupBy { it.sourceFolder() }
+        holdForUndo(emails, label) {
+            byFolder.forEach { (folder, rows) ->
+                MailBackgroundExecutor.submitReporting(this, label) {
+                    mailRepository.mutateAll(action, rows.map { it.id }, folder, target)
+                }
             }
         }
+    }
+
+    /** Hides [emails] at once and runs [send] when the Undo bar times out or is swiped away, or at
+     *  [onStop], unless Undo is tapped first. The server is not asked anything until then. */
+    private fun holdForUndo(emails: List<Email>, label: String, send: () -> Unit) {
+        heldActions.hold(emails) {
+            val keys = emails.map { it.rowKey() }.toSet()
+            allEmails = allEmails.filter { it.rowKey() !in keys }
+            searchResults = searchResults?.filter { it.rowKey() !in keys }
+            renderFilteredEmails()
+            send()
+        }
+        renderFilteredEmails()
+        // One bar for everything held: the new bar replaces the last, and its Undo covers both.
+        val rows = heldActions.heldEmails().size
+        val message = if (heldActions.heldCount() == 1) {
+            resources.getQuantityString(R.plurals.undo_message, rows, label, rows)
+        } else {
+            resources.getQuantityString(R.plurals.undo_message_several, rows, rows)
+        }
+        undoBar = Snackbar.make(recyclerView, message, UNDO_WINDOW_MS.toInt())
+            .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
+            .setAction(R.string.undo) {
+                if (heldActions.undoAll()) renderFilteredEmails()
+            }
+            .addCallback(object : Snackbar.Callback() {
+                override fun onDismissed(transientBottomBar: Snackbar?, event: Int) {
+                    if (commitsOnDismiss(event)) heldActions.flush()
+                }
+            })
+            .also { it.show() }
     }
 
     private fun showFolderPickerPopup(anchor: View) {
@@ -921,8 +960,8 @@ class InboxActivity : LockedActivity() {
         itemTouchHelper.attachToRecyclerView(recyclerView)
     }
 
-    /** Drops the row now and lets the IMAP call finish on its own: waiting for the network round
-     *  trip before updating the list is what made swipes feel slow.
+    /** Hides the row now and lets the IMAP call finish on its own once the undo window closes:
+     *  waiting for the network round trip before updating the list is what made swipes feel slow.
      *
      *  [sourceFolder] is read HERE rather than inside the closure. The worker runs after the swipe
      *  returns, and by then the screen — and [currentFolder] with it — may be showing a different
@@ -933,15 +972,17 @@ class InboxActivity : LockedActivity() {
         mutate: (id: String, folder: String) -> MailOutcome<Unit>,
     ) {
         val sourceFolder = email.sourceFolder()
-        allEmails = allEmails.filter { it.id != email.id }
-        searchResults = searchResults?.filter { it.id != email.id }
-        renderFilteredEmails()
-        MailBackgroundExecutor.submitReporting(this, label) {
-            rowActionObserverForTest?.invoke(email.id, sourceFolder)
-            // [mutate] takes the folder as an argument: it has no way to reach for currentFolder.
-            mutate(email.id, sourceFolder)
+        holdForUndo(listOf(email), label) {
+            MailBackgroundExecutor.submitReporting(this, label) {
+                rowActionObserverForTest?.invoke(email.id, sourceFolder)
+                // [mutate] takes the folder as an argument: it has no way to reach for currentFolder.
+                mutate(email.id, sourceFolder)
+            }
         }
     }
+
+    /** An id names a message only within its folder. */
+    private fun Email.rowKey(): Pair<String, String> = sourceFolder() to id
 
     @androidx.annotation.VisibleForTesting
     internal fun setFolderForTest(folder: String, tab: String) {
@@ -1021,6 +1062,7 @@ class InboxActivity : LockedActivity() {
         private const val PENDING_MESSAGE_TIMEOUT_MS = 30_000L
         private const val ARCHIVE_PARENT_FOLDER = "Archive"
         private const val MENU_SEARCH = 1
+        private const val UNDO_WINDOW_MS = 5_000L
         private const val MENU_BULK_ARCHIVE = 10
         private const val MENU_BULK_MOVE = 11
         private const val MENU_BULK_JUNK = 12
