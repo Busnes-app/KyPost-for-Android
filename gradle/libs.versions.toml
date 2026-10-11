@@ -1,9 +1,11 @@
-# DEFERRED BUMPS. Five entries below are 3+ years stale and are NOT security fixes, so they were
+# DEFERRED BUMPS. Three entries below are 3+ years stale and are NOT security fixes, so they were
 # deliberately kept out of the security pass rather than mixed into it:
 #
-#   androidx-cardview  1.0.0  (2018)   androidx-appcompat  1.6.1  (Feb 2023)
-#   material          1.10.0  (2023)   androidx-core-ktx  1.10.1  (May 2023)
+#   androidx-cardview  1.0.0  (2018)   androidx-core-ktx  1.10.1  (May 2023)
 #   biometric          1.1.0  (2021)   <- see its own note below; this one is security-relevant
+#
+# core-ktx 1.19.1 and okhttp 5.5.0 require compileSdk 37 (checkAarMetadata); both stay put
+# until compileSdk moves in its own change.
 #
 # Bumping any of them means regenerating gradle/verification-metadata.xml, which is the file CI
 # watches most closely. Do it in its own commit:
@@ -15,30 +17,30 @@
 
 [versions]
 agp = "9.4.1"
-kotlin = "2.2.20"
+kotlin = "2.4.20"
 coreKtx = "1.10.1"
 activityKtx = "1.10.1"
 junit = "4.13.2"
 junitVersion = "1.3.0"
 espressoCore = "3.7.0"
 testCore = "1.7.0"
-appcompat = "1.6.1"
-material = "1.10.0"
+appcompat = "1.8.0"
+material = "1.14.0"
 recyclerview = "1.4.0"
 cardview = "1.0.0"
-swiperefreshlayout = "1.1.0"
-angusMail = "2.0.4"
+swiperefreshlayout = "1.2.0"
+angusMail = "2.0.5"
 lifecycleRuntimeKtx = "2.9.4"
 lifecycleViewModelKtx = "2.9.4"
-coroutinesAndroid = "1.10.2"
+coroutinesAndroid = "1.11.0"
 datastorePreferences = "1.1.7"
 okhttp = "5.2.1"
-serializationJson = "1.9.0"
+serializationJson = "1.11.0"
 firebaseBom = "34.2.0"
-kotlinxCoroutinesPlayServices = "1.10.2"
+kotlinxCoroutinesPlayServices = "1.11.0"
 playServicesCodeScanner = "16.1.0"
 playBilling = "9.1.0"
-googleServices = "4.4.4"
+googleServices = "4.5.0"
 securityCrypto = "1.1.0"
 # Newest stable, and abandoned at this branch. Audited 2026-08-21; staying on 1.1.0 deliberately.
 #
@@ -70,19 +72,21 @@ securityCrypto = "1.1.0"
 # The 1.2.0-alpha line buys AndroidX Credential Manager interop we do not use. Revisit only if a
 # defect above stops being workable-around, or if a stable 1.2.0 ships.
 biometric = "1.1.0"
-workRuntime = "2.10.1"
+workRuntime = "2.12.0"
 lifecycleProcess = "2.9.4"
-room = "2.8.4"
-sqlcipher = "4.10.0"
-ksp = "2.3.6"
-bouncyCastlePgp = "1.85"
+room = "2.8.5"
+sqlcipher = "4.19.1"
+ksp = "2.3.12"
+bouncyCastlePgp = "1.86"
+# 1.23.2 makes QuotedHtmlSanitizer output non-idempotent on an mXSS probe
+# (Run4SanitizerMxssProbeTest.everyOutputIsStableUnderReSanitization). Held until that passes.
 jsoup = "1.23.1"
-zxingCore = "3.5.3"
+zxingCore = "3.5.4"
 zxingEmbedded = "4.3.0"
 richHtmlEditor = "1.1.0"
-unifiedPush = "3.3.3"
+unifiedPush = "3.3.5"
 window = "1.5.1"
-startupRuntime = "1.1.1"
+startupRuntime = "1.2.0"
 
 [libraries]
 jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
