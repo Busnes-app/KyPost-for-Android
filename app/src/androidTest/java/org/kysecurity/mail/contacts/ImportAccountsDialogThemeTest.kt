@@ -2,7 +2,6 @@ package org.kysecurity.mail.contacts
 
 import android.content.DialogInterface
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.widget.CheckBox
@@ -17,6 +16,7 @@ import org.kysecurity.mail.security.showSecurely
 import org.kysecurity.mail.themePaletteFor
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -48,16 +48,16 @@ class ImportAccountsDialogThemeTest {
         val palette = themePaletteFor(THEME)
         ActivityScenario.launch(ContactsListActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                val dialog = activity.importAccountsDialog(listOf(DeviceAccount(null, null)), mutableSetOf()) {}.showSecurely()
+                val dialog = activity.importAccountsDialog(listOf(DeviceAccount(null, null)), mutableSetOf()) {}
+                    .also { if (!it.isShowing) it.showSecurely() }
+                val native = androidx.appcompat.app.AlertDialog.Builder(activity).create().also { it.show() }
                 try {
                     val decor = dialog.window!!.decorView
-                    assertEquals(
-                        "surface",
-                        Color.parseColor(palette.panel),
-                        (decor.background as? GradientDrawable)?.color?.defaultColor,
-                    )
+                    // STYLE_GUIDE §3: the native background, shape and insets kept, recoloured.
+                    assertEquals("native background", native.window!!.decorView.background::class, decor.background::class)
+                    assertNotNull("recoloured surface", decor.background.colorFilter)
                     val box = decor.descendants().filterIsInstance<CheckBox>().single()
-                    assertEquals("account text", Color.parseColor(palette.ink), box.currentTextColor)
+                    assertEquals("account text", Color.parseColor(palette.inkStrong), box.currentTextColor)
                     assertEquals(
                         "save button",
                         Color.parseColor(palette.accent),
@@ -65,6 +65,7 @@ class ImportAccountsDialogThemeTest {
                     )
                 } finally {
                     dialog.dismiss()
+                    native.dismiss()
                 }
             }
         }

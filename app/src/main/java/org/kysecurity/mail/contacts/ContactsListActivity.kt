@@ -278,10 +278,16 @@ class ContactsListActivity : LockedActivity() {
 
     /** Per-account consent: importing uploads those contacts to the server, so nothing is checked
      *  until the user checks it. */
-    private fun showImportAccounts() {
+    /** The accounts import can choose from; replaced in tests to stand in for the provider. */
+    @androidx.annotation.VisibleForTesting
+    internal var foreignAccounts: suspend () -> List<org.kysecurity.mail.contacts.device.DeviceAccount> =
+        { DeviceContactsRuntime.graph(this).repository.foreignContactAccounts() }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun showImportAccounts() {
         val graph = DeviceContactsRuntime.graph(this)
         lifecycleScope.launch {
-            val accounts = graph.repository.foreignContactAccounts()
+            val accounts = foreignAccounts()
             if (accounts.isEmpty()) {
                 Toast.makeText(this@ContactsListActivity, R.string.contacts_import_none, Toast.LENGTH_LONG).show()
                 return@launch
