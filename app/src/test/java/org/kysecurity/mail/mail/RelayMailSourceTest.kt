@@ -1296,4 +1296,68 @@ class RelayMailSourceTest {
 
         assertEquals("unsupported action", (outcome as MailOutcome.BadRequest).message)
     }
+
+    // --- Preview snippet (KyPost-Server #351) ----------------------------------------------------
+
+    @Test
+    fun inboxRequest_asksForPreviews() {
+        val (source, calls) = sourceAnswering("""{"tabs": [], "byTab": {}, "cursor": "c1", "delta": false}""")
+
+        source.fetchInbox("INBOX", 50)
+
+        assertEquals("1", calls.requests.single().url.queryParameter("preview"))
+    }
+
+    @Test
+    fun preview_isTheServersSnippetBoundedAndNeverTheBody() {
+        val long = "x".repeat(500)
+        val (source, _) = sourceAnswering(
+            """{"tabs": ["T"], "byTab": {"T": [
+                {"messageId": "1", "subject": "s", "preview": "Lunch at noon?"},
+                {"messageId": "2", "subject": "s", "preview": "$long"},
+                {"messageId": "3", "subject": "s", "body": "<b>legacy body</b>"}
+            ]}, "cursor": "c1", "delta": false}""",
+        )
+
+        val byId = (source.fetchInbox("INBOX", 50) as MailOutcome.Success).value.messages.associateBy { it.id }
+
+        assertEquals("Lunch at noon?", byId.getValue("1").preview)
+        assertEquals("bounded at the most a conforming preview can be", 400, byId.getValue("2").preview.length)
+        assertEquals("a body is not a preview", "", byId.getValue("3").preview)
+    }
+
+    /** Encrypted mail must never leave a snippet in Room, whatever the server sends. */
+    @Test
+    fun preview_isDroppedForEncryptedMail() {
+        val (source, _) = sourceAnswering(
+            """{"tabs": ["T"], "byTab": {"T": [
+                {"messageId": "1", "subject": "s", "pgpEncrypted": true, "preview": "decrypted words"}
+            ]}, "cursor": "c1", "delta": false}""",
+        )
+
+        val email = (source.fetchInbox("INBOX", 50) as MailOutcome.Success).value.messages.single()
+
+        assertEquals("", email.preview)
+    }
+
+    /** A right-to-left override in a snippet can make it display something it does not say. */
+    @Test
+    fun preview_dropsFormatCharacters() {
+        assertEquals("abc", previewText("a\u202Eb\u2066c\u200D"))
+    }
+
+    /** U+E0001 (LANGUAGE TAG) is a format character outside the BMP: classifying its two
+     *  surrogates one at a time let it through. */
+    @Test
+    fun preview_dropsSupplementaryFormatCharacters() {
+        assertEquals("ab", previewText("a\uDB40\uDC01b"))
+    }
+
+    /** The bound never cuts a code point in half. */
+    @Test
+    fun preview_boundNeverSplitsASurrogatePair() {
+        val bounded = previewText("x".repeat(399) + "\uD83D\uDE00")
+
+        assertEquals("x".repeat(399), bounded)
+    }
 }

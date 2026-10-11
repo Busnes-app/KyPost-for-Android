@@ -35,6 +35,9 @@ data class RelayEmailDto(
     // empty one, so callers know not to overwrite/clear a locally cached body.
     val body: String? = null,
     val bodyMode: String = "",
+    /** One line of plain text from `preview=1` (KyPost-Server #351). Absent where the server holds
+     *  no body for the row: delta "updated" entries, `before=` pages, encrypted mail. */
+    val preview: String? = null,
     val label: String = "",
     // `omitempty` server-side, so an absent key means the message has no keywords.
     val keywords: List<String> = emptyList(),

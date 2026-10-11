@@ -81,6 +81,7 @@ class RelayMailSource(
             // since=0 window from 151.4 KiB to 571 B, a five-new-message poll from 15.9 KiB to
             // 295 B, and ~2.6 MiB off the decoded peak (see MemoryBudget).
             .addQueryParameter("bodies", "0")
+            .addQueryParameter("preview", "1")
             .build()
         val request = Request.Builder().url(url).get()
             .authed(pairing)
@@ -488,6 +489,18 @@ class RelayMailSource(
     }
 }
 
+/** The server sends at most 200 code points (#351), at most 400 UTF-16 units, so this never cuts a
+ *  conforming preview, or a surrogate pair in one. */
+private const val MAX_PREVIEW_CHARS = 400
+
+/** Format characters (bidi overrides, zero-width, tags) dropped: they can reorder what the row
+ *  shows. Whole code points, so neither the filter nor the bound sees half a surrogate pair. */
+internal fun previewText(raw: String?): String = buildString {
+    raw.orEmpty().codePoints()
+        .filter { Character.getType(it) != Character.FORMAT.toInt() }
+        .forEach { if (length + Character.charCount(it) <= MAX_PREVIEW_CHARS) appendCodePoint(it) }
+}
+
 /** Same order of magnitude as the outbound cap in `ComposeActivity` and the server's own
  *  `MaxInboundMessageBytes`, so no legitimate attachment is refused. */
 private const val MAX_ATTACHMENT_DOWNLOAD_BYTES = 25L * 1024 * 1024
@@ -595,7 +608,9 @@ private fun RelayEmailDto.toUiEmail(tab: String): Email {
         id = messageId,
         subject = subject,
         sender = sender,
-        preview = body.orEmpty().take(140),
+        // Never for encrypted mail: enrollment's purge of server-decrypted text clears previews only
+        // beside a cached body, and a snippet of a client-protected message is not this app's to keep.
+        preview = if (pgpEncrypted) "" else previewText(preview),
         // Union, not a replacement: the label drives KeywordTabs, the wire list carries $Phishing.
         keywords = (keywords + emailLabel).filter { it.isNotBlank() }.toSet(),
         sentTo = sentTo,

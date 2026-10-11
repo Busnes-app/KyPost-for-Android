@@ -377,7 +377,6 @@ class InboxActivity : LockedActivity() {
         intent.putExtra("email_id", email.id)
         intent.putExtra("email_subject", email.subject)
         intent.putExtra("email_sender", email.sender)
-        intent.putExtra("email_preview", email.preview)
         intent.putExtra("email_body_mode", email.bodyMode)
         intent.putExtra("email_folder", email.sourceFolder())
         intent.putExtra("email_has_attachments", email.hasAttachments)

@@ -72,7 +72,7 @@ private class FakeEmailDao : EmailDao {
     /** Mirrors the real query's predicate. The authority on the SQL itself is
      *  `EmailDaoClearDecryptedTest`, which runs it against a real Room database. */
     override fun clearServerDecryptedBodies(): Int {
-        val hits = rows.values.filter { it.pgpEncrypted && !it.body.isNullOrEmpty() }
+        val hits = rows.values.filter { it.pgpEncrypted && (!it.body.isNullOrEmpty() || it.preview.isNotEmpty()) }
         hits.forEach { rows[key(it.messageId, it.folder)] = it.copy(body = "", preview = "") }
         return hits.size
     }
@@ -1113,5 +1113,44 @@ class MailRepositoryTest {
 
         assertTrue(repository(dao, source).markUnread("42", "INBOX") is MailOutcome.ActionRejected)
         assertEquals("read", dao.getById("42", "INBOX")?.status)
+    }
+
+    // --- Preview snippet (KyPost-Server #351) ----------------------------------------------------
+
+    /** "updated" rows carry no preview; the stored one stays, except on encrypted mail. */
+    @Test
+    fun anUpdatedRowKeepsItsPreviewUnlessEncrypted() {
+        val dao = FakeEmailDao()
+        dao.put(row("1", "INBOX").copy(preview = "stored snippet"))
+        dao.put(row("2", "INBOX").copy(preview = "stored snippet"))
+
+        reconcileFetchResult(
+            dao, "INBOX", "relay",
+            MailFetchResult(
+                tabs = emptyList(),
+                messages = listOf(
+                    email("1", body = null, status = "read").copy(preview = ""),
+                    email("2", body = null, status = "read").copy(preview = "", pgpEncrypted = true),
+                ),
+                isDelta = true,
+                updatedMessageIds = setOf("1", "2"),
+            ),
+        )
+
+        assertEquals("stored snippet", dao.getById("1", "INBOX")?.preview)
+        assertEquals("", dao.getById("2", "INBOX")?.preview)
+    }
+
+    @Test
+    fun aNewPreviewReplacesTheStoredOne() {
+        val dao = FakeEmailDao()
+        dao.put(row("1", "INBOX").copy(preview = "old"))
+
+        reconcileFetchResult(
+            dao, "INBOX", "relay",
+            MailFetchResult(tabs = emptyList(), messages = listOf(email("1", body = null).copy(preview = "new")), isDelta = false),
+        )
+
+        assertEquals("new", dao.getById("1", "INBOX")?.preview)
     }
 }
