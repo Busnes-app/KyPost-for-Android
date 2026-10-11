@@ -201,6 +201,7 @@ class PushRepository(
             if (db != null) {
                 db.emailDao().clearAll()
                 db.contactDao().clearAll()
+                db.recipientPinDao().clearAll()
                 db.pendingContactChangeDao().clearAll()
                 db.groupDao().clearAll()
                 db.groupLinkDao().clearAll()
@@ -225,6 +226,9 @@ class PushRepository(
         }
         step("keywordSettings") {
             context.deleteSharedPreferences(org.kysecurity.mail.KeywordSettings.PREFS_NAME)
+        }
+        step("mailSignature") {
+            context.deleteSharedPreferences(org.kysecurity.mail.MailSignature.PREFS_NAME)
         }
         // Scoping makes a stale value unreadable, not absent — these files must actually be deleted.
         // contacts_state is legacy: kept in this list so older installs do not keep the old file.

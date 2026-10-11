@@ -541,8 +541,16 @@ Owns production Android app code and resources.
   `Color.rgb`, so alpha in `line` survives as a fully opaque near-black in
   `applyEmptyStateBackground`. `ThemePaletteTableTest` holds both rules.
 - `SettingsActivity` is only a hub for existing settings surfaces: Security, Themes, Keywords,
-  Pairing, PGP Key, and About. Keep settings logic in the destination screens rather than
-  duplicating it in the hub.
+  Pairing, PGP Key, Signature, and About. Keep settings logic in the destination screens rather
+  than duplicating it in the hub; Signature's destination is `showSignatureDialog`.
+- The signature (`MailSignature.kt`) is plain text only, at most 1000 characters, in its own
+  private preferences file. It is account data: the pairing purge deletes the file, and so does
+  a security wipe. It is a user-typed setting, not mail metadata, so Hostile Location Protection
+  does not suppress it. Compose escapes it (`plainTextToHtml`) and puts it after an RFC 3676
+  `-- ` delimiter, above any quote (`withSignature`). It goes on new messages, replies and
+  forwards, but never above text another app shared in, which is the message itself. A
+  signature-only body counts as content, so Back on an untouched composer prompts once.
+  `ComposeSignatureTest` covers the escaping and the share exclusion.
 - Primary navigation uses `bottom_nav_menu.xml` for both phone bottom navigation and the `w600dp`
   rail on Inbox, Compose, Contacts, and Settings. The item order is Inbox, Compose, Lock, Contacts,
   Settings; Lock is an action that either locks immediately or opens Security when app lock is
@@ -568,8 +576,57 @@ Owns production Android app code and resources.
   unknown uid as a create under that uid, so a push replayed after a lost reply, or a create
   followed by an edit or delete in the same outbox, lands on one contact. That uid is permanent,
   so nothing remaps it after sync. `ContactCreateIdempotencyTest` pins all three cases.
+  The outbox holds one row per uid (`coalescedChange`): an update to an unsynced create stays a
+  create with the new payload; a delete always replaces whatever was queued and is still sent,
+  because the create may already be on the server from a push whose reply is in flight. Rows are
+  replaced with new ids, never edited in place — a running sync acks by the ids it read, and
+  in-place edits would be acked unsent. `ContactOutboxCoalesceTest` covers both races.
+  Pushes go in batches under the server's caps (`pushBatches`: 500 changes, 900 KiB of change
+  JSON against its 1 MiB body limit), each acked and advancing the cursor on its own. 400/413 is
+  "this request is too big": the batch is halved, and a single change still refused stays queued
+  while the rest go out. Once a reply says `tooOld`, the remaining batches keep the stale cursor
+  (cheap `tooOld` replies with no lists) and one `since=0` pull ends the sync. So does any sync
+  that starts at cursor zero, pushes queued or not: a `tooOld` sync that failed before its pull
+  leaves only the reset cursor to say a snapshot is owed. Until that pull commits, pushes ack their
+  changes but leave the stored cursor at zero, so a failed pull is retried next sync.
+  `ContactPushBatchingTest` pins all five.
+  A `since=0` pull is a snapshot: after tombstone GC the server can no longer list what it
+  deleted, so `applyDelta(snapshot = true)` removes every Room contact absent from it except
+  uids still in the outbox. `ContactFullResyncTest` covers both.
+  **Per address, a key verified on this device is authoritative; a synced key never is.** The PGP
+  QR flow's two saves (`queueCreate`/`queueUpdate` with `verifiedInPerson`) are the only writers of
+  `recipient_pins` after `MIGRATION_12_13`, and each replaces the pins for that contact's addresses
+  — re-scanning is how a pin changes. The migration itself seeds the table with exactly what the
+  lookup before it trusted (`legacyPins`: every contact key per address, with its confirmation), so
+  an upgrade never turns a trusted key into an untrusted one. Pins are keyed on the fingerprint of
+  their own bytes, and a confirmation stays only with a key its stored fingerprint names, bytes
+  included when rows merge; `authoritativeKeys` re-checks that on every read. `LegacyKeyMigrationTest`. `RoomLocalSignerKeys` (`authoritativeKeys`) returns ONLY the pins
+  for a pinned address, so a contact key the server delivers, on a replacement contact or as an
+  update, cannot satisfy `ClientEncryptedSender.applyPins` and the send is `KeyChanged`. Sync never
+  writes the table, so removing or rewriting the contact does not touch the pin; a wipe (database
+  file) or unpair (`purgeAccountScopedData`) clears it. An address with no pin keeps the earlier
+  behaviour: the contact's key, whatever its origin. Server-side provenance (`pgpKeySource`,
+  `pgpKeyVerified`) is not read: it is the relay's claim. `RecipientPinRetentionTest`.
+  The one thing a synced copy can do to a pin is revoke it, recorded when a contact is saved
+  (sync or local), never by a lookup: `withVerifiedRevocation` takes, from a
+  synced copy of the SAME primary key, revocations of that primary or of any subkey the pin holds
+  (matched by fingerprint), each verified against the pinned primary, adds only those signatures
+  to the pin and saves it. Encryption already skips a revoked subkey of the pinned bytes. A
+  revoked pin is still the address's pin — no fallback — so the reader gives `KEY_CHANGED` and the
+  sender `RecipientKeyRevoked`, before the vault opens. That outcome is for pins only
+  (`LocalSignerKey.pinned`), and `isPrimaryRevoked` verifies the revocation rather than trusting a
+  packet: the synced fallback key and pins seeded by `MIGRATION_12_13` hold bytes no one checked,
+  so a revocation packet already on a v12 key counts only if it verifies. Seeded pins take synced
+  revocations like any other pin: pins are matched by address alone. `PinnedKeyRevocationTest`,
+  `PinnedKeyRevocationMergeTest`, `RevocationTrustTest`,
+  `LegacyKeyMigrationTest.aBackfilledPin_takesASyncedRevocationOfItsKey`.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
+  The contacts list shows a sync banner from `ContactSyncRepository.observeSyncStatus`: "N changes
+  waiting" counts contacts (not outbox rows) with queued changes; "Sync stuck" with Retry and the
+  latest failure's first line appears once a queued change is over an hour old or
+  `STUCK_AFTER_FAILURES` syncs in a row failed. `ContactSyncHealth` keeps that failure count in
+  memory only, so a restart forgets it; the outbox age does not. `NotPaired` is not a failure.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
   is DATA2, and the free-text name belongs in the paired `LABEL` (DATA3) with `TYPE_CUSTOM`;
   `DeviceContactFieldCoding` owns both directions of that mapping for every field kind. A label
@@ -578,6 +635,21 @@ Owns production Android app code and resources.
   phones, addresses) through `DeviceContactUpdatePlan`, and advances the link's
   `deviceUpdatedAtEpochMs` only when the batch actually landed — stamping it for a write that never
   happened tells the next merge the device is already current.
+- **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
+  `applyBatch` as the insert. `device_contact_links` is a cache of that: `adoptLostLinks` runs
+  before the pull and relinks every row of our account by SOURCE_ID, tombstones included and
+  whether or not the uid is still in Room, so a death between insert and link write, or cleared
+  app data, rebuilds the link instead of duplicating the contact. A phone edit made while the link
+  was gone is then pulled, not overwritten; a phone delete is queued and purged, not replaced; a
+  row whose contact left Room is removed (`DeviceContactDeleteTest`). The push repeats the
+  live-row lookup before any create. Linked rows from before SOURCE_ID are backfilled.
+  `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_13_14` indexes the link table's
+  `rawContactId`.
+- **Deletes reach the phone through Room.** `syncAll`'s `removeDeletedContacts` stage removes the
+  raw contact of every link whose Room contact is gone, so server tombstones, snapshot prunes and
+  local deletes share one path. A device-side delete is queued and then hard-deleted as the sync
+  adapter: CP2 keeps `DELETED=1` rows until their adapter purges them. `deleteDeviceRawContact`
+  drops the link only after CP2 confirms, so a failed delete is retried. `DeviceContactDeleteTest`.
 - **A CP2 row that is deleted and reinserted destroys every column the reinsert does not re-emit.**
   `Organization.TITLE` and `DEPARTMENT` therefore both fall back to `DeviceRawContactSnapshot` —
   nothing reads a device-typed value of either into Room, so the device's own is what keeps it, and
@@ -674,7 +746,7 @@ Owns production Android app code and resources.
 - The email `bodyMode` column is additive and requires `MIGRATION_10_11` plus a migration test when
   the schema contract changes again. `MIGRATION_11_12` re-keys `emails` on (folder, messageId);
   SQLite cannot alter a primary key, so it rebuilds the table and copies rows rather than dropping
-  the cache. `MIGRATION_12_13` adds `inWindow` (default 1: every earlier row came from the window). `EmailDaoFolderScopeTest` is the authority on that key against real SQL — the JVM fake
+  the cache. `MIGRATION_14_15` adds `inWindow` (default 1: every earlier row came from the window). `EmailDaoFolderScopeTest` is the authority on that key against real SQL — the JVM fake
   in `MailRepositoryTest` mirrors it, and a fake keyed on the id alone reproduces the very bug the
   key exists to prevent.
 - The mail failure contract has JVM regression tests in `MailRepositoryTest`: a failed reconcile

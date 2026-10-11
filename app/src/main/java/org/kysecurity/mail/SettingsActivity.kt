@@ -38,6 +38,9 @@ class SettingsActivity : LockedActivity() {
         findViewById<Button>(R.id.settingsPgp).setOnClickListener {
             startActivity(Intent(this, PgpKeyActivity::class.java))
         }
+        findViewById<Button>(R.id.settingsSignature).setOnClickListener {
+            showSignatureDialog(this)
+        }
         findViewById<Button>(R.id.settingsAbout).setOnClickListener {
             showAboutDialog(this)
         }
@@ -76,6 +79,7 @@ class SettingsActivity : LockedActivity() {
             R.id.settingsKeywords,
             R.id.settingsPairing,
             R.id.settingsPgp,
+            R.id.settingsSignature,
             R.id.settingsAbout,
             R.id.settingsPrivacy,
             R.id.settingsSupport,
@@ -86,6 +90,7 @@ class SettingsActivity : LockedActivity() {
             R.id.settingsKeywordsBody,
             R.id.settingsPairingBody,
             R.id.settingsPgpBody,
+            R.id.settingsSignatureBody,
             R.id.settingsAboutBody,
             R.id.settingsPrivacyBody,
             R.id.settingsSupportBody,

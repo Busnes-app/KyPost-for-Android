@@ -269,7 +269,13 @@ class ComposeActivity : LockedActivity() {
             ForwardAttachmentHandoff.clear()
             Toast.makeText(this, R.string.compose_draft_restored, Toast.LENGTH_SHORT).show()
         } else {
-            val (to, subject, bodyHtml) = parseComposeIntent(intent, ::plainTextToHtml)
+            val (to, subject, prefilledHtml) = parseComposeIntent(intent, ::plainTextToHtml)
+            // Not above text another app asked to send: that is the message, not a quote.
+            val bodyHtml = if (intent.isExternalComposeIntent() && prefilledHtml.isNotBlank()) {
+                prefilledHtml
+            } else {
+                withSignature(prefilledHtml, plainTextToHtml(MailSignature.read(this)))
+            }
             subjectField.setText(subject)
             toInput.setInitialRecipients(to)
             mirroredBodyHtml = bodyHtml
@@ -723,6 +729,8 @@ class ComposeActivity : LockedActivity() {
         is ClientSendOutcome.NoAccountAddress -> getString(R.string.compose_pgp_no_account_address)
         is ClientSendOutcome.TooManyRecipients -> outcome.message
         is ClientSendOutcome.ResolveFailed -> getString(R.string.compose_pgp_resolve_failed, outcome.message)
+        is ClientSendOutcome.RecipientKeyRevoked ->
+            getString(R.string.compose_pgp_key_revoked, outcome.addresses.joinToString(", "))
         is ClientSendOutcome.EncryptFailed -> getString(R.string.compose_pgp_encrypt_failed, outcome.message)
         is ClientSendOutcome.SendFailed -> outcome.outcome.userFacingMessage().orEmpty()
         else -> getString(R.string.compose_pgp_encrypt_failed, "")

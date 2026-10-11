@@ -39,6 +39,10 @@
     <string name="settings_keywords_body">Choose which keyword tabs are visible</string>
     <string name="settings_pairing_body">Push pairing and notification transport</string>
     <string name="settings_pgp_body">Show or scan PGP key QR codes</string>
+    <string name="settings_signature">Signature</string>
+    <string name="settings_signature_body">Added to new messages, replies and forwards, above any quoted text</string>
+    <string name="signature_hint">Your name, title, phone…</string>
+    <string name="save">Save</string>
     <string name="settings_about_body">Version and license</string>
     <string name="settings_privacy">Privacy policy</string>
     <string name="settings_privacy_body">Read how KyPost handles data</string>
@@ -252,6 +256,7 @@
     <string name="compose_pgp_no_key_webmail">Continue in webmail</string>
     <!-- A broken TOFU pin, deliberately louder and never merged into the missing-key copy: this is
          what a key rotation looks like AND what an interception attempt looks like. -->
+    <string name="compose_pgp_key_revoked">The key you verified for %1$s has been revoked by its owner. Nothing was sent. Scan their QR code to verify their new key, then send again.</string>
     <string name="compose_pgp_key_changed_title">A recipient\'s key has changed</string>
     <string name="compose_pgp_key_changed_body">The PGP key for %1$s has changed since you last saved it. Nothing was sent.\n\nThat is what a key rotation looks like — and also what an interception attempt looks like. Check the new fingerprint with them another way, then update their contact.</string>
     <string name="compose_pgp_not_enrolled">This device no longer holds your PGP key. Set it up again from the PGP screen to send encrypted mail from here.</string>
@@ -343,6 +348,17 @@
     <string name="contacts_refresh">Sync now</string>
     <string name="contacts_sync_success">Contacts synced</string>
     <string name="contacts_sync_unauthorized">Device pairing expired or invalid — re-pair this device in Settings</string>
+    <plurals name="contacts_sync_waiting">
+        <item quantity="one">%d change waiting to sync</item>
+        <item quantity="other">%d changes waiting to sync</item>
+    </plurals>
+    <string name="contacts_sync_stuck">Sync stuck</string>
+    <plurals name="contacts_sync_stuck_waiting">
+        <item quantity="one">Sync stuck: %d change waiting</item>
+        <item quantity="other">Sync stuck: %d changes waiting</item>
+    </plurals>
+    <string name="contacts_sync_stuck_no_reason">Not sent for over an hour.</string>
+    <string name="contacts_sync_retry">Retry</string>
     <string name="contacts_dedupe">Find &amp; merge duplicates</string>
     <plurals name="contacts_dedupe_result">
         <item quantity="one">Merged %d duplicate contact</item>
