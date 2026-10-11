@@ -6,7 +6,7 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "pending_contact_changes")
 data class PendingContactChangeEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    /** Client-side temp id for a not-yet-synced create; equal to the real uid for update/delete. */
+    /** The contact's uid. A create mints it locally and the server keeps it. */
     val localUid: String,
     val rev: Long = 0,
     /** "create" | "update" | "delete" */

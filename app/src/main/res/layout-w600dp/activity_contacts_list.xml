@@ -27,6 +27,8 @@
             android:paddingTop="16dp"
             android:paddingEnd="24dp">
 
+            <include layout="@layout/contacts_sync_banner" />
+
             <TextView
                 android:id="@+id/contactsEmptyText"
                 android:layout_width="match_parent"

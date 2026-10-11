@@ -24,12 +24,14 @@ class ContactOutboxEncodingTest {
             createdAtEpochMs = 0L,
         )
 
+    /** The server stores an unknown uid as a create, so a replayed create lands on the same
+     *  contact instead of minting a second one. Rows queued by older builds carry a blank payload uid. */
     @Test
-    fun create_blanksUidSoTheServerMintsOne() {
+    fun create_sendsTheLocalUid() {
         val payload = json.encodeToString(ContactDto.serializer(), ContactDto(uid = "", fn = "Jane"))
         val dto = row(ContactSyncRepository.CHANGE_CREATE, payload).toWireDtoOrNull(json)
 
-        assertEquals("", dto?.uid)
+        assertEquals("uid-1", dto?.uid)
         assertEquals("Jane", dto?.fn)
     }
 
@@ -66,6 +68,26 @@ class ContactOutboxEncodingTest {
         val dto = row(ContactSyncRepository.CHANGE_UPDATE, """{"fn":""").toWireDtoOrNull(json)
 
         assertNull("a truncated payload must not encode as a blank contact", dto)
+    }
+
+    @Test
+    fun coalesce_updateAfterUnsyncedCreate_staysACreate() {
+        val create = row(ContactSyncRepository.CHANGE_CREATE, "{}")
+        val update = row(ContactSyncRepository.CHANGE_UPDATE, """{"fn":"New"}""")
+
+        val merged = coalescedChange(listOf(create), update)
+
+        assertEquals(ContactSyncRepository.CHANGE_CREATE, merged.changeType)
+        assertEquals("""{"fn":"New"}""", merged.payloadJson)
+    }
+
+    /** The create may already be on the server from a push whose reply is still in flight. */
+    @Test
+    fun coalesce_deleteAfterUnsyncedCreate_isStillSent() {
+        val create = row(ContactSyncRepository.CHANGE_CREATE, "{}")
+        val delete = row(ContactSyncRepository.CHANGE_DELETE, "")
+
+        assertEquals(ContactSyncRepository.CHANGE_DELETE, coalescedChange(listOf(create), delete).changeType)
     }
 
     @Test
