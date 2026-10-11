@@ -394,11 +394,15 @@ Owns production Android app code and resources.
   `processed` equals their count. A shortfall `failed[]` does not explain (the relay stops early on
   a cancelled request) confirms none.
 - Inbox swipes and bulk actions are undoable: the rows are hidden at once, a 5 s Snackbar offers
-  Undo, and the relay is asked nothing until the window closes. `PendingRowActions` runs each held
-  action exactly once: on its timer, or on `onStop` (leaving the screen confirms it), or never
-  once undone. A process killed in the foreground inside the window loses the action, so the mail
-  stays where it was. The detail screen's actions finish the Activity and are not undoable.
-  `InboxUndoTest` and `PendingRowActionsTest` cover this.
+  Undo, and the relay is asked nothing until the window closes. One bar covers everything held:
+  a new action replaces the bar (`DISMISS_EVENT_CONSECUTIVE` commits nothing), and its Undo takes
+  back every held action. The bar itself closes the window (`commitsOnDismiss`: timeout or
+  swipe), because Android stretches its timeout for the accessibility "time to take action"
+  setting and a separate timer would commit while Undo is still on screen. `PendingRowActions`
+  runs each held action exactly once, at that dismissal or at `onStop` (leaving the screen
+  confirms it), or never once undone. A process killed in the foreground inside the window loses
+  the action, so the mail stays where it was. The detail screen's actions finish the Activity and
+  are not undoable. `InboxUndoTest` and `PendingRowActionsTest` cover this.
 - The folder picker's Sent and Drafts entries never guess a mailbox name. Each tap lists the
   top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
   the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A localized name

@@ -88,6 +88,7 @@ class InboxActivity : LockedActivity() {
     private val selectedIds = linkedSetOf<String>()
     private var selectionMode: ActionMode? = null
     private val heldActions = PendingRowActions()
+    private var undoBar: Snackbar? = null
     private var newMailCount = 0
 
     /** The folder the list last painted from a refresh; only a repaint of it can bring new mail. */
@@ -203,6 +204,8 @@ class InboxActivity : LockedActivity() {
         super.onStop()
         if (redirectedToUnlock) return
         heldActions.flush()
+        // Nothing is left for its Undo to take back.
+        undoBar?.dismiss()
         mainHandler.removeCallbacks(refreshRunnable)
         mainHandler.removeCallbacks(pendingMessagePollRunnable)
     }
@@ -734,10 +737,10 @@ class InboxActivity : LockedActivity() {
         }
     }
 
-    /** Hides [emails] at once and runs [send] after [UNDO_WINDOW_MS], or at [onStop], unless Undo
-     *  is tapped first. The server is not asked to do anything until then. */
+    /** Hides [emails] at once and runs [send] when the Undo bar times out or is swiped away, or at
+     *  [onStop], unless Undo is tapped first. The server is not asked anything until then. */
     private fun holdForUndo(emails: List<Email>, label: String, send: () -> Unit) {
-        val entry = heldActions.hold(emails) {
+        heldActions.hold(emails) {
             val keys = emails.map { it.rowKey() }.toSet()
             allEmails = allEmails.filter { it.rowKey() !in keys }
             searchResults = searchResults?.filter { it.rowKey() !in keys }
@@ -745,18 +748,24 @@ class InboxActivity : LockedActivity() {
             send()
         }
         renderFilteredEmails()
-        val commit = Runnable { heldActions.commit(entry) }
-        mainHandler.postDelayed(commit, UNDO_WINDOW_MS)
-        val message = resources.getQuantityString(R.plurals.undo_message, emails.size, label, emails.size)
-        Snackbar.make(recyclerView, message, UNDO_WINDOW_MS.toInt())
+        // One bar for everything held: the new bar replaces the last, and its Undo covers both.
+        val rows = heldActions.heldEmails().size
+        val message = if (heldActions.heldCount() == 1) {
+            resources.getQuantityString(R.plurals.undo_message, rows, label, rows)
+        } else {
+            resources.getQuantityString(R.plurals.undo_message_several, rows, rows)
+        }
+        undoBar = Snackbar.make(recyclerView, message, UNDO_WINDOW_MS.toInt())
             .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
             .setAction(R.string.undo) {
-                if (heldActions.undo(entry)) {
-                    mainHandler.removeCallbacks(commit)
-                    renderFilteredEmails()
-                }
+                if (heldActions.undoAll()) renderFilteredEmails()
             }
-            .show()
+            .addCallback(object : Snackbar.Callback() {
+                override fun onDismissed(transientBottomBar: Snackbar?, event: Int) {
+                    if (commitsOnDismiss(event)) heldActions.flush()
+                }
+            })
+            .also { it.show() }
     }
 
     private fun showFolderPickerPopup(anchor: View) {
