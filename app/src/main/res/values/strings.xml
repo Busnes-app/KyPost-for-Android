@@ -75,6 +75,8 @@
 
     <string name="action_archive">Archive</string>
     <string name="action_junk">Mark as junk</string>
+    <string name="action_mark_unread">Mark unread</string>
+    <string name="action_mark_read">Mark read</string>
     <string name="action_delete">Delete</string>
     <string name="action_reply">Reply</string>
     <string name="action_reply_all">Reply all</string>

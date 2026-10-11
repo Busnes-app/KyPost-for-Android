@@ -13,6 +13,32 @@ private const val QUIESCE_TIMEOUT_MS = 2_000L
 
 private const val TAG = "MailBackground"
 
+/** Mark read and Mark unread reach the relay in the order they were asked for, from any screen.
+ *  The pool runs two tasks at once, so an unread could otherwise land before a read still in
+ *  flight and be undone by it. Call [ordered] when the user acts; the task it returns waits for
+ *  the one ordered before it, up to [WAIT_SECONDS] (a hung call must not wedge the pool). An
+ *  interrupt (a wipe quiescing the pool) propagates, and the block does not run. */
+internal object ReadStateLane {
+    const val WAIT_SECONDS = 30L
+
+    private var last: java.util.concurrent.CountDownLatch? = null
+
+    @Synchronized
+    fun <T> ordered(waitSeconds: Long = WAIT_SECONDS, block: () -> T): () -> T {
+        val previous = last
+        val done = java.util.concurrent.CountDownLatch(1)
+        last = done
+        return {
+            try {
+                previous?.await(waitSeconds, TimeUnit.SECONDS)
+                block()
+            } finally {
+                done.countDown()
+            }
+        }
+    }
+}
+
 // Mail mutations outlive the Activity that fired them, so the UI can update optimistically.
 object MailBackgroundExecutor {
     /** Null means suspended, and that is the whole point: a wipe that swapped in a fresh pool

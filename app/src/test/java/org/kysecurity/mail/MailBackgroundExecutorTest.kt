@@ -115,4 +115,66 @@ class MailBackgroundExecutorTest {
         assertEquals("a task ran against a database the wipe had already deleted", 0, startedTooLate.get())
         assertEquals("submitting during a wipe threw at the caller", 0, rejections.get())
     }
+
+    private val order = java.util.Collections.synchronizedList(mutableListOf<String>())
+
+    /** A read ordered first and still running holds back an unread ordered after it, whichever
+     *  pool thread each lands on: unordered, the unread would reach the relay first and be undone. */
+    @Test
+    fun anOrderedTaskWaitsForTheOneOrderedBeforeIt() {
+        val release = CountDownLatch(1)
+        val read = ReadStateLane.ordered { release.await(); order += "read" }
+        val unread = ReadStateLane.ordered { order += "unread" }
+        val unreadThread = Thread { unread() }.apply { start() }
+        val readThread = Thread { read() }.apply { start() }
+
+        unreadThread.join(200)
+        assertTrue("unread must wait for read", unreadThread.isAlive)
+        release.countDown()
+        readThread.join(2_000)
+        unreadThread.join(2_000)
+
+        assertEquals(listOf("read", "unread"), order)
+    }
+
+    /** Every request waits for the one before it, not just a read on the same screen. */
+    @Test
+    fun aChainOfOrderedTasksRunsInRequestOrder() {
+        val tasks = (1..4).map { n -> ReadStateLane.ordered { order += "$n" } }
+        val threads = tasks.reversed().map { task -> Thread { task() }.apply { start() } }
+        threads.forEach { it.join(2_000) }
+
+        assertEquals(listOf("1", "2", "3", "4"), order)
+    }
+
+    @Test
+    fun anOrderedTaskGivesUpOnAHungPredecessorAndRunsAnyway() {
+        val release = CountDownLatch(1)
+        val hung = ReadStateLane.ordered { release.await() }
+        val hungThread = Thread { hung() }.apply { start() }
+
+        assertEquals("ran", ReadStateLane.ordered(waitSeconds = 0) { "ran" }())
+        release.countDown()
+        hungThread.join(2_000)
+    }
+
+    /** A wipe quiesces the pool by interrupting it; the waiting mutation must not then run. */
+    @Test
+    fun anOrderedTaskStopsWhenInterrupted() {
+        val release = CountDownLatch(1)
+        val read = ReadStateLane.ordered { release.await() }
+        val readThread = Thread { read() }.apply { start() }
+        val unread = ReadStateLane.ordered { order += "unread" }
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val unreadThread = Thread { runCatching { unread() }.onFailure(failure::set) }.apply { start() }
+
+        unreadThread.join(200)
+        unreadThread.interrupt()
+        unreadThread.join(2_000)
+        release.countDown()
+        readThread.join(2_000)
+
+        assertTrue(failure.get() is InterruptedException)
+        assertFalse("unread" in order)
+    }
 }

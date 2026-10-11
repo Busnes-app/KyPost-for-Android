@@ -94,7 +94,14 @@ Owns production Android app code and resources.
      empty `failed[]` is also treated as rejected — an unconfirmed operation must not delete a
      locally visible row. `markRead` is deliberately not optimistic: it already runs on `MailBackgroundExecutor`
      and reports nothing, so a pre-emptive local write bought no responsiveness and left the row
-     lying about a state the server never reached.
+     lying about a state the server never reached. `markUnread` (KyPost-Server #350) follows the
+     same rule, from the detail screen's Mark unread button and the inbox row's long-press menu
+     (Mark read / Mark unread); neither repaints the row until the relay confirms. A server
+     without the action answers 400 "unsupported action", which is toasted as is. The open's
+     markRead, the detail button and the row menu all go through `ReadStateLane.ordered`, a
+     process-wide chain: each read-state change waits for the one requested before it (30 s at
+     most), across screens and reopens. The pool has two threads, so without it a read still in
+     flight could land after the unread and win. The row repaint matches folder as well as id.
 - **Older mail and reliable deltas (KyPost-Server #348/#349; each part degrades to the old
   behaviour on a server without it).** Every `/api/inbox` request uses `WINDOW_LIMIT`: the relay
   keeps one window and cursor per `limit`. `EmailEntity.inWindow` is false for rows older than the

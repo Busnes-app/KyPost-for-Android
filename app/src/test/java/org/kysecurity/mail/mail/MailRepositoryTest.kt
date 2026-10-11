@@ -1073,4 +1073,45 @@ class MailRepositoryTest {
         assertEquals("decrypted by the server", body.html)
         assertNull(dao.getById("42", "INBOX")?.body)
     }
+
+    // --- Mark unread (KyPost-Server #350) --------------------------------------------------------
+
+    @Test
+    fun markUnreadSuccess_marksTheRowUnreadInItsFolderOnly() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX", status = "read"))
+        dao.put(row("42", "Archive", status = "read"))
+        val source = FakeMailSource(actionOutcome = MailOutcome.Success(MailActionOutcome(processed = 1, failed = emptyList())))
+
+        assertTrue(repository(dao, source).markUnread("42", "INBOX") is MailOutcome.Success)
+
+        assertEquals(MailAction.UNREAD, source.actions.single().first)
+        assertEquals("unread", dao.getById("42", "INBOX")?.status)
+        assertEquals("read", dao.getById("42", "Archive")?.status)
+    }
+
+    /** A server without the action answers 400; the row stays read and the reason reaches the user. */
+    @Test
+    fun markUnreadOnAServerWithoutTheAction_keepsTheRowAndReportsWhy() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX", status = "read"))
+        val source = FakeMailSource(actionOutcome = MailOutcome.BadRequest("unsupported action"))
+
+        val outcome = repository(dao, source).markUnread("42", "INBOX")
+
+        assertEquals("unsupported action", outcome.userFacingMessage())
+        assertEquals("read", dao.getById("42", "INBOX")?.status)
+    }
+
+    @Test
+    fun markUnreadRejected_keepsTheRowRead() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX", status = "read"))
+        val source = FakeMailSource(
+            actionOutcome = MailOutcome.Success(MailActionOutcome(processed = 0, failed = listOf("42" to "no such message"))),
+        )
+
+        assertTrue(repository(dao, source).markUnread("42", "INBOX") is MailOutcome.ActionRejected)
+        assertEquals("read", dao.getById("42", "INBOX")?.status)
+    }
 }
