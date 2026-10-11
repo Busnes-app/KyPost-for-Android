@@ -6,6 +6,7 @@ import org.kysecurity.mail.data.PendingContactChangeEntity
 import org.kysecurity.mail.push.PairingData
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
@@ -39,13 +40,23 @@ class ContactSyncRepository(
     /** Guards the contacts table against the other sync writer, `DeviceContactRepository.syncAll`. */
     val syncMutex = Mutex()
 
+    val health = ContactSyncHealth()
+
     fun observeContacts(): Flow<List<ContactEntity>> = db.contactDao().observeAll()
 
-    suspend fun sync(): ContactSyncOutcome = syncMutex.withLock {
-        val pairing = pairingProvider() ?: return@withLock ContactSyncOutcome.NotPaired
+    fun observeSyncStatus(now: () -> Long = System::currentTimeMillis): Flow<ContactSyncStatus> =
+        combine(db.pendingContactChangeDao().observeSummary(), health.failures) { pending, failures ->
+            contactSyncStatusOf(pending, failures, now())
+        }
+
+    /** Recorded before unlocking, so a waiting caller cannot record ahead of this one. */
+    suspend fun sync(): ContactSyncOutcome = syncMutex.withLock { syncLocked().also(health::record) }
+
+    private suspend fun syncLocked(): ContactSyncOutcome = run {
+        val pairing = pairingProvider() ?: return@run ContactSyncOutcome.NotPaired
         val deviceId = pairing.deviceId
         val deviceSecret = pairing.deviceSecret
-        if (deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return@withLock ContactSyncOutcome.NotPaired
+        if (deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return@run ContactSyncOutcome.NotPaired
         val pendingChanges = db.pendingContactChangeDao().getAllPending()
         val cursor = cursorStore.cursor(pairing.subscriberId)
 
@@ -55,7 +66,7 @@ class ContactSyncRepository(
         val wireChanges = pendingChanges.map { it to it.toWireDtoOrNull(json) }
         val undecodable = wireChanges.mapNotNull { (row, dto) -> row.takeIf { dto == null } }
         if (undecodable.isNotEmpty()) {
-            return@withLock ContactSyncOutcome.Retry(
+            return@run ContactSyncOutcome.Retry(
                 "Contact sync stopped: ${undecodable.size} queued change(s) are unreadable " +
                     "(${undecodable.joinToString { it.changeType }}). Nothing was sent or discarded.",
             )
