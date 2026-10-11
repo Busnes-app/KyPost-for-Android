@@ -119,7 +119,7 @@ class MailRepository(
 }
 
 /** HTTP 200 is transport success, not operation success: `/api/inbox/actions` answers 200 with the
- *  requested id in `failed[]` (Mobile_Mail_Relay.md Part 2). Only an id the relay actually
+ *  requested id in `failed[]` (docs/Mobile_Mail_Relay.md Part 2). Only an id the relay actually
  *  processed may be applied to the local cache. */
 internal fun MailOutcome<MailActionOutcome>.appliedTo(id: String): MailOutcome<Unit> {
     if (this !is MailOutcome.Success) return toUnitOutcome()
