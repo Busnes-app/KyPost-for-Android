@@ -129,4 +129,38 @@ class DeviceContactMergeBaseTest {
         assertEquals(emptyList<ContactUrlDto>(), room.websites)
         assertEquals("+15550199", room.phones.single().value)
     }
+
+    private fun deviceDepartment(rawContactId: Long): String? = context.contentResolver.query(
+        ContactsContract.Data.CONTENT_URI,
+        arrayOf(ContactsContract.CommonDataKinds.Organization.DEPARTMENT),
+        "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+        arrayOf(rawContactId.toString(), ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE),
+        null,
+    )?.use { if (it.moveToFirst()) it.getString(0) else null }
+
+    /** The organization update writes the department too, so the base must record it: a
+     *  department then cleared on the phone is the phone's change and wins. */
+    @Test
+    fun aDepartmentWrittenWithTheOrganization_clearedOnThePhone_isCleared() = runBlocking {
+        val uid = syncRepository.queueCreate(ContactDto(fn = "Department Base Probe"))
+        repository.syncAll()
+        val rawContactId = db.deviceContactLinkDao().getByUid(uid)!!.rawContactId
+
+        val withOrg = db.contactDao().getByUid(uid)!!.toDto().copy(org = "Acme", department = "Sales")
+        syncRepository.queueUpdate(withOrg, identityChanged = false)
+        repository.syncAll()
+        assertEquals("precondition: the department reached the phone", "Sales", deviceDepartment(rawContactId))
+
+        // An ordinary edit, as the system Contacts app makes one: the row becomes dirty.
+        context.contentResolver.update(
+            ContactsContract.Data.CONTENT_URI,
+            ContentValues().apply { putNull(ContactsContract.CommonDataKinds.Organization.DEPARTMENT) },
+            "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+            arrayOf(rawContactId.toString(), ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE),
+        )
+        repository.syncAll()
+
+        assertNull(db.contactDao().getByUid(uid)!!.toDto().department?.takeIf { it.isNotBlank() })
+        assertEquals("Acme", db.contactDao().getByUid(uid)!!.toDto().org)
+    }
 }
