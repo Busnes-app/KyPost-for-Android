@@ -19,8 +19,11 @@ fun AlertDialog.Builder.showThemed(): AlertDialog {
     val ink = Color.parseColor(palette.ink)
     val inkStrong = Color.parseColor(palette.inkStrong)
     val accent = Color.parseColor(palette.accent)
-    // Tinted, not replaced: the native background carries the dialog's shape and insets (§3).
-    dialog.window?.decorView?.background?.mutate()?.setTint(panel)
+    // Recoloured, not replaced: the native background carries the dialog's shape and insets (§3).
+    // A colour filter, not a tint: AppCompat colours this white shape with a filter of its own,
+    // and a filter takes precedence over any tint.
+    dialog.window?.decorView?.background?.mutate()?.colorFilter =
+        android.graphics.PorterDuffColorFilter(panel, android.graphics.PorterDuff.Mode.SRC_IN)
     dialog.findViewById<TextView>(androidx.appcompat.R.id.alertTitle)?.setTextColor(inkStrong)
     dialog.findViewById<TextView>(android.R.id.message)?.setTextColor(ink)
     listOf(DialogInterface.BUTTON_POSITIVE, DialogInterface.BUTTON_NEGATIVE, DialogInterface.BUTTON_NEUTRAL)
