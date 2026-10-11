@@ -433,6 +433,16 @@ Owns production Android app code and resources.
   before anything reaches the WebView; "Show images" restores `<img src>` and nothing else. An
   `<iframe>` is dropped whole, because `srcdoc` carries an inline document no attribute strip
   reaches. `EmailDetailActivityTest` is the contract for that.
+- A tapped http(s) link in a message never opens directly. `mail/LinkTarget.kt` parses it once with
+  OkHttp's `HttpUrl`, which parses like a browser: userinfo is not the host, a backslash ends the
+  authority, and IDNs come out as `xn--` punycode. The confirm dialog shows that host, and the
+  re-serialized `HttpUrl` is what gets opened, so the confirmed host and the loaded page cannot
+  differ. The dialog is palette-themed (`showThemed`), with the host and address in the bundled
+  IBM Plex Mono. Separately, `blockExternalResources` outlines any anchor whose text reads as an
+  address on a different host (`linkTextMismatch`; `www.` and subdomains of the shown host agree)
+  and appends "⚠ real-host" after it. That is advisory: the confirm dialog is the guard. A
+  `$Phishing`-flagged message adds a warning to the dialog. `mailto:`/`tel:` open as
+  before, and every other scheme stays refused. `LinkTargetTest` covers the parsing.
 - Decrypted reader variants share a sanitizer-enforced aggregate data-image allowance, covering
   literal data URLs and rewritten CIDs even after "Show images". The 128 KiB inline ceiling leaves
   larger parts available for attachment open/save under the separate 4 MiB attachment budget.
