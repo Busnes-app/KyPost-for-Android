@@ -205,6 +205,16 @@ class CalendarRsvpTest {
     }
 
     @Test
+    fun anAliasListedPastFiveHundredAttendeesIsStillFound() {
+        val others = (1..500).map { "ATTENDEE:mailto:guest$it@example.com" }
+        val event = invite(*request, *others.toTypedArray(), "ATTENDEE:mailto:late-alias@example.com").primary
+        val attendee = assertNotNull(rsvpAttendee(event, listOf("primary@example.com", "late-alias@example.com")))
+        assertEquals("late-alias@example.com", attendee)
+        val reply = unfold(rsvpDraft(event, attendee, Rsvp.ACCEPTED, now).calendarReply!!)
+        assertTrue("ATTENDEE;PARTSTAT=ACCEPTED:mailto:late-alias@example.com" in reply)
+    }
+
+    @Test
     fun aliasAnswerAlsoSendsFromTheAlias() {
         val event = invite(*request).primary
         assertEquals("alias@example.com", rsvpDraft(event, "alias@example.com", Rsvp.ACCEPTED, now, sendAs = "alias@example.com").from)

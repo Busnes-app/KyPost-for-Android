@@ -149,7 +149,8 @@ private fun parse(text: String, localZone: ZoneId, windowsZone: (String) -> Stri
                     method = line.value.trim().uppercase().takeIf { METHOD_TOKEN.matches(it) }.orEmpty()
                 // Only the VEVENT's own properties: a VALARM inside it has a DESCRIPTION too.
                 stack.size == 2 && stack[1] == "VEVENT" && line.name == "ATTENDEE" ->
-                    mailtoAddress(line.value)?.takeIf { attendees.size < MAX_ATTENDEES }?.let(attendees::add)
+                    // Uncapped: MAX_INVITE_BYTES already bounds the list, and a cut could drop the user's alias.
+                    mailtoAddress(line.value)?.let(attendees::add)
                 stack.size == 2 && stack[1] == "VEVENT" -> event?.putIfAbsent(line.name, line)
             }
         }
@@ -412,7 +413,6 @@ private const val SPACE = ' '.code.toByte()
 private const val TAB = '\t'.code.toByte()
 private const val ZWJ = '\u200D'
 private const val MAX_TZID_CHARS = 128
-private const val MAX_ATTENDEES = 500
 private val WHITESPACE_RUN = Regex("\\s+")
 private val DTSTAMP_FORMAT = DateTimeFormatter.ofPattern("uuuuMMdd'T'HHmmss'Z'", Locale.ROOT)
 private val NAME = Regex("[A-Z0-9-]{1,64}")
