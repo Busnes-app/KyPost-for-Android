@@ -88,6 +88,19 @@
                 android:text="@string/settings_pgp_body" />
 
             <Button
+                android:id="@+id/settingsSignature"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_signature" />
+
+            <TextView
+                android:id="@+id/settingsSignatureBody"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:text="@string/settings_signature_body" />
+
+            <Button
                 android:id="@+id/settingsAbout"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
