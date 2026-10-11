@@ -1,7 +1,6 @@
 package org.kysecurity.mail
 
 import android.graphics.Color
-import android.graphics.Typeface
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -43,9 +42,6 @@ class EmailAdapter(
         private val subjectTextView: TextView = view.findViewById(R.id.textViewSubject)
         private val senderTextView: TextView = view.findViewById(R.id.textViewSender)
         private val dateTextView: TextView = view.findViewById(R.id.textViewDate)
-
-        // setTypeface(current, NORMAL) keeps a bold current face; derive from the inflated one.
-        private val subjectTypeface: Typeface = subjectTextView.typeface
 
         fun bind(email: Email, palette: ThemePalette, selected: Boolean) {
             // A message this app can't render is worth knowing before tapping it — otherwise the
@@ -91,7 +87,7 @@ class EmailAdapter(
             if (isUnread) {
                 unreadDot.background = unreadDotDrawable(itemView.context)
             }
-            subjectTextView.typeface = Typeface.create(subjectTypeface, if (isUnread) Typeface.BOLD else Typeface.NORMAL)
+            subjectTextView.setBold(isUnread)
             subjectTextView.setTextColor(Color.parseColor(if (isUnread) palette.inkStrong else palette.ink))
             senderTextView.setTextColor(Color.parseColor(palette.ink))
             dateTextView.setTextColor(Color.parseColor(palette.ink))
