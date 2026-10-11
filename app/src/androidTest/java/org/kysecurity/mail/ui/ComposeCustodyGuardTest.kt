@@ -60,18 +60,25 @@ class ComposeCustodyGuardTest {
         }
     }
 
-    /** The editor reports its body asynchronously; until it does, Send says "fill in the message". */
+    /** Waits for the editor to report its body (until then Send asks for a message), taps Send
+     *  once, then waits for the prompt to take focus. */
     private fun awaitSubjectPrompt(scenario: ActivityScenario<ComposeActivity>) {
         val deadline = System.currentTimeMillis() + 15_000
+        var ready = false
+        while (!ready && System.currentTimeMillis() < deadline) {
+            scenario.onActivity { ready = it.bodyReportedForTest() }
+            if (!ready) Thread.sleep(250)
+        }
+        check(ready) { "the editor never reported its body" }
+        scenario.onActivity { it.sendForTest() }
         var last: Throwable? = null
-        while (System.currentTimeMillis() < deadline) {
-            scenario.onActivity { it.sendForTest() }
+        while (System.currentTimeMillis() < deadline + 5_000) {
             try {
                 onView(withText(R.string.compose_empty_subject_title)).inRoot(isDialog()).check(matches(isDisplayed()))
                 return
             } catch (e: Throwable) {
                 last = e
-                Thread.sleep(500)
+                Thread.sleep(250)
             }
         }
         throw AssertionError("the empty-subject prompt never appeared", last)

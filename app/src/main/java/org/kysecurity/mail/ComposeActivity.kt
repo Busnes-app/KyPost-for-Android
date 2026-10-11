@@ -133,6 +133,10 @@ class ComposeActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun sendForTest() = sendEmail()
 
+    /** The editor reports its body asynchronously, after its page loads. */
+    @androidx.annotation.VisibleForTesting
+    internal fun bodyReportedForTest(): Boolean = bodyEditor.isEmptyFlow.value == false
+
     private val bodyMirror = object : Runnable {
         override fun run() {
             bodyEditor.exportHtml { mirroredBodyHtml = it }
