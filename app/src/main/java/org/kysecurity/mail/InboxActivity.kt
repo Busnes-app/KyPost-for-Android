@@ -867,6 +867,12 @@ class InboxActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun allEmailsForTest(): List<Email> = allEmails
 
+    @androidx.annotation.VisibleForTesting
+    internal fun unreadByFolderForTest(): Map<String, Int> = unreadByFolder
+
+    @androidx.annotation.VisibleForTesting
+    internal fun refreshForTest() = refreshInbox()
+
     /** Seeds the list the way a refresh would. */
     @androidx.annotation.VisibleForTesting
     internal fun setEmailsForTest(emails: List<Email>) {
