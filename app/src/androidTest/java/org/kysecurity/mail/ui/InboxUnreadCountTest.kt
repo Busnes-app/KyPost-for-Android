@@ -16,6 +16,7 @@ import org.kysecurity.mail.Email
 import org.kysecurity.mail.InboxActivity
 import org.kysecurity.mail.KeywordSettings
 import org.kysecurity.mail.R
+import org.kysecurity.mail.mail.MailRuntime
 
 /** The chip text carries the count; the keyword, and the selection, live in the tag. */
 @RunWith(AndroidJUnit4::class)
@@ -31,10 +32,12 @@ class InboxUnreadCountTest {
         keywordSettings.setAllTabVisible(false)
     }
 
+    /** Launching Inbox builds MailRuntime; drop it so a later fixture's database is not shadowed. */
     @After
     fun restoreDefaults() {
         keywordSettings.setAllTabVisible(true)
         keywordSettings.setKeywordVisible(TAB_KEYWORD, false)
+        MailRuntime.invalidate()
     }
 
     private fun email(id: String, status: String) =
