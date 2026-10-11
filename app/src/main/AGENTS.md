@@ -19,6 +19,9 @@ Owns production Android app code and resources.
 - Whether a pairing is an account replacement is `isAccountReplacement(incoming, currentPairing, reconnectExpectation)`, never "is there a pairing right now". A reconnect leaves account-scoped data with no pairing, so the pairing alone under-reports; the marker is the second input. `attemptPairing` purges on it and `PushPairingActivity` picks the replace-warning dialog from the same answer (`PushRepository.replacesAnotherAccount`), so the warning cannot disagree with what happens. No pairing and no marker is a first-ever pairing: it must purge nothing.
 - Account replacement is staged: `attemptPairing` registers FIRST and only then purges the account being replaced. Nothing may be destroyed before the replacement is proven, or an offline scan of a valid QR silently unpairs a working account. `clearPairing` returns the stores that survived the purge; a non-empty result during replacement refuses the new account and escalates to `SecurityWipe.wipeAndResetApp`, because no table carries a subscriber column and survivors are readable by whoever pairs next. Never let a purge failure become a log line.
 - A PIN change is staged, not swapped in place. The verifier (`app_lock_secure`) and the wrapped device secret (`push_pairing_secure`) are different preference files, so no single `commit()` covers both. `SecuritySettingsActivity.changePin` writes the new wrapping via `SecurePairingStore.stagePendingSecret` **before** `setPin`, `resolveDeviceSecret` tries the live wrapping then the staged one, and the following `savePairing` promotes and clears the staged copy. Without staging, a process death between the two files sealed the secret under a key no surviving PIN derived, `needsCredentialRewrap()` could not see it (it answers a scheme-version question only — `deviceSecretIsStranded` is the one that detects this), and the relay's eventual 409 read to the user as "re-pair this device". Both of its key derivations go through `CredentialCipher.deriveKeysOrNull` and abort the change on null: an unreadable Keystore pepper is not a wrong PIN, and letting `PepperUnavailableException` out killed the process mid-protocol. Both abort points sit ahead of `setPin`, so there is nothing staged to roll back. `SourceRulesTest.credentialDerivationsHandleAnUnavailableKeystore` keeps raw `deriveKeys` out of every caller but `AppLockManager`.
+- `PinPolicy` alone decides PIN length. A field that caps input sets
+  `InputFilter.LengthFilter(PinPolicy.MAX_LENGTH)` in code; layouts never set `maxLength` on a
+  `numberPassword` field (`PinLayoutLengthTest`).
 - `AppLockStore.putCredentialSaltIfAbsent` is compare-and-set under a companion-scoped lock and never overwrites. It replaced a `check()` that threw `IllegalStateException` through `AppLockManager`'s PIN paths, which catch only `PepperUnavailableException`.
 - Saving an attachment to Downloads is `security/AttachmentDownloads.kt`'s `saveAttachmentToDownloads`, not the detail Activity. Pass the raw sender name and MIME type: the sink resolves the safe type from both before sanitising the display name. The row is recorded in `DownloadedAttachmentLedger` BEFORE the first byte (it is the only handle a later wipe has on decrypted mail outside the sandbox) and is created `IS_PENDING = 1`, published only once the write completes; any failure deletes the row and KEEPS the ledger entry, since a row the delete could not remove must stay findable by the wipe. A decrypted-part save uses `OwnedAttachmentSave`: confirmation admits at most one owned snapshot before the executor hop; lock/destroy wipes a queued snapshot and makes its stale runnable refuse the write, while an already-started write keeps coherent ownership; completion or scheduling rejection wipes the remaining snapshot.
 - `EphemeralAttachmentProvider.openFile` peeks rather than consumes: viewers that probe before reading open the same URI twice, and consuming on the first open made the attachment unreopenable. The TTL sweep is the single owner of pending bytes — the writer does not zero on completion, because that races a second reader streaming the same array. Every mutation of the pending map shares one monitor so the size budget is computed against a map nothing is concurrently draining. `PendingAttachment` sanitises `displayName` through `safeFileName` in its own constructor: the sender's Content-Disposition filename is served to the chooser as `OpenableColumns.DISPLAY_NAME`, so it gets the same treatment as the Downloads sink's name, at the sink rather than at each caller.
@@ -407,6 +410,10 @@ Owns production Android app code and resources.
   The Inbox freshness label stays centered immediately below those tabs. Before the first
   successful refresh it reads "Not updated yet", so its row never appears empty and the first
   success does not shift the message list.
+  A refresh that lands mail above the top row scrolls to it when the list is at the top;
+  otherwise a "N new messages" pill (`inbox_new_mail` plurals, polite live region) over the list
+  counts it and scrolls up on tap. Only a repaint of the folder and tab already painted counts,
+  and a pending saved-position restore wins. `InboxNewMailTest` covers both branches.
 - Theme selection is managed in `ThemesActivity` and uses the shared theme name list based on
   `theme.ts` palettes, led by `Busnes Light`/`Busnes Dark` from `busnes-color-theme-handoff.md`.
   `AppTheme.DEFAULT_THEME` (`Busnes Light`) is the only place the fallback name lives — the
@@ -453,15 +460,18 @@ Owns production Android app code and resources.
   JSON against its 1 MiB body limit), each acked and advancing the cursor on its own. 400/413 is
   "this request is too big": the batch is halved, and a single change still refused stays queued
   while the rest go out. Once a reply says `tooOld`, the remaining batches keep the stale cursor
-  (cheap `tooOld` replies with no lists) and one `since=0` pull ends the sync.
-  `ContactPushBatchingTest` pins all three.
+  (cheap `tooOld` replies with no lists) and one `since=0` pull ends the sync. So does any sync
+  that starts at cursor zero, pushes queued or not: a `tooOld` sync that failed before its pull
+  leaves only the reset cursor to say a snapshot is owed. `ContactPushBatchingTest` pins all four.
   A `since=0` pull is a snapshot: after tombstone GC the server can no longer list what it
   deleted, so `applyDelta(snapshot = true)` removes every Room contact absent from it except
   uids still in the outbox. `ContactFullResyncTest` covers both.
   **Per address, a key verified on this device is authoritative; a synced key never is.** The PGP
   QR flow's two saves (`queueCreate`/`queueUpdate` with `verifiedInPerson`) are the only writers of
-  `recipient_pins` (`MIGRATION_12_13`), and each replaces the pins for that contact's addresses —
-  re-scanning is how a pin changes. `RoomLocalSignerKeys` (`authoritativeKeys`) returns ONLY the pins
+  `recipient_pins` after `MIGRATION_12_13`, and each replaces the pins for that contact's addresses
+  — re-scanning is how a pin changes. The migration itself seeds the table with exactly what the
+  lookup before it trusted (`legacyPins`: every contact key per address, with its confirmation), so
+  an upgrade never turns a trusted key into an untrusted one. `LegacyKeyMigrationTest`. `RoomLocalSignerKeys` (`authoritativeKeys`) returns ONLY the pins
   for a pinned address, so a contact key the server delivers, on a replacement contact or as an
   update, cannot satisfy `ClientEncryptedSender.applyPins` and the send is `KeyChanged`. Sync never
   writes the table, so removing or rewriting the contact does not touch the pin; a wipe (database
@@ -472,7 +482,9 @@ Owns production Android app code and resources.
   revocation from a synced copy of the SAME primary key, verified against the pinned primary, adds
   only that signature to the pin and saves it. A revoked pin is still the address's pin — no
   fallback — so the reader gives `KEY_CHANGED` and the sender `RecipientKeyRevoked`, before the
-  vault opens. `PinnedKeyRevocationTest`, `PinnedKeyRevocationMergeTest`.
+  vault opens. Pins seeded by `MIGRATION_12_13` take revocations the same way: pins are matched
+  by address alone, never by how they were made. `PinnedKeyRevocationTest`,
+  `PinnedKeyRevocationMergeTest`, `LegacyKeyMigrationTest.aBackfilledPin_takesASyncedRevocationOfItsKey`.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
@@ -484,12 +496,29 @@ Owns production Android app code and resources.
   `deviceUpdatedAtEpochMs` only when the batch actually landed — stamping it for a write that never
   happened tells the next merge the device is already current.
 - **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
-  `applyBatch` as the insert. `device_contact_links` is a cache of that: before creating a row,
-  `pushRoomChangesToDevice` adopts a live row of our account whose SOURCE_ID is the uid, so a
-  death between insert and link write, or cleared app data, rebuilds the link instead of
-  duplicating the contact. Linked rows from before SOURCE_ID are backfilled on the next pass.
+  `applyBatch` as the insert. `device_contact_links` is a cache of that: `adoptLostLinks` runs
+  before the pull and relinks a live row of our account whose SOURCE_ID is the uid, so a death
+  between insert and link write, or cleared app data, rebuilds the link instead of duplicating
+  the contact, and a phone edit made while the link was gone is pulled, not overwritten. The
+  push repeats the lookup before any create. Linked rows from before SOURCE_ID are backfilled.
   `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_13_14` indexes the link table's
   `rawContactId`.
+- **Importing another account's contacts uploads them, so it is per-account opt-in.**
+  `importNewDeviceContacts` reads only raw contacts whose `DeviceAccount` (type, name; both null
+  for the phone's own storage) is in `DeviceContactSyncSettings.importAccounts()`, which is empty
+  by default and stored under a key no earlier build wrote — installs that imported everything
+  start with nothing chosen. Consent is bound to the pairing it was given under
+  (`ContactSyncRepository.destination`: the relay's canonical origin and the subscriber id); any
+  other pairing reads none. It is checked again for each contact just before it is queued, inside
+  `whileConsented`, which shares a lock with `setImportAccounts`, so withdrawing consent stops a
+  scan already running. Inside that lock the scan also checks that its session
+  (`ProcessState.generation()`, captured at scan start) and its pairing destination are still
+  current, and abandons the scan if not. The account purge's database step runs under the same
+  lock and clears consent (`clearConsentDuring`): the purge advances the generation only at its
+  end, so this is what stops an import from landing in the outbox the next pairing inherits. Adding an account rewinds the scan watermark so its existing contacts
+  are seen; a scan moves the watermark to its own start time only if `consentRevision` is
+  unchanged since it began, so a rewind made mid-scan survives it. The choice is the Contacts menu's "Import from other accounts…" dialog, whose copy
+  says the contacts go to the user's KyPost server. `DeviceContactImportConsentTest`.
 - **Deletes reach the phone through Room.** `syncAll`'s `removeDeletedContacts` stage removes the
   raw contact of every link whose Room contact is gone, so server tombstones, snapshot prunes and
   local deletes share one path. A device-side delete is queued and then hard-deleted as the sync

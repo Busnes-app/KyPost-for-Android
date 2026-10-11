@@ -5,7 +5,9 @@ import org.kysecurity.mail.data.ContactEntity
 import org.kysecurity.mail.data.PendingContactChangeEntity
 import org.kysecurity.mail.data.RecipientPinEntity
 import org.kysecurity.mail.pgp.PgpFingerprint
+import org.kysecurity.mail.pgp.withVerifiedRevocation
 import org.kysecurity.mail.push.PairingData
+import org.kysecurity.mail.signon.relayOrigin
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
@@ -49,7 +51,8 @@ class ContactSyncRepository(
         val deviceSecret = pairing.deviceSecret
         if (deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return@withLock ContactSyncOutcome.NotPaired
         val pendingChanges = db.pendingContactChangeDao().getAllPending()
-        var cursor = cursorStore.cursor(pairing.subscriberId)
+        val startCursor = cursorStore.cursor(pairing.subscriberId)
+        var cursor = startCursor
 
         // Fail closed BEFORE the network call. A row this app cannot encode used to become an
         // empty ContactDto, which the server accepts as a real update and applyDelta then clears
@@ -91,7 +94,9 @@ class ContactSyncRepository(
             if (!tooOld) cursor = response.cursor
         }
 
-        var pullFrom: Long? = if (tooOld) 0L else cursor.takeIf { pendingChanges.isEmpty() }
+        // A sync starting at zero owes the snapshot even with pushes queued: a tooOld whose sync
+        // failed before its pull leaves only the reset cursor behind.
+        var pullFrom: Long? = if (tooOld || startCursor == 0L) 0L else cursor.takeIf { pendingChanges.isEmpty() }
         while (pullFrom != null) {
             val result = client.pull(pairing.serverUrl, deviceId, deviceSecret, pullFrom)
             val response = (result as? ContactSyncResult.Success)?.response ?: return@withLock failureOutcome(result)
@@ -118,6 +123,12 @@ class ContactSyncRepository(
         is ContactSyncResult.ServiceUnavailable -> ContactSyncOutcome.ServiceUnavailable(result.message)
         is ContactSyncResult.BadRequest -> ContactSyncOutcome.Retry(result.message)
         is ContactSyncResult.Retryable -> ContactSyncOutcome.Retry(result.message)
+    }
+
+    /** Where this device's contact changes go: the relay's canonical origin and the account on
+     *  it. Null when unpaired or the relay URL would be refused. */
+    suspend fun destination(): String? = pairingProvider()?.let { pairing ->
+        relayOrigin(pairing.serverUrl)?.let { "$it\n${pairing.subscriberId}" }
     }
 
     /** Deliberately does not call [sync]; the caller must trigger the follow-up sync itself. */
@@ -204,6 +215,16 @@ class ContactSyncRepository(
         dao.upsertAll(addresses.map { RecipientPinEntity(it, fingerprint, key, confirmed = true) })
     }
 
+    /** Folds a verifiable revocation in [synced]'s key into each pin for its addresses. */
+    private suspend fun recordRevocations(synced: ContactDto) {
+        val key = synced.pgpKey?.takeIf { it.isNotBlank() } ?: return
+        val dao = db.recipientPinDao()
+        val revoked = synced.emails.map { it.value.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()
+            .flatMap { dao.forAddress(it) }
+            .mapNotNull { pin -> withVerifiedRevocation(pin.publicKey, key)?.let { pin.copy(publicKey = it) } }
+        if (revoked.isNotEmpty()) dao.upsertAll(revoked)
+    }
+
     /** One pending row per uid. The old rows are replaced, never edited in place: a sync may
      *  already have read them, and its ack clears by row id. */
     private suspend fun enqueueCoalesced(change: PendingContactChangeEntity) {
@@ -234,11 +255,14 @@ class ContactSyncRepository(
         }
 
         db.withTransaction {
-            // Keys verified on this device live in recipient_pins, which nothing here touches.
+            // Keys verified on this device live in recipient_pins. Sync never adds to them; the one
+            // thing it may do is revoke one, and that is stored here, with the sync that brought
+            // it, so it holds after the synced contact itself is replaced or removed.
             val incomingEntities = response.changed.map { dto ->
                 dto.toEntity(previous = db.contactDao().getByUid(dto.uid))
             }
             db.contactDao().upsertAll(incomingEntities)
+            response.changed.forEach { recordRevocations(it) }
             val removed = response.deleted.map { it.uid }.toMutableSet()
             if (snapshot) {
                 // Queued changes are not on the server yet; everything else absent was deleted there.
