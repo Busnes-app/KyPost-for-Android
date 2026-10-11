@@ -99,7 +99,7 @@ class ContactSyncRepository(
                 if (batch.size > 1) batches.addAll(0, batch.chunked((batch.size + 1) / 2)) else refused += result.message
                 continue
             }
-            val response = (result as? ContactSyncResult.Success)?.response ?: return@withLock failureOutcome(result)
+            val response = (result as? ContactSyncResult.Success)?.response ?: return@run failureOutcome(result)
             applyDelta(pairing.subscriberId, response, batch.map { it.first }, advanceCursor = !snapshotOwed)
             // Keep pushing on the stale cursor once tooOld: the server keeps answering tooOld
             // without contact lists, and one full pull below replaces them all.
@@ -112,7 +112,7 @@ class ContactSyncRepository(
         var pullFrom: Long? = if (tooOld || startCursor == 0L) 0L else cursor.takeIf { pendingChanges.isEmpty() }
         while (pullFrom != null) {
             val result = client.pull(pairing.serverUrl, deviceId, deviceSecret, pullFrom)
-            val response = (result as? ContactSyncResult.Success)?.response ?: return@withLock failureOutcome(result)
+            val response = (result as? ContactSyncResult.Success)?.response ?: return@run failureOutcome(result)
             applyDelta(pairing.subscriberId, response, emptyList(), snapshot = pullFrom == 0L)
             pullFrom = if (response.tooOld && pullFrom != 0L) 0L else null
         }
