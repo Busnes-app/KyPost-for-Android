@@ -5,21 +5,6 @@ import androidx.room.testing.MigrationTestHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import org.bouncycastle.bcpg.ArmoredOutputStream
-import org.bouncycastle.bcpg.HashAlgorithmTags
-import org.bouncycastle.bcpg.PublicKeyAlgorithmTags
-import org.bouncycastle.crypto.generators.RSAKeyPairGenerator
-import org.bouncycastle.crypto.params.RSAKeyGenerationParameters
-import org.bouncycastle.openpgp.PGPKeyRingGenerator
-import org.bouncycastle.openpgp.PGPPublicKey
-import org.bouncycastle.openpgp.PGPPublicKeyRing
-import org.bouncycastle.openpgp.PGPSecretKeyRing
-import org.bouncycastle.openpgp.PGPSignatureGenerator
-import org.bouncycastle.openpgp.operator.bc.BcPBESecretKeyDecryptorBuilder
-import org.bouncycastle.openpgp.PGPSignature
-import org.bouncycastle.openpgp.operator.bc.BcPGPContentSignerBuilder
-import org.bouncycastle.openpgp.operator.bc.BcPGPDigestCalculatorProvider
-import org.bouncycastle.openpgp.operator.bc.BcPGPKeyPair
 import org.kysecurity.mail.data.AppDatabase
 import org.kysecurity.mail.mail.ClientEncryptedMessage
 import org.kysecurity.mail.mail.MailDraft
@@ -46,10 +31,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
-import java.io.ByteArrayOutputStream
-import java.math.BigInteger
-import java.security.SecureRandom
-import java.util.Date
 
 /** A key the app trusted before recipient pins existed is still trusted after the upgrade: a
  *  snapshot that drops the contact must not open the door to a relay-supplied key. */
@@ -176,50 +157,13 @@ class LegacyKeyMigrationTest {
 
     private companion object {
         const val TEST_DB = "legacy-key-migration-test"
-        val SECRET_A: PGPSecretKeyRing by lazy { secretRing("A <alice@example.invalid>") }
-        val KEY_A: String by lazy { armored(publicRing(SECRET_A).encoded) }
-        val KEY_B: String by lazy { armored(publicRing(secretRing("B <alice@example.invalid>")).encoded) }
+        val SECRET_A by lazy { RevocationTestKeys.secretRing("A <alice@example.invalid>") }
+        val KEY_A: String by lazy { RevocationTestKeys.public(SECRET_A) }
+        val KEY_B: String by lazy { RevocationTestKeys.public(RevocationTestKeys.secretRing("B <alice@example.invalid>")) }
 
         /** [KEY_A] with a key revocation made by its own primary key. */
-        val REVOKED_A: String by lazy {
-            val ring = publicRing(SECRET_A)
-            val primary = ring.publicKey
-            val privateKey = SECRET_A.secretKey.extractPrivateKey(BcPBESecretKeyDecryptorBuilder(BcPGPDigestCalculatorProvider()).build(null))
-            val generator = PGPSignatureGenerator(BcPGPContentSignerBuilder(primary.algorithm, HashAlgorithmTags.SHA256))
-            generator.init(PGPSignature.KEY_REVOCATION, privateKey)
-            val revoked = PGPPublicKey.addCertification(primary, generator.generateCertification(primary))
-            armored(PGPPublicKeyRing.insertPublicKey(ring, revoked).encoded)
-        }
-
-        fun publicRing(secret: PGPSecretKeyRing) = PGPPublicKeyRing(secret.publicKeys.asSequence().toList())
+        val REVOKED_A: String by lazy { RevocationTestKeys.primaryRevoked(SECRET_A, signer = SECRET_A) }
 
         fun ring(armoredKey: String) = RevocationTestKeys.ring(armoredKey)
-
-        fun armored(bytes: ByteArray): String {
-            val out = ByteArrayOutputStream()
-            ArmoredOutputStream(out).use { it.write(bytes) }
-            return out.toString(Charsets.UTF_8.name())
-        }
-
-        @Suppress("DEPRECATION")
-        fun secretRing(uid: String): PGPSecretKeyRing {
-            val rsa = RSAKeyPairGenerator().apply {
-                init(RSAKeyGenerationParameters(BigInteger.valueOf(0x10001), SecureRandom(), 2048, 12))
-            }
-            val now = Date()
-            val primary = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), now)
-            val sub = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), now)
-            val ring = PGPKeyRingGenerator(
-                PGPSignature.POSITIVE_CERTIFICATION,
-                primary,
-                uid,
-                BcPGPDigestCalculatorProvider().get(HashAlgorithmTags.SHA1),
-                null,
-                null,
-                BcPGPContentSignerBuilder(primary.publicKey.algorithm, HashAlgorithmTags.SHA256),
-                null,
-            ).apply { addSubKey(sub) }.generateSecretKeyRing()
-            return ring
-        }
     }
 }
