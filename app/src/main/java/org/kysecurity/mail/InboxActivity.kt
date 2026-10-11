@@ -140,7 +140,6 @@ class InboxActivity : LockedActivity() {
         if (result.resultCode == RESULT_OK) {
             val removedId = result.data?.getStringExtra(EmailDetailActivity.EXTRA_REMOVED_EMAIL_ID)
             if (removedId != null) {
-                allEmails.find { it.id == removedId }?.let { adjustUnread(currentFolder, it.status, null) }
                 allEmails = allEmails.filter { it.id != removedId }
                 searchResults = searchResults?.filter { it.id != removedId }
                 rebuildTabs(allEmails)
@@ -375,8 +374,10 @@ class InboxActivity : LockedActivity() {
                 // The anchor is read from Room, not allEmails: right after a folder switch that is
                 // still the old folder.
                 outcome = mailRepository.loadOlderFrom(folder, frontier)
-                emails = mailRepository.cachedEmails(folder)
-                unread = mailRepository.unreadCounts()
+                mailRepository.cachedEmailsAndUnread(folder).let { (rows, counts) ->
+                    emails = rows
+                    unread = counts
+                }
             } catch (e: RuntimeException) {
                 // An exception here would kill the worker thread and the app with it.
                 android.util.Log.w("InboxActivity", "Loading older mail failed", e)
@@ -441,7 +442,8 @@ class InboxActivity : LockedActivity() {
      *  mailbox's rows, and a UID repeats across mailboxes. */
     private fun showStatus(id: String, folder: String, status: String) {
         if (redirectedToUnlock || isDestroyed) return
-        allEmails.find { it.id == id && it.sourceFolder() == folder }?.let { adjustUnread(folder, it.status, status) }
+        // Whatever folder is on screen: the picker counts every folder.
+        recountUnread()
         allEmails = allEmails.map { if (it.id == id && it.sourceFolder() == folder) it.copy(status = status) else it }
         searchResults = searchResults?.map { if (it.id == id && it.sourceFolder() == folder) it.copy(status = status) else it }
         rebuildTabs(allEmails)
@@ -559,8 +561,7 @@ class InboxActivity : LockedActivity() {
         // Not only on a cold open: returning from a message must show its read overlay now, not
         // after the network answers. A pull re-reads the folder and paints once.
         if (showCacheFirst || !forceFullResync) {
-            val cached = mailRepository.cachedEmails(folder)
-            val unread = mailRepository.unreadCounts()
+            val (cached, unread) = mailRepository.cachedEmailsAndUnread(folder)
             runOnUiThread { unreadByFolder = unread }
             if (cached.isNotEmpty()) {
                 runOnUiThread {
@@ -571,8 +572,7 @@ class InboxActivity : LockedActivity() {
         beforeNetworkRefreshForTest?.invoke(folder)
         val outcome: MailOutcome<MailFetchResult> =
             mailRepository.refreshFolder(folder, forceFullResync = forceFullResync)
-        val emails = mailRepository.cachedEmails(folder)
-        val unread = mailRepository.unreadCounts()
+        val (emails, unread) = mailRepository.cachedEmailsAndUnread(folder)
         runOnUiThread { unreadByFolder = unread }
         val errorMessage = outcome.userFacingMessage()
         keywordSettings.rememberKeywords(emails.flatMap { it.keywords }.toSet())
@@ -750,9 +750,15 @@ class InboxActivity : LockedActivity() {
             label
         }
 
-    /** Keeps the picker's counts in step with a local change until the next refresh re-reads Room. */
-    private fun adjustUnread(folder: String, before: String, after: String?) {
-        unreadByFolder = KeywordTabs.adjustedUnread(unreadByFolder, folder, before, after)
+    /** Re-reads the picker's counts from Room after a confirmed change, never adjusting them by
+     *  arithmetic, which a snapshot taken after the change would count twice. On [ioExecutor],
+     *  which runs every refresh too, so an older snapshot cannot land after this one. */
+    private fun recountUnread() {
+        if (isDestroyed || ioExecutor.isShutdown) return
+        ioExecutor.execute {
+            val unread = mailRepository.unreadCounts()
+            runOnUiThread { unreadByFolder = unread }
+        }
     }
 
     private fun switchFolder(folder: String) {
@@ -929,7 +935,8 @@ class InboxActivity : LockedActivity() {
                 val claims = mailRepository.beginRemovals(rows.map { it.id }, folder, session)
                 val dropped = { claims.forEach(mailRepository::abandon) }
                 MailBackgroundExecutor.submitReporting(this, label, onDropped = dropped) {
-                    mailRepository.mutateAll(action, claims, target, account)
+                    // Whatever the outcome: a partial failure can still have applied some rows.
+                    mailRepository.mutateAll(action, claims, target, account).also { runOnUiThread { recountUnread() } }
                 }
             }
         }
@@ -1204,7 +1211,6 @@ class InboxActivity : LockedActivity() {
         fun isTheRow(row: Email) = row.id == email.id && row.sourceFolder() == sourceFolder
         val index = allEmails.indexOfFirst(::isTheRow)
         holdForUndo(listOf(email), label) {
-            adjustUnread(sourceFolder, email.status, null)
             val claim = mailRepository.beginRemoval(email.id, sourceFolder, session)
             // Decided on the worker: reading the pairing is disk and crypto. Until the next repaint
             // [shownAccount] still names the old account, so it cannot answer this alone.
@@ -1216,6 +1222,7 @@ class InboxActivity : LockedActivity() {
                 rowActionObserverForTest?.invoke(email.id, sourceFolder)
                 // [mutate] takes the folder through the claim: it has no way to reach for currentFolder.
                 mutate(claim, account).also {
+                    if (it is MailOutcome.Success) runOnUiThread { recountUnread() }
                     val active = activeAccountForTest?.invoke() ?: mailRepository.currentAccount()
                     pairingChanged.set(account != active)
                 }
