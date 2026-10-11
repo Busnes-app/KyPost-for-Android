@@ -188,7 +188,10 @@ abstract class AppDatabase : RoomDatabase() {
                             db.execSQL(
                                 "INSERT INTO recipient_pins (address, fingerprint, publicKey, confirmed) " +
                                     "VALUES (?, ?, ?, ?) ON CONFLICT(address, fingerprint) " +
-                                    "DO UPDATE SET confirmed = max(confirmed, excluded.confirmed)",
+                                    // A confirmation brings its own key bytes with it.
+                                    "DO UPDATE SET publicKey = CASE WHEN excluded.confirmed > confirmed " +
+                                    "THEN excluded.publicKey ELSE publicKey END, " +
+                                    "confirmed = max(confirmed, excluded.confirmed)",
                                 arrayOf(pin.address, pin.fingerprint, pin.publicKey, if (pin.confirmed) 1 else 0),
                             )
                         }
