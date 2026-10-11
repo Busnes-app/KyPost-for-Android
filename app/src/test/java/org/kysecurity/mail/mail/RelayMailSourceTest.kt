@@ -1183,6 +1183,37 @@ class RelayMailSourceTest {
     }
 
     @Test
+    fun queuedRsvp_neverReachesAReplacementAccountsRelay() {
+        var pairing = testPairing()
+        val calls = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true,"calendarReply":true}""") }
+        val source = RelayMailSource(pairingProvider = { pairing }, cursorProvider = FakeMailCursorProvider(), callFactory = calls)
+        val rsvp = MailDraft(to = "boss@example.com", subject = "Accepted: x", body = "b", calendarReply = "ics")
+
+        // Queued under the first account...
+        val account = assertNotNullAccount(source.currentAccount())
+        val session = org.kysecurity.mail.ProcessState.generation()
+        // ...then the pairing is replaced before the worker runs: first the staged window, where
+        // the new pairing is saved but the purge has not yet advanced the generation.
+        pairing = testPairing().copy(subscriberId = "sub-2", serverUrl = "https://other-relay.example.org")
+        assertTrue(sendBoundRsvp(rsvp, account, session, source::sendMail) is MailOutcome.Unauthorized)
+        // ...and after the purge, when the session itself has ended.
+        org.kysecurity.mail.ProcessState.advanceGeneration()
+        assertNull(sendBoundRsvp(rsvp, account, session, source::sendMail))
+
+        assertEquals(emptyList<String>(), calls.urls)
+        // The same account in the same session still sends.
+        pairing = testPairing()
+        val now = org.kysecurity.mail.ProcessState.generation()
+        assertTrue(sendBoundRsvp(rsvp, account, now, source::sendMail) is MailOutcome.Success)
+        assertEquals(listOf("https://relay.example.com/api/mail/send"), calls.urls)
+    }
+
+    private fun assertNotNullAccount(account: MailAccount?): MailAccount {
+        assertTrue(account != null)
+        return account!!
+    }
+
+    @Test
     fun calendarReplyRefusal_surfacesTheRelaysReason() {
         val source = RelayMailSource(
             pairingProvider = { testPairing() },

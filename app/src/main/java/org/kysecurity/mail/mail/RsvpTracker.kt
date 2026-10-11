@@ -55,3 +55,13 @@ class RsvpTracker {
 
     fun clear() = state.update { emptyMap() }
 }
+
+/** Sends an RSVP only as the account and session it was confirmed under. Null, with no I/O, once
+ *  the session has ended; [send] refuses a replaced pairing before building the request. */
+fun sendBoundRsvp(
+    draft: MailDraft,
+    account: MailAccount,
+    session: Long,
+    send: (MailDraft, MailAccount?) -> MailOutcome<MailSendOutcome>,
+): MailOutcome<MailSendOutcome>? =
+    if (org.kysecurity.mail.ProcessState.isCurrent(session)) send(draft, account) else null

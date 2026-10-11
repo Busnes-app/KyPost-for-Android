@@ -890,8 +890,12 @@ class EmailDetailActivity : LockedActivity() {
 
     /** True once the dialog is up; from then on its dismiss listener owns [key]. */
     private suspend fun showRsvpDialog(event: CalendarEvent, answer: Rsvp, key: String, release: () -> Unit): Boolean {
+        // The send is bound to the session and account it is confirmed under, read before the
+        // addresses: a later pairing must never receive this account's reply.
+        val session = ProcessState.generation()
+        val account = withContext(Dispatchers.IO) { mailRepository.currentAccount() }
         val addresses = ComposePgpController.from(this).accountAddresses()
-        val attendee = org.kysecurity.mail.mail.rsvpAttendee(event, addresses)
+        val attendee = account?.let { org.kysecurity.mail.mail.rsvpAttendee(event, addresses) }
         if (attendee == null) {
             Toast.makeText(this, R.string.rsvp_no_address, Toast.LENGTH_LONG).show()
             return false
@@ -912,7 +916,7 @@ class EmailDetailActivity : LockedActivity() {
             )
             .setPositiveButton(R.string.rsvp_send) { _, _ ->
                 sending = true
-                sendRsvp(key, org.kysecurity.mail.mail.rsvpDraft(event, attendee, answer, java.time.Instant.now(), sendAs))
+                sendRsvp(key, org.kysecurity.mail.mail.rsvpDraft(event, attendee, answer, java.time.Instant.now(), sendAs), account, session)
             }
             .setNegativeButton(android.R.string.cancel, null)
             .setOnDismissListener {
@@ -925,12 +929,13 @@ class EmailDetailActivity : LockedActivity() {
     }
 
     /** On the mail executor, so leaving the screen does not cancel a reply already on its way. */
-    private fun sendRsvp(key: String, draft: MailDraft) {
+    private fun sendRsvp(key: String, draft: MailDraft, account: org.kysecurity.mail.mail.MailAccount, session: Long) {
         val appContext = applicationContext
-        val session = ProcessState.generation()
         MailBackgroundExecutor.submit {
-            val outcome = runCatching { mailRepository.send(draft) }
+            val outcome = runCatching { org.kysecurity.mail.mail.sendBoundRsvp(draft, account, session, mailRepository::send) }
                 .getOrElse { MailOutcome.UpstreamFailure(it.message ?: "Unexpected error") }
+                // The session ended before the send: nothing left this device, and no one to tell.
+                ?: return@submit
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 val result = org.kysecurity.mail.mail.rsvpResult(outcome)
                 // Never this Activity: a rotation may have replaced it. The current one observes this.

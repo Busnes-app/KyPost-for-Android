@@ -242,8 +242,14 @@ class RelayMailSource(
         }
     }
 
-    override fun sendMail(draft: MailDraft): MailOutcome<MailSendOutcome> {
+    override fun currentAccount(): MailAccount? = pairingProvider()?.mailAccount()
+
+    override fun sendMail(draft: MailDraft, account: MailAccount?): MailOutcome<MailSendOutcome> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        // Same read that authenticates the request, so the check and the credentials agree.
+        if (account != null && account != pairing.mailAccount()) {
+            return MailOutcome.Unauthorized("The message belongs to a different account")
+        }
         val base = baseUrl(pairing, "/api/mail/send") ?: return MailOutcome.BadRequest("Server URL is not valid")
         val body = json.encodeToString(draft.toSendWireDto())
         val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))

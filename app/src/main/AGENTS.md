@@ -452,8 +452,11 @@ Owns production Android app code and resources.
     screens derive their buttons from its `phases` and a send never touches the Activity that
     started it, so a rotation can neither double-send nor miss the outcome. A raised SEQUENCE
     is answerable again. An unsure send stays locked across a rotation; a fresh open may retry.
-    A send captures `ProcessState.generation()`; `RsvpTracker.complete` drops a completion
-    from an ended session (no state, no toast).
+    The confirm captures `ProcessState.generation()` and `MailRepository.currentAccount()`.
+    `sendBoundRsvp` does no I/O once that session has ended, and `sendMail(draft, account)`
+    refuses a replaced pairing from the same read that authenticates the request (the
+    `MailAccount` shape of #155), so an old account's reply never reaches a new relay.
+    `RsvpTracker.complete` drops a completion from an ended session (no state, no toast).
 - `pgp/deliverReadOutcome` owns completed attachment arrays inside the worker until rendering
   accepts them. Cancellation across the dispatcher return, render rejection, or a rendering
   exception wipes unadopted bytes; successful adoption transfers cleanup to the detail Activity.
