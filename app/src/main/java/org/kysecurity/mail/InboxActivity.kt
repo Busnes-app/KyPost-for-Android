@@ -603,7 +603,11 @@ class InboxActivity : LockedActivity() {
                     return true
                 }
 
-                override fun onQueryTextChange(newText: String): Boolean = false
+                // Searching is submit-only, but results must match the text on screen.
+                override fun onQueryTextChange(newText: String): Boolean {
+                    if (searchQuery != null && newText.trim() != searchQuery) endSearch()
+                    return false
+                }
             })
         }
         searchItem = menu.add(0, MENU_SEARCH, 0, R.string.search_hint).apply {
@@ -625,6 +629,7 @@ class InboxActivity : LockedActivity() {
     /** Results land only if this query is still the one on screen, in the folder it searched. */
     private fun runSearch(query: String) {
         searchQuery = query
+        renderFilteredEmails()
         val folder = currentFolder
         ioExecutor.execute {
             val outcome = mailRepository.search(query, folder)
@@ -635,12 +640,10 @@ class InboxActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun applySearchResults(query: String, folder: String, outcome: MailOutcome<List<Email>>) {
         if (searchQuery != query || folder != currentFolder) return
-        if (outcome is MailOutcome.Success) {
-            searchResults = outcome.value
-            renderFilteredEmails()
-        } else {
-            outcome.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
-        }
+        // A failure must not leave an earlier query's results under this one.
+        searchResults = (outcome as? MailOutcome.Success)?.value
+        renderFilteredEmails()
+        outcome.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
     }
 
     private fun endSearch() {

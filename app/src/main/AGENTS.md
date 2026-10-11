@@ -377,7 +377,7 @@ Owns production Android app code and resources.
 - Inbox search (`MailRepository.search` → `GET /api/mail/search?q=&mailbox=&limit=`) searches the
   folder on screen, all fields. Results are never written to Room (they are a view of the folder,
   not its sync window), each row is stamped with the searched mailbox, and they replace the list only while their query and folder are still on
-  screen (`applySearchResults`). A folder switch or notification tap ends the search. The query is
+  screen (`applySearchResults`). A folder switch, a notification tap or editing the submitted text ends the search; a failed search shows the folder list. The query is
   kept out of the saved-state Bundle. `InboxSearchTest` covers the stale-result guards.
 - The folder picker's Sent and Drafts entries never guess a mailbox name. Each tap lists the
   top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
