@@ -52,6 +52,9 @@ class ContactSyncRepository(
         if (deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return@withLock ContactSyncOutcome.NotPaired
         val pendingChanges = db.pendingContactChangeDao().getAllPending()
         val startCursor = cursorStore.cursor(pairing.subscriberId)
+        // Owed until a since=0 pull commits; until then a push acks its changes but leaves the
+        // stored cursor at zero, so a failed pull is retried by the next sync.
+        val snapshotOwed = startCursor == 0L
         var cursor = startCursor
 
         // Fail closed BEFORE the network call. A row this app cannot encode used to become an
@@ -87,7 +90,7 @@ class ContactSyncRepository(
                 continue
             }
             val response = (result as? ContactSyncResult.Success)?.response ?: return@withLock failureOutcome(result)
-            applyDelta(pairing.subscriberId, response, batch.map { it.first })
+            applyDelta(pairing.subscriberId, response, batch.map { it.first }, advanceCursor = !snapshotOwed)
             // Keep pushing on the stale cursor once tooOld: the server keeps answering tooOld
             // without contact lists, and one full pull below replaces them all.
             tooOld = tooOld || response.tooOld
@@ -150,6 +153,7 @@ class ContactSyncRepository(
         db.withTransaction {
             db.contactDao().upsertAll(listOf(localCopy.toEntity(verifiedInPerson = verifiedInPerson)))
             if (verifiedInPerson) recordVerifiedKey(localCopy)
+            recordRevocations(localCopy)
             db.pendingContactChangeDao().enqueue(
                 PendingContactChangeEntity(
                     localUid = localUid,
@@ -175,6 +179,7 @@ class ContactSyncRepository(
             val previous = db.contactDao().getByUid(contact.uid)
             db.contactDao().upsertAll(listOf(contact.toEntity(previous, verifiedInPerson, identityChanged)))
             if (verifiedInPerson) recordVerifiedKey(contact)
+            recordRevocations(contact)
             enqueueCoalesced(
                 PendingContactChangeEntity(
                     localUid = contact.uid,
@@ -240,6 +245,7 @@ class ContactSyncRepository(
         response: ContactSyncPullResponseDto,
         flushedChanges: List<PendingContactChangeEntity>,
         snapshot: Boolean = false,
+        advanceCursor: Boolean = true,
     ) {
         if (response.tooOld) {
             // Wire contract: the server applies the pushed changes BEFORE it computes tooOld, so
@@ -274,7 +280,7 @@ class ContactSyncRepository(
             if (flushedChanges.isNotEmpty()) {
                 db.pendingContactChangeDao().clearFlushed(flushedChanges.map { it.id })
             }
-            cursorStore.advanceCursor(subscriberId, response.cursor)
+            if (advanceCursor) cursorStore.advanceCursor(subscriberId, response.cursor)
         }
     }
 
