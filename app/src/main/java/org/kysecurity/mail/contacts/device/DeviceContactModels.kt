@@ -30,11 +30,10 @@ data class DeviceRawContactSnapshot(
     val phoneticFamilyName: String? = null,
     val department: String? = null,
     val title: String? = null,
-    /** The phone's own TYPE/LABEL per IM, keyed by [keptTypeKey] of the protocol the rebuild
-     *  writes, in row order for duplicates: device-only, kept so a rebuild does not drop it. */
-    val imTypes: Map<String, List<Pair<Int?, String?>>> = emptyMap(),
-    /** As [imTypes], per website label and URL. */
-    val websiteTypes: Map<String, List<Pair<Int?, String?>>> = emptyMap(),
+    /** The columns Room has no slot for (type, label, IM protocol) of each IM, website, relation
+     *  and event row the phone holds, keyed by [keptRowKey] as the rebuild will see the row, in
+     *  row order for duplicates, so a rebuild puts them back. */
+    val keptRows: Map<String, List<Map<String, String?>>> = emptyMap(),
     val givenName: String? = null,
     val familyName: String? = null,
     val middleName: String? = null,
@@ -79,6 +78,7 @@ data class DeviceFieldSet(
     val department: String? = null,
 )
 
-/** One row's identity on the phone: what tells it apart besides its value (an IM's protocol, a
- *  website's label) and the value. The same value on two services is two IMs. */
-internal fun keptTypeKey(qualifier: String?, value: String): String = "${qualifier.orEmpty()}\n$value"
+/** One row's identity as Room sees it: its kind, what tells it apart besides its value (an IM's
+ *  written protocol, a label) and the value. The same value on two services is two IMs. */
+internal fun keptRowKey(mimeType: String, qualifier: String?, value: String): String =
+    "$mimeType\n${qualifier.orEmpty()}\n$value"
