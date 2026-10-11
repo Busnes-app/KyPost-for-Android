@@ -47,7 +47,7 @@ class CalendarInvite(
     val method: String,
     val events: List<CalendarEvent>,
 ) {
-    /** The series master when there is one; an override-only invite heads with its first override. */
+    /** The series master; an invite without one does not parse. */
     val primary: CalendarEvent get() = events.first()
 
     val isCancelled: Boolean get() = method == "CANCEL"
@@ -154,7 +154,8 @@ private fun parse(text: String, localZone: ZoneId, windowsZone: (String) -> Stri
             }
         }
     }
-    if (stack.isNotEmpty() || events.isEmpty()) return null
+    // No series master: an override must never be the headline event.
+    if (stack.isNotEmpty() || events.all { it.isOverride }) return null
     val ordered = events.sortedBy { it.isOverride }
     return CalendarInvite(method, ordered.map { it.event })
 }

@@ -169,6 +169,9 @@ class EmailDetailActivity : LockedActivity() {
         val emailSender = intent.getStringExtra("email_sender") ?: "Unknown sender"
         val emailPreview = intent.getStringExtra("email_preview") ?: "No content"
         val emailBodyMode = intent.getStringExtra("email_body_mode").orEmpty()
+        // The row's own recipients, so Reply All has them even if the body fetch fails.
+        toRecipients = splitAddresses(intent.getStringExtra("email_sent_to").orEmpty())
+        ccRecipients = splitAddresses(intent.getStringExtra("email_cc").orEmpty())
         val hasAttachments = intent.getBooleanExtra("email_has_attachments", false)
         val pgpEncrypted = intent.getBooleanExtra("email_pgp_encrypted", false)
         // An unencrypted message was never going to become CLIENT_PROTECTED, so do not hold Reply.
@@ -356,7 +359,7 @@ class EmailDetailActivity : LockedActivity() {
         pgpDecryptError: String,
         loading: ProgressBar,
     ) {
-        val outcome = mailRepository.fetchBody(emailId, emailFolder)
+        val outcome = mailRepository.fetchBody(emailId, emailFolder, toRecipients, ccRecipients)
         val content = (outcome as? MailOutcome.Success)?.value
         // A failed fetch means "not cached", which is NOT the same as "the server sent no
         // body" — see MailRepository.fetchBody.
