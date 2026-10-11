@@ -410,6 +410,9 @@ Owns production Android app code and resources.
   The Inbox freshness label stays centered immediately below those tabs. Before the first
   successful refresh it reads "Not updated yet", so its row never appears empty and the first
   success does not shift the message list.
+  Each inbox row shows `atUtc` in the device zone (`inboxRowDate`: time for today, date otherwise,
+  blank if unparseable). The "No messages in {folder}" empty state shows only once that folder has
+  refreshed successfully (`inboxEmptyVisible`): a loading or unreachable folder never reads as empty.
   A refresh that lands mail above the top row scrolls to it when the list is at the top;
   otherwise a "N new messages" pill (`inbox_new_mail` plurals, polite live region) over the list
   counts it and scrolls up on tap. Only a repaint of the folder and tab already painted counts,

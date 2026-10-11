@@ -40,6 +40,8 @@ Owns JVM unit tests for app logic that can run without device/emulator.
   source cleanup isolation, and wiping without an emulator or timing-dependent threads.
   `ReadOutcomeDeliveryTest` queues the worker and consumer independently to prove completed
   attachments are wiped when cancellation discards dispatcher delivery.
+- `LayoutVariantIdsTest` requires every `@+id` in a `layout/` file to exist in each `layout-*`
+  variant of it; a missing one crashes `findViewById` only on that configuration.
 - A hand-rolled DAO fake must key its rows the way the real table does. `FakeEmailDao` is keyed on
   (folder, messageId) for that reason: keyed on the id alone it silently reproduced the
   folder-collision bug it was supposed to catch, and every test still passed. Where the SQL itself

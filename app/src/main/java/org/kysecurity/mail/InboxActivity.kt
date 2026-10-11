@@ -44,6 +44,7 @@ class InboxActivity : LockedActivity() {
     private lateinit var loadingStatus: TextView
     private lateinit var cancelLoading: View
     private lateinit var freshnessText: TextView
+    private lateinit var emptyText: TextView
     private lateinit var inboxRoot: View
     private lateinit var inboxContent: View
     private lateinit var newMailPill: Chip
@@ -69,6 +70,8 @@ class InboxActivity : LockedActivity() {
     private var pendingSubject: String? = null
     private var pendingMessageDeadlineMs: Long = 0L
     private val refreshedAtByFolder = mutableMapOf<String, Long>()
+    /** Last folder the relay confirmed; before that an empty list is unknown, not empty. */
+    private var loadedFolder: String? = null
     private var newMailCount = 0
 
     /** The folder the list last painted from a refresh; only a repaint of it can bring new mail. */
@@ -216,10 +219,16 @@ class InboxActivity : LockedActivity() {
         loadingOverlay = findViewById(R.id.loadingOverlay)
         swipeRefresh = findViewById(R.id.inboxSwipeRefresh)
         // forceFullResync: a delta cannot repair a drifted cache, so a pull re-reads the folder.
-        swipeRefresh.setOnRefreshListener { refreshInbox(forceFullResync = true) }
+        swipeRefresh.setOnRefreshListener {
+            // Unknown until the relay answers again, so not "No messages" while it is asked.
+            loadedFolder = null
+            renderFilteredEmails()
+            refreshInbox(forceFullResync = true)
+        }
         loadingStatus = findViewById<TextView>(R.id.loadingStatus)
         cancelLoading = findViewById(R.id.cancelLoading)
         freshnessText = findViewById(R.id.inboxFreshness)
+        emptyText = findViewById(R.id.inboxEmpty)
         newMailPill = findViewById(R.id.newMailPill)
         newMailPill.setOnClickListener {
             recyclerView.smoothScrollToPosition(0)
@@ -245,6 +254,7 @@ class InboxActivity : LockedActivity() {
 
         // Rounded panel bar behind the keyword pills — shared STYLE_GUIDE.md §3 Card/panel radius.
         applyPanelBackground(this, keywordChipScroll)
+        applyEmptyStateBackground(this, emptyText)
         applyPillChipTheme(this, newMailPill)
 
         // Re-style every existing chip in place so a theme switch recolors them even when
@@ -424,6 +434,8 @@ class InboxActivity : LockedActivity() {
         refreshedAt: Long? = null,
     ) {
         if (folder != currentFolder) return
+        // A failed fetch un-confirms the folder: its emptiness is no longer known.
+        if (isFinal) loadedFolder = folder.takeIf { refreshedAt != null }
         // Snapshotted before rebuildTabs: a chip rebuild re-renders through the tab listener.
         val previous = adapter.currentEmails().takeIf { paintedFolder == folder }
         val tabBefore = selectedTab
@@ -519,6 +531,9 @@ class InboxActivity : LockedActivity() {
         val added = previous?.let { newRowsAbove(it, filtered) } ?: 0
         val wasAtTop = !recyclerView.canScrollVertically(-1)
         adapter.updateEmails(filtered)
+        emptyText.text = getString(R.string.inbox_empty, currentFolderLabel())
+        emptyText.visibility =
+            if (inboxEmptyVisible(filtered.size, loadedFolder, currentFolder)) View.VISIBLE else View.GONE
         if (pendingScrollPosition > 0 && adapter.itemCount > 0) {
             val target = pendingScrollPosition.coerceAtMost(adapter.itemCount - 1)
             pendingScrollPosition = 0
@@ -544,6 +559,7 @@ class InboxActivity : LockedActivity() {
         hideNewMailPill()
         currentFolder = folder
         selectedTab = KeywordTabs.ALL
+        emptyText.visibility = View.GONE
         applyFolderTitle()
         renderFreshness()
         refreshInbox()
@@ -788,6 +804,8 @@ class InboxActivity : LockedActivity() {
     }
 }
 
+internal fun inboxEmptyVisible(shown: Int, loadedFolder: String?, currentFolder: String): Boolean =
+    shown == 0 && loadedFolder == currentFolder
 /** Rows [new] puts above the first row [old] already had. Zero on a first load. */
 internal fun newRowsAbove(old: List<Email>, new: List<Email>): Int {
     if (old.isEmpty()) return 0

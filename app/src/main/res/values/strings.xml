@@ -393,6 +393,7 @@
     <string name="loading_emails">Syncing emails…</string>
     <string name="inbox_updated">Updated %1$s</string>
     <string name="inbox_not_updated">Not updated yet</string>
+    <string name="inbox_empty">No messages in %1$s</string>
     <plurals name="inbox_new_mail">
         <item quantity="one">%1$d new message</item>
         <item quantity="other">%1$d new messages</item>

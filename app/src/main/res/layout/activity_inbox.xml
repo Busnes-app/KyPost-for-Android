@@ -71,6 +71,15 @@
 
                 </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
+                <!-- Not clickable, so a pull on it still reaches the refresh layout beneath. -->
+                <TextView
+                    android:id="@+id/inboxEmpty"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="32dp"
+                    android:gravity="center"
+                    android:visibility="gone" />
+
                 <com.google.android.material.chip.Chip
                     android:id="@+id/newMailPill"
                     android:layout_width="wrap_content"
