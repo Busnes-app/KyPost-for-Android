@@ -293,7 +293,8 @@ class PushPairingActivity : LockedActivity() {
             .setNegativeButton(R.string.contact_sync_intro_negative) { _, _ -> scanQr() }
             .setOnCancelListener { scanQr() }
             .setOnDismissListener { settings.setHasShownSyncIntro(true) }
-            .show()
+            .create()
+            .showSecurely()
     }
 
     private fun scanQr() {
