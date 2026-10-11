@@ -143,6 +143,9 @@ class ComposeActivity : LockedActivity() {
     internal fun applyPgpComposeStateForTest(state: PgpComposeState) = applyPgpComposeState(state)
 
     @androidx.annotation.VisibleForTesting
+    internal fun bodyReadyForTest(): Boolean = bodyEditor.isEmptyFlow.value == false
+
+    @androidx.annotation.VisibleForTesting
     internal fun sendForTest() = sendEmail()
 
     @androidx.annotation.VisibleForTesting
@@ -155,6 +158,9 @@ class ComposeActivity : LockedActivity() {
     /** Exactly what "Send without a subject?" runs when confirmed. */
     @androidx.annotation.VisibleForTesting
     internal fun confirmSendWithoutSubjectForTest() = sendEmail(allowEmptySubject = true)
+
+    @androidx.annotation.VisibleForTesting
+    internal fun activeDialogForTest(): AlertDialog? = activeDialog
 
     private val bodyMirror = object : Runnable {
         override fun run() {
