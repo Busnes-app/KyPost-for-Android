@@ -108,6 +108,21 @@ class DeviceContactVisibilityTest {
         )
     }
 
+    /** Every write notifies the contacts observer, which runs a sync, which runs this again.
+     *  Asserted on the write itself: watching the provider for silence also caught unrelated
+     *  writes from elsewhere on the device. */
+    @Test
+    fun anAccountAlreadyVisible_isNotWrittenAgain() {
+        DeviceContactAccount.makeContactsVisible(context)
+
+        assertEquals(
+            "a visibility check on a visible account must not write",
+            false,
+            DeviceContactAccount.makeContactsVisible(context),
+        )
+        assertEquals(1, ungroupedVisible())
+    }
+
     /** The fix runs on every sync, so a second write must update the row rather than add one. */
     @Test
     fun optingIn_isIdempotent() {

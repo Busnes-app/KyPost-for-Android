@@ -508,6 +508,13 @@ Owns production Android app code and resources.
   `serverSync` stage and does not skip the local device pass; device edits queued by a pass reach
   the server on the next one. `refreshGroups` fails when the group refresh did not succeed — the
   repository reports that as an outcome, not a throw.
+- **Device sync must not lose a change that lands while it runs, nor wake itself.** A
+  `DeviceContactSyncCoordinator` request during a pass sets `rerun` and gets one more pass rather
+  than being dropped; the request (`claimPass`) and the pass's decision to stop (`runAgainOrStop`)
+  share one lock, so a request can never land between the pass's last check and its exit. A dirty raw contact is cleared only at the `VERSION` the pull read, so a later
+  edit stays dirty. The foreign-import watermark is the scan's start time, not its end.
+  `makeContactsVisible` writes only when `UNGROUPED_VISIBLE` is off: each write notifies the
+  contacts observer, which used to trigger the next sync, which wrote again.
 - **Device merges are three-way.** `device_contact_links.syncedJson` (`MIGRATION_14_15`) holds the
   `ContactDto` both sides agreed on after the last sync. It is written on create and by the push
   pass, per field: `DeviceContactUpdatePlan.nextBase` takes Room's value for each field the phone

@@ -22,16 +22,28 @@ object DeviceContactAccount {
      * ungrouped contact we pushed was stored correctly and shown nowhere. Grouped contacts stayed
      * visible (DeviceGroupLinker sets GROUP_VISIBLE), which is why this read as a partial sync
      * rather than a display flag. Insert on Settings is an upsert, so calling this repeatedly
-     * updates the one row and repairs installs whose account already exists.
+     * updates the one row and repairs installs whose account already exists. It writes only when
+     * the flag is off: every write notifies the contacts observer, which runs another sync, which
+     * called this again.
      */
-    fun makeContactsVisible(context: Context) {
+    /** True when it had to write the setting; false when it was already on and nothing was written. */
+    fun makeContactsVisible(context: Context): Boolean {
+        val resolver = context.applicationContext.contentResolver
+        val visible = resolver.query(
+            ContactsContract.Settings.CONTENT_URI,
+            arrayOf(ContactsContract.Settings.UNGROUPED_VISIBLE),
+            "${ContactsContract.Settings.ACCOUNT_TYPE} = ? AND ${ContactsContract.Settings.ACCOUNT_NAME} = ?",
+            arrayOf(ACCOUNT_TYPE, ACCOUNT_NAME),
+            null,
+        )?.use { it.moveToFirst() && it.getInt(0) == 1 } ?: false
+        if (visible) return false
         val values = ContentValues().apply {
             put(ContactsContract.Settings.ACCOUNT_NAME, ACCOUNT_NAME)
             put(ContactsContract.Settings.ACCOUNT_TYPE, ACCOUNT_TYPE)
             put(ContactsContract.Settings.UNGROUPED_VISIBLE, 1)
         }
-        context.applicationContext.contentResolver
-            .insert(ContactsContract.Settings.CONTENT_URI, values)
+        resolver.insert(ContactsContract.Settings.CONTENT_URI, values)
+        return true
     }
 }
 

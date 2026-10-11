@@ -139,6 +139,23 @@ class DeviceContactImportConsentTest {
         assertEquals(0, queuedProbeCreates())
     }
 
+    /** A contact edited while the scan runs is newer than the scan's start, so it is seen next time. */
+    @Test
+    fun theNextWatermark_isWhenTheScanBegan() = runBlocking {
+        settings.setImportAccounts(destination, setOf(DeviceAccount(null, null).key))
+        val clocked = DeviceContactRepository(
+            context = context,
+            db = db,
+            syncRepository = syncRepository,
+            groupSyncRepository = GroupSyncRepository(db, GroupsSyncClient(callFactory = OkHttpClient())) { null },
+            now = { SCAN_STARTED_AT },
+        )
+
+        clocked.syncAll()
+
+        assertEquals(SCAN_STARTED_AT, settings.lastForeignScanAtEpochMs())
+    }
+
     @Test
     fun consentingToAnAccount_importsItsExistingContacts() = runBlocking {
         repository.syncAll()
@@ -238,5 +255,6 @@ class DeviceContactImportConsentTest {
 
     private companion object {
         const val PROBE_NAME = "Import Consent Probe"
+        const val SCAN_STARTED_AT = 42L
     }
 }
