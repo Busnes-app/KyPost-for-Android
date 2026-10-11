@@ -12,6 +12,7 @@
         android:padding="16dp"
         android:clipToPadding="false">
 
+        <!-- 40dp below a 360dp window, so all seven fit a 320dp phone (values-w360dp: 44dp). -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -25,8 +26,8 @@
 
                 <ImageButton
                     android:id="@+id/actionReply"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_reply"
                     android:padding="10dp"
@@ -34,8 +35,8 @@
 
                 <ImageButton
                     android:id="@+id/actionReplyAll"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_reply_all"
                     android:padding="10dp"
@@ -43,8 +44,8 @@
 
                 <ImageButton
                     android:id="@+id/actionForward"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_forward"
                     android:padding="10dp"
@@ -64,8 +65,8 @@
 
                 <ImageButton
                     android:id="@+id/actionArchive"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_archive"
                     android:padding="10dp"
@@ -73,8 +74,8 @@
 
                 <ImageButton
                     android:id="@+id/actionMove"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_move"
                     android:padding="10dp"
@@ -82,8 +83,8 @@
 
                 <ImageButton
                     android:id="@+id/actionJunk"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_junk"
                     android:padding="10dp"
@@ -91,8 +92,8 @@
 
                 <ImageButton
                     android:id="@+id/actionDelete"
-                    android:layout_width="44dp"
-                    android:layout_height="44dp"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_delete"
                     android:padding="10dp"

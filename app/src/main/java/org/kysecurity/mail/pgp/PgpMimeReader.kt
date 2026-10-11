@@ -136,7 +136,8 @@ internal object PgpMimeReader {
             html = html,
             plain = plain,
             bodyMode = if (html != null) "html" else "plain",
-            protectedSubject = message.subject?.takeIf { it.isNotBlank() },
+            // Present-but-blank is a real (empty) subject; only an absent header means none.
+            protectedSubject = message.getHeader("Subject", null)?.let { message.subject.orEmpty() },
             attachments = attachments,
             attachmentsOmitted = omitted,
             hasDetachedSignature = hasDetachedSignature,
