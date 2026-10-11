@@ -331,6 +331,9 @@ class InboxActivity : LockedActivity() {
         intent.putExtra("email_preview", email.preview)
         intent.putExtra("email_body_mode", email.bodyMode)
         intent.putExtra("email_folder", email.sourceFolder())
+        // A search result has no Room row, so these are the only copy of its recipients.
+        intent.putExtra("email_sent_to", email.sentTo)
+        intent.putExtra("email_cc", email.cc)
         intent.putExtra("email_has_attachments", email.hasAttachments)
         intent.putExtra("email_pgp_encrypted", email.pgpEncrypted)
         intent.putExtra("email_pgp_decrypt_error", email.pgpDecryptError)
