@@ -36,6 +36,10 @@ Owns JVM unit tests for app logic that can run without device/emulator.
   inventory differ, `ENVELOPE_MALFORMED` without a v3 delivery record, no durable retry after 409,
   and the untouched legacy path. `EnrollmentClientsTest` pins the wire bodies: `envelopeVersions`
   on publish, delivery metadata on fetch, and the three acknowledgement shapes.
+- `CalendarInviteTest` builds invites inline and covers zones (IANA, Mozilla path, Windows
+  table, unknown), all-day, DST-nominal durations, RRULE, CANCEL/update, folding, VALARM
+  scoping, the size and event caps, and malformed input. `CalendarHandoffTest` pins the
+  `ACTION_INSERT` extras by their platform key strings.
 - Lifecycle-owned plaintext tests use pure holders such as `OwnedAttachmentSave`; prove admission,
   source cleanup isolation, and wiping without an emulator or timing-dependent threads.
   `ReadOutcomeDeliveryTest` queues the worker and consumer independently to prove completed

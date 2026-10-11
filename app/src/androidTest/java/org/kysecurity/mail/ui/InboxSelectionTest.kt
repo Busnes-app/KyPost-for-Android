@@ -15,6 +15,7 @@ import org.junit.runner.RunWith
 import org.kysecurity.mail.Email
 import org.kysecurity.mail.InboxActivity
 import org.kysecurity.mail.KeywordTabs
+import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRuntime
 
 @RunWith(AndroidJUnit4::class)
@@ -79,6 +80,34 @@ class InboxSelectionTest {
             scenario.moveToState(Lifecycle.State.CREATED)
             scenario.onActivity { activity ->
                 assertEquals(emptyList<String>(), activity.allEmailsForTest().map { it.id })
+            }
+        }
+    }
+
+    /** Rows selected while a search loads are not in its results; acting on "N selected" then
+     *  would silently drop them. The selection ends when the list is replaced. */
+    @Test
+    fun searchResultsReplacingTheListEndTheSelection() = withInbox { activity ->
+        activity.beginSearchForTest("q")
+        activity.toggleSelectedForTest(email("1"))
+        assertTrue(activity.inSelectionModeForTest())
+
+        activity.applySearchResults("q", "INBOX", MailOutcome.Success(listOf(email("2"))))
+
+        assertFalse(activity.inSelectionModeForTest())
+        assertEquals(emptySet<String>(), activity.selectedIdsForTest())
+    }
+
+    /** The relay refuses an action on more than 500 ids, so a selection never grows past that. */
+    @Test
+    fun selectionStopsAtTheRelaysBatchLimit() {
+        val rows = (1..501).map { email("$it") }
+        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.setFolderForTest("INBOX", KeywordTabs.ALL)
+                activity.setEmailsForTest(rows)
+                rows.forEach { activity.toggleSelectedForTest(it) }
+                assertEquals(rows.take(500).map { it.id }.toSet(), activity.selectedIdsForTest())
             }
         }
     }
