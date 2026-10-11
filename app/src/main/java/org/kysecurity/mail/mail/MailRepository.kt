@@ -56,6 +56,13 @@ class MailRepository(
         return pages to null
     }
 
+    /** One page older than [frontier], or than the oldest row held when there is none yet. Null
+     *  when the folder holds no row to page from. */
+    fun loadOlderFrom(folder: String, frontier: String?): MailOutcome<MailPage>? {
+        val before = frontier ?: cachedEmails(folder).lastOrNull()?.id ?: return null
+        return loadOlder(folder, before)
+    }
+
     /** One page older than [before] into Room. The caller pages on from [MailPage.nextBefore]. */
     fun loadOlder(folder: String, before: String): MailOutcome<MailPage> {
         val outcome = relaySource.fetchOlder(folder, WINDOW_LIMIT, before)

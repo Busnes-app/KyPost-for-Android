@@ -20,6 +20,9 @@ private class FakeEmailDao : EmailDao {
     /** Throws on the next write, to stand in for "Room failed / storage filled / process died". */
     var failNextWrite = false
 
+    /** Throws on the next folder read, once. */
+    var failNextFolderRead = false
+
     /** Throws when an upsert carries this id, to fail one write among several. */
     var failUpsertOf: String? = null
 
@@ -37,7 +40,13 @@ private class FakeEmailDao : EmailDao {
 
     private fun key(id: String, folder: String) = folder to id
 
-    override fun getByFolder(folder: String): List<EmailEntity> = rows.values.filter { it.folder == folder }
+    override fun getByFolder(folder: String): List<EmailEntity> {
+        if (failNextFolderRead) {
+            failNextFolderRead = false
+            throw IllegalStateException("simulated Room read failure")
+        }
+        return rows.values.filter { it.folder == folder }
+    }
     override fun upsertAll(emails: List<EmailEntity>) {
         if (failNextWrite) throw IllegalStateException("simulated Room failure")
         if (emails.any { it.messageId == failUpsertOf }) throw IllegalStateException("simulated Room failure")
@@ -1158,5 +1167,27 @@ class MailRepositoryTest {
 
         assertEquals(OLDER_MAIL_NOT_SAVED, (outcome as MailOutcome.BadRequest).message)
         assertTrue(dao.rows.isEmpty())
+    }
+
+    /** A failed read of the row to page from is a storage failure the user can retry, never "no
+     *  older mail": the screen hides the footer for good on a null. */
+    @Test
+    fun aFailedAnchorReadIsAStorageFailureAndTheRetryPages() {
+        val dao = FakeEmailDao()
+        dao.put(row("w1", "INBOX"))
+        dao.failNextFolderRead = true
+        val source = FakeMailSource()
+        source.olderPages += page("p1", next = "p1")
+        val repo = repository(dao, source)
+
+        assertEquals(OLDER_MAIL_NOT_SAVED, (repo.loadOlderFrom("INBOX", null) as MailOutcome.BadRequest).message)
+
+        assertTrue(repo.loadOlderFrom("INBOX", null) is MailOutcome.Success)
+        assertEquals(listOf("w1"), source.befores)
+    }
+
+    @Test
+    fun anEmptyFolderHasNothingToPageFrom() {
+        assertNull(repository(FakeEmailDao(), FakeMailSource()).loadOlderFrom("INBOX", null))
     }
 }
