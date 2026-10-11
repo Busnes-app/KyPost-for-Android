@@ -88,6 +88,7 @@ class InboxActivity : LockedActivity() {
     private val selectedIds = linkedSetOf<String>()
     private var selectionMode: ActionMode? = null
     private val heldActions = PendingRowActions()
+    private var undoBar: Snackbar? = null
     private var newMailCount = 0
 
     /** The folder the list last painted from a refresh; only a repaint of it can bring new mail. */
@@ -203,6 +204,8 @@ class InboxActivity : LockedActivity() {
         super.onStop()
         if (redirectedToUnlock) return
         heldActions.flush()
+        // Nothing is left for its Undo to take back.
+        undoBar?.dismiss()
         mainHandler.removeCallbacks(refreshRunnable)
         mainHandler.removeCallbacks(pendingMessagePollRunnable)
     }
@@ -237,7 +240,12 @@ class InboxActivity : LockedActivity() {
         loadingOverlay = findViewById(R.id.loadingOverlay)
         swipeRefresh = findViewById(R.id.inboxSwipeRefresh)
         // forceFullResync: a delta cannot repair a drifted cache, so a pull re-reads the folder.
-        swipeRefresh.setOnRefreshListener { refreshInbox(forceFullResync = true) }
+        swipeRefresh.setOnRefreshListener {
+            // Unknown until the relay answers again, so not "No messages" while it is asked.
+            loadedFolder = null
+            renderFilteredEmails()
+            refreshInbox(forceFullResync = true)
+        }
         loadingStatus = findViewById<TextView>(R.id.loadingStatus)
         cancelLoading = findViewById(R.id.cancelLoading)
         freshnessText = findViewById(R.id.inboxFreshness)
@@ -448,7 +456,8 @@ class InboxActivity : LockedActivity() {
         refreshedAt: Long? = null,
     ) {
         if (folder != currentFolder) return
-        if (refreshedAt != null) loadedFolder = folder
+        // A failed fetch un-confirms the folder: its emptiness is no longer known.
+        if (isFinal) loadedFolder = folder.takeIf { refreshedAt != null }
         // Snapshotted before rebuildTabs: a chip rebuild re-renders through the tab listener.
         val previous = adapter.currentEmails().takeIf { paintedFolder == folder }
         val tabBefore = selectedTab
@@ -607,7 +616,11 @@ class InboxActivity : LockedActivity() {
                     return true
                 }
 
-                override fun onQueryTextChange(newText: String): Boolean = false
+                // Searching is submit-only, but results must match the text on screen.
+                override fun onQueryTextChange(newText: String): Boolean {
+                    if (searchQuery != null && newText.trim() != searchQuery) endSearch()
+                    return false
+                }
             })
         }
         searchItem = menu.add(0, MENU_SEARCH, 0, R.string.search_hint).apply {
@@ -630,6 +643,7 @@ class InboxActivity : LockedActivity() {
     private fun runSearch(query: String) {
         selectionMode?.finish()
         searchQuery = query
+        renderFilteredEmails()
         val folder = currentFolder
         ioExecutor.execute {
             val outcome = mailRepository.search(query, folder)
@@ -640,12 +654,10 @@ class InboxActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun applySearchResults(query: String, folder: String, outcome: MailOutcome<List<Email>>) {
         if (searchQuery != query || folder != currentFolder) return
-        if (outcome is MailOutcome.Success) {
-            searchResults = outcome.value
-            renderFilteredEmails()
-        } else {
-            outcome.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
-        }
+        // A failure must not leave an earlier query's results under this one.
+        searchResults = (outcome as? MailOutcome.Success)?.value
+        renderFilteredEmails()
+        outcome.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
     }
 
     private fun endSearch() {
@@ -689,7 +701,8 @@ class InboxActivity : LockedActivity() {
         override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
 
         override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
-            val chosen = adapter.currentEmails().filter { it.id in selectedIds }
+            // The whole list, not the visible tab: a row selected under another tab is still selected.
+            val chosen = (searchResults ?: allEmails).filter { it.id in selectedIds }
             when (item.itemId) {
                 MENU_BULK_ARCHIVE -> submitRowsAction(chosen, getString(R.string.action_archive), MailAction.ARCHIVE)
                 MENU_BULK_JUNK -> submitRowsAction(chosen, getString(R.string.action_junk), MailAction.SPAM)
@@ -724,10 +737,10 @@ class InboxActivity : LockedActivity() {
         }
     }
 
-    /** Hides [emails] at once and runs [send] after [UNDO_WINDOW_MS], or at [onStop], unless Undo
-     *  is tapped first. The server is not asked to do anything until then. */
+    /** Hides [emails] at once and runs [send] when the Undo bar times out or is swiped away, or at
+     *  [onStop], unless Undo is tapped first. The server is not asked anything until then. */
     private fun holdForUndo(emails: List<Email>, label: String, send: () -> Unit) {
-        val entry = heldActions.hold(emails) {
+        heldActions.hold(emails) {
             val keys = emails.map { it.rowKey() }.toSet()
             allEmails = allEmails.filter { it.rowKey() !in keys }
             searchResults = searchResults?.filter { it.rowKey() !in keys }
@@ -735,18 +748,24 @@ class InboxActivity : LockedActivity() {
             send()
         }
         renderFilteredEmails()
-        val commit = Runnable { heldActions.commit(entry) }
-        mainHandler.postDelayed(commit, UNDO_WINDOW_MS)
-        val message = resources.getQuantityString(R.plurals.undo_message, emails.size, label, emails.size)
-        Snackbar.make(recyclerView, message, UNDO_WINDOW_MS.toInt())
+        // One bar for everything held: the new bar replaces the last, and its Undo covers both.
+        val rows = heldActions.heldEmails().size
+        val message = if (heldActions.heldCount() == 1) {
+            resources.getQuantityString(R.plurals.undo_message, rows, label, rows)
+        } else {
+            resources.getQuantityString(R.plurals.undo_message_several, rows, rows)
+        }
+        undoBar = Snackbar.make(recyclerView, message, UNDO_WINDOW_MS.toInt())
             .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
             .setAction(R.string.undo) {
-                if (heldActions.undo(entry)) {
-                    mainHandler.removeCallbacks(commit)
-                    renderFilteredEmails()
-                }
+                if (heldActions.undoAll()) renderFilteredEmails()
             }
-            .show()
+            .addCallback(object : Snackbar.Callback() {
+                override fun onDismissed(transientBottomBar: Snackbar?, event: Int) {
+                    if (commitsOnDismiss(event)) heldActions.flush()
+                }
+            })
+            .also { it.show() }
     }
 
     private fun showFolderPickerPopup(anchor: View) {
@@ -1068,11 +1087,15 @@ internal enum class SpecialFolder(@androidx.annotation.StringRes val label: Int,
 
 private fun mailboxLeaf(path: String): String = path.split('/', '.').last().trim()
 
-internal fun specialFolderOf(path: String): SpecialFolder? =
-    SpecialFolder.entries.firstOrNull { kind -> kind.aliases.any { it.equals(mailboxLeaf(path), ignoreCase = true) } }
+/** Null under Archive: `Archive/Sent` is an archived folder, which the Archive entry owns. */
+internal fun specialFolderOf(path: String): SpecialFolder? {
+    if (path.startsWith("Archive/", ignoreCase = true) || path.startsWith("Archive.", ignoreCase = true)) return null
+    return SpecialFolder.entries.firstOrNull { kind -> kind.aliases.any { it.equals(mailboxLeaf(path), ignoreCase = true) } }
+}
 
 internal fun resolveSpecialFolder(paths: List<String>, kind: SpecialFolder): String? =
     kind.aliases.firstNotNullOfOrNull { alias -> paths.firstOrNull { mailboxLeaf(it).equals(alias, ignoreCase = true) } }
+
 /** Rows [new] puts above the first row [old] already had. Zero on a first load. */
 internal fun newRowsAbove(old: List<Email>, new: List<Email>): Int {
     if (old.isEmpty()) return 0
