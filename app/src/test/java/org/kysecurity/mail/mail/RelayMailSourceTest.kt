@@ -1114,6 +1114,11 @@ class RelayMailSourceTest {
         assertFalse(send("""{"ok":true,"calendarReply":false}""").let { (it as MailOutcome.Success).value.calendarReplySent })
         // Not a JSON boolean: the reply is not understood, so it is not a success either.
         assertTrue(send("""{"ok":true,"calendarReply":"yes"}""") is MailOutcome.UpstreamFailure)
+        // A quoted boolean is a string, not the ack; kotlinx would otherwise coerce it.
+        listOf("\"true\"", "\"false\"", "1", "null").forEach { value ->
+            val outcome = send("""{"ok":true,"calendarReply":$value}""")
+            assertEquals(value, MailOutcome.UpstreamFailure("Malformed send response"), outcome)
+        }
     }
 
     @Test

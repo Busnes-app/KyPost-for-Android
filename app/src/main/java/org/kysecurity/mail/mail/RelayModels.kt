@@ -9,6 +9,7 @@ import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 /** Some deployments may emit `cursor` as a bare JSON number rather than a quoted string; decode
  *  either shape into a plain string token so callers never need to care which one the server sent. */
@@ -20,6 +21,20 @@ private object FlexibleCursorSerializer : KSerializer<String> {
     override fun deserialize(decoder: Decoder): String {
         val element = (decoder as JsonDecoder).decodeJsonElement()
         return (element as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content.orEmpty()
+    }
+}
+
+/** An unquoted JSON boolean and nothing else. The default decoder also takes `"true"`. */
+private object StrictBooleanSerializer : KSerializer<Boolean> {
+    override val descriptor = PrimitiveSerialDescriptor("StrictBoolean", PrimitiveKind.BOOLEAN)
+
+    override fun serialize(encoder: Encoder, value: Boolean) = encoder.encodeBoolean(value)
+
+    override fun deserialize(decoder: Decoder): Boolean {
+        val element = (decoder as JsonDecoder).decodeJsonElement()
+        val primitive = element as? JsonPrimitive
+        return primitive?.takeUnless { it.isString }?.booleanOrNull
+            ?: throw kotlinx.serialization.SerializationException("expected a JSON boolean")
     }
 }
 
@@ -195,6 +210,7 @@ data class RelaySendResponseDto(
     val sentSaved: Boolean = false,
     val warning: String = "",
     /** Present and true only when a calendarReply part was actually sent. */
+    @Serializable(with = StrictBooleanSerializer::class)
     val calendarReply: Boolean = false,
 )
 
