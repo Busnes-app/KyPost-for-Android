@@ -30,6 +30,8 @@
     <string name="nav_junk">Junk</string>
     <string name="nav_trash">Trash</string>
     <string name="nav_archive">Archive</string>
+    <string name="nav_sent">Sent</string>
+    <string name="nav_drafts">Drafts</string>
     <string name="settings_title">Settings</string>
     <string name="settings_subtitle">Settings</string>
     <string name="settings_security_body">App lock, notifications, and encrypted mail</string>
@@ -75,6 +77,23 @@
 
     <string name="action_archive">Archive</string>
     <string name="action_junk">Mark as junk</string>
+    <string name="action_move">Move to folder</string>
+    <string name="selection_selected">Selected</string>
+    <string name="selection_limit">Up to %1$d messages at a time</string>
+    <string name="undo">Undo</string>
+    <plurals name="undo_message">
+        <item quantity="one">%1$s: %2$d message</item>
+        <item quantity="other">%1$s: %2$d messages</item>
+    </plurals>
+    <plurals name="undo_message_several">
+        <item quantity="one">%1$d message changed</item>
+        <item quantity="other">%1$d messages changed</item>
+    </plurals>
+    <plurals name="selection_count">
+        <item quantity="one">%d selected</item>
+        <item quantity="other">%d selected</item>
+    </plurals>
+    <string name="move_to_title">Move to</string>
     <string name="action_delete">Delete</string>
     <string name="action_reply">Reply</string>
     <string name="action_reply_all">Reply all</string>
@@ -100,6 +119,35 @@
     <!-- Shown when the server flagged a message with the $Phishing IMAP keyword. Wording
          matches the webmail and Linux clients. -->
     <string name="email_phishing_warning">This message impersonates KyPost. Links to KyPost app addresses have been blocked. KyPost will never ask you to confirm a pairing request by email — never approve one you did not start yourself, on this device.</string>
+    <string name="invite_label">Calendar invite</string>
+    <string name="invite_label_method">Calendar invite · %1$s</string>
+    <string name="invite_untitled">Untitled event</string>
+    <string name="invite_where">Where: %1$s</string>
+    <string name="invite_organizer">Organizer: %1$s</string>
+    <string name="invite_repeats">Repeats</string>
+    <string name="invite_cancelled">This event was cancelled. Check your calendar.</string>
+    <string name="invite_updated">This invite was updated. Check your calendar.</string>
+    <string name="invite_phishing">This message is flagged as phishing. Check the invite before you add it.</string>
+    <string name="invite_organizer_not_sender">The organizer (%1$s) is not the sender of this email. Anyone can name any organizer.</string>
+    <string name="invite_unknown_zone">Time zone \"%1$s\" isn\'t recognised, so this time is read as your own zone and may be wrong.</string>
+    <string name="invite_add">Add to calendar</string>
+    <string name="rsvp_accept">Accept</string>
+    <string name="rsvp_tentative">Maybe</string>
+    <string name="rsvp_decline">Decline</string>
+    <string name="rsvp_confirm_title">Send RSVP unencrypted?</string>
+    <string name="rsvp_confirm_message">Reply \"%1$s\" to %2$s as %3$s.\n\nRSVPs are always sent unencrypted and unsigned, because the organizer\'s calendar can\'t read an encrypted reply. The reply carries your answer, your address and the event\'s ID.</string>
+    <string name="rsvp_confirm_not_sender">The organizer is not the sender of this email, so this reply goes to an address the sender chose.</string>
+    <string name="rsvp_sent_as_plain_mail">Your server didn\'t send this as a calendar reply. The organizer got a plain email; update your server.</string>
+    <string name="rsvp_maybe_sent">RSVP may not have been sent: %1$s. Check your Sent folder before trying again.</string>
+    <string name="rsvp_send">Send unencrypted</string>
+    <string name="rsvp_sent">RSVP sent</string>
+    <string name="rsvp_failed">RSVP not sent: %1$s</string>
+    <string name="rsvp_no_address">Couldn\'t confirm your account address, so no RSVP was sent. Try again.</string>
+    <string name="calendar_create_event">Create event from this email</string>
+    <string name="calendar_no_app">No calendar app can add this event</string>
+    <string name="calendar_handoff_confirm_title">Hand off to your calendar app?</string>
+    <string name="calendar_handoff_confirm_message">Hostile Location Protection is on. Your calendar app will store this event outside KyPost, where a wipe can\'t remove it.</string>
+    <string name="calendar_handoff_confirm_positive">Open calendar</string>
     <string name="email_pgp_client_protected">This message is end-to-end encrypted. The server holds no key for it.</string>
     <string name="email_pgp_open_webmail_button">Open in webmail</string>
     <string name="email_pgp_decrypt_button">Decrypt Email</string>
@@ -393,12 +441,16 @@
     <string name="loading_emails">Syncing emails…</string>
     <string name="inbox_updated">Updated %1$s</string>
     <string name="inbox_not_updated">Not updated yet</string>
+    <string name="inbox_empty">No messages in %1$s</string>
+    <string name="search_hint">Search mail</string>
+    <string name="search_no_results">No matching messages</string>
     <plurals name="inbox_new_mail">
         <item quantity="one">%1$d new message</item>
         <item quantity="other">%1$d new messages</item>
     </plurals>
     <string name="finding_email">Finding new email…</string>
     <string name="no_archive_folders">No archive folders found</string>
+    <string name="special_folder_missing">No %1$s folder on this account</string>
     <string name="email_not_found">Email no longer available</string>
     <string name="load_older_mail">Load older mail</string>
 

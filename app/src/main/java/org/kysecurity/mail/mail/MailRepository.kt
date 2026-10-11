@@ -107,16 +107,44 @@ class MailRepository(
         return outcome
     }
 
+    /** Several messages in one [folder], one relay call. Drops only the rows the relay confirmed.
+     *  `processed` is a count, so a total that `failed[]` does not account for confirms none. */
+    fun mutateAll(
+        action: MailAction,
+        ids: List<String>,
+        folder: String,
+        targetFolder: String? = null,
+    ): MailOutcome<Unit> {
+        if (ids.isEmpty()) return MailOutcome.Success(Unit)
+        val outcome = relaySource.performAction(action, ids, folder, targetFolder)
+        if (outcome !is MailOutcome.Success) return outcome.toUnitOutcome()
+        val failed = outcome.value.failed
+        val confirmed = ids.filter { id -> failed.none { it.first == id } }
+        if (outcome.value.processed != confirmed.size) {
+            return MailOutcome.ActionRejected(ids.first(), "The server reported an incomplete change")
+        }
+        confirmed.forEach { emailDao.deleteById(it, folder) }
+        val first = failed.firstOrNull() ?: return MailOutcome.Success(Unit)
+        return MailOutcome.ActionRejected(first.first, "${failed.size} of ${ids.size} not changed: ${first.second}")
+    }
+
     fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> =
         relaySource.saveClientEncryptedDraft(draft)
 
-    fun send(draft: MailDraft): MailOutcome<MailSendOutcome> = relaySource.sendMail(draft)
+    fun send(draft: MailDraft, account: MailAccount? = null): MailOutcome<MailSendOutcome> =
+        relaySource.sendMail(draft, account)
+
+    fun currentAccount(): MailAccount? = relaySource.currentAccount()
 
     /** The client-custody send: this device already encrypted and signed, the relay only forwards. */
     fun sendClientEncrypted(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome> =
         relaySource.sendClientEncrypted(message)
 
     fun listFolders(parent: String?): MailOutcome<FolderListResult> = relaySource.listFolders(parent)
+
+    /** Not cached: results are a view of [folder], not its window, and must not prune it. */
+    fun search(query: String, folder: String, limit: Int = 50): MailOutcome<List<Email>> =
+        relaySource.searchMail(query, folder, limit)
 
     fun listAttachments(id: String, folder: String): MailOutcome<List<AttachmentInfo>> =
         relaySource.listAttachments(id, folder)
@@ -133,8 +161,18 @@ class MailRepository(
      *  BODY_UNAVAILABLE and drop the webmail handoff. Signed-but-not-encrypted mail is not
      *  `pgpEncrypted`, so it takes the fetch path and keeps the server's copy as the fallback for a
      *  signature this device cannot verify. */
-    fun fetchBody(id: String, folder: String): MailOutcome<MailMessageBody> {
-        val row = emailDao.getById(id, folder) ?: return relaySource.fetchMessageBody(id, folder)
+    /** [knownTo]/[knownCc] are the caller's copy, for a message with no Room row (a search
+     *  result): the relay's body endpoint carries no recipients. */
+    fun fetchBody(
+        id: String,
+        folder: String,
+        knownTo: List<String> = emptyList(),
+        knownCc: List<String> = emptyList(),
+    ): MailOutcome<MailMessageBody> {
+        val row = emailDao.getById(id, folder) ?: return when (val fetched = relaySource.fetchMessageBody(id, folder)) {
+            is MailOutcome.Success -> MailOutcome.Success(fetched.value.copy(toAddresses = knownTo, ccAddresses = knownCc))
+            else -> fetched
+        }
         // The cache is the only source of these: no relay response ever populates them — not the
         // inbox listing, and not /api/mail/body, which carries body and bodyMode alone. Taking the
         // response's empties is what makes Reply All reply to the sender alone.
@@ -157,8 +195,11 @@ class MailRepository(
     }
 }
 
+/** The relay refuses `/api/inbox/actions` with more ids than this (server `maxInboxActionIDs`). */
+const val MAX_ACTION_IDS = 500
+
 /** HTTP 200 is transport success, not operation success: `/api/inbox/actions` answers 200 with the
- *  requested id in `failed[]` (Mobile_Mail_Relay.md Part 2). Only an id the relay actually
+ *  requested id in `failed[]` (docs/Mobile_Mail_Relay.md Part 2). Only an id the relay actually
  *  processed may be applied to the local cache. */
 internal fun MailOutcome<MailActionOutcome>.appliedTo(id: String): MailOutcome<Unit> {
     if (this !is MailOutcome.Success) return toUnitOutcome()
