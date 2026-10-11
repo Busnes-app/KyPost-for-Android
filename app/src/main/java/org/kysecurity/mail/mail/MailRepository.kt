@@ -59,7 +59,12 @@ class MailRepository(
     /** One page older than [frontier], or than the oldest row held when there is none yet. Null
      *  when the folder holds no row to page from. */
     fun loadOlderFrom(folder: String, frontier: String?): MailOutcome<MailPage>? {
-        val before = frontier ?: cachedEmails(folder).lastOrNull()?.id ?: return null
+        // A failed read is not an empty folder: report it, so the caller keeps offering a retry.
+        val before = frontier ?: try {
+            cachedEmails(folder).lastOrNull()?.id
+        } catch (_: RuntimeException) {
+            return MailOutcome.BadRequest(OLDER_MAIL_NOT_SAVED)
+        } ?: return null
         return loadOlder(folder, before)
     }
 

@@ -112,8 +112,8 @@ Owns production Android app code and resources.
   `hasMore`) stores nothing, not even the window, and keeps the old cursor: any stored row would
   count as held, and a retry after newer mail would stop at it and commit past the gap. `delta: false` answering a
   cursor is a snapshot. A `before=` answer without `hasMore` is a server that ignored it; it is
-  refused, never stored. A storage failure while storing a page (full disk) is reported as
-  `OLDER_MAIL_NOT_SAVED`, never thrown, and keeps the paging frontier for a retry. Known gaps: the relay tracks deletions only inside its window, so an
+  refused, never stored. A storage failure reading the row to page from or storing a page is reported as
+  `OLDER_MAIL_NOT_SAVED`, never thrown, and keeps the paging frontier and the footer for a retry; only an empty folder hides it. Known gaps: the relay tracks deletions only inside its window, so an
   out-of-window row stays until the user acts on it; such rows are not healed by the daily resync
   after a UIDVALIDITY reset; encrypted mail stored from a page (older mail, or delta overflow)
   lacks its PGP flags because the page carries none, so it opens through `/api/mail/body` with no

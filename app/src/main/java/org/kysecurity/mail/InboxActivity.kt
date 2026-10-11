@@ -328,18 +328,19 @@ class InboxActivity : LockedActivity() {
         ioExecutor.execute {
             var outcome: MailOutcome<MailPage>? = null
             var emails: List<Email>? = null
-            var started = false
+            var failed = false
             try {
-                // Read from Room, not allEmails: right after a folder switch that is still the old folder.
-                val before = frontier ?: mailRepository.cachedEmails(folder).lastOrNull()?.id
-                started = before != null
-                outcome = before?.let { mailRepository.loadOlder(folder, it) }
+                // The anchor is read from Room, not allEmails: right after a folder switch that is
+                // still the old folder.
+                outcome = mailRepository.loadOlderFrom(folder, frontier)
                 emails = mailRepository.cachedEmails(folder)
             } catch (e: RuntimeException) {
                 // An exception here would kill the worker thread and the app with it.
                 android.util.Log.w("InboxActivity", "Loading older mail failed", e)
-                if (outcome == null && started) outcome = MailOutcome.BadRequest(OLDER_MAIL_NOT_SAVED)
+                failed = true
             } finally {
+                // Null means "nothing to page from" only when nothing failed.
+                if (failed && outcome == null) outcome = MailOutcome.BadRequest(OLDER_MAIL_NOT_SAVED)
                 val result = outcome
                 val painted = emails
                 runOnUiThread { onOlderMailLoaded(folder, result, painted) }
