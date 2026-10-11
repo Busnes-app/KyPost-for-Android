@@ -126,8 +126,8 @@ class InboxSelectionTest {
                 activity.setEmailsForTest(listOf(inbox42))
                 activity.toggleSelectedForTest(inbox42)
             }
-            onView(withContentDescription("Move to folder")).perform(click())
             scenario.onActivity { activity ->
+                activity.bulkMoveForTest()
                 activity.setFolderForTest("Junk", KeywordTabs.ALL)
                 activity.setEmailsForTest(listOf(junk42))
                 requireNotNull(answer) { "the move picker was never asked" }("Archive")

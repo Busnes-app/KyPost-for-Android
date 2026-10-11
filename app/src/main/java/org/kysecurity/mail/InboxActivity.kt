@@ -1015,6 +1015,13 @@ class InboxActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun switchFolderForTest(folder: String) = switchFolder(folder)
 
+    /** Runs the selection bar's own Move handler, as tapping it would. */
+    @androidx.annotation.VisibleForTesting
+    internal fun bulkMoveForTest() {
+        val mode = selectionMode ?: return
+        selectionCallback.onActionItemClicked(mode, mode.menu.findItem(MENU_BULK_MOVE))
+    }
+
     /** Null in production. Stands in for the folder picker, which answers asynchronously. */
     @androidx.annotation.VisibleForTesting
     internal var moveTargetPickerForTest: ((from: String, then: (String) -> Unit) -> Unit)? = null
