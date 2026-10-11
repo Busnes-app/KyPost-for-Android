@@ -379,6 +379,16 @@ Owns production Android app code and resources.
   not its sync window), each row is stamped with the searched mailbox, and they replace the list only while their query and folder are still on
   screen (`applySearchResults`). A folder switch, a notification tap or editing the submitted text ends the search; a failed search shows the folder list. The query is
   kept out of the saved-state Bundle. `InboxSearchTest` covers the stale-result guards.
+- `showThemed()` (`ThemedDialog.kt`) shows a native AlertDialog through `showSecurely()` and then
+  paints its surface, title, message, buttons, list rows and fields in the active palette
+  (STYLE_GUIDE.md §6). A dialog is its own window, so the Activity's theme walk never reaches it.
+  `ThemedDialogsTest` names the dialogs that must use it. The message screen's seven actions use
+  `@dimen/detail_action_size`: 40dp below a 360dp window, 44dp from it, so all seven are on
+  screen at 320dp (`EmailDetailActionRowTest` checks positions, since overflowing fixed-size
+  buttons keep their size and are only clipped).
+- "Move to folder" (`MoveToFolder.kt`, detail screen) offers INBOX, the relay's top-level folders
+  and the Archive subfolders, minus the message's own folder (`moveTargets`), and runs
+  `MailRepository.move`, so the local row goes only once the relay confirms the id.
 - The folder picker's Sent and Drafts entries never guess a mailbox name. Each tap lists the
   top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
   the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A localized name
