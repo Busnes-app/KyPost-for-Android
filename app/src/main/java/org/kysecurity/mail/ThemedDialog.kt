@@ -20,7 +20,11 @@ fun AlertDialog.Builder.showThemed(): AlertDialog {
     val inkStrong = Color.parseColor(palette.inkStrong)
     val accent = Color.parseColor(palette.accent)
     // Tinted, not replaced: the native background carries the dialog's shape and insets (§3).
-    dialog.window?.decorView?.background?.mutate()?.setTint(panel)
+    // On the View, not the drawable: the decor re-applies its own theme tint over a drawable's.
+    dialog.window?.decorView?.apply {
+        backgroundTintList = android.content.res.ColorStateList.valueOf(panel)
+        backgroundTintMode = android.graphics.PorterDuff.Mode.SRC_IN
+    }
     dialog.findViewById<TextView>(androidx.appcompat.R.id.alertTitle)?.setTextColor(inkStrong)
     dialog.findViewById<TextView>(android.R.id.message)?.setTextColor(ink)
     listOf(DialogInterface.BUTTON_POSITIVE, DialogInterface.BUTTON_NEGATIVE, DialogInterface.BUTTON_NEUTRAL)
