@@ -64,6 +64,9 @@ interface EmailDao {
     fun clearServerDecryptedBodies(): Int
 
     @Transaction
+    fun inTransaction(block: () -> Unit) = block()
+
+    @Transaction
     fun replaceFolderSnapshot(folder: String, emails: List<EmailEntity>) {
         upsertAll(emails)
         pruneStaleInFolder(folder, emails.map { it.messageId })

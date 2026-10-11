@@ -120,6 +120,15 @@ class ComposeActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun discardPromptCountForTest(): Int = discardPromptCount
 
+    @androidx.annotation.VisibleForTesting
+    internal fun bodyReadyForTest(): Boolean = bodyEditor.isEmptyFlow.value == false
+
+    @androidx.annotation.VisibleForTesting
+    internal fun sendForTest() = sendEmail()
+
+    @androidx.annotation.VisibleForTesting
+    internal fun activeDialogForTest(): AlertDialog? = activeDialog
+
     private val bodyMirror = object : Runnable {
         override fun run() {
             bodyEditor.exportHtml { mirroredBodyHtml = it }

@@ -179,4 +179,17 @@ class EmailDaoFolderScopeTest {
 
         assertEquals(mapOf("INBOX" to 2, "Archive" to 1), dao.unreadCounts().associate { it.folder to it.unread })
     }
+
+    /** The window and an overflow walk are stored through this; Room must roll both back. */
+    @Test
+    fun inTransactionRollsBackEveryWriteOnAThrow() {
+        runCatching {
+            dao.inTransaction {
+                dao.upsertAll(listOf(row("w1", "INBOX", null)))
+                throw IllegalStateException("simulated failure after the window")
+            }
+        }
+
+        assertNull(dao.getById("w1", "INBOX"))
+    }
 }

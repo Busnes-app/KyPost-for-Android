@@ -496,9 +496,13 @@ class RelayMailSource(
  *  conforming preview, or a surrogate pair in one. */
 private const val MAX_PREVIEW_CHARS = 400
 
-/** Format characters (bidi overrides, zero-width) dropped: they can reorder what the row shows. */
-internal fun previewText(raw: String?): String =
-    raw.orEmpty().take(MAX_PREVIEW_CHARS).filterNot { Character.getType(it) == Character.FORMAT.toInt() }
+/** Format characters (bidi overrides, zero-width, tags) dropped: they can reorder what the row
+ *  shows. Whole code points, so neither the filter nor the bound sees half a surrogate pair. */
+internal fun previewText(raw: String?): String = buildString {
+    raw.orEmpty().codePoints()
+        .filter { Character.getType(it) != Character.FORMAT.toInt() }
+        .forEach { if (length + Character.charCount(it) <= MAX_PREVIEW_CHARS) appendCodePoint(it) }
+}
 
 /** Same order of magnitude as the outbound cap in `ComposeActivity` and the server's own
  *  `MaxInboundMessageBytes`, so no legitimate attachment is refused. */
