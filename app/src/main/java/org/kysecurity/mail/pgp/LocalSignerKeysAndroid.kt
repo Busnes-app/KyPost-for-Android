@@ -23,22 +23,25 @@ internal class RoomLocalSignerKeys(private val database: () -> AppDatabase) : Lo
             val contactKeys = db.contactDao().pinnedForEmail(needle)
                 .filter { it.hasEmail(needle) }
                 .mapNotNull { it.toLocalSignerKey() }
-            // A pinned address uses its pins alone; the synced copies can only revoke them, and a
-            // revocation taken is saved so it outlasts the synced copy.
-            val pins = db.recipientPinDao().forAddress(needle.lowercase()).map { pin ->
-                contactKeys.firstNotNullOfOrNull { withVerifiedRevocation(pin.publicKey, it.publicKey) }
-                    ?.let { revoked -> pin.copy(publicKey = revoked).also { db.recipientPinDao().upsertAll(listOf(it)) } }
-                    ?: pin
-            }
-            authoritativeKeys(pins, contactKeys)
+            // Read-only: revocations reach pins when a contact is saved (ContactSyncRepository).
+            authoritativeKeys(db.recipientPinDao().forAddress(needle.lowercase()), contactKeys)
         }
     }
 }
 
 /** Keys verified on this device are the only ones accepted for their address; a synced contact
- *  key is consulted only for an address with no pin, which is the behaviour before pins existed. */
+ *  key is consulted only for an address with no pin, which is the behaviour before pins existed.
+ *  A pin is confirmed only while its bytes are the key its fingerprint names; one that is not
+ *  is still returned, so the sender refuses it. */
 internal fun authoritativeKeys(pins: List<RecipientPinEntity>, contactKeys: List<LocalSignerKey>): List<LocalSignerKey> =
-    if (pins.isEmpty()) contactKeys else pins.map { LocalSignerKey(publicKey = it.publicKey, confirmed = it.confirmed, pinned = true) }
+    if (pins.isEmpty()) {
+        contactKeys
+    } else {
+        pins.map {
+            val intact = it.fingerprint.isNotEmpty() && PgpFingerprint.compute(it.publicKey) == it.fingerprint
+            LocalSignerKey(publicKey = it.publicKey, confirmed = it.confirmed && intact, pinned = true)
+        }
+    }
 
 /** Exact, case-insensitive match against a DECODED address. */
 internal fun ContactEntity.hasEmail(address: String): Boolean =

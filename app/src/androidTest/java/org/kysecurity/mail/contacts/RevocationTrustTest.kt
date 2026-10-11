@@ -122,6 +122,24 @@ class RevocationTrustTest {
         assertEquals(PgpFingerprint.compute(public(C)), PgpFingerprint.compute(stored))
     }
 
+    /** A revoked copy of the pinned key saved on this device, before any sync, revokes the stored
+     *  pin when it is saved: lookups only read pins. */
+    @Test
+    fun aLocallySavedRevocation_isStoredOnThePinAtOnce() = runBlocking {
+        val repository = ContactSyncRepository(db, ContactSyncClient(callFactory = FakeContactServer()), ContactCursorStore(context, db)) { TEST_PAIRING }
+        val uid = repository.queueCreate(
+            ContactDto(fn = "Alice", emails = listOf(ContactFieldDto(value = ALICE)), pgpKey = public(A)),
+            verifiedInPerson = true,
+        )
+
+        repository.queueUpdate(
+            ContactDto(uid = uid, fn = "Alice", emails = listOf(ContactFieldDto(value = ALICE)), pgpKey = primaryRevoked(A, signer = A)),
+            identityChanged = false,
+        )
+
+        assertTrue(ring(db.recipientPinDao().forAddress(ALICE).single().publicKey).publicKey.hasRevocation())
+    }
+
     private companion object {
         const val ALICE = "alice@example.invalid"
         val A by lazy { secretRing("A <alice@example.invalid>") }
