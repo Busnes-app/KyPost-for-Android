@@ -30,6 +30,7 @@ class ThemedDialogsTest {
             "CalendarHandoff.kt" to "Activity.handOffToCalendar",
             "contacts/ContactsListActivity.kt" to "importAccountsDialog",
             "EmailDetailActivity.kt" to "confirmOpenLink",
+            "security/AppLockOffer.kt" to "showIfDue",
         )
     }
 }
