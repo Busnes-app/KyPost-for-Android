@@ -4,7 +4,6 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -196,7 +195,6 @@ class InboxActivity : LockedActivity() {
 
         applyThemeToActivity(this)
         applyInboxThemeChrome()
-        adapter.notifyDataSetChanged()
         rebuildTabs(allEmails)
         renderFilteredEmails()
     }
@@ -533,7 +531,7 @@ class InboxActivity : LockedActivity() {
             val hasUnread = emails.any {
                 it.status == "unread" && (keyword == KeywordTabs.ALL || it.keywords.contains(keyword))
             }
-            chip.setTypeface(chip.typeface, if (hasUnread) Typeface.BOLD else Typeface.NORMAL)
+            chip.setBold(hasUnread)
             chip.isChipIconVisible = hasUnread
             if (hasUnread) {
                 chip.chipIconSize = dotSizePx.toFloat()

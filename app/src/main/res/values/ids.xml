@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- setBold: the face it last applied, and the base it derived that face from. -->
+    <item name="tag_bold_applied_face" type="id" />
+    <item name="tag_bold_base_face" type="id" />
+</resources>
