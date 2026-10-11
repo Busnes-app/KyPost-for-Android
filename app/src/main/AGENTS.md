@@ -389,6 +389,12 @@ Owns production Android app code and resources.
 - "Move to folder" (`MoveToFolder.kt`, detail screen) offers INBOX, the relay's top-level folders
   and the Archive subfolders, minus the message's own folder (`moveTargets`), and runs
   `MailRepository.move`, so the local row goes only once the relay confirms the id.
+- Long-pressing an inbox row starts selection mode (an AppCompat `ActionMode`: Archive, Move,
+  Junk, Delete). Taps toggle rows, swipes are off, and a folder switch or search ends it. Bulk
+  actions go through `MailRepository.mutateAll`, one relay call per source folder. That method
+  applies rule 2 above to a batch: it drops only ids absent from `failed[]`, and only when
+  `processed` equals their count. A shortfall `failed[]` does not explain (the relay stops early on
+  a cancelled request) confirms none.
 - The folder picker's Sent and Drafts entries never guess a mailbox name. Each tap lists the
   top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
   the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A localized name

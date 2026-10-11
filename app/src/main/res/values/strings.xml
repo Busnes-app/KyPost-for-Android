@@ -78,6 +78,11 @@
     <string name="action_archive">Archive</string>
     <string name="action_junk">Mark as junk</string>
     <string name="action_move">Move to folder</string>
+    <string name="selection_selected">Selected</string>
+    <plurals name="selection_count">
+        <item quantity="one">%d selected</item>
+        <item quantity="other">%d selected</item>
+    </plurals>
     <string name="move_to_title">Move to</string>
     <string name="action_delete">Delete</string>
     <string name="action_reply">Reply</string>

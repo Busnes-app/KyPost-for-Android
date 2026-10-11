@@ -26,10 +26,17 @@ import java.util.Locale
 
 class EmailAdapter(
     private var emails: List<Email>,
-    private val onEmailClick: ((Email) -> Unit)? = null
+    private val onEmailLongClick: ((Email) -> Unit)? = null,
+    private val onEmailClick: ((Email) -> Unit)? = null,
 ) : RecyclerView.Adapter<EmailAdapter.EmailViewHolder>() {
 
-    class EmailViewHolder(view: View, private val onEmailClick: ((Email) -> Unit)?) : RecyclerView.ViewHolder(view) {
+    private var selectedIds: Set<String> = emptySet()
+
+    class EmailViewHolder(
+        view: View,
+        private val onEmailClick: ((Email) -> Unit)?,
+        private val onEmailLongClick: ((Email) -> Unit)?,
+    ) : RecyclerView.ViewHolder(view) {
         private val cardView: CardView = view as CardView
         private val contentLayout: LinearLayout = view.findViewById(R.id.emailItemContent)
         private val unreadDot: View = view.findViewById(R.id.unreadDot)
@@ -37,7 +44,7 @@ class EmailAdapter(
         private val senderTextView: TextView = view.findViewById(R.id.textViewSender)
         private val dateTextView: TextView = view.findViewById(R.id.textViewDate)
 
-        fun bind(email: Email, palette: ThemePalette) {
+        fun bind(email: Email, palette: ThemePalette, selected: Boolean) {
             // A message this app can't render is worth knowing before tapping it — otherwise the
             // only signal is opening it and finding nothing there.
             val pgpState = pgpMessageStateOf(email.pgpEncrypted, email.pgpDecryptError, email.body)
@@ -70,8 +77,11 @@ class EmailAdapter(
             dateTextView.text = inboxRowDate(email.atUtc, ZonedDateTime.now(), Locale.getDefault())
 
             val panel = Color.parseColor(palette.panel)
-            cardView.setCardBackgroundColor(panel)
-            contentLayout.setBackgroundColor(panel)
+            val background = if (selected) blend(panel, Color.parseColor(palette.accent), 0.3f) else panel
+            cardView.setCardBackgroundColor(background)
+            contentLayout.setBackgroundColor(background)
+            itemView.isActivated = selected
+            itemView.stateDescription = if (selected) itemView.context.getString(R.string.selection_selected) else null
 
             val isUnread = email.status == "unread"
             unreadDot.visibility = if (isUnread) View.VISIBLE else View.GONE
@@ -84,18 +94,22 @@ class EmailAdapter(
             dateTextView.setTextColor(Color.parseColor(palette.ink))
 
             itemView.setOnClickListener { onEmailClick?.invoke(email) }
+            itemView.setOnLongClickListener {
+                onEmailLongClick?.invoke(email)
+                onEmailLongClick != null
+            }
         }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): EmailViewHolder {
         val view = LayoutInflater.from(parent.context)
             .inflate(R.layout.item_email, parent, false)
-        return EmailViewHolder(view, onEmailClick)
+        return EmailViewHolder(view, onEmailClick, onEmailLongClick)
     }
 
     override fun onBindViewHolder(holder: EmailViewHolder, position: Int) {
         val palette = getStoredThemePalette(holder.itemView.context)
-        holder.bind(emails[position], palette)
+        holder.bind(emails[position], palette, emails[position].id in selectedIds)
     }
 
     override fun getItemCount(): Int = emails.size
@@ -103,6 +117,10 @@ class EmailAdapter(
     fun getEmailAt(position: Int): Email = emails[position]
 
     fun currentEmails(): List<Email> = emails
+    fun setSelection(ids: Set<String>) {
+        selectedIds = ids.toSet()
+        notifyItemRangeChanged(0, itemCount)
+    }
 
     /** The day the date labels were formatted for: after midnight "today" shows a time it no longer means. */
     private var labelledDay: LocalDate = LocalDate.now()
