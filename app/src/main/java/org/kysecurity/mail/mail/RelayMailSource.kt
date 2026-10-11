@@ -138,6 +138,26 @@ class RelayMailSource(
         }
     }
 
+    override fun searchMail(query: String, mailbox: String, limit: Int): MailOutcome<List<Email>> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        val base = baseUrl(pairing, "/api/mail/search") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val url = base.newBuilder()
+            .addQueryParameter("q", query)
+            .addQueryParameter("mailbox", mailbox)
+            .addQueryParameter("limit", limit.toString())
+            .build()
+        val request = Request.Builder().url(url).get()
+            .authed(pairing)
+            .build()
+        return execute(request) { code, body ->
+            if (code != 200) return@execute mapErrorCode(code, body)
+            val parsed = runCatching { json.decodeFromString<RelaySearchResponseDto>(body) }.getOrNull()
+                ?: return@execute MailOutcome.UpstreamFailure("Malformed search response")
+            // Stamped with the searched mailbox: an id means nothing outside the folder it came from.
+            MailOutcome.Success(parsed.results.map { it.toUiEmail(it.label).copy(folder = mailbox) })
+        }
+    }
+
     override fun createFolder(parent: String, name: String): MailOutcome<Unit> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
         val base = baseUrl(pairing, "/api/inbox/folders") ?: return MailOutcome.BadRequest("Server URL is not valid")
