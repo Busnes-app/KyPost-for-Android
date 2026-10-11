@@ -6,7 +6,6 @@ import android.text.InputFilter
 import android.text.InputType
 import android.widget.EditText
 import androidx.appcompat.app.AlertDialog
-import org.kysecurity.mail.security.showSecurely
 
 /** The paired account's plain-text signature. Account-scoped: the pairing purge deletes the file. */
 internal object MailSignature {
@@ -47,6 +46,5 @@ fun showSignatureDialog(activity: Activity) {
         .setView(frame)
         .setPositiveButton(R.string.save) { _, _ -> MailSignature.save(activity, input.text.toString()) }
         .setNegativeButton(android.R.string.cancel, null)
-        .create()
-        .showSecurely()
+        .showThemed()
 }

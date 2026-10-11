@@ -88,6 +88,10 @@
         <item quantity="one">%1$s: %2$d message</item>
         <item quantity="other">%1$s: %2$d messages</item>
     </plurals>
+    <plurals name="undo_message_several">
+        <item quantity="one">%1$d message changed</item>
+        <item quantity="other">%1$d messages changed</item>
+    </plurals>
     <plurals name="selection_count">
         <item quantity="one">%d selected</item>
         <item quantity="other">%d selected</item>
