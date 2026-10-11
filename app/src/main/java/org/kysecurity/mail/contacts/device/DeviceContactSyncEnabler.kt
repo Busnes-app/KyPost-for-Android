@@ -62,6 +62,7 @@ class DeviceContactSyncEnabler(
                     return@launch
                 }
                 graph.settings.setEnabled(true)
+                PendingAccountSetup.complete(DeviceContactAccount.ACCOUNT_NAME)
                 graph.observer.register()
                 DeviceContactSyncScheduler.ensurePeriodic(activity)
                 graph.coordinator.syncNowAsync()

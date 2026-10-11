@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The edit schema contacts apps read off the sync adapter service (CONTACTS_STRUCTURE). Without
+     an EditSchema, AOSP Contacts shows KyPost contacts read-only. The kinds are the ones device sync
+     reads back; name and photo are required by the parser, and every name part must be declared.
+     Attributes are deliberately un-namespaced: AOSP reads them with a null namespace. -->
+<ContactsAccountType>
+    <EditSchema>
+        <DataKind
+            kind="name"
+            maxOccurs="1"
+            supportsPrefix="true"
+            supportsMiddleName="true"
+            supportsSuffix="true"
+            supportsPhoneticFamilyName="true"
+            supportsPhoneticMiddleName="true"
+            supportsPhoneticGivenName="true" />
+        <DataKind kind="photo" maxOccurs="1" />
+        <DataKind kind="phone">
+            <Type type="mobile" />
+            <Type type="home" />
+            <Type type="work" />
+            <Type type="other" />
+            <Type type="custom" />
+        </DataKind>
+        <DataKind kind="email">
+            <Type type="home" />
+            <Type type="work" />
+            <Type type="other" />
+            <Type type="custom" />
+        </DataKind>
+        <DataKind kind="postal" needsStructured="true">
+            <Type type="home" />
+            <Type type="work" />
+            <Type type="other" />
+            <Type type="custom" />
+        </DataKind>
+        <!-- Device sync writes every IM with a custom protocol. -->
+        <DataKind kind="im">
+            <Type type="custom" />
+        </DataKind>
+        <DataKind kind="organization" maxOccurs="1" />
+        <DataKind kind="note" maxOccurs="1" />
+        <DataKind kind="website" />
+        <DataKind kind="event">
+            <Type type="birthday" maxOccurs="1" />
+            <Type type="anniversary" />
+            <Type type="other" />
+            <Type type="custom" />
+        </DataKind>
+        <DataKind kind="relationship">
+            <Type type="spouse" />
+            <Type type="child" />
+            <Type type="parent" />
+            <Type type="partner" />
+            <Type type="manager" />
+            <Type type="assistant" />
+            <Type type="friend" />
+            <Type type="relative" />
+            <Type type="custom" />
+        </DataKind>
+        <DataKind kind="group_membership" maxOccurs="1" />
+    </EditSchema>
+</ContactsAccountType>

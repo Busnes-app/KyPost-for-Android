@@ -51,7 +51,12 @@ class MainActivity : LockedActivity() {
         lifecycleScope.launch {
             val configured = PushRuntime.graph(this@MainActivity).repository.state.first().pairing != null
 
-            val targetIntent = if (configured) {
+            // An "Add account" request the app-lock redirect interrupted resumes where it was going.
+            // Process-local state, never read from the (exported) launch intent.
+            val setupToken = org.kysecurity.mail.contacts.device.PendingAccountSetup.pendingToken
+            val targetIntent = if (setupToken != null) {
+                org.kysecurity.mail.contacts.ContactsListActivity.setupIntent(this@MainActivity, setupToken)
+            } else if (configured) {
                 Intent(this@MainActivity, InboxActivity::class.java).apply {
                     notificationExtras(intent)?.let { putExtras(it) }
                 }

@@ -497,6 +497,27 @@ Owns production Android app code and resources.
   relation and event rows come from builders both paths share. It advances the link's
   `deviceUpdatedAtEpochMs` only when the batch actually landed — stamping it for a write that never
   happened tells the next merge the device is already current.
+- **KyPost is the declared contacts sync adapter for its own account** (`res/xml/syncadapter.xml`:
+  `com.android.contacts`, `supportsUploading`, not user-visible), so contacts apps can treat its
+  raw contacts as editable. `KyPostContactSyncService` is a non-exported stub: SyncManager binds it
+  from system_server, as AccountManager binds the authenticator, so neither enters the
+  exported-components allowlist; a system-initiated pass does nothing, because the coordinator and
+  worker own sync and its gates. The same service carries `android.provider.CONTACTS_STRUCTURE`
+  (`res/xml/contacts.xml`): AOSP Contacts treats an account without an `EditSchema` as read-only
+  and discards a schema that breaks any of its parser rules, which `ContactsStructureSchemaTest`
+  mirrors. `KyPostContactAuthenticator.addAccount` answers with the existing account, or holds the
+  caller's response in `PendingAccountSetup` and opens the Contacts screen in account-setup mode.
+  Any app can make that request, so setup never enables on its own: it asks first
+  (`contacts_account_setup_message`), even with contacts permission already granted; Enable runs
+  the normal enable flow and answers with the account once it exists, while declining or leaving
+  answers with a cancel. Setup progress (confirmed, permission request outstanding) is saved state
+  of its own, so a recreate re-asks or resumes. The app-lock redirect keeps the request
+  (MainActivity resumes the flow after unlock). Each request's token rides in the setup intent
+  (`ContactsListActivity.setupIntent`), and a screen acts on and cancels only its own request, so
+  closing a screen whose request a newer one displaced leaves the newer one waiting.
+  `AccountSetupConsentTest`. `editProperties` answers
+  an empty bundle. `ContactSyncAdapterDeclarationTest`, `ContactAccountFlowsTest`. Unverified on
+  hardware: how stock Contacts apps render and edit these contacts with the schema.
 - **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
   `applyBatch` as the insert. `device_contact_links` is a cache of that: `adoptLostLinks` runs
   before the pull and relinks a live row of our account whose SOURCE_ID is the uid, so a death
