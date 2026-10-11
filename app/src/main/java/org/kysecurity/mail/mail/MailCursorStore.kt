@@ -7,7 +7,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import org.kysecurity.mail.ScopedValue
 import kotlinx.coroutines.runBlocking
 
-private val Context.mailSyncDataStore by preferencesDataStore(name = "mail_sync_state")
+internal val Context.mailSyncDataStore by preferencesDataStore(name = "mail_sync_state")
 
 private const val FULL_RESYNC_INTERVAL_MS = 24L * 60 * 60 * 1000
 

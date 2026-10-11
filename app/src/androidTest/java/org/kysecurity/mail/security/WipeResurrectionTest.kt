@@ -5,6 +5,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.kysecurity.mail.data.DataRuntime
 import org.kysecurity.mail.push.PairingData
 import org.kysecurity.mail.push.PushRuntime
+import org.kysecurity.mail.push.pushDataStore
+import org.kysecurity.mail.mail.mailSyncDataStore
+import org.kysecurity.mail.contacts.contactsDataStore
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -110,6 +115,37 @@ class WipeResurrectionTest {
 
         PushRuntime.invalidate()
         assertNull(PushRuntime.graph(context).repository.state.first().unifiedPushEndpoint)
+    }
+
+    /** The process survives the wipe's relaunch, so a DataStore cache outliving its deleted file
+     *  is readable afterwards. One test per store the wipe deletes. */
+    @Test
+    fun wipe_dropsCachedMailSyncState(): Unit = runBlocking {
+        context.mailSyncDataStore.edit { it[PROBE] = "stale" }
+
+        SecurityWipe.wipeAndResetApp(context)
+
+        assertEquals(emptyMap<Any, Any>(), context.mailSyncDataStore.data.first().asMap())
+    }
+
+    @Test
+    fun wipe_dropsCachedContactsState(): Unit = runBlocking {
+        context.contactsDataStore.edit { it[PROBE] = "stale" }
+
+        SecurityWipe.wipeAndResetApp(context)
+
+        assertEquals(emptyMap<Any, Any>(), context.contactsDataStore.data.first().asMap())
+    }
+
+    /** Turning on Hostile Location Protection deletes the same three files. */
+    @Test
+    fun deletePlaintextMetadataStores_dropsCachedState(): Unit = runBlocking {
+        val stores = listOf(context.pushDataStore, context.mailSyncDataStore, context.contactsDataStore)
+        stores.forEach { store -> store.edit { it[PROBE] = "stale" } }
+
+        SecurityWipe.deletePlaintextMetadataStores(context)
+
+        stores.forEach { assertEquals(emptyMap<Any, Any>(), it.data.first().asMap()) }
     }
 
     /** The other half of that ordering: work submitted WHILE the wipe runs.
@@ -438,5 +474,9 @@ class WipeResurrectionTest {
         SecurityWipe.wipeAndResetApp(context)
 
         assertFalse("push_state must not survive a wipe", pushStateFile().exists())
+    }
+
+    private companion object {
+        val PROBE = stringPreferencesKey("probe")
     }
 }

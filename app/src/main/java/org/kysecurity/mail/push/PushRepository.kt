@@ -19,7 +19,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.IOException
 
-private val Context.pushDataStore by preferencesDataStore(name = "push_state")
+internal val Context.pushDataStore by preferencesDataStore(name = "push_state")
 
 private val KEY_LAST_SYNC_AT = longPreferencesKey("sync_last_at")
 private val KEY_LAST_PUSH_AT = longPreferencesKey("push_last_received_at")

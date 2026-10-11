@@ -8,7 +8,7 @@ import org.kysecurity.mail.ScopedValue
 import org.kysecurity.mail.data.AppDatabase
 import org.kysecurity.mail.data.ContactSyncStateEntity
 
-private val Context.contactsDataStore by preferencesDataStore(name = "contacts_state")
+internal val Context.contactsDataStore by preferencesDataStore(name = "contacts_state")
 
 // Kept in Room so it commits with the outbox ack; the first read imports the legacy DataStore value.
 class ContactCursorStore(context: Context, private val db: AppDatabase) {
