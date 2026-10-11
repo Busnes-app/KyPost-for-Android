@@ -205,6 +205,26 @@ class CalendarRsvpTest {
     }
 
     @Test
+    fun aCompletionFromAnEndedSessionIsDropped() {
+        val tracker = RsvpTracker()
+        val key = rsvpKey(invite(*request).primary)
+        val session = org.kysecurity.mail.ProcessState.generation()
+        assertTrue(tracker.begin(key))
+        // Unpair or wipe: the generation advances, then the tracker is reset.
+        org.kysecurity.mail.ProcessState.advanceGeneration()
+        tracker.clear()
+
+        assertFalse(tracker.complete(key, RsvpResult.SENT, session), "no feedback for the old session")
+        assertTrue(tracker.phases.value.isEmpty())
+        assertTrue(tracker.canAnswer(key))
+
+        val current = org.kysecurity.mail.ProcessState.generation()
+        tracker.begin(key)
+        assertTrue(tracker.complete(key, RsvpResult.SENT, current))
+        assertFalse(tracker.canAnswer(key))
+    }
+
+    @Test
     fun anAliasListedPastFiveHundredAttendeesIsStillFound() {
         val others = (1..500).map { "ATTENDEE:mailto:guest$it@example.com" }
         val event = invite(*request, *others.toTypedArray(), "ATTENDEE:mailto:late-alias@example.com").primary

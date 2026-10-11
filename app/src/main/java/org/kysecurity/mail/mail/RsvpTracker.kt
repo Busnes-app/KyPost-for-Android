@@ -43,6 +43,14 @@ class RsvpTracker {
     fun opened(key: String, freshOpen: Boolean) =
         state.update { if (freshOpen && it[key] == RsvpPhase.UNSURE) it - key else it }
 
+    /** [finish] for a send started in [session]; false, recording nothing, once that session has
+     *  ended, so a reset tracker is not repopulated and the caller shows no feedback. */
+    fun complete(key: String, result: RsvpResult, session: Long): Boolean {
+        if (!org.kysecurity.mail.ProcessState.isCurrent(session)) return false
+        finish(key, result)
+        return true
+    }
+
     fun canAnswer(key: String): Boolean = key !in state.value
 
     fun clear() = state.update { emptyMap() }

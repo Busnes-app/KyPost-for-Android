@@ -927,11 +927,15 @@ class EmailDetailActivity : LockedActivity() {
     /** On the mail executor, so leaving the screen does not cancel a reply already on its way. */
     private fun sendRsvp(key: String, draft: MailDraft) {
         val appContext = applicationContext
+        val session = ProcessState.generation()
         MailBackgroundExecutor.submit {
             val outcome = runCatching { mailRepository.send(draft) }
                 .getOrElse { MailOutcome.UpstreamFailure(it.message ?: "Unexpected error") }
             android.os.Handler(android.os.Looper.getMainLooper()).post {
                 val result = org.kysecurity.mail.mail.rsvpResult(outcome)
+                // Never this Activity: a rotation may have replaced it. The current one observes this.
+                // An ended session (unpair, wipe) gets neither state nor feedback.
+                if (!rsvpTracker.complete(key, result, session)) return@post
                 val reason = outcome.userFacingMessage().orEmpty()
                 val message = when (result) {
                     org.kysecurity.mail.mail.RsvpResult.SENT -> appContext.getString(R.string.rsvp_sent)
@@ -940,8 +944,6 @@ class EmailDetailActivity : LockedActivity() {
                     org.kysecurity.mail.mail.RsvpResult.MAYBE_SENT -> appContext.getString(R.string.rsvp_maybe_sent, reason)
                 }
                 Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
-                // Never this Activity: a rotation may have replaced it. The current one observes this.
-                rsvpTracker.finish(key, result)
             }
         }
     }
