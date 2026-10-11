@@ -128,6 +128,13 @@ class VCardParserTest {
     }
 
     @Test
+    fun anyOtherBeginOrEndIsAStructuralError() {
+        assertEquals(VCardImport.Refusal.MALFORMED, refused(card("FN:A") + card("FN:B", "END:OTHER")))
+        assertEquals(VCardImport.Refusal.MALFORMED, refused(card("FN:A", "BEGIN:VEVENT")))
+        assertEquals(VCardImport.Refusal.MALFORMED, refused("BEGIN:VCALENDAR\r\n" + card("FN:A")))
+    }
+
+    @Test
     fun invalidUtf8IsRefused() {
         val bytes = card("FN:A").toByteArray(Charsets.UTF_8) + byteArrayOf(0xC3.toByte(), 0x28)
         assertEquals(VCardImport.Refused(VCardImport.Refusal.NOT_UTF8), parseVCards(bytes))

@@ -162,6 +162,8 @@ private fun parseUnfolded(text: String): VCardImport {
         if (line.isBlank()) continue
         val property = parseProperty(line) ?: refuse(VCardImport.Refusal.MALFORMED)
         val open = card
+        val delimiter = property.name == "BEGIN" || property.name == "END"
+        if (delimiter && !property.value.equals("VCARD", ignoreCase = true)) refuse(VCardImport.Refusal.MALFORMED)
         when {
             property.name == "BEGIN" && property.value.equals("VCARD", ignoreCase = true) -> {
                 if (open != null) refuse(VCardImport.Refusal.MALFORMED)
