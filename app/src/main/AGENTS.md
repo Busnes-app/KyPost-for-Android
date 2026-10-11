@@ -466,6 +466,16 @@ Owns production Android app code and resources.
   strips control characters from URLs and TYPE labels, so a field cannot inject a property;
   `VCardWriterTest` holds that. The server uid is not exported. `VCardShareTest`
   (instrumentation) reads each dialog choice back through the provider as a receiver would.
+  vCard import (list overflow) opens the system picker (`ACTION_OPEN_DOCUMENT`, no storage
+  permission) and treats the file as hostile: `readVCardImport` reads at most
+  `MAX_VCARD_IMPORT_BYTES` (256 KiB), then `parseVCards` requires strict UTF-8, vCard 3.0/4.0, and
+  balanced BEGIN/END, and refuses the whole file past `MAX_VCARD_IMPORT_CONTACTS` (200) or the
+  server's 64 values per field. It reads only the writer's properties: UID, KEY, PHOTO, groups and
+  encoded values are ignored, so a file can never pin a PGP key or pick a server uid. A preview
+  (count, first ten names, skipped cards) is confirmed before `ContactSyncRepository.queueImport`
+  queues every contact as an ordinary create in one transaction. It refuses while the outbox is
+  non-empty, because the push is not batched yet and a larger one could pass the server's
+  500-change cap. `VCardParserTest` holds the refusals and the writer round trip.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
   is DATA2, and the free-text name belongs in the paired `LABEL` (DATA3) with `TYPE_CUSTOM`;
   `DeviceContactFieldCoding` owns both directions of that mapping for every field kind. A label
