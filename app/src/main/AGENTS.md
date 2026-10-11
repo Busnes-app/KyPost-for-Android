@@ -577,6 +577,11 @@ Owns production Android app code and resources.
     `DatabaseMigration.kt`. **If this decision is ever revisited again, update this bullet and
     `AppLockStore.tripwire`'s KDoc in the same commit** — the previous change did not, and this
     file spent a release telling every reader the database was plaintext.
+- Every text field asks the keyboard not to learn what is typed (`IME_FLAG_NO_PERSONALIZED_LEARNING`).
+  XML fields declare `flagNoPersonalizedLearning` in `imeOptions`, and fields built in code call
+  `noPersonalizedLearning()`. `KeyboardPrivacyTest` fails on any new field without it. Keyboards
+  may ignore the flag. The compose body is out of reach: `RichHtmlEditorWebView` is a `final`
+  library WebView whose `onCreateInputConnection` cannot be overridden.
 - Compose's address-book and Send action icons use the active palette's `inkStrong` color.
 - Send needs a recipient and a body. A blank subject is legal (the relay doesn't require one), so
   compose asks "Send without a subject?" instead of refusing (`sendReadiness`).

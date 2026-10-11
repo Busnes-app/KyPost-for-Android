@@ -513,8 +513,14 @@ class ComposeActivity : LockedActivity() {
 
     private fun showCreateLinkDialog() {
         val padding = (16 * resources.displayMetrics.density).toInt()
-        val urlField = EditText(this).apply { hint = getString(R.string.compose_link_dialog_url_hint) }
-        val textField = EditText(this).apply { hint = getString(R.string.compose_link_dialog_text_hint) }
+        val urlField = EditText(this).apply {
+            noPersonalizedLearning()
+            hint = getString(R.string.compose_link_dialog_url_hint)
+        }
+        val textField = EditText(this).apply {
+            noPersonalizedLearning()
+            hint = getString(R.string.compose_link_dialog_text_hint)
+        }
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(padding, padding, padding, 0)

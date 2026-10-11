@@ -13,6 +13,7 @@
 
         <EditText
             android:id="@+id/rowImService"
+            android:imeOptions="flagNoPersonalizedLearning"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
@@ -22,6 +23,7 @@
 
         <EditText
             android:id="@+id/rowImLabel"
+            android:imeOptions="flagNoPersonalizedLearning"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="4dp"
@@ -31,6 +33,7 @@
 
         <EditText
             android:id="@+id/rowImValue"
+            android:imeOptions="flagNoPersonalizedLearning"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:hint="@string/contacts_im_value_hint"
