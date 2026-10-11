@@ -96,6 +96,8 @@ When enabled:
   title and text to `system_server`, which records them in Notification History and
   `dumpsys notification` — an on-disk record in another UID that no wipe step here can
   reach. Withholding the content is the only control this app has over it.
+- Adding a calendar invite, or creating an event from an email, asks first: the event is
+  handed to the device's calendar app, which stores it where no KyPost wipe reaches.
 
 **Known limitation — notifications posted before protection was enabled.** Turning the
 mode on cannot retract what the OS already recorded. Clear Notification History from

@@ -153,6 +153,9 @@ class MailRepository(
     }
 }
 
+/** The relay refuses `/api/inbox/actions` with more ids than this (server `maxInboxActionIDs`). */
+const val MAX_ACTION_IDS = 500
+
 /** HTTP 200 is transport success, not operation success: `/api/inbox/actions` answers 200 with the
  *  requested id in `failed[]` (docs/Mobile_Mail_Relay.md Part 2). Only an id the relay actually
  *  processed may be applied to the local cache. */
