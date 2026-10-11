@@ -2,7 +2,6 @@ package org.kysecurity.mail
 
 import android.content.DialogInterface
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
@@ -20,13 +19,8 @@ fun AlertDialog.Builder.showThemed(): AlertDialog {
     val ink = Color.parseColor(palette.ink)
     val inkStrong = Color.parseColor(palette.inkStrong)
     val accent = Color.parseColor(palette.accent)
-    val density = dialog.context.resources.displayMetrics.density
-    dialog.window?.setBackgroundDrawable(
-        GradientDrawable().apply {
-            setColor(panel)
-            cornerRadius = 14 * density
-        },
-    )
+    // Tinted, not replaced: the native background carries the dialog's shape and insets (§3).
+    dialog.window?.decorView?.background?.mutate()?.setTint(panel)
     dialog.findViewById<TextView>(androidx.appcompat.R.id.alertTitle)?.setTextColor(inkStrong)
     dialog.findViewById<TextView>(android.R.id.message)?.setTextColor(ink)
     listOf(DialogInterface.BUTTON_POSITIVE, DialogInterface.BUTTON_NEGATIVE, DialogInterface.BUTTON_NEUTRAL)
