@@ -30,10 +30,10 @@ import org.kysecurity.mail.contacts.device.DeviceContactSyncScheduler
 import org.kysecurity.mail.data.ContactEntity
 import org.kysecurity.mail.pgp.hasPgpIdentity
 import org.kysecurity.mail.setupPrimaryNavigation
+import org.kysecurity.mail.showThemed
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.kysecurity.mail.security.LockedActivity
-import org.kysecurity.mail.security.showSecurely
 
 class ContactsListActivity : LockedActivity() {
 
@@ -295,8 +295,23 @@ class ContactsListActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun showImportAccounts() {
         val graph = DeviceContactsRuntime.graph(this)
+        // Permission can be revoked in Android settings while sync stays on: ask again instead of
+        // querying a provider that will refuse. Enabling is idempotent once it is granted.
+        val canRead = androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CONTACTS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!canRead) {
+            syncEnabler.checkAndEnable()
+            return
+        }
         lifecycleScope.launch {
-            val accounts = foreignAccounts()
+            // Cancellation is not a SecurityException, so it still propagates.
+            val accounts = try {
+                foreignAccounts()
+            } catch (e: SecurityException) {
+                Toast.makeText(this@ContactsListActivity, R.string.contacts_device_sync_permission_denied, Toast.LENGTH_LONG).show()
+                syncEnabler.checkAndEnable()
+                return@launch
+            }
             if (accounts.isEmpty()) {
                 Toast.makeText(this@ContactsListActivity, R.string.contacts_import_none, Toast.LENGTH_LONG).show()
                 return@launch
@@ -313,40 +328,29 @@ class ContactsListActivity : LockedActivity() {
                     graph.settings.setImportAccounts(destination, chosen)
                     graph.coordinator.syncNowAsync()
                 }
-            }.showSecurely()
+            }
         }
     }
 
-    /** One checkbox per account, ticked for those in [chosen], which tracks the ticks. */
+    /** One checkbox per account, ticked for those in [chosen], which tracks the ticks. Shown
+     *  through [showThemed]: the native dialog in the active palette (STYLE_GUIDE §3, §6). */
     @androidx.annotation.VisibleForTesting
     internal fun importAccountsDialog(
         accounts: List<org.kysecurity.mail.contacts.device.DeviceAccount>,
         chosen: MutableSet<String>,
         onSave: () -> Unit,
     ): androidx.appcompat.app.AlertDialog {
-        // STYLE_GUIDE section 6: a native dialog, painted with the active palette.
-        val palette = getStoredThemePalette(this)
-        val ink = android.graphics.Color.parseColor(palette.ink)
-        val accent = android.graphics.Color.parseColor(palette.accent)
-        val density = resources.displayMetrics.density
-        val padding = (16 * density).toInt()
-        val title = android.widget.TextView(this).apply {
-            setText(R.string.contacts_import_title)
-            setTextColor(android.graphics.Color.parseColor(palette.inkStrong))
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 20f)
-            setPadding(padding, padding, padding, 0)
-        }
+        val accent = android.graphics.Color.parseColor(getStoredThemePalette(this).accent)
+        val padding = (16 * resources.displayMetrics.density).toInt()
         val container = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(padding, padding, padding, 0)
-            addView(android.widget.TextView(context).apply { setText(R.string.contacts_import_message); setTextColor(ink) })
+            addView(android.widget.TextView(context).apply { setText(R.string.contacts_import_message) })
             for (account in accounts) {
                 addView(
                     android.widget.CheckBox(context).apply {
                         text = account.name?.let { "$it (${account.type})" }
                             ?: getString(R.string.contacts_import_local_account)
-                        setTextColor(ink)
                         buttonTintList = android.content.res.ColorStateList.valueOf(accent)
                         isChecked = account.key in chosen
                         setOnCheckedChangeListener { _, checked ->
@@ -356,24 +360,12 @@ class ContactsListActivity : LockedActivity() {
                 )
             }
         }
-        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
-            .setCustomTitle(title)
+        return androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.contacts_import_title)
             .setView(android.widget.ScrollView(this).apply { addView(container) })
             .setPositiveButton(R.string.contacts_import_save) { _, _ -> onSave() }
             .setNegativeButton(R.string.cancel, null)
-            .create()
-        // Built now, not at show, so the buttons exist to be coloured.
-        dialog.create()
-        dialog.window?.setBackgroundDrawable(
-            android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = 20f * density
-                setColor(android.graphics.Color.parseColor(palette.panel))
-                setStroke(density.toInt().coerceAtLeast(1), android.graphics.Color.parseColor(palette.line))
-            },
-        )
-        dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE)?.setTextColor(accent)
-        dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE)?.setTextColor(ink)
-        return dialog
+            .showThemed()
     }
 
     // User-triggered, so — unlike the silent foreground/post-edit auto-sync — this one reports its
