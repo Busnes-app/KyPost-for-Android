@@ -77,8 +77,9 @@ private fun org.bouncycastle.openpgp.PGPPublicKey.isExpiredAt(now: Date): Boolea
     return createdAt + validSeconds * 1_000L <= now.time
 }
 
-/** [confirmed] is the only input that can produce [PgpSignatureState.VERIFIED_CONFIRMED]. */
-internal data class LocalSignerKey(val publicKey: String, val confirmed: Boolean)
+/** [confirmed] is the only input that can produce [PgpSignatureState.VERIFIED_CONFIRMED].
+ *  [pinned]: held in `recipient_pins`, not the synced fallback for an address with no pin. */
+internal data class LocalSignerKey(val publicKey: String, val confirmed: Boolean, val pinned: Boolean = false)
 
 internal fun interface LocalSignerKeyLookup {
     /** Empty when this device holds no key for [address] — including when [address] is blank. */
