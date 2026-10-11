@@ -9,6 +9,7 @@ import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonDecoder
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
 /** Some deployments may emit `cursor` as a bare JSON number rather than a quoted string; decode
  *  either shape into a plain string token so callers never need to care which one the server sent. */
@@ -20,6 +21,20 @@ private object FlexibleCursorSerializer : KSerializer<String> {
     override fun deserialize(decoder: Decoder): String {
         val element = (decoder as JsonDecoder).decodeJsonElement()
         return (element as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content.orEmpty()
+    }
+}
+
+/** An unquoted JSON boolean and nothing else. The default decoder also takes `"true"`. */
+private object StrictBooleanSerializer : KSerializer<Boolean> {
+    override val descriptor = PrimitiveSerialDescriptor("StrictBoolean", PrimitiveKind.BOOLEAN)
+
+    override fun serialize(encoder: Encoder, value: Boolean) = encoder.encodeBoolean(value)
+
+    override fun deserialize(decoder: Decoder): Boolean {
+        val element = (decoder as JsonDecoder).decodeJsonElement()
+        val primitive = element as? JsonPrimitive
+        return primitive?.takeUnless { it.isString }?.booleanOrNull
+            ?: throw kotlinx.serialization.SerializationException("expected a JSON boolean")
     }
 }
 
@@ -115,10 +130,17 @@ data class RelayMailRequestDto(
     val sign: Boolean = false,
     val encrypt: Boolean = false,
     val allowPickupFallback: Boolean = false,
+    /** Send only, like the three above. Omitted when null (encodeDefaults is off). */
+    val calendarReply: RelayCalendarReplyDto? = null,
+    /** Send only; omitted when blank, which sends as the primary address. */
+    val from: String = "",
 ) {
     /** Redacted: the body is the user's outgoing message. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "RelayMailRequestDto(redacted)"
 }
+
+@Serializable
+data class RelayCalendarReplyDto(val ics: String)
 
 /** One pre-encrypted delivery for POST /api/mail/send-pgp. */
 @Serializable
@@ -158,6 +180,7 @@ data class RelayAttachmentInfoDto(
     val name: String = "",
     val mimeType: String = "",
     val size: Int = 0,
+    val calendarMethod: String = "",
 )
 
 @Serializable
@@ -182,7 +205,14 @@ data class RelayMessageBodyDto(val body: String = "", val bodyMode: String = "")
 }
 
 @Serializable
-data class RelaySendResponseDto(val ok: Boolean = false, val sentSaved: Boolean = false, val warning: String = "")
+data class RelaySendResponseDto(
+    val ok: Boolean = false,
+    val sentSaved: Boolean = false,
+    val warning: String = "",
+    /** Present and true only when a calendarReply part was actually sent. */
+    @Serializable(with = StrictBooleanSerializer::class)
+    val calendarReply: Boolean = false,
+)
 
 /** The 409 body /api/mail/send returns when recipients have no usable PGP key. Both PGP refusals
  *  are 409 and are told apart by which field is present, never by status or error prose — the

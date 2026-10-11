@@ -103,6 +103,8 @@ class PgpBootstrapClientTest {
         val result = client.fetch("https://relay.example.com", "device-1", "secret-1")
 
         assertEquals("me@example.invalid", (result as PgpBootstrapResult.Success).accountAddress)
+        // Every send-as alias, primary first: an RSVP answers as whichever one the invite names.
+        assertEquals(listOf("me@example.invalid", "alias@example.invalid"), result.addresses)
     }
 
     /** No mail account configured server-side, so there is no valid `From` to build. Compose must

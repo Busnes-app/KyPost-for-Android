@@ -409,6 +409,26 @@ Owns production Android app code and resources.
   event" tap during the body fetch waits for it (`BodyFetchGate`) rather than going out
   subject-only. The card is
   only as reliable as the relay's listing: invites appear only when `hasAttachments` is true.
+- RSVP (Accept/Maybe/Decline on the invite card) sends an RFC 5546 REPLY through
+  `MailRepository.send` with `MailDraft.calendarReply` → `/api/mail/send` `calendarReply.ics`
+  (KyPost-Server #354), addressed to the ORGANIZER.
+  - `rsvpDraft` copies UID and SEQUENCE, restates RECURRENCE-ID without TZID (the REPLY has no
+    VTIMEZONE), adds DTSTAMP, folds at 75 octets. An unreadable SEQUENCE or RECURRENCE-ID means
+    no RSVP.
+  - ATTENDEE is the bootstrap `suggestedUserIDs` address the invite lists, else the primary; an
+    alias is also sent as `from`. No usable address means no RSVP.
+  - **Always** unencrypted and unsigned (the relay 400s `calendarReply` beside either flag), so
+    each RSVP is confirmed in a dialog that says so. The draft never sets `sign`/`encrypt`.
+  - Buttons need the relay's `calendarMethod` (#353): an older relay ignores `calendarReply` and
+    would send plain mail. Only a 200 carrying `"calendarReply": true` (#354) is an RSVP
+    (`rsvpResult`). A 200 without it means the organizer got plain mail: the user is told to
+    update the server, the RSVP is not marked sent, and nothing is retried.
+  - A refusal shows the relay's reason; nothing else is sent instead. Only a definite refusal
+    (`refusedBeforeSending`) re-arms the buttons; a timeout says "may have been sent".
+  - `RsvpTracker` (process-wide, keyed on UID + RECURRENCE-ID + SEQUENCE) owns RSVP state;
+    screens derive their buttons from its `phases` and a send never touches the Activity that
+    started it, so a rotation can neither double-send nor miss the outcome. A raised SEQUENCE
+    is answerable again. An unsure send stays locked across a rotation; a fresh open may retry.
 - `pgp/deliverReadOutcome` owns completed attachment arrays inside the worker until rendering
   accepts them. Cancellation across the dispatcher return, render rejection, or a rendering
   exception wipes unadopted bytes; successful adoption transfers cleanup to the detail Activity.
