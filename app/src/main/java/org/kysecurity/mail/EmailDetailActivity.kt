@@ -1029,12 +1029,11 @@ class EmailDetailActivity : LockedActivity() {
         startActivity(intent)
     }
 
-    /** CATEGORY_BROWSABLE + NEW_TASK: an email link must not reach non-browsable activities. */
-    /** Mail links lie about where they go; show the parsed host and open exactly what was shown. */
     /** What a tapped http(s) link in the WebView runs. */
     @androidx.annotation.VisibleForTesting
     internal fun openLinkForTest(raw: String) = confirmOpenLink(raw)
 
+    /** Mail links lie about where they go; show the parsed host and open exactly what was shown. */
     private fun confirmOpenLink(raw: String) {
         val target = org.kysecurity.mail.mail.linkTargetOf(raw)
         if (target == null) {
@@ -1042,19 +1041,29 @@ class EmailDetailActivity : LockedActivity() {
             return
         }
         val url = target.url.toString()
-        var message = getString(R.string.email_link_confirm_message, target.host, url.take(LINK_PREVIEW_MAX_CHARS))
+        val shownUrl = url.take(LINK_PREVIEW_MAX_CHARS)
+        val message = android.text.SpannableStringBuilder(
+            getString(R.string.email_link_confirm_message, target.host, shownUrl),
+        )
+        // STYLE_GUIDE.md §2: addresses in IBM Plex Mono. The bundled face, not the downloadable one,
+        // which can block the main thread on a first fetch.
+        val mono = android.graphics.Typeface.createFromAsset(assets, "fonts/IBMPlexMono-Regular.ttf")
+        for (part in listOf(target.host, shownUrl)) {
+            val start = message.indexOf(part).takeIf { it >= 0 } ?: continue
+            message.setSpan(android.text.style.TypefaceSpan(mono), start, start + part.length, 0)
+        }
         if (intent.getBooleanExtra("email_suspicious", false)) {
-            message += "\n\n" + getString(R.string.email_link_confirm_phishing)
+            message.append("\n\n").append(getString(R.string.email_link_confirm_phishing))
         }
         androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle(R.string.email_link_confirm_title)
             .setMessage(message)
             .setPositiveButton(R.string.email_link_confirm_open) { _, _ -> openExternally(android.net.Uri.parse(url)) }
             .setNegativeButton(android.R.string.cancel, null)
-            .create()
-            .showSecurely()
+            .showThemed()
     }
 
+    /** CATEGORY_BROWSABLE + NEW_TASK: an email link must not reach non-browsable activities. */
     private fun openExternally(uri: android.net.Uri) {
         val intent = Intent(Intent.ACTION_VIEW, uri)
             .addCategory(Intent.CATEGORY_BROWSABLE)
@@ -1321,6 +1330,13 @@ internal fun blockExternalResources(
     // images" clears blockNetworkLoads. A frame with no src and no srcdoc renders nothing anyway,
     // so there is nothing to preserve — the composer's Safelist drops the tag for the same reason.
     document.select("iframe").remove()
+    // Text naming one address over an href to another is the oldest phish in mail. Advisory: the
+    // tap still goes through the confirm dialog, which shows the real host either way.
+    document.select("a[href]").forEach { anchor ->
+        val real = org.kysecurity.mail.mail.linkTextMismatch(anchor.text(), anchor.attr("href")) ?: return@forEach
+        anchor.attr("style", anchor.attr("style") + ";outline:2px solid $COLOR_DANGER")
+        anchor.after(org.jsoup.nodes.Element("span").attr("style", "color:$COLOR_DANGER").text(" \u26A0 $real"))
+    }
     // `track` fetches over the network exactly like its sibling `source`, and never as an image.
     val resourceTags = if (keepImages && !keepInlineDataImages) "video, audio, source, track, embed, object" else "img, video, audio, source, track, embed, object"
     // Charge the entire URL, including prefix/padding, without decoding or copying its payload.

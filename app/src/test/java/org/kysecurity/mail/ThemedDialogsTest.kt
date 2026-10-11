@@ -26,6 +26,7 @@ class ThemedDialogsTest {
             "MoveToFolder.kt" to "pickMoveTarget",
             "MailSignature.kt" to "showSignatureDialog",
             "ComposeActivity.kt" to "confirmEmptySubject",
+            "EmailDetailActivity.kt" to "confirmOpenLink",
         )
     }
 }

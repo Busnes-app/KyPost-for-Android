@@ -45,4 +45,21 @@ class LinkTargetTest {
         assertNull(linkTargetOf("https://"))
         assertNull(linkTargetOf("not a url"))
     }
+
+    @Test
+    fun addressShapedTextThatDisagreesNamesTheRealHost() {
+        assertEquals("two.example", linkTextMismatch("https://one.example/", "https://two.example/"))
+        assertEquals("bank.example.evil.example", linkTextMismatch("bank.example", "https://bank.example.evil.example/"))
+        assertEquals("evil.example", linkTextMismatch("www.bank.example/login", "https://bank.example@evil.example/"))
+    }
+
+    @Test
+    fun agreeingOrOrdinaryTextIsNotFlagged() {
+        assertNull(linkTextMismatch("https://bank.example/login", "https://bank.example/other"))
+        assertNull(linkTextMismatch("bank.example", "https://www.bank.example/"))
+        assertNull(linkTextMismatch("bank.example", "https://login.bank.example/"))
+        assertNull(linkTextMismatch("Click here", "https://evil.example/"))
+        assertNull(linkTextMismatch("support@bank.example", "https://evil.example/"))
+        assertNull(linkTextMismatch("https://one.example/", "mailto:a@two.example"))
+    }
 }
