@@ -972,9 +972,6 @@ class InboxActivity : LockedActivity() {
     }
 
     @androidx.annotation.VisibleForTesting
-    internal fun switchFolderForTest(folder: String) = switchFolder(folder)
-
-    @androidx.annotation.VisibleForTesting
     internal fun currentFolderForTest(): String = currentFolder
 
     @androidx.annotation.VisibleForTesting
