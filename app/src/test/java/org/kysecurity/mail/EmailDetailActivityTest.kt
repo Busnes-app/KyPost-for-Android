@@ -149,6 +149,17 @@ class EmailDetailActivityTest {
     }
 
     @Test
+    fun blockExternalResources_flagsLinkTextThatNamesAnotherHost() {
+        val html = blockExternalResources(
+            "<a href=\"https://two.example/\">https://one.example/</a>" +
+                "<a href=\"https://one.example/x\">https://one.example/</a><a href=\"https://two.example/\">Read more</a>",
+        )
+
+        assertEquals(1, Regex("outline:2px solid").findAll(html).count())
+        assertTrue(html, html.contains("\u26A0 two.example"))
+    }
+
+    @Test
     fun blockExternalResources_removesImageAndStyleResourceUrls() {
         val blocked = blockExternalResources(
             "<img src=\"https://example.com/a.png\"><div style=\"background:url(https://example.com/b.png)\">Hi</div>",

@@ -688,8 +688,7 @@ class ComposeActivity : LockedActivity() {
             .setTitle(R.string.compose_empty_subject_title)
             .setNegativeButton(R.string.compose_empty_subject_add) { _, _ -> subjectField.requestFocus() }
             .setPositiveButton(R.string.compose_empty_subject_send) { _, _ -> sendEmail(allowEmptySubject = true) }
-            .create()
-            .showSecurely()
+            .showThemed()
     }
 
     /** Sender built on IO (Keystore), crypto on Default (Bouncy Castle); the prompt hops to Main. */
