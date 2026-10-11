@@ -137,6 +137,10 @@ class ComposeActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun sendForTest() = sendEmail()
 
+    /** Exactly what "Send without a subject?" runs when confirmed. */
+    @androidx.annotation.VisibleForTesting
+    internal fun confirmSendWithoutSubjectForTest() = sendEmail(allowEmptySubject = true)
+
     private val bodyMirror = object : Runnable {
         override fun run() {
             bodyEditor.exportHtml { mirroredBodyHtml = it }
