@@ -51,11 +51,11 @@ jobs:
       # swapped jar from running: it verifies the jar against the checksums
       # Gradle publishes for every release. Must come before any ./gradlew
       # invocation (including the autobuild step below).
-      - uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
       # Temurin 25: same JDK as ci.yml. Gradle 9.6 officially supports 25;
       # CodeQL's autobuild invokes Gradle, so the toolchain must match.
-      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: "25"
@@ -64,17 +64,17 @@ jobs:
       - uses: ./.github/actions/placeholder-google-services
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@2d92b76c45b91eb80fc44c74ce3fce0ee94e8f9d # v3.30.0
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           languages: ${{ matrix.language }}
           build-mode: manual
-          # Default suite is security-and-quality. Uncomment to widen:
+          # No queries: input runs the default suite. Uncomment to widen:
           # queries: security-extended
 
       - name: Build for CodeQL
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@2d92b76c45b91eb80fc44c74ce3fce0ee94e8f9d # v3.30.0
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           category: "/language:${{ matrix.language }}"

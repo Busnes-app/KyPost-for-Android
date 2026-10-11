@@ -25,10 +25,16 @@ object ProcessState {
 
     fun isCurrent(token: Long): Boolean = generation.get() == token
 
+    /** Ends the current session for every captured token. A teardown calls this before it touches
+     *  any data, so nothing from the outgoing session lands while it runs; advancing twice is harmless. */
+    fun advanceGeneration() {
+        generation.incrementAndGet()
+    }
+
     /** Resets every registered holder, isolating failures; returns the names that failed.
      *  The generation advances first, so work racing the reset already reads as expired. */
     fun resetAll(): List<String> {
-        generation.incrementAndGet()
+        advanceGeneration()
         val failed = mutableListOf<String>()
         registered.forEach { state ->
             runCatching { state.resetForNewSession() }.onFailure {

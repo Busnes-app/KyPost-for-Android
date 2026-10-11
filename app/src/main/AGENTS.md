@@ -85,7 +85,7 @@ Owns production Android app code and resources.
      daily since=0 self-heal — a day of silently missing messages. The delta itself lands through
      `EmailDao.applyFolderDelta`, one transaction, so it cannot half-apply.
   2. HTTP 200 from `/api/inbox/actions` is transport success, not operation success: the relay
-     answers 200 with per-id `failed[]` (Mobile_Mail_Relay.md Part 2). `MailOutcome<MailActionOutcome>
+     answers 200 with per-id `failed[]` (docs/Mobile_Mail_Relay.md Part 2). `MailOutcome<MailActionOutcome>
      .appliedTo(id)` is the only gate on touching the local row — archive/spam/delete/move drop the
      cached row and `markRead` sets `status`, both **after** the relay confirms that id, never
      before. A rejection becomes `MailOutcome.ActionRejected`, not `UpstreamFailure`: the request
@@ -374,6 +374,52 @@ Owns production Android app code and resources.
   - Sign-only is impossible (the relay accepts `multipart/encrypted` only), so the two chips are
     coupled when `clientSide`.
 - Inbox tabs come from the relay's `tabs`/`label` response fields.
+- Inbox search (`MailRepository.search` → `GET /api/mail/search?q=&mailbox=&limit=`) searches the
+  folder on screen, all fields. Results are never written to Room (they are a view of the folder,
+  not its sync window), each row is stamped with the searched mailbox, and they replace the list only while their query and folder are still on
+  screen (`applySearchResults`). A folder switch, a notification tap or editing the submitted text ends the search; a failed search shows the folder list. The query is
+  kept out of the saved-state Bundle. `InboxSearchTest` covers the stale-result guards.
+  Because a result has no Room row, opening one passes its To/Cc to the detail screen
+  (`email_sent_to`/`email_cc`). They seed Reply All and are handed to `fetchBody`, which uses them
+  when no row exists (`SearchResultReplyAllTest`).
+- `showThemed()` (`ThemedDialog.kt`) shows a native AlertDialog through `showSecurely()` and then
+  tints its native surface (shape and insets kept), title, message, buttons, list rows and fields in the active palette
+  (STYLE_GUIDE.md §6). A dialog is its own window, so the Activity's theme walk never reaches it.
+  `ThemedDialogsTest` names the dialogs that must use it. The message screen's seven actions use
+  `@dimen/detail_action_size`: 40dp below a 360dp window, 44dp from it, so all seven are on
+  screen at 320dp (`EmailDetailActionRowTest` checks positions, since overflowing fixed-size
+  buttons keep their size and are only clipped).
+- "Move to folder" (`MoveToFolder.kt`, detail screen) offers INBOX, the relay's top-level folders
+  and the Archive subfolders, minus the message's own folder (`moveTargets`), and runs
+  `MailRepository.move`, so the local row goes only once the relay confirms the id.
+- Long-pressing an inbox row starts selection mode (an AppCompat `ActionMode`: Archive, Move,
+  Junk, Delete). Taps toggle rows, swipes are off, and a folder switch or search ends it. Bulk
+  actions go through `MailRepository.mutateAll`, one relay call per source folder. That method
+  applies rule 2 above to a batch: it drops only ids absent from `failed[]`, and only when
+  `processed` equals their count. A shortfall `failed[]` does not explain (the relay stops early on
+  a cancelled request) confirms none.
+  A selection holds at most `MAX_ACTION_IDS` (500, the relay's per-request cap); `toggleSelected`
+  is the only entry point and refuses the 501st row with a toast. Search results replacing the
+  list end the selection, so a bulk action never covers rows the user can no longer see.
+  Selected rows have their folder pinned when the action is tapped, and the optimistic removal
+  matches (folder, id), so a Move answered after a folder switch cannot hide a same-id row in the
+  folder now on screen (`aLateBulkMoveRemovesOnlyRowsFromTheirOwnFolder`).
+- Inbox swipes and bulk actions are undoable: the rows are hidden at once, a 5 s Snackbar offers
+  Undo, and the relay is asked nothing until the window closes. One bar covers everything held:
+  a new action replaces the bar (`DISMISS_EVENT_CONSECUTIVE` commits nothing), and its Undo takes
+  back every held action. The bar itself closes the window (`commitsOnDismiss`: timeout or
+  swipe), because Android stretches its timeout for the accessibility "time to take action"
+  setting and a separate timer would commit while Undo is still on screen. Only the bar on screen
+  commits: a replaced bar can still time out after its replacement shows, and that dismissal is
+  ignored (`onUndoBarDismissed`). `PendingRowActions`
+  runs each held action exactly once, at that dismissal or at `onStop` (leaving the screen
+  confirms it), or never once undone. A process killed in the foreground inside the window loses
+  the action, so the mail stays where it was. The detail screen's actions finish the Activity and
+  are not undoable. `InboxUndoTest` and `PendingRowActionsTest` cover this.
+- The folder picker's Sent and Drafts entries never guess a mailbox name. Each tap lists the
+  top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
+  the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A localized name
+  with no alias match shows "No Sent folder", because the relay exposes no special-use flag.
 - The inbox is fetched with `bodies=0`, so **an inbox row never carries a body** and the `emails`
   table is a cache of the messages actually opened, not a mirror of the window. `fetchBody` fills a
   blank one from `GET /api/mail/body` and writes it back. Two rules hold this together, both with
@@ -391,6 +437,50 @@ Owns production Android app code and resources.
   HTML fallback/quoting, while HTML bodies must not be detected by content when the server supplied
   a mode. The detail screen renders known plain bodies in a native wrapping `TextView`, so email
   reading never requires horizontal scrolling.
+- Calendar invites (`mail/CalendarInvite.kt`, `CalendarHandoff.kt`). KyPost writes no calendar
+  and syncs none (DAVx5 does that). The detail screen downloads the first listed `text/calendar`
+  part (else `application/ics` / `.ics`) and parses it on the device with a strict RFC 5545
+  subset parser — no ical4j. Over 256 KiB, over 50 VEVENTs, or any structural error refuses the
+  whole invite; a refusal or throw only hides the card. Only a VEVENT's own properties count
+  (a VALARM's DESCRIPTION does not); RECURRENCE-ID overrides are never the headline event; an invite with no series master
+  (override-only, e.g. an Outlook single-occurrence update) does not parse and shows no card.
+  Lines are unfolded as bytes before UTF-8 decoding; dates resolve STRICT; format characters
+  (bidi, zero-width) are stripped from text and refused in addresses. The organizer is shown as
+  its bare `mailto:` address, never CN, and the card says when it is not the From address — the
+  sender writes both. A TZID over 128 chars, or one no IANA, last-2/3-segment or ICU Windows-name
+  lookup resolves, is read as floating and the card says so. **Add**
+  fires `ACTION_INSERT` on `Events.CONTENT_URI` (no calendar permission) and only on a tap;
+  CANCEL and REPLY offer no Add. Under Hostile Location Protection every calendar handoff,
+  including the "Create event from this email" overflow item (subject and body only, no date
+  guessing, never the decrypted body or protected subject), is confirmed first. A "Create
+  event" tap during the body fetch waits for it (`BodyFetchGate`) rather than going out
+  subject-only. The card is
+  only as reliable as the relay's listing: invites appear only when `hasAttachments` is true.
+- RSVP (Accept/Maybe/Decline on the invite card) sends an RFC 5546 REPLY through
+  `MailRepository.send` with `MailDraft.calendarReply` → `/api/mail/send` `calendarReply.ics`
+  (KyPost-Server #354), addressed to the ORGANIZER.
+  - `rsvpDraft` copies UID and SEQUENCE, restates RECURRENCE-ID without TZID (the REPLY has no
+    VTIMEZONE), adds DTSTAMP, folds at 75 octets. An unreadable SEQUENCE or RECURRENCE-ID means
+    no RSVP.
+  - ATTENDEE is the bootstrap `suggestedUserIDs` address the invite lists, else the primary; an
+    alias is also sent as `from`. No usable address means no RSVP.
+  - **Always** unencrypted and unsigned (the relay 400s `calendarReply` beside either flag), so
+    each RSVP is confirmed in a dialog that says so. The draft never sets `sign`/`encrypt`.
+  - Buttons need the relay's `calendarMethod` (#353): an older relay ignores `calendarReply` and
+    would send plain mail. Only a 200 carrying `"calendarReply": true` (#354) is an RSVP
+    (`rsvpResult`). A 200 without it means the organizer got plain mail: the user is told to
+    update the server, the RSVP is not marked sent, and nothing is retried.
+  - A refusal shows the relay's reason; nothing else is sent instead. Only a definite refusal
+    (`refusedBeforeSending`) re-arms the buttons; a timeout says "may have been sent".
+  - `RsvpTracker` (process-wide, keyed on UID + RECURRENCE-ID + SEQUENCE) owns RSVP state;
+    screens derive their buttons from its `phases` and a send never touches the Activity that
+    started it, so a rotation can neither double-send nor miss the outcome. A raised SEQUENCE
+    is answerable again. An unsure send stays locked across a rotation; a fresh open may retry.
+    The confirm captures `ProcessState.generation()` and `MailRepository.currentAccount()`.
+    `sendBoundRsvp` does no I/O once that session has ended, and `sendMail(draft, account)`
+    refuses a replaced pairing from the same read that authenticates the request (the
+    `MailAccount` shape of #155), so an old account's reply never reaches a new relay.
+    `RsvpTracker.complete` drops a completion from an ended session (no state, no toast).
 - `pgp/deliverReadOutcome` owns completed attachment arrays inside the worker until rendering
   accepts them. Cancellation across the dispatcher return, render rejection, or a rendering
   exception wipes unadopted bytes; successful adoption transfers cleanup to the detail Activity.
@@ -410,6 +500,9 @@ Owns production Android app code and resources.
   The Inbox freshness label stays centered immediately below those tabs. Before the first
   successful refresh it reads "Not updated yet", so its row never appears empty and the first
   success does not shift the message list.
+  Each inbox row shows `atUtc` in the device zone (`inboxRowDate`: time for today, date otherwise,
+  blank if unparseable). The "No messages in {folder}" empty state shows only once that folder has
+  refreshed successfully (`inboxEmptyVisible`): a loading or unreachable folder never reads as empty.
   A refresh that lands mail above the top row scrolls to it when the list is at the top;
   otherwise a "N new messages" pill (`inbox_new_mail` plurals, polite live region) over the list
   counts it and scrolls up on tap. Only a repaint of the folder and tab already painted counts,
@@ -424,8 +517,16 @@ Owns production Android app code and resources.
   `Color.rgb`, so alpha in `line` survives as a fully opaque near-black in
   `applyEmptyStateBackground`. `ThemePaletteTableTest` holds both rules.
 - `SettingsActivity` is only a hub for existing settings surfaces: Security, Themes, Keywords,
-  Pairing, PGP Key, and About. Keep settings logic in the destination screens rather than
-  duplicating it in the hub.
+  Pairing, PGP Key, Signature, and About. Keep settings logic in the destination screens rather
+  than duplicating it in the hub; Signature's destination is `showSignatureDialog`.
+- The signature (`MailSignature.kt`) is plain text only, at most 1000 characters, in its own
+  private preferences file. It is account data: the pairing purge deletes the file, and so does
+  a security wipe. It is a user-typed setting, not mail metadata, so Hostile Location Protection
+  does not suppress it. Compose escapes it (`plainTextToHtml`) and puts it after an RFC 3676
+  `-- ` delimiter, above any quote (`withSignature`). It goes on new messages, replies and
+  forwards, but never above text another app shared in, which is the message itself. A
+  signature-only body counts as content, so Back on an untouched composer prompts once.
+  `ComposeSignatureTest` covers the escaping and the share exclusion.
 - Primary navigation uses `bottom_nav_menu.xml` for both phone bottom navigation and the `w600dp`
   rail on Inbox, Compose, Contacts, and Settings. The item order is Inbox, Compose, Lock, Contacts,
   Settings; Lock is an action that either locks immediately or opens Security when app lock is
@@ -497,6 +598,11 @@ Owns production Android app code and resources.
   `LegacyKeyMigrationTest.aBackfilledPin_takesASyncedRevocationOfItsKey`.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
+  The contacts list shows a sync banner from `ContactSyncRepository.observeSyncStatus`: "N changes
+  waiting" counts contacts (not outbox rows) with queued changes; "Sync stuck" with Retry and the
+  latest failure's first line appears once a queued change is over an hour old or
+  `STUCK_AFTER_FAILURES` syncs in a row failed. `ContactSyncHealth` keeps that failure count in
+  memory only, so a restart forgets it; the outbox age does not. `NotPaired` is not a failure.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
   is DATA2, and the free-text name belongs in the paired `LABEL` (DATA3) with `TYPE_CUSTOM`;
   `DeviceContactFieldCoding` owns both directions of that mapping for every field kind. A label

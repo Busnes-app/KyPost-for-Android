@@ -269,7 +269,13 @@ class ComposeActivity : LockedActivity() {
             ForwardAttachmentHandoff.clear()
             Toast.makeText(this, R.string.compose_draft_restored, Toast.LENGTH_SHORT).show()
         } else {
-            val (to, subject, bodyHtml) = parseComposeIntent(intent, ::plainTextToHtml)
+            val (to, subject, prefilledHtml) = parseComposeIntent(intent, ::plainTextToHtml)
+            // Not above text another app asked to send: that is the message, not a quote.
+            val bodyHtml = if (intent.isExternalComposeIntent() && prefilledHtml.isNotBlank()) {
+                prefilledHtml
+            } else {
+                withSignature(prefilledHtml, plainTextToHtml(MailSignature.read(this)))
+            }
             subjectField.setText(subject)
             toInput.setInitialRecipients(to)
             mirroredBodyHtml = bodyHtml
