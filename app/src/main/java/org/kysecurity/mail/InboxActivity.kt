@@ -693,7 +693,8 @@ class InboxActivity : LockedActivity() {
         override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
 
         override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
-            val chosen = adapter.currentEmails().filter { it.id in selectedIds }
+            // The whole list, not the visible tab: a row selected under another tab is still selected.
+            val chosen = (searchResults ?: allEmails).filter { it.id in selectedIds }
             when (item.itemId) {
                 MENU_BULK_ARCHIVE -> submitRowsAction(chosen, getString(R.string.action_archive), MailAction.ARCHIVE)
                 MENU_BULK_JUNK -> submitRowsAction(chosen, getString(R.string.action_junk), MailAction.SPAM)
