@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.appcompat.app.AlertDialog
 import org.kysecurity.mail.R
+import org.kysecurity.mail.showThemed
 
 /** The one-time "lock KyPost?" suggestion after a first pairing. Never forced: dismissing it is
  *  an answer, and it is not asked again on this install. */
@@ -26,8 +27,7 @@ object AppLockOffer {
                 activity.startActivity(Intent(activity, SecuritySettingsActivity::class.java))
             }
             .setNegativeButton(R.string.app_lock_offer_decline, null)
-            .create()
-            .showSecurely()
+            .showThemed()
     }
 }
 
