@@ -49,11 +49,14 @@ class ContactSyncRepository(
             contactSyncStatusOf(pending, failures, now())
         }
 
-    suspend fun sync(): ContactSyncOutcome = syncMutex.withLock {
-        val pairing = pairingProvider() ?: return@withLock ContactSyncOutcome.NotPaired
+    /** Recorded before unlocking, so a waiting caller cannot record ahead of this one. */
+    suspend fun sync(): ContactSyncOutcome = syncMutex.withLock { syncLocked().also(health::record) }
+
+    private suspend fun syncLocked(): ContactSyncOutcome = run {
+        val pairing = pairingProvider() ?: return@run ContactSyncOutcome.NotPaired
         val deviceId = pairing.deviceId
         val deviceSecret = pairing.deviceSecret
-        if (deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return@withLock ContactSyncOutcome.NotPaired
+        if (deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return@run ContactSyncOutcome.NotPaired
         val pendingChanges = db.pendingContactChangeDao().getAllPending()
         val cursor = cursorStore.cursor(pairing.subscriberId)
 
@@ -63,7 +66,7 @@ class ContactSyncRepository(
         val wireChanges = pendingChanges.map { it to it.toWireDtoOrNull(json) }
         val undecodable = wireChanges.mapNotNull { (row, dto) -> row.takeIf { dto == null } }
         if (undecodable.isNotEmpty()) {
-            return@withLock ContactSyncOutcome.Retry(
+            return@run ContactSyncOutcome.Retry(
                 "Contact sync stopped: ${undecodable.size} queued change(s) are unreadable " +
                     "(${undecodable.joinToString { it.changeType }}). Nothing was sent or discarded.",
             )
@@ -91,7 +94,7 @@ class ContactSyncRepository(
             is ContactSyncResult.BadRequest -> ContactSyncOutcome.Retry(result.message)
             is ContactSyncResult.Retryable -> ContactSyncOutcome.Retry(result.message)
         }
-    }.also(health::record)
+    }
 
     /** Deliberately does not call [sync]; the caller must trigger the follow-up sync itself. */
     suspend fun dedupe(): ContactDedupeOutcome = resolveDedupeOutcome(pairingProvider) { pairing ->
