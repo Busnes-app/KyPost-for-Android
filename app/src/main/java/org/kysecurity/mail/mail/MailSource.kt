@@ -124,6 +124,11 @@ data class MailDraft(
     val encrypt: Boolean = false,
     /** Per-message opt-in: the fallback stores this plaintext on the server for up to seven days. */
     val allowPickupFallback: Boolean = false,
+    /** A verified send-as alias to send from; blank sends as the account's primary address. */
+    val from: String = "",
+    /** An iTIP REPLY sent as a text/calendar alternative (KyPost-Server #354). Send only; the relay
+     *  refuses it beside [sign] or [encrypt]. */
+    val calendarReply: String? = null,
 ) {
     /** Redacted: the body is the user's outgoing message. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "MailDraft(redacted)"
@@ -159,7 +164,12 @@ data class ClientEncryptedDraft(val to: String, val pgpDraft: String) {
     override fun toString(): String = "ClientEncryptedDraft(redacted)"
 }
 
-data class MailSendOutcome(val sentSaved: Boolean, val warning: String)
+data class MailSendOutcome(
+    val sentSaved: Boolean,
+    val warning: String,
+    /** The relay confirmed the iTIP part went out (KyPost-Server #354). An older relay omits it. */
+    val calendarReplySent: Boolean = false,
+)
 
 data class ClientEncryptedDelivery(val recipients: List<String>, val ciphertext: String)
 
@@ -190,11 +200,23 @@ data class MailMessageBody(
     override fun toString(): String = "MailMessageBody(redacted)"
 }
 
-/** One received attachment's metadata (no content), from GET /api/mail/attachments. */
-data class AttachmentInfo(val index: Int, val name: String, val mimeType: String, val size: Int)
+/** One received attachment's metadata (no content), from GET /api/mail/attachments.
+ *  [calendarMethod] is set only by a relay with KyPost-Server #353, and only on text/calendar. */
+data class AttachmentInfo(
+    val index: Int,
+    val name: String,
+    val mimeType: String,
+    val size: Int,
+    val calendarMethod: String = "",
+)
 
 /** Not a `data class`: the generated equals/hashCode would compare [bytes] by identity. */
 class DownloadedAttachment(val name: String, val mimeType: String, val bytes: ByteArray)
+
+/** The account a pairing speaks for; the same pair `isAccountReplacement` compares. */
+data class MailAccount(val subscriberId: String, val serverUrl: String)
+
+fun org.kysecurity.mail.push.PairingData.mailAccount() = MailAccount(subscriberId, serverUrl)
 
 interface MailSource {
     /** [forceFullResync] requests since=0 (full re-fetch reported in delta shape) regardless of
@@ -215,7 +237,12 @@ interface MailSource {
     ): MailOutcome<MailActionOutcome>
     fun saveDraft(draft: MailDraft): MailOutcome<Unit>
     fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit>
-    fun sendMail(draft: MailDraft): MailOutcome<MailSendOutcome>
+    /** Null when unpaired. */
+    fun currentAccount(): MailAccount?
+
+    /** A non-null [account] is checked against the pairing the request is built from; on a
+     *  mismatch nothing is sent. */
+    fun sendMail(draft: MailDraft, account: MailAccount? = null): MailOutcome<MailSendOutcome>
 
     /** Relays ciphertext this device already built; a different endpoint and failure set. */
     fun sendClientEncrypted(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome>

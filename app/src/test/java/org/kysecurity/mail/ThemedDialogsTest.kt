@@ -27,6 +27,8 @@ class ThemedDialogsTest {
             "MailSignature.kt" to "showSignatureDialog",
             "ComposeActivity.kt" to "confirmEmptySubject",
             "EmailDetailActivity.kt" to "confirmOpenLink",
+            "EmailDetailActivity.kt" to "showRsvpDialog",
+            "CalendarHandoff.kt" to "Activity.handOffToCalendar",
         )
     }
 }
