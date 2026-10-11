@@ -405,6 +405,18 @@ Owns production Android app code and resources.
   Selected rows have their folder pinned when the action is tapped, and the optimistic removal
   matches (folder, id), so a Move answered after a folder switch cannot hide a same-id row in the
   folder now on screen (`aLateBulkMoveRemovesOnlyRowsFromTheirOwnFolder`).
+- Inbox swipes and bulk actions are undoable: the rows are hidden at once, a 5 s Snackbar offers
+  Undo, and the relay is asked nothing until the window closes. One bar covers everything held:
+  a new action replaces the bar (`DISMISS_EVENT_CONSECUTIVE` commits nothing), and its Undo takes
+  back every held action. The bar itself closes the window (`commitsOnDismiss`: timeout or
+  swipe), because Android stretches its timeout for the accessibility "time to take action"
+  setting and a separate timer would commit while Undo is still on screen. Only the bar on screen
+  commits: a replaced bar can still time out after its replacement shows, and that dismissal is
+  ignored (`onUndoBarDismissed`). `PendingRowActions`
+  runs each held action exactly once, at that dismissal or at `onStop` (leaving the screen
+  confirms it), or never once undone. A process killed in the foreground inside the window loses
+  the action, so the mail stays where it was. The detail screen's actions finish the Activity and
+  are not undoable. `InboxUndoTest` and `PendingRowActionsTest` cover this.
 - The folder picker's Sent and Drafts entries never guess a mailbox name. Each tap lists the
   top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
   the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A localized name

@@ -1,5 +1,7 @@
 package org.kysecurity.mail.ui
 
+import android.graphics.Paint
+import android.graphics.Typeface
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.lifecycle.Lifecycle
@@ -70,6 +72,34 @@ class InboxRowRebindTest {
             }
         }
     }
+
+    /** Space Grotesk is a downloadable font: AppCompat swaps it in after the row is inflated, and
+     *  later binds must keep it. MONOSPACE stands in for the delivered face; widths tell faces apart. */
+    @Test
+    fun aFontDeliveredAfterInflationSurvivesRebinding() {
+        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val adapter = EmailAdapter(listOf(email("unread")))
+                val holder = adapter.onCreateViewHolder(FrameLayout(activity), 0)
+                val subject = holder.itemView.findViewById<TextView>(R.id.textViewSubject)
+                adapter.onBindViewHolder(holder, 0)
+
+                subject.typeface = Typeface.MONOSPACE // what font delivery does
+                adapter.updateEmails(listOf(email("read")))
+                adapter.onBindViewHolder(holder, 0)
+                assertFalse(subject.typeface.isBold)
+                assertEquals(widthIn(Typeface.MONOSPACE, subject), widthIn(subject.typeface, subject), 0.01f)
+
+                adapter.updateEmails(listOf(email("unread")))
+                adapter.onBindViewHolder(holder, 0)
+                assertTrue(subject.typeface.isBold)
+                assertEquals(widthIn(Typeface.create(Typeface.MONOSPACE, Typeface.BOLD), subject), widthIn(subject.typeface, subject), 0.01f)
+            }
+        }
+    }
+
+    private fun widthIn(face: Typeface, like: TextView): Float =
+        Paint(like.paint).apply { typeface = face }.measureText("iiiiWWWW")
 
     @Test
     fun aTabWhoseMailWasReadIsNotBold() {
