@@ -49,11 +49,14 @@ class ContactSyncRepository(
             contactSyncStatusOf(pending, failures, now())
         }
 
-    suspend fun sync(): ContactSyncOutcome = syncMutex.withLock {
-        val pairing = pairingProvider() ?: return@withLock ContactSyncOutcome.NotPaired
+    /** Recorded before unlocking, so a waiting caller cannot record ahead of this one. */
+    suspend fun sync(): ContactSyncOutcome = syncMutex.withLock { syncLocked().also(health::record) }
+
+    private suspend fun syncLocked(): ContactSyncOutcome = run {
+        val pairing = pairingProvider() ?: return@run ContactSyncOutcome.NotPaired
         val deviceId = pairing.deviceId
         val deviceSecret = pairing.deviceSecret
-        if (deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return@withLock ContactSyncOutcome.NotPaired
+        if (deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return@run ContactSyncOutcome.NotPaired
         val pendingChanges = db.pendingContactChangeDao().getAllPending()
         val cursor = cursorStore.cursor(pairing.subscriberId)
 
@@ -63,7 +66,7 @@ class ContactSyncRepository(
         val wireChanges = pendingChanges.map { it to it.toWireDtoOrNull(json) }
         val undecodable = wireChanges.mapNotNull { (row, dto) -> row.takeIf { dto == null } }
         if (undecodable.isNotEmpty()) {
-            return@withLock ContactSyncOutcome.Retry(
+            return@run ContactSyncOutcome.Retry(
                 "Contact sync stopped: ${undecodable.size} queued change(s) are unreadable " +
                     "(${undecodable.joinToString { it.changeType }}). Nothing was sent or discarded.",
             )
@@ -91,7 +94,7 @@ class ContactSyncRepository(
             is ContactSyncResult.BadRequest -> ContactSyncOutcome.Retry(result.message)
             is ContactSyncResult.Retryable -> ContactSyncOutcome.Retry(result.message)
         }
-    }.also(health::record)
+    }
 
     /** Deliberately does not call [sync]; the caller must trigger the follow-up sync itself. */
     suspend fun dedupe(): ContactDedupeOutcome = resolveDedupeOutcome(pairingProvider) { pairing ->
@@ -104,7 +107,8 @@ class ContactSyncRepository(
         }
     }
 
-    /** Creates locally under a temp uid and enqueues the create; reconciled to a server uid on sync. */
+    /** The local uid is permanent: the server stores an unknown uid as a create, so a replayed
+     *  push lands on the same contact. */
     suspend fun queueCreate(contact: ContactDto): String {
         val localUid = UUID.randomUUID().toString()
         val localCopy = contact.copy(uid = localUid)
@@ -115,7 +119,7 @@ class ContactSyncRepository(
                     localUid = localUid,
                     rev = 0,
                     changeType = CHANGE_CREATE,
-                    payloadJson = json.encodeToString(contact.copy(uid = "")),
+                    payloadJson = json.encodeToString(localCopy),
                     createdAtEpochMs = System.currentTimeMillis(),
                 ),
             )
@@ -166,9 +170,8 @@ class ContactSyncRepository(
     ) {
         if (response.tooOld) {
             // Wire contract: the server applies the pushed changes BEFORE it computes tooOld, so
-            // they are already persisted and the outbox rows MUST be cleared. Replaying them
-            // duplicates every create (toWireDtoOrNull sends a blank uid, so the server mints a new one).
-            // Only the cursor is discarded, which makes the next sync a full since=0 re-pull.
+            // they are already persisted and the outbox rows are cleared. Only the cursor is
+            // discarded, which makes the next sync a full since=0 re-pull.
             db.withTransaction {
                 cursorStore.resetCursor(subscriberId)
                 if (flushedChanges.isNotEmpty()) {
@@ -179,17 +182,6 @@ class ContactSyncRepository(
         }
 
         db.withTransaction {
-            val pendingCreates = flushedChanges.filter { it.changeType == CHANGE_CREATE }
-            val reconciled = ContactSyncReconciliation.reconcile(pendingCreates, response.changed)
-            if (reconciled.isNotEmpty()) {
-                // The device link row keys on uid, so it has to follow this rename.
-                reconciled.forEach { (localUid, serverUid) ->
-                    db.deviceContactLinkDao().remapUid(localUid, serverUid)
-                }
-                // Drop the temp-uid rows; the upsert below inserts the real, server-assigned rows.
-                db.contactDao().deleteByUids(reconciled.keys.toList())
-            }
-
             val incomingEntities = response.changed.map { dto ->
                 dto.toEntity(previous = db.contactDao().getByUid(dto.uid))
             }
@@ -213,7 +205,7 @@ class ContactSyncRepository(
  *  type this build does not know. Callers must abandon the sync rather than send a substitute. */
 internal fun PendingContactChangeEntity.toWireDtoOrNull(json: Json): ContactDto? = when (changeType) {
     ContactSyncRepository.CHANGE_DELETE -> ContactDto(uid = localUid, rev = rev, deleted = true)
-    ContactSyncRepository.CHANGE_CREATE -> decodePayload(json)?.copy(uid = "")
+    ContactSyncRepository.CHANGE_CREATE -> decodePayload(json)?.copy(uid = localUid)
     ContactSyncRepository.CHANGE_UPDATE -> decodePayload(json)?.copy(uid = localUid, rev = rev)
     else -> null
 }

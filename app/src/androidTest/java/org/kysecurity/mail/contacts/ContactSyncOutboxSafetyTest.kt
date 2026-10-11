@@ -6,7 +6,10 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.kysecurity.mail.data.AppDatabase
 import org.kysecurity.mail.data.PendingContactChangeEntity
 import org.kysecurity.mail.push.PairingData
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.Call
 import okhttp3.Callback
@@ -103,9 +106,8 @@ class ContactSyncOutboxSafetyTest {
         assertEquals(2, db.pendingChangeCount())
     }
 
-    /** Wire contract: the server commits pushed changes BEFORE computing tooOld. Keeping the rows
-     *  would replay them, and a replayed create carries a blank uid, so the server mints a second
-     *  contact. Only the cursor is discarded, forcing a full since=0 re-pull. */
+    /** Wire contract: the server commits pushed changes BEFORE computing tooOld, so the rows are
+     *  acknowledged. Only the cursor is discarded, forcing a full since=0 re-pull. */
     @Test
     fun tooOld_clearsTheAcknowledgedOutboxAndResetsOnlyTheCursor() = runBlocking {
         val cursorStore = ContactCursorStore(
@@ -135,6 +137,22 @@ class ContactSyncOutboxSafetyTest {
         assertTrue("expected stuck, got $status", status is ContactSyncStatus.Stuck)
         assertEquals("two rows for one contact are one waiting change", 1, (status as ContactSyncStatus.Stuck).pending)
         assertTrue(status.reason is ContactSyncOutcome.Retry)
+    }
+
+    /** Recorded after unlock, a waiting caller could finish and record first, so an old failure
+     *  overwrote a newer success. The Unconfined collector runs inline at each record. */
+    @Test
+    fun syncOutcome_isRecordedWhileTheSyncLockIsHeld() = runBlocking {
+        enqueue(ContactSyncRepository.CHANGE_UPDATE, "{not json")
+        val lockedAtRecord = mutableListOf<Boolean>()
+        val watcher = launch(Dispatchers.Unconfined) {
+            repository.health.failures.drop(1).collect { lockedAtRecord += repository.syncMutex.isLocked }
+        }
+
+        repository.sync()
+        watcher.cancel()
+
+        assertEquals(listOf(true), lockedAtRecord)
     }
 
     private suspend fun AppDatabase.pendingChangeCount() = pendingContactChangeDao().getAllPending().size
