@@ -85,7 +85,7 @@ Owns production Android app code and resources.
      daily since=0 self-heal — a day of silently missing messages. The delta itself lands through
      `EmailDao.applyFolderDelta`, one transaction, so it cannot half-apply.
   2. HTTP 200 from `/api/inbox/actions` is transport success, not operation success: the relay
-     answers 200 with per-id `failed[]` (Mobile_Mail_Relay.md Part 2). `MailOutcome<MailActionOutcome>
+     answers 200 with per-id `failed[]` (docs/Mobile_Mail_Relay.md Part 2). `MailOutcome<MailActionOutcome>
      .appliedTo(id)` is the only gate on touching the local row — archive/spam/delete/move drop the
      cached row and `markRead` sets `status`, both **after** the relay confirms that id, never
      before. A rejection becomes `MailOutcome.ActionRejected`, not `UpstreamFailure`: the request
@@ -379,6 +379,9 @@ Owns production Android app code and resources.
   not its sync window), each row is stamped with the searched mailbox, and they replace the list only while their query and folder are still on
   screen (`applySearchResults`). A folder switch, a notification tap or editing the submitted text ends the search; a failed search shows the folder list. The query is
   kept out of the saved-state Bundle. `InboxSearchTest` covers the stale-result guards.
+  Because a result has no Room row, opening one passes its To/Cc to the detail screen
+  (`email_sent_to`/`email_cc`). They seed Reply All and are handed to `fetchBody`, which uses them
+  when no row exists (`SearchResultReplyAllTest`).
 - `showThemed()` (`ThemedDialog.kt`) shows a native AlertDialog through `showSecurely()` and then
   paints its surface, title, message, buttons, list rows and fields in the active palette
   (STYLE_GUIDE.md §6). A dialog is its own window, so the Activity's theme walk never reaches it.
