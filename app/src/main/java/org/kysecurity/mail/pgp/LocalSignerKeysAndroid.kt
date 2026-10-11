@@ -38,7 +38,7 @@ internal class RoomLocalSignerKeys(private val database: () -> AppDatabase) : Lo
 /** Keys verified on this device are the only ones accepted for their address; a synced contact
  *  key is consulted only for an address with no pin, which is the behaviour before pins existed. */
 internal fun authoritativeKeys(pins: List<RecipientPinEntity>, contactKeys: List<LocalSignerKey>): List<LocalSignerKey> =
-    if (pins.isEmpty()) contactKeys else pins.map { LocalSignerKey(publicKey = it.publicKey, confirmed = it.confirmed) }
+    if (pins.isEmpty()) contactKeys else pins.map { LocalSignerKey(publicKey = it.publicKey, confirmed = it.confirmed, pinned = true) }
 
 /** Exact, case-insensitive match against a DECODED address. */
 internal fun ContactEntity.hasEmail(address: String): Boolean =

@@ -17,6 +17,7 @@ import org.bouncycastle.openpgp.operator.bc.BcPGPContentSignerBuilder
 import org.bouncycastle.openpgp.operator.bc.BcPGPDigestCalculatorProvider
 import org.bouncycastle.openpgp.operator.bc.BcPGPKeyPair
 import org.kysecurity.mail.mail.MailDraft
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -29,6 +30,10 @@ import java.util.Date
 
 /** A synced copy may withdraw a pinned key, and only when its revocation verifies against it. */
 class PinnedKeyRevocationMergeTest {
+
+    /** The sends that get as far as the vault leave a key held, as in ClientEncryptedSenderTest. */
+    @After
+    fun clearHeldKey() = EnrollmentSession.clear()
 
     @Test
     fun aVerifiableRevocationOfTheSameKey_isTaken() {
@@ -46,6 +51,21 @@ class PinnedKeyRevocationMergeTest {
     @Test
     fun aRevocationNotMadeByThePinnedKey_isIgnored() {
         assertNull(withVerifiedRevocation(public(A), revoked(A, signer = B)))
+        assertFalse("a forged packet is not a revocation", isPrimaryRevoked(revoked(A, signer = B)))
+    }
+
+    /** "The key you verified has been revoked" is about pins only, even for a real revocation. */
+    @Test
+    fun anUnpinnedRevokedKey_isNotReportedAsAVerifiedKeyRevoked() = runBlocking {
+        val outcome = ClientEncryptedSender(
+            opener = FakeVaultOpener(),
+            resolver = FakeRecipientKeyResolver(resolvedAll(listOf(ALICE), public(A))),
+            transport = FakeClientEncryptedTransport(),
+            localKeys = FakePinnedKeys(mapOf(ALICE to listOf(LocalSignerKey(revoked(A, signer = A), confirmed = true)))),
+            accountAddress = "me@example.invalid",
+        ).send(MailDraft(to = ALICE, subject = "s", body = "b", mode = "plain"), sign = false)
+
+        assertFalse("got $outcome", outcome is ClientSendOutcome.RecipientKeyRevoked)
     }
 
     @Test
@@ -64,7 +84,7 @@ class PinnedKeyRevocationMergeTest {
             opener = opener,
             resolver = FakeRecipientKeyResolver(resolvedAll(listOf(ALICE), revoked(A, signer = A))),
             transport = transport,
-            localKeys = FakePinnedKeys(mapOf(ALICE to listOf(LocalSignerKey(revokedPin, confirmed = true)))),
+            localKeys = FakePinnedKeys(mapOf(ALICE to listOf(LocalSignerKey(revokedPin, confirmed = true, pinned = true)))),
             accountAddress = "me@example.invalid",
         )
 
@@ -90,7 +110,7 @@ class PinnedKeyRevocationMergeTest {
                 opener = opener,
                 resolver = FakeRecipientKeyResolver(ResolveResult.Success(listOf(relayKey))),
                 transport = transport,
-                localKeys = FakePinnedKeys(mapOf(ALICE to listOf(LocalSignerKey(revokedPin, confirmed = true)))),
+                localKeys = FakePinnedKeys(mapOf(ALICE to listOf(LocalSignerKey(revokedPin, confirmed = true, pinned = true)))),
                 accountAddress = "me@example.invalid",
             )
 
@@ -102,8 +122,63 @@ class PinnedKeyRevocationMergeTest {
         }
     }
 
+    /** The newest encryption subkey of a pinned key is revoked by its owner on the synced copy: the
+     *  pin takes that revocation and the next message is encrypted to the remaining subkey. */
+    @Test
+    fun aVerifiedSubkeyRevocation_isTakenAndNeverEncryptedTo() = runBlocking {
+        val pin = public(C)
+        val merged = withVerifiedRevocation(pin, subkeyRevoked(C, NEWEST_SUBKEY, signer = C))
+
+        val transport = FakeClientEncryptedTransport()
+        ClientEncryptedSender(
+            opener = FakeVaultOpener(),
+            resolver = FakeRecipientKeyResolver(resolvedAll(listOf(ALICE), pin)),
+            transport = transport,
+            localKeys = FakePinnedKeys(mapOf(ALICE to listOf(LocalSignerKey(merged ?: pin, confirmed = true)))),
+            accountAddress = "me@example.invalid",
+        ).send(MailDraft(to = ALICE, subject = "s", body = "b", mode = "plain"), sign = false)
+
+        val targets = recipientKeyIds(armorOf(transport.sent.single().deliveries.single().ciphertext))
+        assertTrue("the message went out", targets.isNotEmpty())
+        assertFalse("encrypted to the revoked subkey", subkeyId(C, NEWEST_SUBKEY) in targets)
+        assertEquals("the pin is still the same key", PgpFingerprint.compute(pin), merged?.let(PgpFingerprint::compute))
+    }
+
+    @Test
+    fun aSubkeyRevocationNotMadeByThePinnedPrimary_isIgnored() {
+        assertNull(withVerifiedRevocation(public(C), subkeyRevoked(C, NEWEST_SUBKEY, signer = B)))
+    }
+
     private companion object {
         const val ALICE = "alice@example.invalid"
+        const val NEWEST_SUBKEY = 1
+        /** Two encryption subkeys; the newer one is the one a send picks. */
+        val C: PGPSecretKeyRing by lazy { generator("C <c@example.invalid>", subkeys = 2).generateSecretKeyRing() }
+
+        fun subkeyId(owner: PGPSecretKeyRing, index: Int): Long =
+            owner.publicKeys.asSequence().filter { !it.isMasterKey }.toList()[index].keyID
+
+        /** [owner]'s public ring with subkey [index] revoked by a signature from [signer]'s primary. */
+        fun subkeyRevoked(owner: PGPSecretKeyRing, index: Int, signer: PGPSecretKeyRing): String {
+            val ring = publicRing(owner)
+            val subkey = ring.publicKeys.asSequence().filter { !it.isMasterKey }.toList()[index]
+            val privateKey = signer.secretKey.extractPrivateKey(BcPBESecretKeyDecryptorBuilder(BcPGPDigestCalculatorProvider()).build(null))
+            val generator = PGPSignatureGenerator(BcPGPContentSignerBuilder(signer.secretKey.publicKey.algorithm, HashAlgorithmTags.SHA256))
+            generator.init(PGPSignature.SUBKEY_REVOCATION, privateKey)
+            val revoked = PGPPublicKey.addCertification(subkey, generator.generateCertification(ring.publicKey, subkey))
+            return armored(PGPPublicKeyRing.insertPublicKey(ring, revoked).encoded)
+        }
+
+        fun recipientKeyIds(armoredMessage: String): Set<Long> {
+            val factory = org.bouncycastle.openpgp.jcajce.JcaPGPObjectFactory(
+                org.bouncycastle.openpgp.PGPUtil.getDecoderStream(armoredMessage.byteInputStream(Charsets.UTF_8)),
+            )
+            val list = generateSequence { factory.nextObject() }.filterIsInstance<org.bouncycastle.openpgp.PGPEncryptedDataList>().first()
+            return list.encryptedDataObjects.asSequence()
+                .filterIsInstance<org.bouncycastle.openpgp.PGPPublicKeyEncryptedData>()
+                .map { it.keyID }
+                .toSet()
+        }
         val A: PGPSecretKeyRing by lazy { generator("A <a@example.invalid>").generateSecretKeyRing() }
         val B: PGPSecretKeyRing by lazy { generator("B <b@example.invalid>").generateSecretKeyRing() }
 
@@ -124,13 +199,14 @@ class PinnedKeyRevocationMergeTest {
         }
 
         @Suppress("DEPRECATION")
-        fun generator(uid: String): PGPKeyRingGenerator {
+        fun generator(uid: String, subkeys: Int = 1): PGPKeyRingGenerator {
             val rsa = RSAKeyPairGenerator().apply {
                 init(RSAKeyGenerationParameters(BigInteger.valueOf(0x10001), SecureRandom(), 2048, 12))
             }
             val now = Date()
-            val primary = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), now)
-            val sub = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), now)
+            val primary = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), Date(now.time - subkeys * 60_000L))
+            // Each later subkey a minute newer, so "newest" is well defined.
+            val subs = (1..subkeys).map { BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), Date(now.time - (subkeys - it) * 60_000L)) }
             return PGPKeyRingGenerator(
                 PGPSignature.POSITIVE_CERTIFICATION,
                 primary,
@@ -140,7 +216,7 @@ class PinnedKeyRevocationMergeTest {
                 null,
                 BcPGPContentSignerBuilder(primary.publicKey.algorithm, HashAlgorithmTags.SHA256),
                 null,
-            ).apply { addSubKey(sub) }
+            ).apply { subs.forEach { addSubKey(it) } }
         }
 
         fun armored(bytes: ByteArray): String {
