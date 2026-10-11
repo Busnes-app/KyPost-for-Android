@@ -1144,4 +1144,19 @@ class MailRepositoryTest {
         assertEquals("decrypted by the server", body.html)
         assertNull(dao.getById("42", "INBOX")?.body)
     }
+
+    /** A full disk while storing a page must come back as a failure the screen can show, not an
+     *  exception that kills the Inbox's worker thread and the app with it. */
+    @Test
+    fun aStorageFailureWhileLoadingOlderMailIsReportedNotThrown() {
+        val dao = FakeEmailDao()
+        dao.failUpsertOf = "p1"
+        val source = FakeMailSource()
+        source.olderPages += page("p1", next = "p1")
+
+        val outcome = repository(dao, source).loadOlder("INBOX", "w1")
+
+        assertTrue("expected a reported failure, got $outcome", outcome is MailOutcome.BadRequest)
+        assertTrue(dao.rows.isEmpty())
+    }
 }
