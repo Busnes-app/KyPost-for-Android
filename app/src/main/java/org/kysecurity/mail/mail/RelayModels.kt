@@ -68,6 +68,9 @@ data class RelayInboxResponseDto(
 )
 
 @Serializable
+data class RelaySearchResponseDto(val results: List<RelayEmailDto> = emptyList())
+
+@Serializable
 data class RelayFolderDto(val path: String, val deletable: Boolean = true)
 
 @Serializable

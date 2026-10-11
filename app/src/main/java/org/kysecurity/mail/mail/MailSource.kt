@@ -201,6 +201,9 @@ interface MailSource {
      *  any persisted cursor — the documented self-heal for a missed removal notification. */
     fun fetchInbox(mailbox: String, limit: Int, forceFullResync: Boolean = false): MailOutcome<MailFetchResult>
     fun listFolders(parent: String?): MailOutcome<FolderListResult>
+
+    /** Server-side search of one [mailbox]; rows carry no body, like the inbox. */
+    fun searchMail(query: String, mailbox: String, limit: Int): MailOutcome<List<Email>>
     fun createFolder(parent: String, name: String): MailOutcome<Unit>
     fun renameFolder(folder: String, name: String): MailOutcome<Unit>
     fun deleteFolder(folder: String): MailOutcome<Unit>
