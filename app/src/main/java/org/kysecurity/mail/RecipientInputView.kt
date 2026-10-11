@@ -29,7 +29,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** One TO/CC/BCC recipient field; see ContactAutocomplete.md sections 1, 2 and 4. */
+/** One TO/CC/BCC recipient field; see docs/ContactAutocomplete.md sections 1, 2 and 4. */
 class RecipientInputView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
