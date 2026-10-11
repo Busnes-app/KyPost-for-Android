@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import org.kysecurity.mail.ScopedValue
+import org.kysecurity.mail.contacts.contactsDataStore
+import org.kysecurity.mail.mail.mailSyncDataStore
 import org.kysecurity.mail.security.AppLockStore
 import org.kysecurity.mail.security.SecurityRuntime
 import kotlinx.coroutines.flow.Flow
@@ -232,11 +234,11 @@ class PushRepository(
         }
         // Scoping makes a stale value unreadable, not absent — these files must actually be deleted.
         // contacts_state is legacy: kept in this list so older installs do not keep the old file.
-        listOf("mail_sync_state", "contacts_state").forEach { name ->
-            step("datastore/$name") {
-                val file = java.io.File(context.filesDir, "datastore/$name.preferences_pb")
-                !file.exists() || file.delete()
-            }
+        listOf(
+            "mail_sync_state" to context.mailSyncDataStore,
+            "contacts_state" to context.contactsDataStore,
+        ).forEach { (name, store) ->
+            step("datastore/$name") { org.kysecurity.mail.clearAndDelete(context, name, store) }
         }
         // Every process-static holder at once via the registry, not by name — enumeration missed one.
         step("enrollment") { org.kysecurity.mail.pgp.EnrollmentTeardown.destroy(context).isEmpty() }
@@ -273,13 +275,6 @@ class PushRepository(
             // The UnifiedPush endpoint stays: the distributor is still registered, and re-pairing needs it.
             prefs.remove(KEY_TRANSPORT)
         }
-    }
-
-    /** Empties `push_state` through DataStore, cache included. Deleting the file alone does not:
-     *  DataStore keeps serving its cached values, and a later edit re-reads the empty file, sees
-     *  no change, and leaves the cache as it was. */
-    suspend fun clearPersistedState() {
-        context.pushDataStore.edit { it.clear() }
     }
 
     override suspend fun clearPairing(): List<String> {
