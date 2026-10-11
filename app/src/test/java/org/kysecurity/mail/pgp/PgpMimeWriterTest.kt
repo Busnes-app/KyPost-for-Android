@@ -31,6 +31,19 @@ class PgpMimeWriterTest {
         assertEquals("<p>Hello from the writer.</p>", parsed.html?.trim())
     }
 
+    @Test
+    fun aBlankSubjectIsCarriedAsBlankNotDropped() {
+        val content = buildProtectedContent(contentType = "text/plain; charset=utf-8", body = "hi", subject = "  ")
+        assertEquals("", requireNotNull(PgpMimeReader.read(content.toByteArray(Charsets.UTF_8))).protectedSubject)
+    }
+
+    /** A message with no protected Subject at all keeps the envelope's (null here). */
+    @Test
+    fun noProtectedSubjectHeaderReadsAsAbsent() {
+        val content = "Content-Type: text/plain; charset=utf-8\r\n\r\nhi\r\n"
+        assertEquals(null, requireNotNull(PgpMimeReader.read(content.toByteArray(Charsets.UTF_8))).protectedSubject)
+    }
+
     /** memoryhole / draft-ietf-lamps-header-protection; the relay parses exactly this shape. */
     @Test
     fun repeatsTheSubjectInAnRfc822HeadersPart() {

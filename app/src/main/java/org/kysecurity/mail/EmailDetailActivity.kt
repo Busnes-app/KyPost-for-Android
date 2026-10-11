@@ -671,7 +671,7 @@ class EmailDetailActivity : LockedActivity() {
                 }
                 imagesBlockedBar.visibility = if (plainText == null && rendered.hasRemoteImages) View.VISIBLE else View.GONE
                 // The real subject from the encrypted part's protected headers; the envelope one is a placeholder.
-                outcome.body.protectedSubject?.takeIf { it.isNotBlank() }?.let { subjectView.text = it }
+                outcome.body.protectedSubject?.let { subjectView.text = it }
                 // The verdict actually safe to display — see displaySignatureVerdict's KDoc for why
                 // this can differ from outcome.signature itself.
                 val verdict = displaySignatureVerdict(outcome)

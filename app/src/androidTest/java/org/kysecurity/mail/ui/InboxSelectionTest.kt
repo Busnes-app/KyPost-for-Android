@@ -1,7 +1,12 @@
 package org.kysecurity.mail.ui
 
+import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
+import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.action.ViewActions.click
+import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -10,9 +15,15 @@ import org.junit.runner.RunWith
 import org.kysecurity.mail.Email
 import org.kysecurity.mail.InboxActivity
 import org.kysecurity.mail.KeywordTabs
+import org.kysecurity.mail.mail.MailRuntime
 
 @RunWith(AndroidJUnit4::class)
 class InboxSelectionTest {
+
+    @After
+    fun releaseRuntime() {
+        MailRuntime.invalidate()
+    }
 
     private fun email(id: String) =
         Email(id = id, subject = "Subject $id", sender = "sender@example.com", preview = "", folder = "INBOX")
@@ -46,5 +57,29 @@ class InboxSelectionTest {
         activity.switchFolderForTest("Archive")
         assertFalse(activity.inSelectionModeForTest())
         assertEquals(emptySet<String>(), activity.selectedIdsForTest())
+    }
+
+    /** "2 selected" means two: a row selected under another keyword tab is still selected. */
+    @Test
+    fun aBulkActionCoversRowsSelectedInOtherTabs() {
+        val work = Email(id = "w", subject = "w", sender = "a@example.com", preview = "", folder = "INBOX", keywords = setOf("Work"))
+        val home = Email(id = "h", subject = "h", sender = "a@example.com", preview = "", folder = "INBOX", keywords = setOf("Home"))
+        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.setFolderForTest("INBOX", "Work")
+                activity.setEmailsForTest(listOf(work, home))
+                activity.toggleSelectedForTest(work)
+                activity.setFolderForTest("INBOX", "Home")
+                activity.setEmailsForTest(listOf(work, home))
+                activity.toggleSelectedForTest(home)
+                assertEquals(setOf("w", "h"), activity.selectedIdsForTest())
+            }
+            onView(withContentDescription("Archive")).perform(click())
+            // Leaving the screen sends anything still held for Undo.
+            scenario.moveToState(Lifecycle.State.CREATED)
+            scenario.onActivity { activity ->
+                assertEquals(emptyList<String>(), activity.allEmailsForTest().map { it.id })
+            }
+        }
     }
 }

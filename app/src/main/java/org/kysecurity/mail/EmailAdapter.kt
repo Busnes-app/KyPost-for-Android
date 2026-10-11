@@ -18,6 +18,7 @@ import org.kysecurity.mail.pgp.pgpMessageStateOf
 import org.kysecurity.mail.pgp.pgpRowMarker
 import org.kysecurity.mail.pgp.pgpSignatureStateOf
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -121,10 +122,16 @@ class EmailAdapter(
         notifyItemRangeChanged(0, itemCount)
     }
 
+    /** The day the date labels were formatted for: after midnight "today" shows a time it no longer means. */
+    private var labelledDay: LocalDate = LocalDate.now()
+
     fun updateEmails(newEmails: List<Email>) {
         val previous = emails
         emails = newEmails
-        dispatchEmailListUpdate(previous, newEmails, AdapterListUpdateCallback(this))
+        val today = LocalDate.now()
+        val dayChanged = today != labelledDay
+        labelledDay = today
+        dispatchEmailListUpdate(previous, newEmails, AdapterListUpdateCallback(this), dayChanged)
     }
 }
 
@@ -145,6 +152,7 @@ internal fun dispatchEmailListUpdate(
     old: List<Email>,
     new: List<Email>,
     callback: ListUpdateCallback,
+    dayChanged: Boolean = false,
 ) {
     DiffUtil.calculateDiff(object : DiffUtil.Callback() {
         override fun getOldListSize(): Int = old.size
@@ -152,4 +160,6 @@ internal fun dispatchEmailListUpdate(
         override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean = old[oldPos].id == new[newPos].id
         override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean = old[oldPos] == new[newPos]
     }).dispatchUpdatesTo(callback)
+    // Rebinds, not a reload: a range change keeps an in-flight swipe's holder.
+    if (dayChanged && new.isNotEmpty()) callback.onChanged(0, new.size, null)
 }

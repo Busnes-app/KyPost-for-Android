@@ -18,8 +18,16 @@ class EmailAdapterUpdateTest {
         override fun onChanged(position: Int, count: Int, payload: Any?) { ops += "change($position,$count)" }
     }
 
-    private fun updates(old: List<Email>, new: List<Email>): List<String> =
-        RecordingUpdates().also { dispatchEmailListUpdate(old, new, it) }.ops
+    private fun updates(old: List<Email>, new: List<Email>, dayChanged: Boolean = false): List<String> =
+        RecordingUpdates().also { dispatchEmailListUpdate(old, new, it, dayChanged) }.ops
+
+    /** Past midnight, yesterday's "9:05 AM" must become a date even when no mail changed. */
+    @Test
+    fun anUnchangedListIsRebound_whenTheDayChanges() {
+        val rows = listOf(email("a"), email("b"))
+        assertEquals(emptyList<String>(), updates(rows, rows))
+        assertEquals(listOf("change(0,2)"), updates(rows, rows, dayChanged = true))
+    }
 
     @Test
     fun swipingOneEmailAwayRemovesOnlyThatRow() {
