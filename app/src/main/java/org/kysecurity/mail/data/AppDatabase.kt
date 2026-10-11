@@ -192,7 +192,7 @@ abstract class AppDatabase : RoomDatabase() {
                                     "DO UPDATE SET publicKey = CASE WHEN excluded.confirmed > confirmed " +
                                     "THEN excluded.publicKey ELSE publicKey END, " +
                                     "confirmed = max(confirmed, excluded.confirmed)",
-                                arrayOf<Any?>(pin.address, pin.fingerprint, pin.publicKey, if (pin.confirmed) 1 else 0),
+                                arrayOf<Any>(pin.address, pin.fingerprint, pin.publicKey, if (pin.confirmed) 1 else 0),
                             )
                         }
                     }
