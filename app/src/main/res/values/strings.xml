@@ -39,6 +39,10 @@
     <string name="settings_keywords_body">Choose which keyword tabs are visible</string>
     <string name="settings_pairing_body">Push pairing and notification transport</string>
     <string name="settings_pgp_body">Show or scan PGP key QR codes</string>
+    <string name="settings_signature">Signature</string>
+    <string name="settings_signature_body">Added to new messages, replies and forwards, above any quoted text</string>
+    <string name="signature_hint">Your name, title, phone…</string>
+    <string name="save">Save</string>
     <string name="settings_about_body">Version and license</string>
     <string name="settings_privacy">Privacy policy</string>
     <string name="settings_privacy_body">Read how KyPost handles data</string>
