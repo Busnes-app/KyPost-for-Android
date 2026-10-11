@@ -23,31 +23,44 @@ fun shareContactsAsVCard(activity: Activity, contacts: List<ContactDto>, fileNam
         Toast.makeText(activity, R.string.contacts_vcard_none, Toast.LENGTH_SHORT).show()
         return
     }
-    val versions = arrayOf(VCardVersion.V4, VCardVersion.V3)
     AlertDialog.Builder(activity)
         .setTitle(R.string.contacts_vcard_version_title)
-        .setItems(arrayOf(activity.getString(R.string.contacts_vcard_v4), activity.getString(R.string.contacts_vcard_v3))) { _, which ->
-            launchShare(activity, writeVCards(contacts, versions[which]), fileName)
+        .setItems(VCARD_SHARE_CHOICES.map { activity.getString(it.second) }.toTypedArray()) { _, which ->
+            launchShare(activity, contacts, which, fileName)
         }
         .setNegativeButton(android.R.string.cancel, null)
         .create()
         .showSecurely()
 }
 
-private fun launchShare(activity: Activity, vcard: String, fileName: String) {
+/** The version dialog's items, in order. */
+internal val VCARD_SHARE_CHOICES = listOf(
+    VCardVersion.V4 to R.string.contacts_vcard_v4,
+    VCardVersion.V3 to R.string.contacts_vcard_v3,
+)
+
+/** The ACTION_SEND for dialog choice [which]; null when the ephemeral provider is full. */
+internal fun vcardShareIntent(contacts: List<ContactDto>, which: Int, fileName: String): Intent? {
+    val vcard = writeVCards(contacts, VCARD_SHARE_CHOICES[which].first)
     val uri = EphemeralAttachmentBytes.register(vcard.toByteArray(Charsets.UTF_8), VCARD_MIME_TYPE, fileName)
-        ?: run {
-            Toast.makeText(activity, R.string.attachment_too_many_open, Toast.LENGTH_LONG).show()
-            return
-        }
-    val send = Intent(Intent.ACTION_SEND)
+        ?: return null
+    return Intent(Intent.ACTION_SEND)
         .setType(VCARD_MIME_TYPE)
         .putExtra(Intent.EXTRA_STREAM, uri)
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+}
+
+private fun launchShare(activity: Activity, contacts: List<ContactDto>, which: Int, fileName: String) {
+    val send = vcardShareIntent(contacts, which, fileName) ?: run {
+        Toast.makeText(activity, R.string.attachment_too_many_open, Toast.LENGTH_LONG).show()
+        return
+    }
     val chooser = Intent.createChooser(send, activity.getString(R.string.contacts_vcard_share_title))
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     runCatching { activity.startActivity(chooser) }.onFailure {
-        EphemeralAttachmentBytes.revoke(uri.lastPathSegment.orEmpty())
+        @Suppress("DEPRECATION")
+        val uri = send.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+        EphemeralAttachmentBytes.revoke(uri?.lastPathSegment.orEmpty())
         Toast.makeText(activity, R.string.contacts_vcard_share_failed, Toast.LENGTH_LONG).show()
     }
 }
