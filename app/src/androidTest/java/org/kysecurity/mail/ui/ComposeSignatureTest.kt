@@ -5,6 +5,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -18,6 +19,8 @@ class ComposeSignatureTest {
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
+    /** An earlier compose test can leave a draft that this launch would restore instead. */
+    @Before
     @After
     fun cleanUp() {
         context.deleteSharedPreferences(MailSignature.PREFS_NAME)
