@@ -37,6 +37,9 @@ internal class FakeContactServer : Call.Factory {
     /** The Nth POST (1-based) fails with a 500 before anything is applied; 0 for none. */
     var failPost = 0
 
+    /** As [failPost], for GETs. */
+    var failGet = 0
+
     fun live(): List<ContactDto> = contacts.values.filterNot { it.deleted }
 
     /** Seeds server-side contacts, as if written by another client. */
@@ -65,6 +68,7 @@ internal class FakeContactServer : Call.Factory {
         } else {
             since = request.url.queryParameter("since")?.toLong() ?: 0L
             requests += "GET since=$since"
+            if (requests.count { it.startsWith("GET") } == failGet) return reply(request, 500, "internal error")
         }
         if (loseNextResponse) {
             loseNextResponse = false
