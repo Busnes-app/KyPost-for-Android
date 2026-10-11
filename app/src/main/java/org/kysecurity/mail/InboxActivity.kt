@@ -233,7 +233,12 @@ class InboxActivity : LockedActivity() {
         loadingOverlay = findViewById(R.id.loadingOverlay)
         swipeRefresh = findViewById(R.id.inboxSwipeRefresh)
         // forceFullResync: a delta cannot repair a drifted cache, so a pull re-reads the folder.
-        swipeRefresh.setOnRefreshListener { refreshInbox(forceFullResync = true) }
+        swipeRefresh.setOnRefreshListener {
+            // Unknown until the relay answers again, so not "No messages" while it is asked.
+            loadedFolder = null
+            renderFilteredEmails()
+            refreshInbox(forceFullResync = true)
+        }
         loadingStatus = findViewById<TextView>(R.id.loadingStatus)
         cancelLoading = findViewById(R.id.cancelLoading)
         freshnessText = findViewById(R.id.inboxFreshness)
@@ -444,7 +449,8 @@ class InboxActivity : LockedActivity() {
         refreshedAt: Long? = null,
     ) {
         if (folder != currentFolder) return
-        if (refreshedAt != null) loadedFolder = folder
+        // A failed fetch un-confirms the folder: its emptiness is no longer known.
+        if (isFinal) loadedFolder = folder.takeIf { refreshedAt != null }
         // Snapshotted before rebuildTabs: a chip rebuild re-renders through the tab listener.
         val previous = adapter.currentEmails().takeIf { paintedFolder == folder }
         val tabBefore = selectedTab
@@ -602,7 +608,11 @@ class InboxActivity : LockedActivity() {
                     return true
                 }
 
-                override fun onQueryTextChange(newText: String): Boolean = false
+                // Searching is submit-only, but results must match the text on screen.
+                override fun onQueryTextChange(newText: String): Boolean {
+                    if (searchQuery != null && newText.trim() != searchQuery) endSearch()
+                    return false
+                }
             })
         }
         searchItem = menu.add(0, MENU_SEARCH, 0, R.string.search_hint).apply {
@@ -625,6 +635,7 @@ class InboxActivity : LockedActivity() {
     private fun runSearch(query: String) {
         selectionMode?.finish()
         searchQuery = query
+        renderFilteredEmails()
         val folder = currentFolder
         ioExecutor.execute {
             val outcome = mailRepository.search(query, folder)
@@ -635,12 +646,10 @@ class InboxActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun applySearchResults(query: String, folder: String, outcome: MailOutcome<List<Email>>) {
         if (searchQuery != query || folder != currentFolder) return
-        if (outcome is MailOutcome.Success) {
-            searchResults = outcome.value
-            renderFilteredEmails()
-        } else {
-            outcome.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
-        }
+        // A failure must not leave an earlier query's results under this one.
+        searchResults = (outcome as? MailOutcome.Success)?.value
+        renderFilteredEmails()
+        outcome.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
     }
 
     private fun endSearch() {
@@ -1035,11 +1044,15 @@ internal enum class SpecialFolder(@androidx.annotation.StringRes val label: Int,
 
 private fun mailboxLeaf(path: String): String = path.split('/', '.').last().trim()
 
-internal fun specialFolderOf(path: String): SpecialFolder? =
-    SpecialFolder.entries.firstOrNull { kind -> kind.aliases.any { it.equals(mailboxLeaf(path), ignoreCase = true) } }
+/** Null under Archive: `Archive/Sent` is an archived folder, which the Archive entry owns. */
+internal fun specialFolderOf(path: String): SpecialFolder? {
+    if (path.startsWith("Archive/", ignoreCase = true) || path.startsWith("Archive.", ignoreCase = true)) return null
+    return SpecialFolder.entries.firstOrNull { kind -> kind.aliases.any { it.equals(mailboxLeaf(path), ignoreCase = true) } }
+}
 
 internal fun resolveSpecialFolder(paths: List<String>, kind: SpecialFolder): String? =
     kind.aliases.firstNotNullOfOrNull { alias -> paths.firstOrNull { mailboxLeaf(it).equals(alias, ignoreCase = true) } }
+
 /** Rows [new] puts above the first row [old] already had. Zero on a first load. */
 internal fun newRowsAbove(old: List<Email>, new: List<Email>): Int {
     if (old.isEmpty()) return 0
