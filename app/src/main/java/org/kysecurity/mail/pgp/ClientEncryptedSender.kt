@@ -88,10 +88,11 @@ internal class ClientEncryptedSender(
         val byAddress = resolved.associateBy { it.address.lowercase() }
 
         // This device's own pins first: whatever the relay says about a key, a pin its owner
-        // revoked is the reason the send cannot happen.
+        // revoked is the reason the send cannot happen. Only pins: the synced fallback key of an
+        // unpinned address is not "the key you verified".
         val revoked = addresses.filter { address ->
             val trusted = localKeys.keysFor(address).filter { it.publicKey.isNotBlank() }
-            trusted.isNotEmpty() && trusted.all { isPrimaryRevoked(it.publicKey) }
+            trusted.isNotEmpty() && trusted.all { it.pinned && isPrimaryRevoked(it.publicKey) }
         }
         if (revoked.isNotEmpty()) return ClientSendOutcome.RecipientKeyRevoked(revoked)
 

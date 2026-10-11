@@ -100,7 +100,7 @@ class LocalSignerKeyMappingTest {
         val pin = org.kysecurity.mail.data.RecipientPinEntity("bob@example.com", "F", "PINNED", confirmed = true)
         val synced = LocalSignerKey("SYNCED", confirmed = true)
 
-        assertEquals(listOf(LocalSignerKey("PINNED", confirmed = true)), authoritativeKeys(listOf(pin), listOf(synced)))
+        assertEquals(listOf(LocalSignerKey("PINNED", confirmed = true, pinned = true)), authoritativeKeys(listOf(pin), listOf(synced)))
     }
 
     /** No pin: the contact's key is used exactly as before pins existed. */
