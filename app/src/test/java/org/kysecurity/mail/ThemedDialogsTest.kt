@@ -25,6 +25,7 @@ class ThemedDialogsTest {
         val SITES = listOf(
             "MoveToFolder.kt" to "pickMoveTarget",
             "MailSignature.kt" to "showSignatureDialog",
+            "ComposeActivity.kt" to "confirmEmptySubject",
         )
     }
 }
