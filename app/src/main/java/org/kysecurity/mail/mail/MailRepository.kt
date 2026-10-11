@@ -62,7 +62,12 @@ class MailRepository(
         if (outcome !is MailOutcome.Success) return outcome
         // The server ignored before= and sent its newest window, which is not older mail.
         if (outcome.value.hasMore == null) return MailOutcome.BadRequest(OLDER_MAIL_UNSUPPORTED)
-        reconcileOlderMail(emailDao, folder, "relay", outcome.value.messages)
+        // Room reports a full disk or I/O error as a RuntimeException (SQLiteFullException and kin).
+        try {
+            reconcileOlderMail(emailDao, folder, "relay", outcome.value.messages)
+        } catch (_: RuntimeException) {
+            return MailOutcome.BadRequest(OLDER_MAIL_NOT_SAVED)
+        }
         return outcome
     }
 
@@ -280,6 +285,8 @@ internal const val WINDOW_LIMIT = 50
 private const val MAX_OVERFLOW_PAGES = 20
 
 private const val OVERFLOW_UNREACHABLE = "The server reported more new mail than it would page"
+
+internal const val OLDER_MAIL_NOT_SAVED = "Couldn't save older mail on this device. Free up storage and try again."
 
 internal const val OLDER_MAIL_UNSUPPORTED = "This server can't load older mail. Update KyPost Server to use this."
 

@@ -1156,7 +1156,7 @@ class MailRepositoryTest {
 
         val outcome = repository(dao, source).loadOlder("INBOX", "w1")
 
-        assertTrue("expected a reported failure, got $outcome", outcome is MailOutcome.BadRequest)
+        assertEquals(OLDER_MAIL_NOT_SAVED, (outcome as MailOutcome.BadRequest).message)
         assertTrue(dao.rows.isEmpty())
     }
 }

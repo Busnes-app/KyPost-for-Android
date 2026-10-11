@@ -34,6 +34,8 @@ import org.kysecurity.mail.mail.MailFetchResult
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRepository
 import org.kysecurity.mail.mail.MailRuntime
+import org.kysecurity.mail.mail.MailPage
+import org.kysecurity.mail.mail.OLDER_MAIL_NOT_SAVED
 import org.kysecurity.mail.mail.OLDER_MAIL_UNSUPPORTED
 import org.kysecurity.mail.mail.isFlaggedPhishing
 import org.kysecurity.mail.mail.notifiedMessage
@@ -330,29 +332,47 @@ class InboxActivity : LockedActivity() {
         val frontier = olderFrontier[folder]
         olderFooter.loading = true
         ioExecutor.execute {
-            // Read from Room, not allEmails: right after a folder switch that is still the old folder.
-            val before = frontier ?: mailRepository.cachedEmails(folder).lastOrNull()?.id
-            val outcome = before?.let { mailRepository.loadOlder(folder, it) }
-            val emails = mailRepository.cachedEmails(folder)
-            runOnUiThread {
-                olderFooter.loading = false
-                when {
-                    outcome is MailOutcome.Success -> {
-                        val next = outcome.value.nextBefore
-                        if (outcome.value.hasMore == true && next != null) olderFrontier[folder] = next else olderExhausted += folder
-                    }
-                    outcome == null || (outcome as? MailOutcome.BadRequest)?.message == OLDER_MAIL_UNSUPPORTED ->
-                        olderExhausted += folder
-                    // A stale frontier answers 400 forever; retry from the oldest row instead.
-                    else -> olderFrontier.remove(folder)
-                }
-                if (folder != currentFolder) return@runOnUiThread
-                allEmails = emails
-                rebuildTabs(emails)
-                renderFilteredEmails()
-                outcome?.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
+            var outcome: MailOutcome<MailPage>? = null
+            var emails: List<Email>? = null
+            var started = false
+            try {
+                // Read from Room, not allEmails: right after a folder switch that is still the old folder.
+                val before = frontier ?: mailRepository.cachedEmails(folder).lastOrNull()?.id
+                started = before != null
+                outcome = before?.let { mailRepository.loadOlder(folder, it) }
+                emails = mailRepository.cachedEmails(folder)
+            } catch (e: RuntimeException) {
+                // An exception here would kill the worker thread and the app with it.
+                android.util.Log.w("InboxActivity", "Loading older mail failed", e)
+                if (outcome == null && started) outcome = MailOutcome.BadRequest(OLDER_MAIL_NOT_SAVED)
+            } finally {
+                val result = outcome
+                val painted = emails
+                runOnUiThread { onOlderMailLoaded(folder, result, painted) }
             }
         }
+    }
+
+    private fun onOlderMailLoaded(folder: String, outcome: MailOutcome<MailPage>?, emails: List<Email>?) {
+        olderFooter.loading = false
+        val message = (outcome as? MailOutcome.BadRequest)?.message
+        when {
+            outcome is MailOutcome.Success -> {
+                val next = outcome.value.nextBefore
+                if (outcome.value.hasMore == true && next != null) olderFrontier[folder] = next else olderExhausted += folder
+            }
+            outcome == null || message == OLDER_MAIL_UNSUPPORTED -> olderExhausted += folder
+            // A stale frontier answers 400 forever; retry from the oldest row instead. Any other
+            // failure (network, storage) keeps the frontier, so the retry asks for the same page.
+            outcome is MailOutcome.BadRequest && message != OLDER_MAIL_NOT_SAVED -> olderFrontier.remove(folder)
+        }
+        if (folder != currentFolder) return
+        if (emails != null) {
+            allEmails = emails
+            rebuildTabs(emails)
+            renderFilteredEmails()
+        }
+        outcome?.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
     }
 
     /** The row's own mailbox, not the screen's. An IMAP UID is unique only within one folder, so
