@@ -17,6 +17,12 @@ import org.kysecurity.mail.pgp.PgpSignatureState
 import org.kysecurity.mail.pgp.pgpMessageStateOf
 import org.kysecurity.mail.pgp.pgpRowMarker
 import org.kysecurity.mail.pgp.pgpSignatureStateOf
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
 
 class EmailAdapter(
     private var emails: List<Email>,
@@ -29,6 +35,7 @@ class EmailAdapter(
         private val unreadDot: View = view.findViewById(R.id.unreadDot)
         private val subjectTextView: TextView = view.findViewById(R.id.textViewSubject)
         private val senderTextView: TextView = view.findViewById(R.id.textViewSender)
+        private val dateTextView: TextView = view.findViewById(R.id.textViewDate)
 
         fun bind(email: Email, palette: ThemePalette) {
             // A message this app can't render is worth knowing before tapping it — otherwise the
@@ -60,6 +67,7 @@ class EmailAdapter(
                 else -> null
             }
             senderTextView.text = email.sender
+            dateTextView.text = inboxRowDate(email.atUtc, ZonedDateTime.now(), Locale.getDefault())
 
             val panel = Color.parseColor(palette.panel)
             cardView.setCardBackgroundColor(panel)
@@ -73,6 +81,7 @@ class EmailAdapter(
             subjectTextView.setTypeface(subjectTextView.typeface, if (isUnread) Typeface.BOLD else Typeface.NORMAL)
             subjectTextView.setTextColor(Color.parseColor(if (isUnread) palette.inkStrong else palette.ink))
             senderTextView.setTextColor(Color.parseColor(palette.ink))
+            dateTextView.setTextColor(Color.parseColor(palette.ink))
 
             itemView.setOnClickListener { onEmailClick?.invoke(email) }
         }
@@ -93,11 +102,31 @@ class EmailAdapter(
 
     fun getEmailAt(position: Int): Email = emails[position]
 
+    fun currentEmails(): List<Email> = emails
+
+    /** The day the date labels were formatted for: after midnight "today" shows a time it no longer means. */
+    private var labelledDay: LocalDate = LocalDate.now()
+
     fun updateEmails(newEmails: List<Email>) {
         val previous = emails
         emails = newEmails
-        dispatchEmailListUpdate(previous, newEmails, AdapterListUpdateCallback(this))
+        val today = LocalDate.now()
+        val dayChanged = today != labelledDay
+        labelledDay = today
+        dispatchEmailListUpdate(previous, newEmails, AdapterListUpdateCallback(this), dayChanged)
     }
+}
+
+/** Time for mail from today, date otherwise, in [now]'s zone. Blank when the relay sent no
+ *  parseable `atUtc` (RFC 3339). */
+internal fun inboxRowDate(atUtc: String?, now: ZonedDateTime, locale: Locale): String {
+    val local = runCatching { Instant.parse(atUtc.orEmpty()) }.getOrNull()?.atZone(now.zone) ?: return ""
+    val formatter = if (local.toLocalDate() == now.toLocalDate()) {
+        DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
+    } else {
+        DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+    }
+    return formatter.withLocale(locale).format(local)
 }
 
 /** Not notifyDataSetChanged(): NO_POSITION holders strand ItemTouchHelper's swipe animation. */
@@ -105,6 +134,7 @@ internal fun dispatchEmailListUpdate(
     old: List<Email>,
     new: List<Email>,
     callback: ListUpdateCallback,
+    dayChanged: Boolean = false,
 ) {
     DiffUtil.calculateDiff(object : DiffUtil.Callback() {
         override fun getOldListSize(): Int = old.size
@@ -112,4 +142,6 @@ internal fun dispatchEmailListUpdate(
         override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean = old[oldPos].id == new[newPos].id
         override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean = old[oldPos] == new[newPos]
     }).dispatchUpdatesTo(callback)
+    // Rebinds, not a reload: a range change keeps an in-flight swipe's holder.
+    if (dayChanged && new.isNotEmpty()) callback.onChanged(0, new.size, null)
 }
