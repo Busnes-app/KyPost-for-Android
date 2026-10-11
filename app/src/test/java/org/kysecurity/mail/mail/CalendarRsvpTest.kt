@@ -14,6 +14,15 @@ class CalendarRsvpTest {
 
     private val now = Instant.parse("2026-10-10T08:09:10Z")
 
+    /** The override VEVENT of a series, parsed beside its master: an override-only invite does not parse. */
+    private fun override(vararg extra: String) = assertNotNull(
+        parseCalendarInvite(
+            (listOf("BEGIN:VCALENDAR", "METHOD:REQUEST", "BEGIN:VEVENT") + request + listOf("END:VEVENT", "BEGIN:VEVENT") +
+                request + extra + listOf("END:VEVENT", "END:VCALENDAR")).joinToString("\r\n").toByteArray(),
+            ZoneId.of("UTC"),
+        ),
+    ).events.last()
+
     private fun invite(vararg event: String, method: String = "REQUEST") = assertNotNull(
         parseCalendarInvite(
             (listOf("BEGIN:VCALENDAR", "METHOD:$method", "BEGIN:VEVENT") + event + listOf("END:VEVENT", "END:VCALENDAR"))
@@ -118,7 +127,7 @@ class CalendarRsvpTest {
     fun overrideRecurrenceIdIsRestatedWithoutATzid() {
         // The REPLY carries no VTIMEZONE, so a zoned RECURRENCE-ID must become UTC.
         fun reply(rid: String) = unfold(
-            rsvpDraft(invite(*request, rid).primary, "me@example.com", Rsvp.TENTATIVE, now).calendarReply!!,
+            rsvpDraft(override(rid), "me@example.com", Rsvp.TENTATIVE, now).calendarReply!!,
         )
         assertTrue("\r\nRECURRENCE-ID:20261019T080000Z\r\n" in reply("RECURRENCE-ID;TZID=Europe/Berlin:20261019T100000"))
         assertTrue("\r\nRECURRENCE-ID:20261019T100000Z\r\n" in reply("RECURRENCE-ID:20261019T100000Z"))
@@ -128,8 +137,8 @@ class CalendarRsvpTest {
 
     @Test
     fun unrestatableRecurrenceIdOrSequenceMeansNoRsvp() {
-        assertFalse(invite(*request, "RECURRENCE-ID;TZID=Narnia:20261019T100000").offersRsvp("REQUEST"))
-        assertFalse(invite(*request, "RECURRENCE-ID:garbage").offersRsvp("REQUEST"))
+        assertFalse(override("RECURRENCE-ID;TZID=Narnia:20261019T100000").canReply)
+        assertFalse(override("RECURRENCE-ID:garbage").canReply)
         val badSequence = request.map { if (it.startsWith("SEQUENCE")) "SEQUENCE:99999999999" else it }
         assertFalse(invite(*badSequence.toTypedArray()).offersRsvp("REQUEST"))
     }
@@ -190,7 +199,7 @@ class CalendarRsvpTest {
         tracker.finish(key, RsvpResult.SENT)
         tracker.opened(key, freshOpen = true)
         assertFalse(tracker.canAnswer(key), "a confirmed RSVP stays sent")
-        tracker.begin(rsvpKey(invite(*request, "RECURRENCE-ID:20261019T100000Z").primary))
+        tracker.begin(rsvpKey(override("RECURRENCE-ID:20261019T100000Z")))
         tracker.cancel(key)
         assertFalse(tracker.canAnswer(key), "cancel releases only a pending send")
     }
