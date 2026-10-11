@@ -82,6 +82,7 @@ class ContactDetailActivity : LockedActivity() {
             setIcon(R.drawable.ic_edit)
             setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
         }
+        menu.add(0, MENU_SHARE, 1, R.string.contacts_share_vcard)
         return super.onCreateOptionsMenu(menu)
     }
 
@@ -89,6 +90,14 @@ class ContactDetailActivity : LockedActivity() {
         return when (item.itemId) {
             MENU_EDIT -> {
                 startActivity(Intent(this, ContactEditActivity::class.java).putExtra(ContactEditActivity.EXTRA_UID, uid))
+                true
+            }
+            MENU_SHARE -> {
+                lifecycleScope.launch {
+                    val dto = DataRuntime.graph(this@ContactDetailActivity).database.contactDao().getByUid(uid)?.toDto()
+                        ?: return@launch
+                    shareContactsAsVCard(this@ContactDetailActivity, listOf(dto), dto.fn)
+                }
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -279,6 +288,7 @@ class ContactDetailActivity : LockedActivity() {
         private val ALLOWED_FIELD_SCHEMES = setOf("http", "https", "mailto", "tel", "geo")
 
         private const val MENU_EDIT = 1
+        private const val MENU_SHARE = 2
         const val EXTRA_UID = "contact_uid"
 
         private const val STATE_SCROLL_Y = "contact_detail_scroll_y"

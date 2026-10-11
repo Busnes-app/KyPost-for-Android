@@ -306,6 +306,15 @@
     </plurals>
     <string name="contacts_sync_stuck_no_reason">Not sent for over an hour.</string>
     <string name="contacts_sync_retry">Retry</string>
+    <string name="contacts_share_vcard">Share as vCard</string>
+    <string name="contacts_export_vcard">Export all as vCard</string>
+    <string name="contacts_vcard_version_title">vCard format</string>
+    <string name="contacts_vcard_v4">vCard 4.0</string>
+    <string name="contacts_vcard_v3">vCard 3.0 (older apps)</string>
+    <string name="contacts_vcard_share_title">Share contacts</string>
+    <string name="contacts_vcard_share_failed">No app can receive contacts</string>
+    <string name="contacts_vcard_none">No contacts to export</string>
+    <string name="contacts_vcard_blocked_hostile">Contacts can\'t be shared while Hostile Location Protection is on. The receiving app could save them anywhere.</string>
     <string name="contacts_dedupe">Find &amp; merge duplicates</string>
     <plurals name="contacts_dedupe_result">
         <item quantity="one">Merged %d duplicate contact</item>
