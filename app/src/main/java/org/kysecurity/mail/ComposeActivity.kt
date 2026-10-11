@@ -123,6 +123,16 @@ class ComposeActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun discardPromptCountForTest(): Int = discardPromptCount
 
+    /** Null in production. Sees every draft handed to the relay's plain send. */
+    @androidx.annotation.VisibleForTesting
+    internal var sendObserverForTest: ((MailDraft) -> Unit)? = null
+
+    @androidx.annotation.VisibleForTesting
+    internal fun applyPgpComposeStateForTest(state: PgpComposeState) = applyPgpComposeState(state)
+
+    @androidx.annotation.VisibleForTesting
+    internal fun sendForTest() = sendEmail()
+
     private val bodyMirror = object : Runnable {
         override fun run() {
             bodyEditor.exportHtml { mirroredBodyHtml = it }
@@ -819,6 +829,7 @@ class ComposeActivity : LockedActivity() {
 
     /** Shared by the first attempt and the confirmed re-send, so the re-send cannot drift. */
     private fun dispatchSend(draft: MailDraft) {
+        sendObserverForTest?.invoke(draft)
         ioExecutor.execute {
             val outcome = MailRuntime.graph(this).repository.send(draft)
             runOnUiThread {
