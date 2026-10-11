@@ -68,6 +68,27 @@ class ContactPushBatchingTest {
         assertEquals(600, db.contactDao().observeAll().first().size)
     }
 
+    /** The retry's push succeeds but its snapshot pull fails: the snapshot is still owed, so the
+     *  next sync must ask for since=0 again rather than resume from the push's cursor. */
+    @Test
+    fun aSnapshotStillOwedAfterItsPullFails_isPulledByTheNextSync() = runBlocking {
+        db.contactDao().upsertAll(listOf(ContactDto(uid = "forgotten", rev = 2, fn = "Forgotten").toEntity()))
+        server.gcHighWater = 10
+        server.failPost = 2
+        server.failGet = 1
+        cursorStore.advanceCursor(TEST_PAIRING.subscriberId, 5)
+        repeat(600) { repository.queueCreate(ContactDto(fn = "Contact $it")) }
+
+        assertTrue(repository.sync() is ContactSyncOutcome.Retry)
+        assertTrue(repository.sync() is ContactSyncOutcome.Retry)
+        val before = server.requests.size
+        assertTrue(repository.sync() is ContactSyncOutcome.Success)
+
+        assertEquals(listOf("GET since=0"), server.requests.drop(before))
+        assertEquals("the snapshot removes what the server no longer has", null, db.contactDao().getByUid("forgotten"))
+        assertEquals(0, db.pendingContactChangeDao().getAllPending().size)
+    }
+
     @Test
     fun tooOldMidPush_clearsTheOutboxAndEndsWithOneFullPull() = runBlocking {
         server.seed(*Array(12) { ContactDto(uid = "remote-$it", fn = "Remote $it") })

@@ -48,6 +48,11 @@ internal fun legacyPins(
     confirmed: Boolean,
 ): List<RecipientPinEntity> {
     if (publicKey.isNullOrBlank() || fingerprint.isNullOrBlank()) return emptyList()
+    // Keyed on what the bytes are: a row whose new key was rejected kept the previous fingerprint.
+    // Confirmation stays only with a key that is the one its fingerprint names; a key that will
+    // not fingerprint becomes a refusal pin, as the sender treats it.
+    val actual = org.kysecurity.mail.pgp.PgpFingerprint.compute(publicKey)
+    val keyConfirmed = confirmed && actual == fingerprint
     val addresses = runCatching {
         legacyJson.decodeFromString(
             kotlinx.serialization.builtins.ListSerializer(org.kysecurity.mail.contacts.ContactFieldDto.serializer()),
@@ -55,7 +60,7 @@ internal fun legacyPins(
         )
     }.getOrDefault(emptyList())
     return addresses.map { it.value.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()
-        .map { RecipientPinEntity(it, fingerprint, publicKey, confirmed) }
+        .map { RecipientPinEntity(it, actual.orEmpty(), publicKey, keyConfirmed) }
 }
 
 private val legacyJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
