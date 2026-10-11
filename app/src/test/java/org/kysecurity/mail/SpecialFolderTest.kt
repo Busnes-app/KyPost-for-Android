@@ -41,6 +41,9 @@ class SpecialFolderTest {
         assertEquals(SpecialFolder.SENT, specialFolderOf("Sent Items"))
         assertEquals(SpecialFolder.DRAFTS, specialFolderOf("drafts"))
         assertNull(specialFolderOf("INBOX"))
+        // Archived copies are Archive's: the picker must not tick Sent or Drafts for them.
+        assertNull(specialFolderOf("Archive/Sent"))
+        assertNull(specialFolderOf("Archive.Drafts"))
         assertNull(specialFolderOf("Junk"))
     }
 }
