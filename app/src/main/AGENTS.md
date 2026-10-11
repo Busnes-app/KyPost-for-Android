@@ -401,6 +401,9 @@ Owns production Android app code and resources.
   A selection holds at most `MAX_ACTION_IDS` (500, the relay's per-request cap); `toggleSelected`
   is the only entry point and refuses the 501st row with a toast. Search results replacing the
   list end the selection, so a bulk action never covers rows the user can no longer see.
+  Selected rows have their folder pinned when the action is tapped, and the optimistic removal
+  matches (folder, id), so a Move answered after a folder switch cannot hide a same-id row in the
+  folder now on screen (`aLateBulkMoveRemovesOnlyRowsFromTheirOwnFolder`).
 - The folder picker's Sent and Drafts entries never guess a mailbox name. Each tap lists the
   top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
   the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A localized name

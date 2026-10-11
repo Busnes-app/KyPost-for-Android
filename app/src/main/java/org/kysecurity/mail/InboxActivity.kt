@@ -708,6 +708,8 @@ class InboxActivity : LockedActivity() {
         override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
             // The whole list, not the visible tab: a row selected under another tab is still selected.
             val chosen = (searchResults ?: allEmails).filter { it.id in selectedIds }
+                // Pinned now: Move answers later, when the screen may show another folder.
+                .map { it.copy(folder = it.sourceFolder()) }
             when (item.itemId) {
                 MENU_BULK_ARCHIVE -> submitRowsAction(chosen, getString(R.string.action_archive), MailAction.ARCHIVE)
                 MENU_BULK_JUNK -> submitRowsAction(chosen, getString(R.string.action_junk), MailAction.SPAM)
@@ -735,9 +737,10 @@ class InboxActivity : LockedActivity() {
     /** [submitRowAction] for several rows: one relay call per source folder. */
     private fun submitRowsAction(emails: List<Email>, label: String, action: MailAction, target: String? = null) {
         if (emails.isEmpty()) return
-        val ids = emails.map { it.id }.toSet()
-        allEmails = allEmails.filter { it.id !in ids }
-        searchResults = searchResults?.filter { it.id !in ids }
+        // (folder, id): an IMAP id names a message only within its own folder.
+        val keys = emails.map { it.folder to it.id }.toSet()
+        allEmails = allEmails.filter { (it.sourceFolder() to it.id) !in keys }
+        searchResults = searchResults?.filter { (it.sourceFolder() to it.id) !in keys }
         renderFilteredEmails()
         emails.groupBy { it.sourceFolder() }.forEach { (folder, rows) ->
             MailBackgroundExecutor.submitReporting(this, label) {
