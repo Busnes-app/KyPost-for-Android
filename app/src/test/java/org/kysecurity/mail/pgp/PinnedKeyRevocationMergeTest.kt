@@ -17,6 +17,7 @@ import org.bouncycastle.openpgp.operator.bc.BcPGPContentSignerBuilder
 import org.bouncycastle.openpgp.operator.bc.BcPGPDigestCalculatorProvider
 import org.bouncycastle.openpgp.operator.bc.BcPGPKeyPair
 import org.kysecurity.mail.mail.MailDraft
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -29,6 +30,10 @@ import java.util.Date
 
 /** A synced copy may withdraw a pinned key, and only when its revocation verifies against it. */
 class PinnedKeyRevocationMergeTest {
+
+    /** The sends that get as far as the vault leave a key held, as in ClientEncryptedSenderTest. */
+    @After
+    fun clearHeldKey() = EnrollmentSession.clear()
 
     @Test
     fun aVerifiableRevocationOfTheSameKey_isTaken() {
@@ -46,6 +51,21 @@ class PinnedKeyRevocationMergeTest {
     @Test
     fun aRevocationNotMadeByThePinnedKey_isIgnored() {
         assertNull(withVerifiedRevocation(public(A), revoked(A, signer = B)))
+        assertFalse("a forged packet is not a revocation", isPrimaryRevoked(revoked(A, signer = B)))
+    }
+
+    /** "The key you verified has been revoked" is about pins only, even for a real revocation. */
+    @Test
+    fun anUnpinnedRevokedKey_isNotReportedAsAVerifiedKeyRevoked() = runBlocking {
+        val outcome = ClientEncryptedSender(
+            opener = FakeVaultOpener(),
+            resolver = FakeRecipientKeyResolver(resolvedAll(listOf(ALICE), public(A))),
+            transport = FakeClientEncryptedTransport(),
+            localKeys = FakePinnedKeys(mapOf(ALICE to listOf(LocalSignerKey(revoked(A, signer = A), confirmed = true)))),
+            accountAddress = "me@example.invalid",
+        ).send(MailDraft(to = ALICE, subject = "s", body = "b", mode = "plain"), sign = false)
+
+        assertFalse("got $outcome", outcome is ClientSendOutcome.RecipientKeyRevoked)
     }
 
     @Test
@@ -64,7 +84,7 @@ class PinnedKeyRevocationMergeTest {
             opener = opener,
             resolver = FakeRecipientKeyResolver(resolvedAll(listOf(ALICE), revoked(A, signer = A))),
             transport = transport,
-            localKeys = FakePinnedKeys(mapOf(ALICE to listOf(LocalSignerKey(revokedPin, confirmed = true)))),
+            localKeys = FakePinnedKeys(mapOf(ALICE to listOf(LocalSignerKey(revokedPin, confirmed = true, pinned = true)))),
             accountAddress = "me@example.invalid",
         )
 
@@ -90,7 +110,7 @@ class PinnedKeyRevocationMergeTest {
                 opener = opener,
                 resolver = FakeRecipientKeyResolver(ResolveResult.Success(listOf(relayKey))),
                 transport = transport,
-                localKeys = FakePinnedKeys(mapOf(ALICE to listOf(LocalSignerKey(revokedPin, confirmed = true)))),
+                localKeys = FakePinnedKeys(mapOf(ALICE to listOf(LocalSignerKey(revokedPin, confirmed = true, pinned = true)))),
                 accountAddress = "me@example.invalid",
             )
 

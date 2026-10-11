@@ -471,13 +471,18 @@ Owns production Android app code and resources.
   file) or unpair (`purgeAccountScopedData`) clears it. An address with no pin keeps the earlier
   behaviour: the contact's key, whatever its origin. Server-side provenance (`pgpKeySource`,
   `pgpKeyVerified`) is not read: it is the relay's claim. `RecipientPinRetentionTest`.
-  The one thing a synced copy can do to a pin is revoke it: `withVerifiedRevocation` takes a key
-  revocation from a synced copy of the SAME primary key, verified against the pinned primary, adds
-  only that signature to the pin and saves it. A revoked pin is still the address's pin — no
-  fallback — so the reader gives `KEY_CHANGED` and the sender `RecipientKeyRevoked`, before the
-  vault opens. Pins seeded by `MIGRATION_12_13` take revocations the same way: pins are matched
-  by address alone, never by how they were made. `PinnedKeyRevocationTest`,
-  `PinnedKeyRevocationMergeTest`, `LegacyKeyMigrationTest.aBackfilledPin_takesASyncedRevocationOfItsKey`.
+  The one thing a synced copy can do to a pin is revoke it: `withVerifiedRevocation` takes, from a
+  synced copy of the SAME primary key, revocations of that primary or of any subkey the pin holds
+  (matched by fingerprint), each verified against the pinned primary, adds only those signatures
+  to the pin and saves it. Encryption already skips a revoked subkey of the pinned bytes. A
+  revoked pin is still the address's pin — no fallback — so the reader gives `KEY_CHANGED` and the
+  sender `RecipientKeyRevoked`, before the vault opens. That outcome is for pins only
+  (`LocalSignerKey.pinned`), and `isPrimaryRevoked` verifies the revocation rather than trusting a
+  packet: the synced fallback key and pins seeded by `MIGRATION_12_13` hold bytes no one checked,
+  so a revocation packet already on a v12 key counts only if it verifies. Seeded pins take synced
+  revocations like any other pin: pins are matched by address alone. `PinnedKeyRevocationTest`,
+  `PinnedKeyRevocationMergeTest`, `RevocationTrustTest`,
+  `LegacyKeyMigrationTest.aBackfilledPin_takesASyncedRevocationOfItsKey`.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
