@@ -36,7 +36,8 @@ internal class FakeMailSource : MailSource {
     fun awaitCompleted(action: MailAction, count: Int = 1, seconds: Long = 10): Boolean {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(seconds)
         while (System.nanoTime() < deadline) {
-            if (completed.count { it == action } >= count) return true
+            // The relay thread appends while this reads: iterate under the list's own lock.
+            if (synchronized(completed) { completed.count { it == action } } >= count) return true
             Thread.sleep(20)
         }
         return false
