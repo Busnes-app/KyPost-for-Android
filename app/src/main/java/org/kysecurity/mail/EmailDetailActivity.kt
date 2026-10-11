@@ -923,8 +923,7 @@ class EmailDetailActivity : LockedActivity() {
                 rsvpDialog = null
                 if (!sending) release()
             }
-            .create()
-            .showSecurely()
+            .showThemed()
         return true
     }
 
