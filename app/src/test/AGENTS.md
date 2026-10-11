@@ -42,6 +42,9 @@ Owns JVM unit tests for app logic that can run without device/emulator.
   attachments are wiped when cancellation discards dispatcher delivery.
 - `LayoutVariantIdsTest` requires every `@+id` in a `layout/` file to exist in each `layout-*`
   variant of it; a missing one crashes `findViewById` only on that configuration.
+- A test that reads source files from disk must declare them as task inputs in
+  `app/build.gradle.kts` (`tasks.withType<Test>`), or Gradle reports it UP-TO-DATE after a change
+  only to those files. Layout XML is declared for `KeyboardPrivacyTest` and `LayoutVariantIdsTest`.
 - A hand-rolled DAO fake must key its rows the way the real table does. `FakeEmailDao` is keyed on
   (folder, messageId) for that reason: keyed on the id alone it silently reproduced the
   folder-collision bug it was supposed to catch, and every test still passed. Where the SQL itself
