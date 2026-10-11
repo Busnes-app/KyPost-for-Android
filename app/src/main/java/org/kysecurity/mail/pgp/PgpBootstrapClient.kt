@@ -18,8 +18,8 @@ sealed class PgpBootstrapResult {
         val publicKey: String,
         /** Delivery `From` must equal this exactly or the relay answers 403. */
         val accountAddress: String = "",
-        /** The account address and every verified send-as alias. */
-        val ownAddresses: List<String> = emptyList(),
+        /** The primary address, then every verified send-as alias. */
+        val addresses: List<String> = emptyList(),
     ) : PgpBootstrapResult()
 
     data class Failed(val message: String) : PgpBootstrapResult()
@@ -62,7 +62,7 @@ class PgpBootstrapClient(
             protection = parsed.protection,
             publicKey = parsed.publicKey,
             accountAddress = parsed.suggestedUserIDs.firstOrNull().orEmpty(),
-            ownAddresses = parsed.suggestedUserIDs,
+            addresses = parsed.suggestedUserIDs,
         )
     }
 }

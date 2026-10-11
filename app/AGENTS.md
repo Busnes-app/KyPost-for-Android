@@ -16,7 +16,7 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   token mint (`/api/pgp/qr/token`), PGP bootstrap (`/api/pgp/bootstrap`), recipient key lookup
   (`/api/pgp/recipients/check`, and `/api/pgp/recipients/resolve` for client-side encrypted send
   only), mail relay (`/api/inbox`, `/api/inbox/folders`,
-  `/api/inbox/actions`, `/api/mail/draft`, `/api/mail/send`, `/api/mail/send-pgp`), MFA push-respond
+  `/api/inbox/actions`, `/api/mail/search`, `/api/mail/draft`, `/api/mail/send`, `/api/mail/send-pgp`), MFA push-respond
   (`/api/mfa/push/respond`), and self-deregistration (`/api/notifications/native/deregister`).
   `deviceSecret` is minted server-side once per successful `POST
   /api/notifications/native/register` call and returned only in that response — the app must
@@ -48,6 +48,13 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   (`PairingAuthHeaders.kt`). Add new HTTP clients through that factory rather than bounding reads
   per call site; endpoints that read raw bytes (attachment download) still apply their own tighter
   cap on top.
+- `ProcessState.resetAll` is the session boundary: the wipe, the account purge
+  (`purgeAccountScopedData`) and `AppRestart` all run it. It advances `ProcessState.generation()`
+  before resetting any holder. The purge and the wipe also call `advanceGeneration()` as their
+  very first statement, before any data step, so outgoing-session work is stale for the whole
+  teardown (`PurgeSessionOrderTest`). Work that outlives its caller (a callback, a background
+  completion) captures the generation when it starts and checks `ProcessState.isCurrent` before
+  touching session state; a stale result is dropped. `SessionGenerationTest` pins the ordering.
 - `SecurityWipe.wipeAndResetApp` destroys local plaintext **before** any network call, records a
   durable `wipe_in_progress` marker so an interrupted wipe resumes at next launch
   (`enforceTripwire` checks it first), and returns `WipeResult` — never report a wipe as complete
@@ -92,7 +99,7 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   cancellation. Never render purchase options until both INAPP and SUBS ownership queries succeed.
 - Settings links to the canonical KyPost privacy policy at
   `https://www.kypost.org/privacy.html`, immediately before the final Support KyPost action.
-- Contact autocomplete (ContactAutocomplete.md): `ComposeActivity`'s TO/CC/BCC fields are
+- Contact autocomplete (docs/ContactAutocomplete.md): `ComposeActivity`'s TO/CC/BCC fields are
   `RecipientInputView`s backed by `ContactDao.search` (name/email substring match, debounced
   150ms, top 5 shown). The address-book icon on the TO row opens `AddressBookSheet`
   (`contacts/` package), a `BottomSheetDialogFragment` offering TO/CC/BCC actions per contact.

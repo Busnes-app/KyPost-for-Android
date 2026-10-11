@@ -103,20 +103,8 @@ class PgpBootstrapClientTest {
         val result = client.fetch("https://relay.example.com", "device-1", "secret-1")
 
         assertEquals("me@example.invalid", (result as PgpBootstrapResult.Success).accountAddress)
-    }
-
-    /** Reply All drops every one of these, verified send-as aliases included. */
-    @Test
-    fun keepsEveryOwnAddress() = runBlocking {
-        val body = """{"hasIdentity":false,"protection":"","suggestedUserIDs":["me@example.invalid","alias@example.invalid"]}"""
-        val client = PgpBootstrapClient(callFactory = FakeCallFactory { request -> response(request, body, 200) })
-
-        val result = client.fetch("https://relay.example.com", "device-1", "secret-1")
-
-        assertEquals(
-            listOf("me@example.invalid", "alias@example.invalid"),
-            (result as PgpBootstrapResult.Success).ownAddresses,
-        )
+        // Every send-as alias, primary first: an RSVP answers as whichever one the invite names.
+        assertEquals(listOf("me@example.invalid", "alias@example.invalid"), result.addresses)
     }
 
     /** No mail account configured server-side, so there is no valid `From` to build. Compose must

@@ -6,6 +6,8 @@ import org.kysecurity.mail.pgp.OUTER_PLACEHOLDER_SUBJECT
 import org.kysecurity.mail.push.PairingData
 import org.kysecurity.mail.testing.streamingResponse
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -537,6 +539,67 @@ class RelayMailSourceTest {
     }
 
     @Test
+    fun searchMail_queriesOneMailboxWithThisDevicesCredentials() {
+        val callFactory = FakeCallFactory { request -> jsonResponse(request, """{"results": []}""") }
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = callFactory,
+        )
+
+        source.searchMail("invoice & co", "INBOX.Sent", 50)
+
+        val request = callFactory.requests.single()
+        assertEquals("GET", request.method)
+        assertEquals("/api/mail/search", request.url.encodedPath)
+        assertEquals("invoice & co", request.url.queryParameter("q"))
+        assertEquals("INBOX.Sent", request.url.queryParameter("mailbox"))
+        assertEquals("50", request.url.queryParameter("limit"))
+        assertEquals("device-1", request.header(HEADER_DEVICE_ID))
+        assertEquals("secret-1", request.header(HEADER_DEVICE_SECRET))
+    }
+
+    @Test
+    fun searchMail_stampsResultsWithTheSearchedMailbox() {
+        val callFactory = FakeCallFactory { request ->
+            jsonResponse(
+                request,
+                """{"results": [{"messageId": "42", "sender": "a@example.com", "subject": "Invoice",
+                    "label": "Billing", "keywords": ["${'$'}Phishing"], "status": "read",
+                    "atUtc": "2026-10-09T12:00:00Z"}]}""",
+            )
+        }
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = callFactory,
+        )
+
+        val email = (source.searchMail("invoice", "Archive", 50) as MailOutcome.Success).value.single()
+
+        assertEquals("42", email.id)
+        assertEquals("Archive", email.folder)
+        assertEquals("read", email.status)
+        assertEquals("2026-10-09T12:00:00Z", email.atUtc)
+        assertEquals(setOf("${'$'}Phishing", "Billing"), email.keywords)
+        assertNull(email.body)
+    }
+
+    @Test
+    fun searchMail_failuresAreOutcomesNotExceptions() {
+        fun searchAgainst(code: Int, body: String): MailOutcome<List<org.kysecurity.mail.Email>> =
+            RelayMailSource(
+                pairingProvider = { testPairing() },
+                cursorProvider = FakeMailCursorProvider(),
+                callFactory = FakeCallFactory { request -> jsonResponse(request, body, code) },
+            ).searchMail("x", "INBOX", 50)
+
+        assertTrue(searchAgainst(503, "search failed") is MailOutcome.ServiceUnavailable)
+        assertTrue(searchAgainst(401, "") is MailOutcome.Unauthorized)
+        assertTrue(searchAgainst(200, "<html>") is MailOutcome.UpstreamFailure)
+    }
+
+    @Test
     fun createFolder_sendsPairingHeaders_notQueryParams() {
         val callFactory = FakeCallFactory { request -> jsonResponse(request, "", code = 200) }
         val source = RelayMailSource(
@@ -1064,6 +1127,125 @@ class RelayMailSourceTest {
         assertEquals(false, sent.sign)
         assertEquals(false, sent.encrypt)
         assertEquals(false, sent.allowPickupFallback)
+    }
+
+    @Test
+    fun calendarReply_ridesOnSendOnly_andIsAbsentOtherwise() {
+        val callFactory = BodyRecordingCallFactory { request ->
+            jsonResponse(request, """{"ok":true,"sentSaved":true,"warning":""}""")
+        }
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = callFactory,
+        )
+        val rsvp = MailDraft(
+            to = "boss@example.com", subject = "Accepted: x", body = "b",
+            from = "alias@example.com", calendarReply = "BEGIN:VCALENDAR\r\n",
+        )
+
+        assertTrue(source.sendMail(rsvp) is MailOutcome.Success)
+        source.sendMail(rsvp.copy(calendarReply = null))
+        source.saveDraft(rsvp)
+
+        val wire = Json.parseToJsonElement(callFactory.bodies[0]).jsonObject
+        assertEquals("https://relay.example.com/api/mail/send", callFactory.urls[0])
+        assertEquals("BEGIN:VCALENDAR\r\n", wire["calendarReply"]!!.jsonObject["ics"]!!.jsonPrimitive.content)
+        assertEquals("alias@example.com", wire["from"]!!.jsonPrimitive.content)
+        // The relay refuses calendarReply beside either flag; encodeDefaults=false omits them.
+        assertNull(wire["encrypt"])
+        assertNull(wire["sign"])
+        assertFalse("calendarReply" in Json.parseToJsonElement(callFactory.bodies[1]).jsonObject)
+        assertFalse("calendarReply" in Json.parseToJsonElement(callFactory.bodies[2]).jsonObject)
+    }
+
+    @Test
+    fun calendarReplyAck_isReadOnlyAsAJsonTrue() {
+        fun send(body: String) = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body) },
+        ).sendMail(MailDraft(to = "boss@example.com", subject = "s", body = "b", calendarReply = "x"))
+
+        val acked = send("""{"ok":true,"sentSaved":true,"warning":"","calendarReply":true}""")
+        assertTrue((acked as MailOutcome.Success).value.calendarReplySent)
+        // An older relay ignores the field and still answers 200: the organizer got plain mail.
+        val ignored = send("""{"ok":true,"sentSaved":true,"warning":""}""")
+        assertFalse((ignored as MailOutcome.Success).value.calendarReplySent)
+        assertFalse(send("""{"ok":true,"calendarReply":false}""").let { (it as MailOutcome.Success).value.calendarReplySent })
+        // Not a JSON boolean: the reply is not understood, so it is not a success either.
+        assertTrue(send("""{"ok":true,"calendarReply":"yes"}""") is MailOutcome.UpstreamFailure)
+        // A quoted boolean is a string, not the ack; kotlinx would otherwise coerce it.
+        listOf("\"true\"", "\"false\"", "1", "null").forEach { value ->
+            val outcome = send("""{"ok":true,"calendarReply":$value}""")
+            assertEquals(value, MailOutcome.UpstreamFailure("Malformed send response"), outcome)
+        }
+    }
+
+    @Test
+    fun queuedRsvp_neverReachesAReplacementAccountsRelay() {
+        var pairing = testPairing()
+        val calls = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true,"calendarReply":true}""") }
+        val source = RelayMailSource(pairingProvider = { pairing }, cursorProvider = FakeMailCursorProvider(), callFactory = calls)
+        val rsvp = MailDraft(to = "boss@example.com", subject = "Accepted: x", body = "b", calendarReply = "ics")
+
+        // Queued under the first account...
+        val account = assertNotNullAccount(source.currentAccount())
+        val session = org.kysecurity.mail.ProcessState.generation()
+        // ...then the pairing is replaced before the worker runs: first the staged window, where
+        // the new pairing is saved but the purge has not yet advanced the generation.
+        pairing = testPairing().copy(subscriberId = "sub-2", serverUrl = "https://other-relay.example.org")
+        assertTrue(sendBoundRsvp(rsvp, account, session, source::sendMail) is MailOutcome.Unauthorized)
+        // ...and after the purge, when the session itself has ended.
+        org.kysecurity.mail.ProcessState.advanceGeneration()
+        assertNull(sendBoundRsvp(rsvp, account, session, source::sendMail))
+
+        assertEquals(emptyList<String>(), calls.urls)
+        // The same account in the same session still sends.
+        pairing = testPairing()
+        val now = org.kysecurity.mail.ProcessState.generation()
+        assertTrue(sendBoundRsvp(rsvp, account, now, source::sendMail) is MailOutcome.Success)
+        assertEquals(listOf("https://relay.example.com/api/mail/send"), calls.urls)
+    }
+
+    private fun assertNotNullAccount(account: MailAccount?): MailAccount {
+        assertTrue(account != null)
+        return account!!
+    }
+
+    @Test
+    fun calendarReplyRefusal_surfacesTheRelaysReason() {
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request ->
+                Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(400).message("Bad Request")
+                    .body("invalid calendar reply: calendar reply needs exactly one VEVENT".toResponseBody("text/plain".toMediaType()))
+                    .build()
+            },
+        )
+
+        val outcome = source.sendMail(MailDraft(to = "a@example.com", subject = "s", body = "b", calendarReply = "x"))
+
+        assertEquals(
+            "invalid calendar reply: calendar reply needs exactly one VEVENT",
+            (outcome as MailOutcome.BadRequest).message,
+        )
+    }
+
+    @Test
+    fun listAttachments_carriesTheCalendarMethod() {
+        val body = """{"ok":true,"attachments":[{"index":0,"name":"a.pdf","mimeType":"application/pdf","size":3},""" +
+            """{"index":1,"name":"invite.ics","mimeType":"text/calendar","size":9,"calendarMethod":"REQUEST"}]}"""
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body) },
+        )
+
+        val infos = (source.listAttachments("7", "INBOX") as MailOutcome.Success).value
+
+        assertEquals(listOf("", "REQUEST"), infos.map { it.calendarMethod })
     }
 
     @Test
