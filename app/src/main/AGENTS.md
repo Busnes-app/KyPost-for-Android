@@ -409,7 +409,9 @@ Owns production Android app code and resources.
   a new action replaces the bar (`DISMISS_EVENT_CONSECUTIVE` commits nothing), and its Undo takes
   back every held action. The bar itself closes the window (`commitsOnDismiss`: timeout or
   swipe), because Android stretches its timeout for the accessibility "time to take action"
-  setting and a separate timer would commit while Undo is still on screen. `PendingRowActions`
+  setting and a separate timer would commit while Undo is still on screen. Only the bar on screen
+  commits: a replaced bar can still time out after its replacement shows, and that dismissal is
+  ignored (`onUndoBarDismissed`). `PendingRowActions`
   runs each held action exactly once, at that dismissal or at `onStop` (leaving the screen
   confirms it), or never once undone. A process killed in the foreground inside the window loses
   the action, so the mail stays where it was. The detail screen's actions finish the Activity and
