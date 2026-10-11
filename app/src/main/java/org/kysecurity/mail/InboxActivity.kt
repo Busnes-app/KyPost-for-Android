@@ -156,7 +156,7 @@ class InboxActivity : LockedActivity() {
             currentFolder == "Trash" -> getString(R.string.nav_trash)
             currentFolder == ARCHIVE_PARENT_FOLDER -> getString(R.string.nav_archive)
             currentFolder.startsWith("$ARCHIVE_PARENT_FOLDER/") -> currentFolder.substringAfterLast('/')
-            else -> getString(R.string.nav_inbox)
+            else -> getString(specialFolderOf(currentFolder)?.label ?: R.string.nav_inbox)
         }
     }
 
@@ -572,6 +572,10 @@ class InboxActivity : LockedActivity() {
         popupMenu.menu.add(0, 2, 2, getString(R.string.nav_trash)).isChecked = currentFolder == "Trash"
         popupMenu.menu.add(0, 3, 3, getString(R.string.nav_archive)).isChecked =
             currentFolder == ARCHIVE_PARENT_FOLDER || currentFolder.startsWith("$ARCHIVE_PARENT_FOLDER/")
+        popupMenu.menu.add(0, 4, 4, getString(SpecialFolder.SENT.label)).isChecked =
+            specialFolderOf(currentFolder) == SpecialFolder.SENT
+        popupMenu.menu.add(0, 5, 5, getString(SpecialFolder.DRAFTS.label)).isChecked =
+            specialFolderOf(currentFolder) == SpecialFolder.DRAFTS
         popupMenu.menu.setGroupCheckable(0, true, true)
 
         popupMenu.setOnMenuItemClickListener { menuItem ->
@@ -581,6 +585,14 @@ class InboxActivity : LockedActivity() {
                 2 -> "Trash"
                 3 -> {
                     fetchAndShowArchiveSubfolders(anchor)
+                    return@setOnMenuItemClickListener true
+                }
+                4 -> {
+                    openSpecialFolder(SpecialFolder.SENT)
+                    return@setOnMenuItemClickListener true
+                }
+                5 -> {
+                    openSpecialFolder(SpecialFolder.DRAFTS)
                     return@setOnMenuItemClickListener true
                 }
                 else -> return@setOnMenuItemClickListener false
@@ -602,6 +614,26 @@ class InboxActivity : LockedActivity() {
                     if (errorMessage != null) {
                         Toast.makeText(this, errorMessage, Toast.LENGTH_LONG).show()
                     }
+                }
+            }
+        }
+    }
+
+    /** The account names these folders, not us: "Sent Items", "INBOX.Sent". */
+    private fun openSpecialFolder(kind: SpecialFolder) {
+        ioExecutor.execute {
+            val outcome = mailRepository.listFolders(null)
+            runOnUiThread {
+                if (outcome !is MailOutcome.Success) {
+                    outcome.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
+                    return@runOnUiThread
+                }
+                val path = resolveSpecialFolder(outcome.value.folders.map { it.path }, kind)
+                if (path == null) {
+                    val message = getString(R.string.special_folder_missing, getString(kind.label))
+                    Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+                } else {
+                    switchFolder(path)
                 }
             }
         }
@@ -806,6 +838,25 @@ class InboxActivity : LockedActivity() {
 
 internal fun inboxEmptyVisible(shown: Int, loadedFolder: String?, currentFolder: String): Boolean =
     shown == 0 && loadedFolder == currentFolder
+
+/** Leaf names the server itself falls back on (`special_folders.go` `folderNameAliases`), in
+ *  its preference order. */
+internal enum class SpecialFolder(@androidx.annotation.StringRes val label: Int, val aliases: List<String>) {
+    SENT(R.string.nav_sent, listOf("Sent", "Sent Items", "Sent Messages", "Sent Mail")),
+    DRAFTS(R.string.nav_drafts, listOf("Drafts", "Draft")),
+}
+
+private fun mailboxLeaf(path: String): String = path.split('/', '.').last().trim()
+
+/** Null under Archive: `Archive/Sent` is an archived folder, which the Archive entry owns. */
+internal fun specialFolderOf(path: String): SpecialFolder? {
+    if (path.startsWith("Archive/", ignoreCase = true) || path.startsWith("Archive.", ignoreCase = true)) return null
+    return SpecialFolder.entries.firstOrNull { kind -> kind.aliases.any { it.equals(mailboxLeaf(path), ignoreCase = true) } }
+}
+
+internal fun resolveSpecialFolder(paths: List<String>, kind: SpecialFolder): String? =
+    kind.aliases.firstNotNullOfOrNull { alias -> paths.firstOrNull { mailboxLeaf(it).equals(alias, ignoreCase = true) } }
+
 /** Rows [new] puts above the first row [old] already had. Zero on a first load. */
 internal fun newRowsAbove(old: List<Email>, new: List<Email>): Int {
     if (old.isEmpty()) return 0
