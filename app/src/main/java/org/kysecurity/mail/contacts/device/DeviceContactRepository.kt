@@ -1036,17 +1036,20 @@ class DeviceContactRepository(
                 null,
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    Triple(
+                    RawContactRow(
                         cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts._ID)),
                         cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.CONTACT_ID)),
-                        cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_TYPE)),
+                        DeviceAccount(
+                            cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_TYPE)),
+                            cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_NAME)),
+                        ),
                     )
                 } else {
                     null
                 }
             } ?: return@withContext null
 
-            val (actualRawContactId, contactId, accountType) = rawContactData
+            val (actualRawContactId, contactId, account) = rawContactData
             val lastUpdated = queryContactLastUpdated(contactId)
 
             val dataProjection = arrayOf(
@@ -1216,8 +1219,9 @@ class DeviceContactRepository(
             return@withContext DeviceRawContactSnapshot(
                 rawContactId = actualRawContactId,
                 contactId = contactId,
-                accountType = accountType,
-                accountName = null,
+                // Both halves: import consent is per account, type and name.
+                accountType = account.type,
+                accountName = account.name,
                 lastUpdatedEpochMs = lastUpdated,
                 dirty = false,
                 fn = fn,
@@ -1243,3 +1247,5 @@ class DeviceContactRepository(
 private const val FOREIGN_LIVE_ROWS =
     "(${ContactsContract.RawContacts.ACCOUNT_TYPE} IS NULL OR ${ContactsContract.RawContacts.ACCOUNT_TYPE} != ?) AND " +
         "${ContactsContract.RawContacts.DELETED} = 0"
+
+private data class RawContactRow(val id: Long, val contactId: Long, val account: DeviceAccount)
