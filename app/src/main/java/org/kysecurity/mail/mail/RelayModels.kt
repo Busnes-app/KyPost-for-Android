@@ -44,7 +44,7 @@ data class RelayEmailDto(
     // hasn't warmed the message yet (see backend mailcache.Entry).
     val hasAttachments: Boolean = false,
     // Only present when the parent response has "delta": true — "new" or "updated"
-    // (Mobile_Mail_Relay.md Part 5, delta/cursor sync v2).
+    // (docs/Mobile_Mail_Relay.md Part 5, delta/cursor sync v2).
     val changeType: String? = null,
     // pgpEncrypted with an EMPTY pgpDecryptError means client-protected, not a decrypt failure.
     val pgpEncrypted: Boolean = false,
@@ -100,7 +100,7 @@ data class RelayActionResponseDto(
 )
 
 /** `to`/`cc`/`bcc` are comma-separated strings here, not arrays — differs from /api/inbox's
- *  response shape and from contact sync's array-of-objects shape (Mobile_Mail_Relay.md Part 6). */
+ *  response shape and from contact sync's array-of-objects shape (docs/Mobile_Mail_Relay.md Part 6). */
 @Serializable
 data class RelayMailRequestDto(
     val to: String,

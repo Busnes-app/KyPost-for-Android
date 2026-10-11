@@ -238,7 +238,7 @@ class MailRepositoryTest {
         val dao = FakeEmailDao()
         dao.put(row("m2", "INBOX", body = "cached full body").copy(preview = "cached preview"))
 
-        // An "updated" entry never carries a body (Mobile_Mail_Relay.md Part 5) — only status changed.
+        // An "updated" entry never carries a body (docs/Mobile_Mail_Relay.md Part 5) — only status changed.
         val result = MailFetchResult(
             tabs = listOf("Work"),
             messages = listOf(email("m2", body = null, status = "read")),

@@ -16,7 +16,7 @@ interface MailCursorProvider {
     fun cursor(subscriberId: String, folder: String): String?
     fun saveCursor(subscriberId: String, folder: String, cursor: String)
     /** True once a day (per subscriber+folder) or if a full resync has never been recorded —
-     *  the documented self-heal for a missed removal notification (Mobile_Mail_Relay.md Part 5). */
+     *  the documented self-heal for a missed removal notification (docs/Mobile_Mail_Relay.md Part 5). */
     fun shouldForceFullResync(subscriberId: String, folder: String): Boolean
     fun recordFullResync(subscriberId: String, folder: String)
 }
