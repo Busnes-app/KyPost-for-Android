@@ -204,6 +204,7 @@
     <string name="compose_pgp_no_key_webmail">Continue in webmail</string>
     <!-- A broken TOFU pin, deliberately louder and never merged into the missing-key copy: this is
          what a key rotation looks like AND what an interception attempt looks like. -->
+    <string name="compose_pgp_key_revoked">The key you verified for %1$s has been revoked by its owner. Nothing was sent. Scan their QR code to verify their new key, then send again.</string>
     <string name="compose_pgp_key_changed_title">A recipient\'s key has changed</string>
     <string name="compose_pgp_key_changed_body">The PGP key for %1$s has changed since you last saved it. Nothing was sent.\n\nThat is what a key rotation looks like — and also what an interception attempt looks like. Check the new fingerprint with them another way, then update their contact.</string>
     <string name="compose_pgp_not_enrolled">This device no longer holds your PGP key. Set it up again from the PGP screen to send encrypted mail from here.</string>

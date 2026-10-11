@@ -55,7 +55,9 @@ class DeviceContactRepository(
                 groupSyncRepository.sync()
                 reconcileGroupRenames()
             },
+            stage("adoptLostLinks") { adoptLostLinks() },
             stage("pullDeviceChanges") { pullDeviceChangesForOwnAccount() },
+            stage("removeDeletedContacts") { removeRowsOfDeletedContacts() },
             stage("importNewDeviceContacts") { importNewDeviceContacts() },
             stage("pushRoomChanges") { pushRoomChangesToDevice() },
         )
@@ -115,7 +117,8 @@ class DeviceContactRepository(
                         restoreDeletedRawContact(rawContactId)
                     } else {
                         syncRepository.queueDelete(link.uid, 0)
-                        db.deviceContactLinkDao().deleteByUid(link.uid)
+                        // Purges the tombstone: CP2 keeps DELETED=1 rows until their adapter does.
+                        deleteDeviceRawContact(link.uid)
                     }
                 } else if (!deleted && dirty && link != null) {
                     dirtyRawContacts.add(rawContactId)
@@ -424,13 +427,19 @@ class DeviceContactRepository(
         val currentRoomContacts = db.contactDao().observeAll().first()
         // One read of the link table for the whole loop rather than a getByUid per contact.
         val linksByUid = db.deviceContactLinkDao().getAll().associateBy { it.uid }
+        val rowsByUid = ownRawContactsBySourceId(linksByUid.values)
 
         for (entity in currentRoomContacts) {
             // Policy can change mid-loop: protection can be enabled while this is still running.
             if (!syncPermitted()) return@withContext
 
             val dto = entity.toDto()
-            val existingLink = linksByUid[dto.uid]
+            // adoptLostLinks already ran; this catches a row it missed, as a failed stage, so a
+            // lost link never becomes a duplicate.
+            val existingLink = linksByUid[dto.uid] ?: rowsByUid[dto.uid]?.let { rawContactId ->
+                org.kysecurity.mail.data.DeviceContactLinkEntity(dto.uid, rawContactId, 0L)
+                    .also { db.deviceContactLinkDao().upsert(it) }
+            }
 
             if (existingLink == null) {
                 createRawContactForDto(dto)
@@ -455,6 +464,7 @@ class DeviceContactRepository(
             android.content.ContentProviderOperation.newInsert(rawContactUriBase)
                 .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, DeviceContactAccount.ACCOUNT_TYPE)
                 .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, DeviceContactAccount.ACCOUNT_NAME)
+                .withValue(ContactsContract.RawContacts.SOURCE_ID, dto.uid)
                 .build(),
         )
 
@@ -823,11 +833,21 @@ class DeviceContactRepository(
                 ).build(),
         )
 
-        runCatching {
-            contentResolver.applyBatch(ContactsContract.AUTHORITY, deleteOps)
-        }
+        // On failure the link stays, so removeRowsOfDeletedContacts retries next sync.
+        runCatching { contentResolver.applyBatch(ContactsContract.AUTHORITY, deleteOps) }
+            .onSuccess { db.deviceContactLinkDao().deleteByUid(uid) }
+            .onFailure { android.util.Log.e("DeviceContactSync", "Could not delete raw contact ${link.rawContactId}", it) }
+        Unit
+    }
 
-        db.deviceContactLinkDao().deleteByUid(uid)
+    /** Room is the truth: a link whose contact is gone (server tombstone, snapshot prune, local
+     *  delete) takes its raw contact with it. */
+    private suspend fun removeRowsOfDeletedContacts() {
+        val live = db.contactDao().allUids().toHashSet()
+        for (link in db.deviceContactLinkDao().getAll()) {
+            if (!syncPermitted()) return
+            if (link.uid !in live) deleteDeviceRawContact(link.uid)
+        }
     }
 
     /** These rows sit outside the app sandbox, so neither the wipe nor in-memory Room reaches them. */
@@ -868,6 +888,57 @@ class DeviceContactRepository(
             cursor.moveToFirst() &&
                 cursor.getString(0) == DeviceContactAccount.ACCOUNT_TYPE
         } ?: false
+    }
+
+    /** Our live raw contacts keyed by SOURCE_ID (the contact uid). Linked rows written before
+     *  SOURCE_ID existed get it backfilled, so they can be adopted after a lost link too. */
+    private suspend fun ownRawContactsBySourceId(
+        links: Collection<org.kysecurity.mail.data.DeviceContactLinkEntity>,
+    ): Map<String, Long> = withContext(Dispatchers.IO) {
+        val bySourceId = mutableMapOf<String, Long>()
+        val unstamped = mutableSetOf<Long>()
+        contentResolver.query(
+            ContactsContract.RawContacts.CONTENT_URI,
+            arrayOf(ContactsContract.RawContacts._ID, ContactsContract.RawContacts.SOURCE_ID),
+            "${ContactsContract.RawContacts.ACCOUNT_TYPE} = ? AND ${ContactsContract.RawContacts.DELETED} = 0",
+            arrayOf(DeviceContactAccount.ACCOUNT_TYPE),
+            null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val sourceId = cursor.getString(1)
+                if (sourceId.isNullOrEmpty()) unstamped += cursor.getLong(0) else bySourceId[sourceId] = cursor.getLong(0)
+            }
+        }
+        val uri = ContactsContract.RawContacts.CONTENT_URI.buildUpon()
+            .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true")
+            .build()
+        val backfill = links.filter { it.rawContactId in unstamped }.map { link ->
+            android.content.ContentProviderOperation.newUpdate(uri)
+                .withSelection("${ContactsContract.RawContacts._ID} = ?", arrayOf(link.rawContactId.toString()))
+                .withValue(ContactsContract.RawContacts.SOURCE_ID, link.uid)
+                .build()
+        }
+        if (backfill.isNotEmpty()) {
+            runCatching { contentResolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(backfill)) }
+                .onFailure { android.util.Log.e("DeviceContactSync", "Could not backfill SOURCE_ID", it) }
+        }
+        bySourceId
+    }
+
+    /** Relinks our rows whose link was lost (death before the link write, cleared data) before the
+     *  pull, so a phone edit made meanwhile is merged rather than overwritten by the push. The
+     *  pull takes the device's timestamp from the row itself; an unedited row holds what we last
+     *  wrote, so the zero timestamp lets Room win there. */
+    private suspend fun adoptLostLinks() {
+        val links = db.deviceContactLinkDao().getAll()
+        val linkedUids = links.mapTo(HashSet()) { it.uid }
+        val linkedRows = links.mapTo(HashSet()) { it.rawContactId }
+        val rowsByUid = ownRawContactsBySourceId(links)
+        for (uid in db.contactDao().allUids()) {
+            val rawContactId = rowsByUid[uid] ?: continue
+            if (uid in linkedUids || rawContactId in linkedRows) continue
+            db.deviceContactLinkDao().upsert(org.kysecurity.mail.data.DeviceContactLinkEntity(uid, rawContactId, 0L))
+        }
     }
 
     /** Sweeps legacy link rows pointing at another account's raw contacts, before the first sync. */

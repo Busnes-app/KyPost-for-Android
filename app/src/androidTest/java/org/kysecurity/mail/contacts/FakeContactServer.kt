@@ -25,38 +25,70 @@ internal class FakeContactServer : Call.Factory {
     /** Applies the next push, then fails the call as if the app died before reading the reply. */
     var loseNextResponse = false
 
+    /** Runs once, after a push is applied and before its reply: an edit made mid-sync. */
+    var duringPush: (() -> Unit)? = null
+
+    /** Every request, as "POST" or "GET since=N". */
+    val requests = mutableListOf<String>()
+
+    /** Cursors below this answer tooOld, as after tombstone GC. */
+    var gcHighWater = 0L
+
+    /** The Nth POST (1-based) fails with a 500 before anything is applied; 0 for none. */
+    var failPost = 0
+
     fun live(): List<ContactDto> = contacts.values.filterNot { it.deleted }
+
+    /** Seeds server-side contacts, as if written by another client. */
+    fun seed(vararg seeded: ContactDto) = seeded.forEach(::apply)
+
+    /** Drops a contact with no tombstone, as after tombstone GC. */
+    fun forget(uid: String) {
+        contacts.remove(uid)
+    }
 
     override fun newCall(request: Request): Call {
         val since: Long
         if (request.method == "POST") {
+            requests += "POST"
+            if (requests.count { it == "POST" } == failPost) return reply(request, 500, "internal error")
             val buffer = Buffer().also { request.body!!.writeTo(it) }
+            if (buffer.size > MAX_BODY_BYTES) return reply(request, 400, "invalid request")
             val push = json.decodeFromString(ContactSyncPushRequestDto.serializer(), buffer.readUtf8())
+            if (push.changes.size > MAX_CHANGES) {
+                return reply(request, 413, """{"error":"too many changes in one request","maxChanges":$MAX_CHANGES}""")
+            }
             pushes += push
             push.changes.forEach(::apply)
             since = push.baseCursor
+            duringPush?.also { duringPush = null }?.invoke()
         } else {
             since = request.url.queryParameter("since")?.toLong() ?: 0L
+            requests += "GET since=$since"
         }
         if (loseNextResponse) {
             loseNextResponse = false
             return FakeServerCall(request, null)
         }
-        val all = contacts.values.filter { it.rev > since }
+        val tooOld = since in 1 until gcHighWater
+        val all = if (tooOld) emptyList() else contacts.values.filter { it.rev > since }
         val body = json.encodeToString(
             ContactSyncPullResponseDto.serializer(),
             ContactSyncPullResponseDto(
                 cursor = seq,
+                tooOld = tooOld,
                 changed = all.filterNot { it.deleted },
                 deleted = all.filter { it.deleted },
             ),
         )
-        return FakeServerCall(
-            request,
-            Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK")
-                .body(body.toResponseBody("application/json".toMediaType())).build(),
-        )
+        return reply(request, 200, body)
     }
+
+    private fun reply(request: Request, code: Int, body: String): Call = FakeServerCall(
+        request,
+        Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(code).message("")
+            .body(body.toResponseBody("application/json".toMediaType())).build(),
+    )
 
     private fun apply(change: ContactDto) {
         val uid = change.uid.trim()
@@ -68,7 +100,22 @@ internal class FakeContactServer : Call.Factory {
         val key = uid.ifEmpty { UUID.randomUUID().toString() }
         contacts[key] = change.copy(uid = key, rev = ++seq, deleted = false)
     }
+
+    private companion object {
+        const val MAX_CHANGES = 500
+        const val MAX_BODY_BYTES = 1L shl 20
+    }
 }
+
+internal val TEST_PAIRING = org.kysecurity.mail.push.PairingData(
+    subscriberId = "sub-1",
+    serverUrl = "https://relay.example.com",
+    registrationUrl = "https://relay.example.com/register",
+    pairingToken = "token-1",
+    deviceId = "device-1",
+    deviceSecret = "secret-1",
+    pairedAtEpochMs = 0L,
+)
 
 private class FakeServerCall(private val req: Request, private val response: Response?) : Call {
     private var executed = false

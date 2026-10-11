@@ -451,6 +451,40 @@ Owns production Android app code and resources.
   unknown uid as a create under that uid, so a push replayed after a lost reply, or a create
   followed by an edit or delete in the same outbox, lands on one contact. That uid is permanent,
   so nothing remaps it after sync. `ContactCreateIdempotencyTest` pins all three cases.
+  The outbox holds one row per uid (`coalescedChange`): an update to an unsynced create stays a
+  create with the new payload; a delete always replaces whatever was queued and is still sent,
+  because the create may already be on the server from a push whose reply is in flight. Rows are
+  replaced with new ids, never edited in place — a running sync acks by the ids it read, and
+  in-place edits would be acked unsent. `ContactOutboxCoalesceTest` covers both races.
+  Pushes go in batches under the server's caps (`pushBatches`: 500 changes, 900 KiB of change
+  JSON against its 1 MiB body limit), each acked and advancing the cursor on its own. 400/413 is
+  "this request is too big": the batch is halved, and a single change still refused stays queued
+  while the rest go out. Once a reply says `tooOld`, the remaining batches keep the stale cursor
+  (cheap `tooOld` replies with no lists) and one `since=0` pull ends the sync. So does any sync
+  that starts at cursor zero, pushes queued or not: a `tooOld` sync that failed before its pull
+  leaves only the reset cursor to say a snapshot is owed. `ContactPushBatchingTest` pins all four.
+  A `since=0` pull is a snapshot: after tombstone GC the server can no longer list what it
+  deleted, so `applyDelta(snapshot = true)` removes every Room contact absent from it except
+  uids still in the outbox. `ContactFullResyncTest` covers both.
+  **Per address, a key verified on this device is authoritative; a synced key never is.** The PGP
+  QR flow's two saves (`queueCreate`/`queueUpdate` with `verifiedInPerson`) are the only writers of
+  `recipient_pins` after `MIGRATION_12_13`, and each replaces the pins for that contact's addresses
+  — re-scanning is how a pin changes. The migration itself seeds the table with exactly what the
+  lookup before it trusted (`legacyPins`: every contact key per address, with its confirmation), so
+  an upgrade never turns a trusted key into an untrusted one. `LegacyKeyMigrationTest`. `RoomLocalSignerKeys` (`authoritativeKeys`) returns ONLY the pins
+  for a pinned address, so a contact key the server delivers, on a replacement contact or as an
+  update, cannot satisfy `ClientEncryptedSender.applyPins` and the send is `KeyChanged`. Sync never
+  writes the table, so removing or rewriting the contact does not touch the pin; a wipe (database
+  file) or unpair (`purgeAccountScopedData`) clears it. An address with no pin keeps the earlier
+  behaviour: the contact's key, whatever its origin. Server-side provenance (`pgpKeySource`,
+  `pgpKeyVerified`) is not read: it is the relay's claim. `RecipientPinRetentionTest`.
+  The one thing a synced copy can do to a pin is revoke it: `withVerifiedRevocation` takes a key
+  revocation from a synced copy of the SAME primary key, verified against the pinned primary, adds
+  only that signature to the pin and saves it. A revoked pin is still the address's pin — no
+  fallback — so the reader gives `KEY_CHANGED` and the sender `RecipientKeyRevoked`, before the
+  vault opens. Pins seeded by `MIGRATION_12_13` take revocations the same way: pins are matched
+  by address alone, never by how they were made. `PinnedKeyRevocationTest`,
+  `PinnedKeyRevocationMergeTest`, `LegacyKeyMigrationTest.aBackfilledPin_takesASyncedRevocationOfItsKey`.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
@@ -461,6 +495,19 @@ Owns production Android app code and resources.
   phones, addresses) through `DeviceContactUpdatePlan`, and advances the link's
   `deviceUpdatedAtEpochMs` only when the batch actually landed — stamping it for a write that never
   happened tells the next merge the device is already current.
+- **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
+  `applyBatch` as the insert. `device_contact_links` is a cache of that: `adoptLostLinks` runs
+  before the pull and relinks a live row of our account whose SOURCE_ID is the uid, so a death
+  between insert and link write, or cleared app data, rebuilds the link instead of duplicating
+  the contact, and a phone edit made while the link was gone is pulled, not overwritten. The
+  push repeats the lookup before any create. Linked rows from before SOURCE_ID are backfilled.
+  `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_13_14` indexes the link table's
+  `rawContactId`.
+- **Deletes reach the phone through Room.** `syncAll`'s `removeDeletedContacts` stage removes the
+  raw contact of every link whose Room contact is gone, so server tombstones, snapshot prunes and
+  local deletes share one path. A device-side delete is queued and then hard-deleted as the sync
+  adapter: CP2 keeps `DELETED=1` rows until their adapter purges them. `deleteDeviceRawContact`
+  drops the link only after CP2 confirms, so a failed delete is retried. `DeviceContactDeleteTest`.
 - **A CP2 row that is deleted and reinserted destroys every column the reinsert does not re-emit.**
   `Organization.TITLE` and `DEPARTMENT` therefore both fall back to `DeviceRawContactSnapshot` —
   nothing reads a device-typed value of either into Room, so the device's own is what keeps it, and

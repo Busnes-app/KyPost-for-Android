@@ -211,4 +211,18 @@ class ContactSyncClientTest {
         assertNull(sentRequest.url.queryParameter("secret"))
         assertEquals("POST", sentRequest.method)
     }
+
+    /** 413 is "too many changes": retrying the same request can never succeed, so it must not
+     *  look Retryable. The repository splits a BadRequest batch instead. */
+    @Test
+    fun push_413_mapsToBadRequest() = runBlocking {
+        val callFactory = FakeCallFactory { request ->
+            response(request, """{"error":"too many changes in one request","maxChanges":500}""", 413)
+        }
+        val client = ContactSyncClient(callFactory = callFactory)
+
+        val result = client.push("https://relay.example.com", "device-1", "secret-1", baseCursor = 0L, changes = emptyList())
+
+        assertTrue("got $result", result is ContactSyncResult.BadRequest)
+    }
 }
