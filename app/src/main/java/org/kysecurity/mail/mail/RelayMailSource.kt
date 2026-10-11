@@ -93,7 +93,7 @@ class RelayMailSource(
             // The checkpoint is returned, not saved here: MailRepository commits it once the
             // messages it covers are in Room. See [MailCheckpoint].
             // changeType is the source of truth for new-vs-updated, never whether `since` was sent
-            // (Mobile_Mail_Relay.md Part 5) — read it straight off each entry, not derived state.
+            // (docs/Mobile_Mail_Relay.md Part 5) — read it straight off each entry, not derived state.
             val entries = parsed.byTab.flatMap { (tab, emails) -> emails.map { it.toUiEmail(tab) to it.changeType } }
             MailOutcome.Success(
                 MailFetchResult(
@@ -114,7 +114,7 @@ class RelayMailSource(
     }
 
     /** since=0 when forced (explicitly, or the daily self-heal cadence is due), or no cursor is
-     *  persisted yet (fresh pairing) — otherwise the persisted cursor (Mobile_Mail_Relay.md Part 5). */
+     *  persisted yet (fresh pairing) — otherwise the persisted cursor (docs/Mobile_Mail_Relay.md Part 5). */
     private fun sinceValue(subscriberId: String, folder: String, forceFullResync: Boolean): String {
         val forced = forceFullResync || cursorProvider.shouldForceFullResync(subscriberId, folder)
         return if (forced) FULL_RESYNC_SINCE else cursorProvider.cursor(subscriberId, folder) ?: FULL_RESYNC_SINCE
@@ -135,6 +135,26 @@ class RelayMailSource(
             MailOutcome.Success(
                 FolderListResult(parent = parsed.parent, folders = parsed.folders.map { FolderInfo(it.path, it.deletable) }),
             )
+        }
+    }
+
+    override fun searchMail(query: String, mailbox: String, limit: Int): MailOutcome<List<Email>> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        val base = baseUrl(pairing, "/api/mail/search") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val url = base.newBuilder()
+            .addQueryParameter("q", query)
+            .addQueryParameter("mailbox", mailbox)
+            .addQueryParameter("limit", limit.toString())
+            .build()
+        val request = Request.Builder().url(url).get()
+            .authed(pairing)
+            .build()
+        return execute(request) { code, body ->
+            if (code != 200) return@execute mapErrorCode(code, body)
+            val parsed = runCatching { json.decodeFromString<RelaySearchResponseDto>(body) }.getOrNull()
+                ?: return@execute MailOutcome.UpstreamFailure("Malformed search response")
+            // Stamped with the searched mailbox: an id means nothing outside the folder it came from.
+            MailOutcome.Success(parsed.results.map { it.toUiEmail(it.label).copy(folder = mailbox) })
         }
     }
 
@@ -191,7 +211,7 @@ class RelayMailSource(
             val parsed = runCatching { json.decodeFromString<RelayActionResponseDto>(rawBody) }.getOrNull()
                 ?: return@execute MailOutcome.UpstreamFailure("Malformed action response")
             // ok:false with a non-empty failed[] is still a partial success — processed ids already
-            // took effect (Mobile_Mail_Relay.md Part 2's explicit callout).
+            // took effect (docs/Mobile_Mail_Relay.md Part 2's explicit callout).
             MailOutcome.Success(
                 MailActionOutcome(processed = parsed.processed, failed = parsed.failed.map { it.messageId to it.error }),
             )
@@ -222,8 +242,14 @@ class RelayMailSource(
         }
     }
 
-    override fun sendMail(draft: MailDraft): MailOutcome<MailSendOutcome> {
+    override fun currentAccount(): MailAccount? = pairingProvider()?.mailAccount()
+
+    override fun sendMail(draft: MailDraft, account: MailAccount?): MailOutcome<MailSendOutcome> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        // Same read that authenticates the request, so the check and the credentials agree.
+        if (account != null && account != pairing.mailAccount()) {
+            return MailOutcome.Unauthorized("The message belongs to a different account")
+        }
         val base = baseUrl(pairing, "/api/mail/send") ?: return MailOutcome.BadRequest("Server URL is not valid")
         val body = json.encodeToString(draft.toSendWireDto())
         val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
@@ -233,7 +259,9 @@ class RelayMailSource(
             if (code != 200) return@execute mapErrorCode(code, rawBody)
             val parsed = runCatching { json.decodeFromString<RelaySendResponseDto>(rawBody) }.getOrNull()
                 ?: return@execute MailOutcome.UpstreamFailure("Malformed send response")
-            MailOutcome.Success(MailSendOutcome(sentSaved = parsed.sentSaved, warning = parsed.warning))
+            MailOutcome.Success(
+                MailSendOutcome(sentSaved = parsed.sentSaved, warning = parsed.warning, calendarReplySent = parsed.calendarReply),
+            )
         }
     }
 
@@ -325,7 +353,9 @@ class RelayMailSource(
             if (code != 200) return@execute mapErrorCode(code, body)
             val parsed = runCatching { json.decodeFromString<RelayAttachmentListResponseDto>(body) }.getOrNull()
                 ?: return@execute MailOutcome.UpstreamFailure("Malformed attachment list response")
-            MailOutcome.Success(parsed.attachments.map { AttachmentInfo(it.index, it.name, it.mimeType, it.size) })
+            MailOutcome.Success(
+                parsed.attachments.map { AttachmentInfo(it.index, it.name, it.mimeType, it.size, it.calendarMethod) },
+            )
         }
     }
 
@@ -559,7 +589,13 @@ private fun MailDraft.toWireDto(): RelayMailRequestDto =
 /** Send-only mapping. [toWireDto] stays flagless because /api/mail/draft ignores these fields —
  *  see [MailDraft.allowPickupFallback]. */
 private fun MailDraft.toSendWireDto(): RelayMailRequestDto =
-    toWireDto().copy(sign = sign, encrypt = encrypt, allowPickupFallback = allowPickupFallback)
+    toWireDto().copy(
+        sign = sign,
+        encrypt = encrypt,
+        allowPickupFallback = allowPickupFallback,
+        calendarReply = calendarReply?.let(::RelayCalendarReplyDto),
+        from = from,
+    )
 
 private fun RelayEmailDto.toUiEmail(tab: String): Email {
     val emailLabel = label.ifBlank { tab }

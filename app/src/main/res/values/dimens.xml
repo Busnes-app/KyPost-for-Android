@@ -2,4 +2,6 @@
 <resources>
     <!-- STYLE_GUIDE.md §3 Card/panel radius — shared with iOS Shape.panel / Linux shapePanel (both 14). -->
     <dimen name="card_corner_radius">14dp</dimen>
+    <!-- Seven of these share the message action row: 7 x 40dp fits a 320dp phone's 288dp. -->
+    <dimen name="detail_action_size">40dp</dimen>
 </resources>
