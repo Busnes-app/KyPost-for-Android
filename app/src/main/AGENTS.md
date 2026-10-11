@@ -382,8 +382,10 @@ Owns production Android app code and resources.
 - `showThemed()` (`ThemedDialog.kt`) shows a native AlertDialog through `showSecurely()` and then
   paints its surface, title, message, buttons, list rows and fields in the active palette
   (STYLE_GUIDE.md §6). A dialog is its own window, so the Activity's theme walk never reaches it.
-  `ThemedDialogsTest` names the dialogs that must use it. The message action row scrolls
-  horizontally when seven 44dp actions do not fit (`EmailDetailActionRowTest`, 320dp).
+  `ThemedDialogsTest` names the dialogs that must use it. The message screen's seven actions use
+  `@dimen/detail_action_size`: 40dp below a 360dp window, 44dp from it, so all seven are on
+  screen at 320dp (`EmailDetailActionRowTest` checks positions, since overflowing fixed-size
+  buttons keep their size and are only clipped).
 - "Move to folder" (`MoveToFolder.kt`, detail screen) offers INBOX, the relay's top-level folders
   and the Archive subfolders, minus the message's own folder (`moveTargets`), and runs
   `MailRepository.move`, so the local row goes only once the relay confirms the id.

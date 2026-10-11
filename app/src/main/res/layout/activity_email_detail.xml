@@ -12,105 +12,96 @@
         android:padding="16dp"
         android:clipToPadding="false">
 
-        <!-- Scrolls only when seven 44dp actions outgrow the window (320dp phones); fillViewport
-             keeps the spacer pushing the destructive group right whenever they fit. -->
-        <HorizontalScrollView
+        <!-- 40dp below a 360dp window, so all seven fit a 320dp phone (values-w360dp: 44dp). -->
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="8dp"
-            android:fillViewport="true"
-            android:scrollbars="none">
+            android:orientation="horizontal">
 
             <LinearLayout
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal">
 
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
+                <ImageButton
+                    android:id="@+id/actionReply"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_reply"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_reply" />
 
-                    <ImageButton
-                        android:id="@+id/actionReply"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/action_reply"
-                        android:padding="10dp"
-                        android:src="@drawable/ic_reply" />
+                <ImageButton
+                    android:id="@+id/actionReplyAll"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_reply_all"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_reply_all" />
 
-                    <ImageButton
-                        android:id="@+id/actionReplyAll"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/action_reply_all"
-                        android:padding="10dp"
-                        android:src="@drawable/ic_reply_all" />
-
-                    <ImageButton
-                        android:id="@+id/actionForward"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/action_forward"
-                        android:padding="10dp"
-                        android:src="@drawable/ic_forward" />
-
-                </LinearLayout>
-
-                <View
-                    android:layout_width="0dp"
-                    android:layout_height="1dp"
-                    android:layout_weight="1" />
-
-                <LinearLayout
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <ImageButton
-                        android:id="@+id/actionArchive"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/action_archive"
-                        android:padding="10dp"
-                        android:src="@drawable/ic_archive" />
-
-                    <ImageButton
-                        android:id="@+id/actionMove"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/action_move"
-                        android:padding="10dp"
-                        android:src="@drawable/ic_move" />
-
-                    <ImageButton
-                        android:id="@+id/actionJunk"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/action_junk"
-                        android:padding="10dp"
-                        android:src="@drawable/ic_spam" />
-
-                    <ImageButton
-                        android:id="@+id/actionDelete"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="@string/action_delete"
-                        android:padding="10dp"
-                        android:src="@drawable/ic_delete" />
-
-                </LinearLayout>
+                <ImageButton
+                    android:id="@+id/actionForward"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_forward"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_forward" />
 
             </LinearLayout>
 
-        </HorizontalScrollView>
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <ImageButton
+                    android:id="@+id/actionArchive"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_archive"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_archive" />
+
+                <ImageButton
+                    android:id="@+id/actionMove"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_move"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_move" />
+
+                <ImageButton
+                    android:id="@+id/actionJunk"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_junk"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_spam" />
+
+                <ImageButton
+                    android:id="@+id/actionDelete"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_delete"
+                    android:padding="10dp"
+                    android:src="@drawable/ic_delete" />
+
+            </LinearLayout>
+
+        </LinearLayout>
 
         <TextView
             android:id="@+id/emailSubject"
