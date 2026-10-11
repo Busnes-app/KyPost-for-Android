@@ -1,5 +1,7 @@
 package org.kysecurity.mail.push
 
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
@@ -8,8 +10,10 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.kysecurity.mail.ProcessState
 import org.kysecurity.mail.testing.BodyRecordingCallFactory
 import org.kysecurity.mail.testing.response
+import kotlin.coroutines.CoroutineContext
 
 /** A UnifiedPush endpoint is distributor state, not registration state: the distributor usually
  *  delivers it before the device is paired, and pairing has to register it. */
@@ -33,12 +37,22 @@ class UnifiedPushEndpointTest {
     }
 
     /** Stands in for the gms channel: every fetch is an FCM token, and is counted. */
-    private fun coordinator(store: FakePushStore) = PushSyncCoordinator(
-        repository = store,
-        registrationClient = NativeRegistrationClient(callFactory = calls),
-        wipeOnIncompletePurge = {},
-        fetchRegistrationCredential = { fcmFetches++; PushRegistrationCredential(token = "fcm-token") },
-    )
+    private fun coordinator(store: FakePushStore, events: CoroutineScope = CoroutineScope(ManualDispatcher())) =
+        PushSyncCoordinator(
+            repository = store,
+            registrationClient = NativeRegistrationClient(callFactory = calls),
+            wipeOnIncompletePurge = {},
+            fetchRegistrationCredential = { fcmFetches++; PushRegistrationCredential(token = "fcm-token") },
+            eventScope = events,
+        )
+
+    /** Holds dispatched work until [runNewestFirst], which runs it in reverse: the worst order a
+     *  thread pool could pick. */
+    private class ManualDispatcher : CoroutineDispatcher() {
+        private val tasks = ArrayDeque<Runnable>()
+        override fun dispatch(context: CoroutineContext, block: Runnable) { tasks.addLast(block) }
+        fun runNewestFirst() { while (tasks.isNotEmpty()) tasks.removeLast().run() }
+    }
 
     private fun lastBody(): JsonObject = Json.parseToJsonElement(calls.bodies.last()) as JsonObject
 
@@ -56,8 +70,7 @@ class UnifiedPushEndpointTest {
         val store = FakePushStore()
         val coordinator = coordinator(store)
 
-        // What KyPostUnifiedPushService.onNewEndpoint does.
-        coordinator.syncProvidedToken(endpoint, PushTransport.UNIFIED_PUSH, "p256dh-1", "auth-1")
+        coordinator.acceptUnifiedPushEndpoint(endpoint, "p256dh-1", "auth-1", ProcessState.generation())
         assertTrue("nothing is registered while unpaired", calls.bodies.isEmpty())
 
         val result = coordinator.attemptPairing(pairing)
@@ -77,7 +90,7 @@ class UnifiedPushEndpointTest {
     fun aReplacementPairingKeepsTheEndpointItRegistered() = runBlocking {
         val store = FakePushStore(pairing = pairing.copy(subscriberId = "sub-old", deviceSecret = "old"))
         val coordinator = coordinator(store)
-        coordinator.syncProvidedToken(endpoint, PushTransport.UNIFIED_PUSH, "p256dh-1", "auth-1")
+        coordinator.acceptUnifiedPushEndpoint(endpoint, "p256dh-1", "auth-1", ProcessState.generation())
 
         coordinator.attemptPairing(pairing)
 
@@ -90,12 +103,44 @@ class UnifiedPushEndpointTest {
     fun aForgottenEndpointIsNeverRegistered() = runBlocking {
         val store = FakePushStore()
         val coordinator = coordinator(store)
-        coordinator.syncProvidedToken(endpoint, PushTransport.UNIFIED_PUSH, "p256dh-1", "auth-1")
+        coordinator.acceptUnifiedPushEndpoint(endpoint, "p256dh-1", "auth-1", ProcessState.generation())
 
         coordinator.forgetUnifiedPushEndpoint()
         coordinator.attemptPairing(pairing)
 
         assertEquals("fcm-token", lastBody()["deviceToken"]?.jsonPrimitive?.content)
         assertEquals(null, store.state.first().unifiedPushEndpoint)
+    }
+
+    /** An unpair or wipe ends the session the callback was captured in; its endpoint must not land. */
+    @Test
+    fun anEndpointFromAnEndedSessionIsNeitherStoredNorRegistered() = runBlocking {
+        val store = FakePushStore(pairing = pairing.copy(deviceId = "dev-1", deviceSecret = "s-0"))
+        val coordinator = coordinator(store)
+        val captured = ProcessState.generation()
+
+        ProcessState.advanceGeneration()
+        coordinator.acceptUnifiedPushEndpoint(endpoint, "p256dh-1", "auth-1", captured)
+
+        assertEquals(null, store.state.first().unifiedPushEndpoint)
+        assertTrue("nothing may be registered", calls.bodies.isEmpty())
+    }
+
+    /** onNewEndpoint then onUnregistered: however the work is scheduled, the revocation wins. */
+    @Test
+    fun aRevocationIsNeverOvertakenByTheEndpointItRevokes() = runBlocking {
+        val store = FakePushStore()
+        val dispatcher = ManualDispatcher()
+        val coordinator = coordinator(store, CoroutineScope(dispatcher))
+
+        coordinator.enqueueUnifiedPush {
+            acceptUnifiedPushEndpoint(endpoint, "p256dh-1", "auth-1", ProcessState.generation())
+        }
+        coordinator.enqueueUnifiedPush { forgetUnifiedPushEndpoint() }
+        dispatcher.runNewestFirst()
+
+        assertEquals(null, store.state.first().unifiedPushEndpoint)
+        coordinator.attemptPairing(pairing)
+        assertEquals("fcm-token", lastBody()["deviceToken"]?.jsonPrimitive?.content)
     }
 }

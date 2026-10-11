@@ -85,6 +85,16 @@ internal class FakePushStore(
         backing.value = backing.value.copy(unifiedPushEndpoint = endpoint, unifiedPushP256dh = p256dh, unifiedPushAuth = auth)
     }
 
+    override suspend fun storeUnifiedPushEndpoint(
+        endpoint: String,
+        p256dh: String?,
+        auth: String?,
+        generation: Long,
+    ): Boolean {
+        updateUnifiedPushRegistration(endpoint, p256dh, auth)
+        return true
+    }
+
     override suspend fun updateSyncState(lastSyncAtEpochMs: Long?, syncError: String?) {
         backing.value = backing.value.copy(lastTokenSyncAtEpochMs = lastSyncAtEpochMs, syncError = syncError)
     }

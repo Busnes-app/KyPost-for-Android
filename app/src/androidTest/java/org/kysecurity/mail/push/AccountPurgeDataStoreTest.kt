@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.kysecurity.mail.contacts.contactsDataStore
@@ -36,5 +37,23 @@ class AccountPurgeDataStoreTest {
         PushRuntime.graph(context).repository.clearPairing()
 
         assertEquals(emptyMap<Any, Any>(), context.contactsDataStore.data.first().asMap())
+    }
+
+    /** A malformed file must not survive the purge just because DataStore cannot parse it. */
+    @Test
+    fun unpair_recoversACorruptDataStore(): Unit = runBlocking {
+        val file = java.io.File(context.filesDir, "datastore/mail_sync_state.preferences_pb")
+        file.parentFile?.mkdirs()
+        file.writeBytes(ByteArray(64) { 0xFF.toByte() })
+
+        try {
+            val residue = PushRuntime.graph(context).repository.clearPairing()
+
+            assertEquals(emptyList<String>(), residue)
+            assertFalse(file.exists())
+            assertEquals(emptyMap<Any, Any>(), context.mailSyncDataStore.data.first().asMap())
+        } finally {
+            file.delete() // a failure here must not leave later tests a corrupt store
+        }
     }
 }

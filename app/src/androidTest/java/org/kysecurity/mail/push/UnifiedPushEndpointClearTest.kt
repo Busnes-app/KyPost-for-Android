@@ -28,4 +28,19 @@ class UnifiedPushEndpointClearTest {
         assertNull(state.unifiedPushP256dh)
         assertNull(state.unifiedPushAuth)
     }
+
+    /** An endpoint callback captured before an unpair, released after it, must not restore it. */
+    @Test
+    fun anEndpointFromAnEndedSessionIsNotStored(): Unit = runBlocking {
+        val graph = PushRuntime.graph(context)
+        val captured = org.kysecurity.mail.ProcessState.generation()
+
+        graph.repository.clearPairing()
+        graph.syncCoordinator.acceptUnifiedPushEndpoint("https://ntfy.example/late", "p256dh", "auth", captured)
+
+        val state = graph.repository.state.first()
+        assertNull(state.unifiedPushEndpoint)
+        assertNull(state.unifiedPushP256dh)
+        assertNull(state.unifiedPushAuth)
+    }
 }

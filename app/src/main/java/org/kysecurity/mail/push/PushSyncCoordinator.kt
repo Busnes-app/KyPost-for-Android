@@ -1,6 +1,11 @@
 package org.kysecurity.mail.push
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -21,6 +26,8 @@ class PushSyncCoordinator(
      *  [PushGraph] supplies the channel's own [ChannelPush], and a caller that forgets now fails
      *  to compile rather than silently registering the wrong transport. */
     private val fetchRegistrationCredential: suspend () -> PushRegistrationCredential?,
+    /** Where UnifiedPush callback work runs; see [enqueueUnifiedPush]. */
+    private val eventScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
     /** ONE registration at a time, process-wide.
      *
@@ -142,6 +149,22 @@ class PushSyncCoordinator(
         return syncCurrentPairingToken()
     }
 
+    /** Runs UnifiedPush callback work off the callback thread. */
+    fun enqueueUnifiedPush(event: suspend PushSyncCoordinator.() -> Unit): Job =
+        eventScope.launch { event() }
+
+    /** A new endpoint from the distributor, captured in session [generation]. Stored even when
+     *  unpaired, since the distributor often answers before pairing, then registered if paired. */
+    suspend fun acceptUnifiedPushEndpoint(
+        endpoint: String,
+        p256dh: String?,
+        auth: String?,
+        generation: Long,
+    ): NativeRegistrationResult = registrationGate.withLock {
+        repository.storeUnifiedPushEndpoint(endpoint, p256dh, auth, generation)
+        syncLocked(endpoint, PushTransport.UNIFIED_PUSH, p256dh, auth)
+    }
+
     /** The distributor revoked the endpoint (onUnregistered); it must never be registered again. */
     suspend fun forgetUnifiedPushEndpoint() = registrationGate.withLock {
         repository.updateUnifiedPushRegistration(endpoint = null, p256dh = null, auth = null)
@@ -153,8 +176,6 @@ class PushSyncCoordinator(
         p256dh: String? = null,
         auth: String? = null,
     ): NativeRegistrationResult = registrationGate.withLock {
-        // Stored even when unpaired: the distributor often delivers it before pairing, which needs it.
-        if (transport == PushTransport.UNIFIED_PUSH) repository.updateUnifiedPushRegistration(token, p256dh, auth)
         syncLocked(token, transport, p256dh, auth)
     }
 

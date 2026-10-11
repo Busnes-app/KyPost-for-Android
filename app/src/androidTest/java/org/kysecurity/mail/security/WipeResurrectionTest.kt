@@ -137,6 +137,24 @@ class WipeResurrectionTest {
         assertEquals(emptyMap<Any, Any>(), context.contactsDataStore.data.first().asMap())
     }
 
+    /** A malformed file must not fail every wipe retry just because DataStore cannot parse it. */
+    @Test
+    fun wipe_recoversACorruptDataStore(): Unit = runBlocking {
+        val file = File(context.filesDir, "datastore/mail_sync_state.preferences_pb")
+        file.parentFile?.mkdirs()
+        file.writeBytes(ByteArray(64) { 0xFF.toByte() })
+
+        try {
+            val result = SecurityWipe.wipeAndResetApp(context)
+
+            assertTrue("the wipe must complete, got $result", result is WipeResult.Complete)
+            assertFalse(file.exists())
+            assertEquals(emptyMap<Any, Any>(), context.mailSyncDataStore.data.first().asMap())
+        } finally {
+            file.delete() // a failure here must not leave later tests a corrupt store
+        }
+    }
+
     /** Turning on Hostile Location Protection deletes the same three files. */
     @Test
     fun deletePlaintextMetadataStores_dropsCachedState(): Unit = runBlocking {

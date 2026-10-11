@@ -361,6 +361,16 @@ class PushRepository(
         }
     }
 
+    override suspend fun storeUnifiedPushEndpoint(
+        endpoint: String,
+        p256dh: String?,
+        auth: String?,
+        generation: Long,
+    ): Boolean {
+        updateUnifiedPushRegistration(endpoint, p256dh, auth)
+        return true
+    }
+
     /** The durable pull cursor for [subscriberId], scoped so a new subscriber starts clean. */
     override suspend fun pullCursor(subscriberId: String): Long = pullCursorValue.get(subscriberId) ?: 0L
 
