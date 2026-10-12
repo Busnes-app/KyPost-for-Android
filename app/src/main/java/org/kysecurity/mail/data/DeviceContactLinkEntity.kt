@@ -9,4 +9,6 @@ data class DeviceContactLinkEntity(
     @PrimaryKey val uid: String,
     val rawContactId: Long,
     val deviceUpdatedAtEpochMs: Long,
+    /** The ContactDto JSON both sides held after the last sync, the merge base; empty if unknown. */
+    val syncedJson: String = "",
 )

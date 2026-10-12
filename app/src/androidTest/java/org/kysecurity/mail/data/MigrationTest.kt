@@ -254,6 +254,21 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate15To16_addsAnEmptyMergeBase_keepingLinks() {
+        helper.createDatabase(TEST_DB, 15).apply {
+            execSQL("INSERT INTO device_contact_links (uid, rawContactId, deviceUpdatedAtEpochMs) VALUES ('u1', 7, 0)")
+            close()
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 16, true, AppDatabase.MIGRATION_15_16)
+
+        migrated.query("SELECT syncedJson FROM device_contact_links WHERE uid = 'u1'").use { cursor ->
+            assertEquals(true, cursor.moveToFirst())
+            assertEquals("", cursor.getString(0))
+        }
+    }
+
     private fun insertV11Email(messageId: String, folder: String, subject: String) =
         "INSERT INTO emails " +
             "(messageId, folder, sender, sentTo, cc, bcc, subject, preview, bodyMode, label, " +

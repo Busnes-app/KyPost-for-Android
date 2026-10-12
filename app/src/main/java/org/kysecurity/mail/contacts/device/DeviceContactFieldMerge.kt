@@ -8,6 +8,47 @@ import org.kysecurity.mail.contacts.ContactRelationDto
 import org.kysecurity.mail.contacts.ContactUrlDto
 
 object DeviceContactFieldMerge {
+    /** Three-way merge against [base], the value both sides held after the last sync. A side still
+     *  equal to it did not change, so the other side wins, including a field it emptied. Without a
+     *  base, or with a change on both sides, [twoWay] decides; it cannot tell cleared from unset. */
+    fun <T> againstBase(room: T, device: T, base: T?, baseKnown: Boolean, twoWay: (T, T) -> T): T = when {
+        !baseKnown -> twoWay(room, device)
+        same(device, base) -> room
+        same(room, base) -> device
+        else -> twoWay(room, device)
+    }
+
+    /** Compares as CP2 stores: null, blank and empty are one value, since CP2 drops an empty row,
+     *  labels ignore case, since CP2 reads Room's "home" back as TYPE_HOME, "Home", and relations
+     *  and IMs compare as written and read back, which can drop a label. */
+    fun same(a: Any?, b: Any?): Boolean = a == b || normal(a) == normal(b)
+
+    private fun normal(v: Any?): Any? = when (v) {
+        is String -> v.trim().ifEmpty { null }
+        is Collection<*> -> v.map(::normal).ifEmpty { null }
+        is ContactFieldDto -> v.copy(label = label(v.label), value = v.value.trim())
+        is ContactAddressDto -> ContactAddressDto(
+            label = label(v.label),
+            street = normal(v.street) as String?,
+            city = normal(v.city) as String?,
+            region = normal(v.region) as String?,
+            postalCode = normal(v.postalCode) as String?,
+            country = normal(v.country) as String?,
+        )
+        is ContactRelationDto -> ContactRelationDto(
+            label = DeviceContactFieldCoding.relationLabelFromType(DeviceContactFieldCoding.relationType(v.label)),
+            name = v.name.trim(),
+        )
+        is ContactImDto -> {
+            val protocol = DeviceContactFieldCoding.imCustomProtocolLabel(v.service, v.label)
+            val service = DeviceContactFieldCoding.imServiceFromCustomProtocolLabel(protocol)
+            v.copy(service = service, label = protocol.takeIf { service.isEmpty() }, value = v.value.trim())
+        }
+        else -> v
+    }
+
+    private fun label(l: String?): String? = l?.trim()?.lowercase()?.ifEmpty { null }
+
     fun <T> mergeField(
         roomValue: T?,
         deviceValue: T?,

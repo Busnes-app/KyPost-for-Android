@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ContactSyncStateEntity::class,
         RecipientPinEntity::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -214,6 +214,13 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_14_15 = object : Migration(14, 15) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `emails` ADD COLUMN `inWindow` INTEGER NOT NULL DEFAULT 1")
+            }
+        }
+
+        /** The device-merge base; empty means "unknown" and keeps the two-way rule. */
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `device_contact_links` ADD COLUMN `syncedJson` TEXT NOT NULL DEFAULT ''")
             }
         }
     }
