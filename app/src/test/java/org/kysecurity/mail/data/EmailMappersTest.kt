@@ -22,6 +22,7 @@ class EmailMappersTest {
             label = "Work",
             status = "read",
             atUtc = "2026-07-07T20:43:25Z",
+            wokenAt = "2026-07-08T09:00:00Z",
             sourceMode = "relay",
         )
 
@@ -40,6 +41,7 @@ class EmailMappersTest {
         assertEquals(email.label, roundTripped.label)
         assertEquals(email.status, roundTripped.status)
         assertEquals(email.atUtc, roundTripped.atUtc)
+        assertEquals(email.wokenAt, roundTripped.wokenAt)
         assertEquals("INBOX", entity.folder)
     }
 

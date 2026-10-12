@@ -79,6 +79,23 @@ class RelayModelsSerializationTest {
         assertTrue(parsed.byTab["Work"]?.first()?.keywords?.isEmpty() == true)
     }
 
+    /** An older server never sends `wokenAt`; absent must decode to null, not fail the response. */
+    @Test
+    fun relayInboxResponseDto_decodesWokenAtWhenPresentAndNullWhenAbsent() {
+        val jsonText = """
+            {"tabs": ["Work"], "byTab": {"Work": [
+              {"messageId": "m1", "subject": "S", "atUtc": "2026-10-01T08:00:00Z", "wokenAt": "2026-10-12T09:00:00Z"},
+              {"messageId": "m2", "subject": "S", "atUtc": "2026-10-02T08:00:00Z"}
+            ]}}
+        """.trimIndent()
+
+        val rows = json.decodeFromString<RelayInboxResponseDto>(jsonText).byTab.getValue("Work")
+
+        assertEquals("2026-10-12T09:00:00Z", rows[0].wokenAt)
+        assertEquals("2026-10-01T08:00:00Z", rows[0].atUtc)
+        assertEquals(null, rows[1].wokenAt)
+    }
+
     @Test
     fun relayInboxResponseDto_decodesDeltaShape_newUpdatedAndRemoved() {
         val jsonText = """

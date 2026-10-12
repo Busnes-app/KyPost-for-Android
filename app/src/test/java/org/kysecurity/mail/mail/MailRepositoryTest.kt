@@ -321,6 +321,28 @@ class MailRepositoryTest {
         assertEquals("read", merged.status)
     }
 
+    /** The pin follows the server: an "updated" row sets it, and one without it clears it. */
+    @Test
+    fun deltaResult_updatedEntry_setsAndClearsWokenAt() {
+        val dao = FakeEmailDao()
+        dao.put(row("m2", "INBOX"))
+        fun update(wokenAt: String?) = reconcileFetchResult(
+            dao, "INBOX", "relay",
+            MailFetchResult(
+                tabs = emptyList(),
+                messages = listOf(email("m2", body = null).copy(wokenAt = wokenAt)),
+                isDelta = true,
+                updatedMessageIds = setOf("m2"),
+            ),
+        )
+
+        update("2026-10-12T09:00:00Z")
+        assertEquals("2026-10-12T09:00:00Z", dao.getById("m2", "INBOX")?.wokenAt)
+
+        update(null)
+        assertNull(dao.getById("m2", "INBOX")?.wokenAt)
+    }
+
     @Test
     fun deltaResult_updatedEntryWithNoLocalCache_isSkippedRatherThanStoredBodyless() {
         val dao = FakeEmailDao()

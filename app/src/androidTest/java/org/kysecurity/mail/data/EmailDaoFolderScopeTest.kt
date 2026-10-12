@@ -43,6 +43,20 @@ class EmailDaoFolderScopeTest {
         sourceMode = "relay",
     )
 
+    /** A woken snooze sorts by when it woke, above newer mail; others keep arrival order. */
+    @Test
+    fun aWokenOlderEmailSortsAboveNewerMail() {
+        dao.upsertAll(
+            listOf(
+                row("old", "INBOX", null).copy(atUtc = "2026-10-01T08:00:00Z"),
+                row("woken", "INBOX", null).copy(atUtc = "2026-09-01T08:00:00Z", wokenAt = "2026-10-12T09:00:00Z"),
+                row("new", "INBOX", null).copy(atUtc = "2026-10-11T08:00:00Z"),
+            ),
+        )
+
+        assertEquals(listOf("woken", "new", "old"), dao.getByFolder("INBOX").map { it.messageId })
+    }
+
     @Test
     fun theSameUidInTwoFoldersIsTwoRows() {
         dao.upsertAll(listOf(row("42", "INBOX", "the inbox one"), row("42", "Archive", "the archived one")))

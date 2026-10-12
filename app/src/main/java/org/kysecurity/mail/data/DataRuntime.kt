@@ -32,6 +32,7 @@ class DataGraph(context: Context) : org.kysecurity.mail.ClosableGraph {
                 AppDatabase.MIGRATION_13_14,
                 AppDatabase.MIGRATION_14_15,
                 AppDatabase.MIGRATION_15_16,
+                AppDatabase.MIGRATION_16_17,
             )
             .build()
     }

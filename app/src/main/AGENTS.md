@@ -164,6 +164,10 @@ Owns production Android app code and resources.
   removal in one folder deleted the other. Every per-message DAO statement takes the folder.
   Still not UIDVALIDITY-aware — the relay does not expose it and a client cannot invent one; the
   daily full resync rewrites the window, so id reuse self-heals within a day. See `EmailEntity`.
+- Woken snooze pin (KyPost-Server #386): an inbox row's optional `wokenAt` is when a snoozed message
+  returned to INBOX. `EmailDao.getByFolder` orders by `COALESCE(wokenAt, atUtc)`, the row shows
+  `atUtc` plus a "Snoozed" badge. An "updated" delta row replaces it, so one without `wokenAt`
+  clears the pin. Older-mail pages (`reconcileOlderMail`) keep a held row's value.
 - PGP state on relay inbox rows: `pgpEncrypted`, `pgpSigned`, `pgpVerified`, `pgpSignerFingerprint`,
   `pgpDecryptError`. All are `omitempty` server-side, so the Kotlin defaults (false/"") are the
   contract for a message with no OpenPGP content, not an unknown state. `pgp.PgpMessageState` is the

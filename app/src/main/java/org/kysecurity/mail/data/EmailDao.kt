@@ -11,7 +11,8 @@ data class FolderUnread(val folder: String, val unread: Int)
 
 @Dao
 interface EmailDao {
-    @Query("SELECT * FROM emails WHERE folder = :folder ORDER BY atUtc DESC")
+    /** A woken snooze sorts as if it arrived when it woke. Both are RFC 3339 UTC, so text order is time order. */
+    @Query("SELECT * FROM emails WHERE folder = :folder ORDER BY COALESCE(wokenAt, atUtc) DESC")
     fun getByFolder(folder: String): List<EmailEntity>
 
     @Upsert
