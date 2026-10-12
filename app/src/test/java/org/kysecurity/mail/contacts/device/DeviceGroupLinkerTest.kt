@@ -82,4 +82,21 @@ class DeviceGroupLinkerTest {
             groupRenameTargets(links, groups),
         )
     }
+
+    @Test
+    fun groupRemovals_areExactlyTheLinksWhoseBackendGroupIsGone() {
+        val gone = GroupLinkEntity(groupId = "gone", androidGroupRowId = 3L)
+        val links = listOf(GroupLinkEntity(groupId = "g1", androidGroupRowId = 1L), gone)
+
+        assertEquals(listOf(gone to true), groupRemovals(links, listOf(GroupEntity(id = "g1", name = "Family", rev = 1))))
+    }
+
+    /** Two backend groups matched by title share row 7: removing one must not delete it. */
+    @Test
+    fun groupRemovals_keepARowALiveGroupStillLinksTo() {
+        val gone = GroupLinkEntity(groupId = "g2", androidGroupRowId = 7L)
+        val links = listOf(GroupLinkEntity(groupId = "g1", androidGroupRowId = 7L), gone)
+
+        assertEquals(listOf(gone to false), groupRemovals(links, listOf(GroupEntity(id = "g1", name = "Team", rev = 1))))
+    }
 }
