@@ -1,12 +1,13 @@
 package org.kysecurity.mail.contacts.device
 
 import android.content.Context
+import org.kysecurity.mail.ClosableGraph
 import org.kysecurity.mail.SingletonGraph
 import org.kysecurity.mail.contacts.ContactsRuntime
 import org.kysecurity.mail.data.DataRuntime
 import org.kysecurity.mail.security.HostileLocationSettings
 
-class DeviceContactsGraph(context: Context) {
+class DeviceContactsGraph(context: Context) : ClosableGraph {
     private val appContext = context.applicationContext
     private val hostileLocationSettings = HostileLocationSettings(appContext)
     val settings = DeviceContactSyncSettings(appContext)
@@ -27,6 +28,13 @@ class DeviceContactsGraph(context: Context) {
     /** True when contact sync may run at all right now — see [DeviceContactSyncCoordinator]'s
      *  `hostileLocationEnabled` for why protection vetoes it. */
     fun syncPermitted(): Boolean = !hostileLocationSettings.isEnabled()
+
+    /** A dropped graph's observer would otherwise stay registered and run passes against the
+     *  database dropped with it. */
+    override fun closeGraph() {
+        observer.unregister()
+        coordinator.close()
+    }
 
     fun bootstrapIfEnabled() {
         if (!settings.isEnabled()) return

@@ -92,4 +92,59 @@ class DeviceContactSyncCoordinatorTest {
     private companion object {
         const val WAIT_S = 5L
     }
+
+    /** A pass queued while sync was on must not run once sync is off: turning device sync off,
+     *  or Hostile Location Protection on, means no further pass touches the contacts provider. */
+    @Test
+    fun aDebouncedPass_doesNotRunAfterSyncIsTurnedOff() = runBlocking {
+        val runs = AtomicInteger()
+        var on = true
+        val coordinator = DeviceContactSyncCoordinator(
+            syncAll = { runs.incrementAndGet(); emptyList() },
+            enabled = { on },
+            debounceMs = 50,
+        )
+
+        coordinator.syncWithDebounce()
+        on = false
+        kotlinx.coroutines.delay(500)
+
+        assertEquals(0, runs.get())
+    }
+
+    /** The same for Hostile Location Protection turned on during the debounce. */
+    @Test
+    fun aDebouncedPass_doesNotRunOnceProtectionIsOn() = runBlocking {
+        val runs = AtomicInteger()
+        var protectionOn = false
+        val coordinator = DeviceContactSyncCoordinator(
+            syncAll = { runs.incrementAndGet(); emptyList() },
+            enabled = { true },
+            hostileLocationEnabled = { protectionOn },
+            debounceMs = 50,
+        )
+
+        coordinator.syncWithDebounce()
+        protectionOn = true
+        kotlinx.coroutines.delay(500)
+
+        assertEquals(0, runs.get())
+    }
+
+    /** A closed coordinator, its graph dropped, runs nothing it had queued. */
+    @Test
+    fun close_stopsAQueuedPass() = runBlocking {
+        val runs = AtomicInteger()
+        val coordinator = DeviceContactSyncCoordinator(
+            syncAll = { runs.incrementAndGet(); emptyList() },
+            enabled = { true },
+            debounceMs = 50,
+        )
+
+        coordinator.syncWithDebounce()
+        coordinator.close()
+        kotlinx.coroutines.delay(500)
+
+        assertEquals(0, runs.get())
+    }
 }

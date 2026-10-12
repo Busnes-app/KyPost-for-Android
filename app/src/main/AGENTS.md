@@ -796,6 +796,12 @@ Owns production Android app code and resources.
   edit stays dirty. The foreign-import watermark is the scan's start time, not its end.
   `makeContactsVisible` writes only when `UNGROUPED_VISIBLE` is off: each write notifies the
   contacts observer, which used to trigger the next sync, which wrote again.
+- **No pass after sync is turned off.** A debounced pass re-checks the enable and Hostile Location
+  gates after its delay, not only when queued: a pass queued just before sync was turned off ran
+  anyway, and against a database without the device's contacts it hard-deletes every row of our
+  account (in tests, the next test's probe). Dropping `DeviceContactsRuntime` closes the graph
+  (`ClosableGraph`): its observer is unregistered and its coordinator's passes cancelled, so a
+  dropped graph never syncs against the database dropped with it. `DeviceContactSyncCoordinatorTest`.
 - **A backend group's lifetime is the device group's.** After a group refresh that succeeded,
   `reconcileGroups` deletes, as the sync adapter and only within our account, the device group of
   every link whose group the server no longer lists (`groupRemovals`), then drops the link. A failed

@@ -16,6 +16,7 @@ class DeviceContactSyncCoordinator(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     /** Runs when a request finds a pass already running; tests use it to stall the requester. */
     private val onFoundRunning: () -> Unit = {},
+    private val debounceMs: Long = 3_000,
 ) {
     private var debounceJob: kotlinx.coroutines.Job? = null
 
@@ -57,10 +58,14 @@ class DeviceContactSyncCoordinator(
         if (!syncAllowed()) return
         debounceJob?.cancel()
         debounceJob = scope.launch {
-            delay(3000)
-            if (claimPass()) runBoundedSync("debounced")
+            delay(debounceMs)
+            // Checked again: sync may have been turned off, or protection on, during the wait.
+            if (syncAllowed() && claimPass()) runBoundedSync("debounced")
         }
     }
+
+    /** Stops queued and running passes; this coordinator takes no more. */
+    fun close() = scope.cancel()
 
     private suspend fun runBoundedSync(trigger: String) {
         try {
