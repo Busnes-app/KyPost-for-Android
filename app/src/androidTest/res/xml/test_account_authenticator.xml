@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Must match TestAccountAuthenticatorService.ACCOUNT_TYPE. -->
-<account-authenticator xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accountType="org.kysecurity.mail.test.importprobe"
-    android:label="@string/test_account_label" />

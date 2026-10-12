@@ -185,6 +185,21 @@ class DeviceContactImportConsentTest {
         }
     }
 
+    /** Consent is per account, type and name, and the check made just before each import reads
+     *  the account from the raw contact snapshot, so the snapshot must carry the name too. Read
+     *  on a row of this app's own account, the one named account a test can rely on: the
+     *  provider strips rows of an account type AccountManager does not know whenever the
+     *  device's accounts change. */
+    @Test
+    fun aSnapshotCarriesItsAccountName() = runBlocking {
+        val own = DeviceAccount(DeviceContactAccount.ACCOUNT_TYPE, DeviceContactAccount.ACCOUNT_NAME)
+        val rawContactId = insertLocalContact(NAMED_PROBE, "named-probe@example.com", own)
+
+        val snapshot = repository.readRawContactSnapshot(rawContactId)
+
+        assertEquals(own, snapshot?.let { DeviceAccount(it.accountType, it.accountName) })
+    }
+
     private fun rawContactExists(rawContactId: Long): Boolean = context.contentResolver.query(
         ContactsContract.RawContacts.CONTENT_URI,
         arrayOf(ContactsContract.RawContacts._ID),
