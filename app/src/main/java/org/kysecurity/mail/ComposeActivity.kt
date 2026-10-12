@@ -20,9 +20,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.addCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationBarView
+import com.google.android.material.snackbar.Snackbar
 import com.infomaniak.lib.richhtmleditor.RichHtmlEditorWebView
 import org.kysecurity.mail.contacts.AddressBookSheet
 import org.kysecurity.mail.contacts.RecipientCandidate
@@ -86,11 +88,17 @@ class ComposeActivity : LockedActivity() {
     private lateinit var signChip: Chip
     private lateinit var webmailChip: Chip
     private lateinit var keylessWarning: android.widget.TextView
-    private val pgpController by lazy { ComposePgpController.from(this) }
+    private val pgpController by lazy { pgpControllerForTest ?: ComposePgpController.from(this) }
     private var sendMenuItem: MenuItem? = null
 
     /** Key held only by the user and this device not enrolled: Send is withdrawn while it holds. */
     private var handoffOnlyAccount = false
+
+    /** False until a bootstrap answer reaches [applyPgpComposeState]; nothing is sent before
+     *  custody is known. A failed bootstrap leaves it false (see [resolveCustody]). */
+    private var custodyKnown = false
+    private var custodyJob: Job? = null
+    private var custodyRetryBar: Snackbar? = null
 
     /** True when the encryption happens on this device and the send goes to `/api/mail/send-pgp`
      *  rather than `/api/mail/send`. From [PgpComposeState.clientSide]. */
@@ -122,6 +130,31 @@ class ComposeActivity : LockedActivity() {
 
     @androidx.annotation.VisibleForTesting
     internal fun discardPromptCountForTest(): Int = discardPromptCount
+
+    /** Null in production. Called when a send is committed, before the editor's export. */
+    @androidx.annotation.VisibleForTesting
+    internal var sendObserverForTest: (() -> Unit)? = null
+
+    /** Null in production. Stands in for the editor's own report, which arrives from its page. */
+    @androidx.annotation.VisibleForTesting
+    internal var bodyEmptyForTest: Boolean? = null
+
+    @androidx.annotation.VisibleForTesting
+    internal fun applyPgpComposeStateForTest(state: PgpComposeState) = applyPgpComposeState(state)
+
+    @androidx.annotation.VisibleForTesting
+    internal fun sendForTest() = sendEmail()
+
+    @androidx.annotation.VisibleForTesting
+    internal fun sendEnabledForTest(): Boolean? = sendMenuItem?.isEnabled
+
+    /** True once a custody lookup has finished, either way. */
+    @androidx.annotation.VisibleForTesting
+    internal fun custodySettledForTest(): Boolean = custodyJob?.isCompleted == true
+
+    /** Exactly what "Send without a subject?" runs when confirmed. */
+    @androidx.annotation.VisibleForTesting
+    internal fun confirmSendWithoutSubjectForTest() = sendEmail(allowEmptySubject = true)
 
     private val bodyMirror = object : Runnable {
         override fun run() {
@@ -219,7 +252,7 @@ class ComposeActivity : LockedActivity() {
         keylessWarning = findViewById(R.id.composeKeylessWarning)
         applyWarningCalloutTheme(this, keylessWarning)
 
-        lifecycleScope.launch { applyPgpComposeState(pgpController.composeState()) }
+        resolveCustody()
 
         toInput = findViewById(R.id.composeToInput)
         ccInput = findViewById(R.id.composeCcInput)
@@ -369,6 +402,28 @@ class ComposeActivity : LockedActivity() {
         // post, not postDelayed: the first mirror has to exist before the first teardown can.
         mainHandler.removeCallbacks(bodyMirror)
         mainHandler.post(bodyMirror)
+        // Coming back (e.g. after reconnecting) is a natural moment to retry a failed lookup.
+        if (!custodyKnown) resolveCustody()
+    }
+
+    /** Couldn't-check is not "no identity": a failed bootstrap keeps custody unknown, so Send stays
+     *  blocked, and offers a retry. Only a real answer reaches [applyPgpComposeState]. */
+    private fun resolveCustody() {
+        if (custodyKnown || custodyJob?.isActive == true) return
+        custodyRetryBar?.dismiss()
+        custodyJob = lifecycleScope.launch {
+            val state = pgpController.composeState()
+            if (state != null) {
+                custodyRetryBar?.dismiss()
+                applyPgpComposeState(state)
+            } else {
+                applySendAvailability()
+                custodyRetryBar = Snackbar.make(rootView, R.string.compose_custody_check_failed, Snackbar.LENGTH_INDEFINITE)
+                    .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
+                    .setAction(R.string.compose_custody_retry) { resolveCustody() }
+                    .also { it.show() }
+            }
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -387,19 +442,25 @@ class ComposeActivity : LockedActivity() {
     /** Withdraws Send on an account this app cannot encrypt for. See [applyPgpComposeState]. */
     private fun applySendAvailability() {
         sendMenuItem?.isVisible = !handoffOnlyAccount
-        sendMenuItem?.isEnabled = !handoffOnlyAccount && !handoffBusy
+        sendMenuItem?.isEnabled = custodyKnown && !handoffOnlyAccount && !handoffBusy
+    }
+
+    /** The one custody gate. Every path to the relay asks it, at the moment it would send, because
+     *  custody can resolve while a prompt is open. Hidden chips mean both flags false, so letting a
+     *  handoff-only account through is a cleartext send. */
+    private fun custodyPermitsSend(): Boolean {
+        if (custodyKnown && !handoffOnlyAccount) return true
+        val message = if (custodyKnown) R.string.compose_send_needs_webmail else R.string.compose_send_custody_pending
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        applySendAvailability()
+        resolveCustody()
+        return false
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             MENU_SEND -> {
-                // Belt and braces against a stale menu: the item is hidden for a handoff-only
-                // account, but a send that reached here would be a silent cleartext downgrade.
-                if (handoffOnlyAccount) {
-                    Toast.makeText(this, R.string.compose_send_needs_webmail, Toast.LENGTH_LONG).show()
-                } else {
-                    sendEmail()
-                }
+                sendEmail()
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -445,6 +506,7 @@ class ComposeActivity : LockedActivity() {
         // Unenrolled client-custody: hidden chips send both flags false, a silent cleartext downgrade.
         handoffOnlyAccount = state.handoffToWebmail
         clientSideAccount = state.clientSide
+        custodyKnown = true
         applySendAvailability()
         pgpChips.visibility =
             if (state.canEncrypt || state.canSign || state.handoffToWebmail) View.VISIBLE else View.GONE
@@ -657,24 +719,35 @@ class ComposeActivity : LockedActivity() {
         }
     }
 
-    private fun sendEmail() {
+    private fun sendEmail(allowEmptySubject: Boolean = false) {
         if (handoffBusy) return
+        if (!custodyPermitsSend()) return
         val to = toInput.commaJoinedRecipients()
         val cc = ccInput.commaJoinedRecipients()
         val bcc = bccInput.commaJoinedRecipients()
         val subject = subjectField.text.toString().trim()
-        val isBodyEmpty = bodyEditor.isEmptyFlow.value != false
+        val isBodyEmpty = bodyEmptyForTest ?: (bodyEditor.isEmptyFlow.value != false)
 
-        if (to.isBlank() || subject.isBlank() || isBodyEmpty) {
-            Toast.makeText(this, R.string.compose_fill_all_fields, Toast.LENGTH_SHORT).show()
-            return
+        when (sendReadiness(to, subject, isBodyEmpty, allowEmptySubject)) {
+            SendReadiness.READY -> Unit
+            SendReadiness.INCOMPLETE -> {
+                Toast.makeText(this, R.string.compose_fill_all_fields, Toast.LENGTH_SHORT).show()
+                return
+            }
+            SendReadiness.CONFIRM_EMPTY_SUBJECT -> {
+                confirmEmptySubject()
+                return
+            }
         }
 
         sendMenuItem?.isEnabled = false
+        sendObserverForTest?.invoke()
 
         bodyEditor.exportHtml { html ->
             // exportHtml's main-looper callback can fire after onDestroy shut ioExecutor down.
             if (isFinishing || isDestroyed) return@exportHtml
+            // Asked again: custody can resolve between the tap and this callback.
+            if (!custodyPermitsSend()) return@exportHtml
             val draft = MailDraft(
                 to = to, cc = cc, bcc = bcc, subject = subject, body = html, mode = "html",
                 attachments = attachments.toList(),
@@ -694,9 +767,19 @@ class ComposeActivity : LockedActivity() {
         }
     }
 
+    /** Mail without a subject is legal and sometimes meant; ask rather than refuse. */
+    private fun confirmEmptySubject() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.compose_empty_subject_title)
+            .setNegativeButton(R.string.compose_empty_subject_add) { _, _ -> subjectField.requestFocus() }
+            .setPositiveButton(R.string.compose_empty_subject_send) { _, _ -> sendEmail(allowEmptySubject = true) }
+            .showThemed()
+    }
+
     /** Sender built on IO (Keystore), crypto on Default (Bouncy Castle); the prompt hops to Main. */
     private fun dispatchClientSend(draft: MailDraft) {
         if (sendJob?.isActive == true) return
+        if (!custodyPermitsSend()) return
         sendMenuItem?.isEnabled = false
         sendJob = lifecycleScope.launch {
             val sender = withContext(Dispatchers.IO) { clientSender() }
@@ -803,6 +886,8 @@ class ComposeActivity : LockedActivity() {
 
     /** Shared by the first attempt and the confirmed re-send, so the re-send cannot drift. */
     private fun dispatchSend(draft: MailDraft) {
+        // The pickup-fallback re-send arrives here without passing sendEmail.
+        if (!custodyPermitsSend()) return
         ioExecutor.execute {
             val outcome = MailRuntime.graph(this).repository.send(draft)
             runOnUiThread {
@@ -943,7 +1028,7 @@ class ComposeActivity : LockedActivity() {
         handoffBusy = false
         handoffAttempt++
         webmailChip.isEnabled = true
-        sendMenuItem?.isEnabled = !handoffOnlyAccount
+        applySendAvailability()
     }
 
     /** Kept internal so device tests exercise the real failure/browser/cache behavior. */
@@ -1055,6 +1140,11 @@ class ComposeActivity : LockedActivity() {
     }
 
     companion object {
+        /** Null in production. Replaces the bootstrap-backed controller for the next launch. */
+        @androidx.annotation.VisibleForTesting
+        @Volatile
+        internal var pgpControllerForTest: ComposePgpController? = null
+
         /** Null in production. Stands in for a provider's `openAssetFileDescriptor`; null falls through. */
         @androidx.annotation.VisibleForTesting
         @Volatile
@@ -1117,3 +1207,12 @@ internal fun readAtMost(input: InputStream, limit: Long, expectedSize: Long = -1
         out.write(buffer, 0, read)
     }
 }
+
+internal enum class SendReadiness { READY, INCOMPLETE, CONFIRM_EMPTY_SUBJECT }
+
+internal fun sendReadiness(to: String, subject: String, bodyEmpty: Boolean, allowEmptySubject: Boolean): SendReadiness =
+    when {
+        to.isBlank() || bodyEmpty -> SendReadiness.INCOMPLETE
+        subject.isBlank() && !allowEmptySubject -> SendReadiness.CONFIRM_EMPTY_SUBJECT
+        else -> SendReadiness.READY
+    }
