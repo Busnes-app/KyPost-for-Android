@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ContactSyncStateEntity::class,
         RecipientPinEntity::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -207,6 +207,13 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS `index_device_contact_links_rawContactId` " +
                         "ON `device_contact_links` (`rawContactId`)",
                 )
+            }
+        }
+
+        /** Every row cached so far came from the window. */
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `emails` ADD COLUMN `inWindow` INTEGER NOT NULL DEFAULT 1")
             }
         }
     }

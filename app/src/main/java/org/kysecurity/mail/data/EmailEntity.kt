@@ -8,9 +8,10 @@ import androidx.room.Entity
  *
  *  ponytail: still not UIDVALIDITY-aware — the relay does not expose it, and a client cannot
  *  invent it. A UIDVALIDITY reset therefore leaves rows keyed to ids the server has reused; the
- *  daily full resync (`MailFetchResult.isFullWindow`) rewrites the window and prunes the rest,
- *  so the damage self-heals within a day. Upgrade path: have the relay return UIDVALIDITY (or a
- *  stable opaque id) and add it to this key.
+ *  daily full resync (`MailFetchResult.isFullWindow`) rewrites the window and prunes the rest of
+ *  it within a day, but rows outside the window ([inWindow] false) are never pruned and stay
+ *  stale. Upgrade path: have the relay return UIDVALIDITY (or a stable opaque id) and add it to
+ *  this key.
  */
 @Entity(tableName = "emails", primaryKeys = ["folder", "messageId"])
 data class EmailEntity(
@@ -36,6 +37,9 @@ data class EmailEntity(
     val pgpVerified: Boolean = false,
     val pgpSignerFingerprint: String = "",
     val pgpDecryptError: String = "",
+    /** False once the row is older than the relay's window (paged in, or reported `agedOut`). A
+     *  snapshot lists only the window, so absence from one proves nothing about these rows. */
+    val inWindow: Boolean = true,
 ) {
     /** Redacted: the preview and body are cached message content. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "EmailEntity(redacted)"

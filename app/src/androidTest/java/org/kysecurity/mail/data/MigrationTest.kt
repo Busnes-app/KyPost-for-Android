@@ -239,6 +239,21 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate14To15_marksEveryCachedRowAsWindowMail() {
+        helper.createDatabase(TEST_DB, 14).apply {
+            execSQL(insertV11Email(messageId = "42", folder = "INBOX", subject = "Cached"))
+            close()
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 15, true, AppDatabase.MIGRATION_14_15)
+
+        migrated.query("SELECT inWindow FROM emails WHERE messageId = '42'").use { cursor ->
+            assertEquals(true, cursor.moveToFirst())
+            assertEquals(1, cursor.getInt(0))
+        }
+    }
+
     private fun insertV11Email(messageId: String, folder: String, subject: String) =
         "INSERT INTO emails " +
             "(messageId, folder, sender, sentTo, cc, bcc, subject, preview, bodyMode, label, " +

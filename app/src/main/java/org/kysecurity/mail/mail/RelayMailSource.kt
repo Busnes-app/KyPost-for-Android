@@ -108,6 +108,33 @@ class RelayMailSource(
                         cursor = parsed.cursor,
                         wasFullResync = since == FULL_RESYNC_SINCE,
                     ),
+                    agedOutMessageIds = parsed.agedOut,
+                    hasMore = parsed.hasMore == true,
+                    nextBefore = parsed.nextBefore,
+                ),
+            )
+        }
+    }
+
+    override fun fetchOlder(mailbox: String, limit: Int, before: String): MailOutcome<MailPage> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        val base = baseUrl(pairing, "/api/inbox") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val url = base.newBuilder()
+            .addQueryParameter("limit", limit.toString())
+            .addQueryParameter("mailbox", mailbox)
+            .addQueryParameter("before", before)
+            // A server without before= paging answers with its window, bodies included unless told.
+            .addQueryParameter("bodies", "0")
+            .build()
+        val request = Request.Builder().url(url).get().authed(pairing).build()
+        return executeStreaming(request, RelayInboxResponseDto.serializer()) { code, parsed, errorBody ->
+            if (code != 200) return@executeStreaming mapErrorCode(code, errorBody)
+            if (parsed == null) return@executeStreaming MailOutcome.UpstreamFailure("Malformed inbox response")
+            MailOutcome.Success(
+                MailPage(
+                    messages = parsed.byTab.flatMap { (tab, emails) -> emails.map { it.toUiEmail(tab) } },
+                    hasMore = parsed.hasMore,
+                    nextBefore = parsed.nextBefore,
                 ),
             )
         }

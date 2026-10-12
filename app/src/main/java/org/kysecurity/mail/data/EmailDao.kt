@@ -29,8 +29,19 @@ interface EmailDao {
     @Query("SELECT * FROM emails WHERE messageId = :id AND folder = :folder")
     fun getById(id: String, folder: String): EmailEntity?
 
-    @Query("DELETE FROM emails WHERE folder = :folder AND messageId NOT IN (:keepIds)")
+    @Query("SELECT messageId FROM emails WHERE folder = :folder")
+    fun getIds(folder: String): List<String>
+
+    /** Window rows only: a snapshot cannot speak for mail older than the window. */
+    @Query("DELETE FROM emails WHERE folder = :folder AND inWindow = 1 AND messageId NOT IN (:keepIds)")
     fun pruneStaleInFolder(folder: String, keepIds: List<String>)
+
+    @Query("UPDATE emails SET inWindow = 0 WHERE folder = :folder AND messageId IN (:ids)")
+    fun markAgedOut(folder: String, ids: List<String>)
+
+    /** `atUtc` is RFC 3339 UTC from the relay, so text order is time order. */
+    @Query("UPDATE emails SET inWindow = 0 WHERE folder = :folder AND atUtc < :oldest AND messageId NOT IN (:keepIds)")
+    fun markAgedOutBefore(folder: String, oldest: String, keepIds: List<String>)
 
     /** Fills in a body fetched on open. Scoped to the columns the fetch actually answers for, not
      *  an `@Upsert` of the whole row: the metadata already there came from the inbox window and is
@@ -42,6 +53,9 @@ interface EmailDao {
     // `body IS NOT NULL` is not redundant: `body != ''` is NULL, not false, for a null body.
     @Query("UPDATE emails SET body = '', preview = '' WHERE pgpEncrypted = 1 AND body IS NOT NULL AND body != ''")
     fun clearServerDecryptedBodies(): Int
+
+    @Transaction
+    fun inTransaction(block: () -> Unit) = block()
 
     @Transaction
     fun replaceFolderSnapshot(folder: String, emails: List<EmailEntity>) {
@@ -58,9 +72,11 @@ interface EmailDao {
         upserts: List<EmailEntity>,
         removedIds: List<String>,
         pruneKeepIds: List<String>?,
+        agedOutIds: List<String>,
     ) {
         upsertAll(upserts)
         removedIds.forEach { deleteById(it, folder) }
+        if (agedOutIds.isNotEmpty()) markAgedOut(folder, agedOutIds)
         if (pruneKeepIds != null) pruneStaleInFolder(folder, pruneKeepIds)
     }
 }
