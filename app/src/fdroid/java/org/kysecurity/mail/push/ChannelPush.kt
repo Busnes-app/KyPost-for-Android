@@ -9,8 +9,7 @@ import kotlinx.coroutines.flow.first
  *  the endpoint is minted by the distributor and arrives asynchronously on
  *  [KyPostUnifiedPushService.onNewEndpoint], which persists it. So this reads what the connector
  *  has already produced, and returns null until it has produced something — which is why the
- *  pairing screen has to send the user to install a distributor BEFORE the QR scanner opens,
- *  rather than after a failed pairing. */
+ *  pairing screen offers the distributor choice before the device is paired. */
 object ChannelPush : ChannelPushTransport {
 
     /** Names the transport explicitly. Left unset, the server derives `fcm` from
@@ -21,16 +20,7 @@ object ChannelPush : ChannelPushTransport {
     override suspend fun registrationCredential(
         context: Context,
         store: PushStore,
-    ): PushRegistrationCredential? {
-        val state = store.state.first()
-        val endpoint = state.unifiedPushEndpoint?.takeIf { it.isNotBlank() } ?: return null
-        return PushRegistrationCredential(
-            token = endpoint,
-            transport = PushTransport.UNIFIED_PUSH,
-            p256dh = state.unifiedPushP256dh,
-            auth = state.unifiedPushAuth,
-        )
-    }
+    ): PushRegistrationCredential? = store.state.first().unifiedPushCredential()
 
     /** The transport-neutral teardown in [PushRepository] already unregisters the distributor and
      *  deletes the connector's key material. There is no second transport with state of its own,

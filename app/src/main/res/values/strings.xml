@@ -30,6 +30,8 @@
     <string name="nav_junk">Junk</string>
     <string name="nav_trash">Trash</string>
     <string name="nav_archive">Archive</string>
+    <string name="nav_sent">Sent</string>
+    <string name="nav_drafts">Drafts</string>
     <string name="settings_title">Settings</string>
     <string name="settings_subtitle">Settings</string>
     <string name="settings_security_body">App lock, notifications, and encrypted mail</string>
@@ -37,6 +39,10 @@
     <string name="settings_keywords_body">Choose which keyword tabs are visible</string>
     <string name="settings_pairing_body">Push pairing and notification transport</string>
     <string name="settings_pgp_body">Show or scan PGP key QR codes</string>
+    <string name="settings_signature">Signature</string>
+    <string name="settings_signature_body">Added to new messages, replies and forwards, above any quoted text</string>
+    <string name="signature_hint">Your name, title, phone…</string>
+    <string name="save">Save</string>
     <string name="settings_about_body">Version and license</string>
     <string name="settings_privacy">Privacy policy</string>
     <string name="settings_privacy_body">Read how KyPost handles data</string>
@@ -65,6 +71,9 @@
     <!-- Subject line prefixed by its PGP and attachment markers. Ordered, so a locale that
          reads right-to-left can put them where they belong. -->
     <string name="email_row_subject_marked">%1$s %2$s</string>
+    <string name="email_row_unread">Unread</string>
+    <string name="email_row_from">from %1$s</string>
+    <string name="email_row_has_attachments">has attachments</string>
     <string name="attachment_chip_label">👁 %1$s</string>
     <string name="email_to">To:</string>
     <string name="email_cc">Cc:</string>
@@ -75,11 +84,31 @@
 
     <string name="action_archive">Archive</string>
     <string name="action_junk">Mark as junk</string>
+    <string name="action_move">Move to folder</string>
+    <string name="selection_selected">Selected</string>
+    <string name="selection_limit">Up to %1$d messages at a time</string>
+    <string name="undo">Undo</string>
+    <plurals name="undo_message">
+        <item quantity="one">%1$s: %2$d message</item>
+        <item quantity="other">%1$s: %2$d messages</item>
+    </plurals>
+    <plurals name="undo_message_several">
+        <item quantity="one">%1$d message changed</item>
+        <item quantity="other">%1$d messages changed</item>
+    </plurals>
+    <plurals name="selection_count">
+        <item quantity="one">%d selected</item>
+        <item quantity="other">%d selected</item>
+    </plurals>
+    <string name="move_to_title">Move to</string>
+    <string name="action_mark_unread">Mark unread</string>
+    <string name="action_mark_read">Mark read</string>
     <string name="action_delete">Delete</string>
     <string name="action_reply">Reply</string>
     <string name="action_reply_all">Reply all</string>
     <string name="action_forward">Forward</string>
     <string name="mail_action_failed">%1$s failed: %2$s</string>
+    <string name="action_retry">Retry</string>
 
     <string name="keyword_settings_title">Keyword Settings</string>
     <string name="keyword_settings_intro">Hide or show keyword headings in inbox tabs. Touch and hold a row to change its order.</string>
@@ -100,6 +129,35 @@
     <!-- Shown when the server flagged a message with the $Phishing IMAP keyword. Wording
          matches the webmail and Linux clients. -->
     <string name="email_phishing_warning">This message impersonates KyPost. Links to KyPost app addresses have been blocked. KyPost will never ask you to confirm a pairing request by email — never approve one you did not start yourself, on this device.</string>
+    <string name="invite_label">Calendar invite</string>
+    <string name="invite_label_method">Calendar invite · %1$s</string>
+    <string name="invite_untitled">Untitled event</string>
+    <string name="invite_where">Where: %1$s</string>
+    <string name="invite_organizer">Organizer: %1$s</string>
+    <string name="invite_repeats">Repeats</string>
+    <string name="invite_cancelled">This event was cancelled. Check your calendar.</string>
+    <string name="invite_updated">This invite was updated. Check your calendar.</string>
+    <string name="invite_phishing">This message is flagged as phishing. Check the invite before you add it.</string>
+    <string name="invite_organizer_not_sender">The organizer (%1$s) is not the sender of this email. Anyone can name any organizer.</string>
+    <string name="invite_unknown_zone">Time zone \"%1$s\" isn\'t recognised, so this time is read as your own zone and may be wrong.</string>
+    <string name="invite_add">Add to calendar</string>
+    <string name="rsvp_accept">Accept</string>
+    <string name="rsvp_tentative">Maybe</string>
+    <string name="rsvp_decline">Decline</string>
+    <string name="rsvp_confirm_title">Send RSVP unencrypted?</string>
+    <string name="rsvp_confirm_message">Reply \"%1$s\" to %2$s as %3$s.\n\nRSVPs are always sent unencrypted and unsigned, because the organizer\'s calendar can\'t read an encrypted reply. The reply carries your answer, your address and the event\'s ID.</string>
+    <string name="rsvp_confirm_not_sender">The organizer is not the sender of this email, so this reply goes to an address the sender chose.</string>
+    <string name="rsvp_sent_as_plain_mail">Your server didn\'t send this as a calendar reply. The organizer got a plain email; update your server.</string>
+    <string name="rsvp_maybe_sent">RSVP may not have been sent: %1$s. Check your Sent folder before trying again.</string>
+    <string name="rsvp_send">Send unencrypted</string>
+    <string name="rsvp_sent">RSVP sent</string>
+    <string name="rsvp_failed">RSVP not sent: %1$s</string>
+    <string name="rsvp_no_address">Couldn\'t confirm your account address, so no RSVP was sent. Try again.</string>
+    <string name="calendar_create_event">Create event from this email</string>
+    <string name="calendar_no_app">No calendar app can add this event</string>
+    <string name="calendar_handoff_confirm_title">Hand off to your calendar app?</string>
+    <string name="calendar_handoff_confirm_message">Hostile Location Protection is on. Your calendar app will store this event outside KyPost, where a wipe can\'t remove it.</string>
+    <string name="calendar_handoff_confirm_positive">Open calendar</string>
     <string name="email_pgp_client_protected">This message is end-to-end encrypted. The server holds no key for it.</string>
     <string name="email_pgp_open_webmail_button">Open in webmail</string>
     <string name="email_pgp_decrypt_button">Decrypt Email</string>
@@ -164,6 +222,14 @@
         <item quantity="other">%1$d attachments are too large to forward from this device — they won\'t be attached</item>
     </plurals>
     <string name="cancel">Cancel</string>
+    <string name="app_lock_offer_title">Lock KyPost?</string>
+    <string name="app_lock_offer_message">Your mail now opens without a PIN. An app lock keeps it closed to anyone holding your unlocked phone. You can set it up later in Settings, Security.</string>
+    <string name="app_lock_offer_accept">Set up app lock</string>
+    <string name="app_lock_offer_decline">Not now</string>
+    <string name="email_link_confirm_title">Open this link?</string>
+    <string name="email_link_confirm_message">It goes to\n\n%1$s\n\nFull address: %2$s</string>
+    <string name="email_link_confirm_phishing">This message was flagged as possible phishing. Check the address above, not the link text.</string>
+    <string name="email_link_confirm_open">Open</string>
     <string name="compose_format_bold">Bold</string>
     <string name="compose_format_italic">Italic</string>
     <string name="compose_format_underline">Underline</string>
@@ -187,6 +253,9 @@
     <string name="compose_pickup_dialog_title">Send an unencrypted link?</string>
     <string name="compose_pickup_dialog_body">We don\'t have a PGP key for %1$s. They\'ll get an email with a one-time link instead.\n\nTo make that work, this message\'s contents are stored on your KyPost server — unencrypted — for up to 7 days or until the link is opened. Everyone else on this message still gets it encrypted.</string>
     <string name="compose_pickup_dialog_confirm">Send link anyway</string>
+    <string name="compose_unthreaded_title">Send as a new conversation?</string>
+    <string name="compose_unthreaded_body">The server could not link this reply to the message it answers, so nothing was sent.\n\n%1$s\n\nYou can send it anyway; it will start a new conversation for the recipients.</string>
+    <string name="compose_unthreaded_confirm">Send anyway</string>
     <string name="compose_handoff_dialog_title">Finish this in webmail</string>
     <string name="compose_handoff_dialog_body">This composition won\'t be transferred to webmail. Open webmail and recreate it there. Your current fields and attachments will remain here when you return.</string>
     <string name="compose_send_needs_webmail">This account\'s PGP key is held only by your browser, so this app can\'t encrypt or sign. Use “Continue in webmail” to send it protected.</string>
@@ -251,7 +320,13 @@
     <string name="push_pairing_latest_keywords">Keywords: %1$s</string>
     <string name="push_pairing_notifications_denied">Notifications are off. Push still arrives in the in-app history.</string>
     <string name="push_pairing_qr_scan_failed">QR scan was cancelled or failed.</string>
-    <string name="compose_fill_all_fields">Fill in the recipient, subject and message.</string>
+    <string name="compose_fill_all_fields">Fill in the recipient and message.</string>
+    <string name="compose_empty_subject_title">Send without a subject?</string>
+    <string name="compose_send_custody_pending">Still checking this account\'s encryption settings. Try again in a moment.</string>
+    <string name="compose_custody_check_failed">Couldn\'t check this account\'s encryption settings, so Send is off.</string>
+    <string name="compose_custody_retry">Retry</string>
+    <string name="compose_empty_subject_add">Add subject</string>
+    <string name="compose_empty_subject_send">Send</string>
     <string name="push_pairing_status_not_paired">Not paired</string>
     <string name="push_pairing_resync">Re-sync token</string>
     <string name="push_pairing_unpair">Unpair device</string>
@@ -296,6 +371,54 @@
     <string name="contacts_refresh">Sync now</string>
     <string name="contacts_sync_success">Contacts synced</string>
     <string name="contacts_sync_unauthorized">Device pairing expired or invalid — re-pair this device in Settings</string>
+    <plurals name="contacts_sync_waiting">
+        <item quantity="one">%d change waiting to sync</item>
+        <item quantity="other">%d changes waiting to sync</item>
+    </plurals>
+    <string name="contacts_sync_stuck">Sync stuck</string>
+    <plurals name="contacts_sync_stuck_waiting">
+        <item quantity="one">Sync stuck: %d change waiting</item>
+        <item quantity="other">Sync stuck: %d changes waiting</item>
+    </plurals>
+    <string name="contacts_sync_stuck_no_reason">Not sent for over an hour.</string>
+    <string name="contacts_sync_retry">Retry</string>
+    <string name="contacts_share_vcard">Share as vCard</string>
+    <string name="contacts_export_vcard">Export all as vCard</string>
+    <string name="contacts_vcard_version_title">vCard format</string>
+    <string name="contacts_vcard_v4">vCard 4.0</string>
+    <string name="contacts_vcard_v3">vCard 3.0 (older apps)</string>
+    <string name="contacts_vcard_share_title">Share contacts</string>
+    <string name="contacts_vcard_share_failed">No app can receive contacts</string>
+    <string name="contacts_vcard_none">No contacts to export</string>
+    <string name="contacts_vcard_blocked_hostile">Contacts can\'t be shared while Hostile Location Protection is on. The receiving app could save them anywhere.</string>
+    <string name="contacts_vcard_import_menu">Import vCard…</string>
+    <string name="contacts_vcard_import_title">Import contacts?</string>
+    <plurals name="contacts_vcard_import_message">
+        <item quantity="one">%d contact from this file will be added and synced to your server:</item>
+        <item quantity="other">%d contacts from this file will be added and synced to your server:</item>
+    </plurals>
+    <plurals name="contacts_vcard_import_more">
+        <item quantity="one">…and %d more</item>
+        <item quantity="other">…and %d more</item>
+    </plurals>
+    <plurals name="contacts_vcard_import_skipped">
+        <item quantity="one">%d card has no name, email or organization and will be skipped.</item>
+        <item quantity="other">%d cards have no name, email or organization and will be skipped.</item>
+    </plurals>
+    <string name="contacts_vcard_import_positive">Import</string>
+    <plurals name="contacts_vcard_import_done">
+        <item quantity="one">%d contact imported</item>
+        <item quantity="other">%d contacts imported</item>
+    </plurals>
+    <string name="contacts_vcard_import_outbox_busy">Some changes are still waiting to sync. Sync them first, then import.</string>
+    <string name="contacts_vcard_import_unreadable">Couldn\'t read that file.</string>
+    <string name="contacts_vcard_import_too_large">That file is larger than %d KB.</string>
+    <string name="contacts_vcard_import_not_utf8">That file isn\'t UTF-8 text.</string>
+    <string name="contacts_vcard_import_malformed">That file isn\'t a valid vCard.</string>
+    <string name="contacts_vcard_import_unsupported_version">Only vCard 3.0 and 4.0 files can be imported.</string>
+    <string name="contacts_vcard_import_too_many_contacts">That file has too many contacts. The limit is %d.</string>
+    <string name="contacts_vcard_import_too_many_values">A contact in that file has too many values in one field. The limit is %d.</string>
+    <string name="contacts_vcard_import_empty">No contacts found in that file.</string>
     <string name="contacts_dedupe">Find &amp; merge duplicates</string>
     <plurals name="contacts_dedupe_result">
         <item quantity="one">Merged %d duplicate contact</item>
@@ -394,13 +517,23 @@
     <string name="loading_emails">Syncing emails…</string>
     <string name="inbox_updated">Updated %1$s</string>
     <string name="inbox_not_updated">Not updated yet</string>
+    <string name="inbox_empty">No messages in %1$s</string>
+    <string name="search_hint">Search mail</string>
+    <string name="search_no_results">No matching messages</string>
     <plurals name="inbox_new_mail">
         <item quantity="one">%1$d new message</item>
         <item quantity="other">%1$d new messages</item>
     </plurals>
     <string name="finding_email">Finding new email…</string>
     <string name="no_archive_folders">No archive folders found</string>
+    <string name="special_folder_missing">No %1$s folder on this account</string>
     <string name="email_not_found">Email no longer available</string>
+    <string name="load_older_mail">Load older mail</string>
+    <string name="label_with_unread">%1$s · %2$d</string>
+    <plurals name="tab_unread_description">
+        <item quantity="one">%1$s, %2$d unread</item>
+        <item quantity="other">%1$s, %2$d unread</item>
+    </plurals>
 
     <string name="contacts_device_sync_enable">Enable device contact sync</string>
     <string name="contacts_device_sync_disable">Disable device contact sync</string>

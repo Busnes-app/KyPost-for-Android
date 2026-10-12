@@ -61,7 +61,13 @@ internal class FakePushStore(
         // marker whether or not the purge it wraps could prove itself complete.
         reconnectMarker = null
         if (purgeResidue.isEmpty()) {
-            backing.value = backing.value.copy(pairing = null)
+            // As PushRepository.clearPairing: the UnifiedPush endpoint goes with the pairing.
+            backing.value = backing.value.copy(
+                pairing = null,
+                unifiedPushEndpoint = null,
+                unifiedPushP256dh = null,
+                unifiedPushAuth = null,
+            )
             storedPin = null
         }
         return purgeResidue
@@ -77,6 +83,18 @@ internal class FakePushStore(
 
     override suspend fun updateUnifiedPushRegistration(endpoint: String?, p256dh: String?, auth: String?) {
         backing.value = backing.value.copy(unifiedPushEndpoint = endpoint, unifiedPushP256dh = p256dh, unifiedPushAuth = auth)
+    }
+
+    override suspend fun storeUnifiedPushEndpoint(
+        endpoint: String?,
+        p256dh: String?,
+        auth: String?,
+        generation: Long,
+    ): Boolean {
+        // As PushRepository.storeUnifiedPushEndpoint: an ended session stores nothing.
+        if (!org.kysecurity.mail.ProcessState.isCurrent(generation)) return false
+        updateUnifiedPushRegistration(endpoint, p256dh, auth)
+        return true
     }
 
     override suspend fun updateSyncState(lastSyncAtEpochMs: Long?, syncError: String?) {

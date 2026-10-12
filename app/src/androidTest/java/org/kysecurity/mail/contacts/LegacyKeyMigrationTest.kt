@@ -60,13 +60,13 @@ class LegacyKeyMigrationTest {
                 execSQL(
                     "INSERT INTO contacts (uid, rev, fn, emailsJson, phonesJson, addressesJson, pgpKey, pgpKeyFingerprint, " +
                         "pgpKeyNeedsReverification) VALUES (?, 3, 'Alice', ?, '[]', '[]', ?, ?, ?)",
-                    arrayOf(row.uid, """[{"value":"Alice@Example.invalid"}]""", row.key, row.fingerprint, if (row.alarmed) 1 else 0),
+                    arrayOf<Any?>(row.uid, """[{"value":"Alice@Example.invalid"}]""", row.key, row.fingerprint, if (row.alarmed) 1 else 0),
                 )
             }
             close()
         }
         return Room.databaseBuilder(context, AppDatabase::class.java, TEST_DB)
-            .addMigrations(AppDatabase.MIGRATION_12_13, AppDatabase.MIGRATION_13_14, AppDatabase.MIGRATION_14_15)
+            .addMigrations(AppDatabase.MIGRATION_12_13, AppDatabase.MIGRATION_13_14, AppDatabase.MIGRATION_14_15, AppDatabase.MIGRATION_15_16)
             .build()
             .also { db = it }
     }

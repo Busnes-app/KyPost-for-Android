@@ -48,9 +48,14 @@ data class DeviceContactUpdatePlan(
     fun hasOrganizationChange(): Boolean = org != null || title != null || department != null
 
     /** True when applying this plan to [snapshot] leaves the phone with [dto]'s value for every
-     *  merged field. */
+     *  merged field, including those the plan never writes. */
     fun leavesDeviceMatching(dto: ContactDto, snapshot: DeviceRawContactSnapshot): Boolean =
         nextBase(dto, snapshot, base = null) != null
+
+    /** The department the phone holds once this plan lands; the Organization row writer emits
+     *  exactly this. A blank planned value is a clear. */
+    fun departmentAfter(snapshot: DeviceRawContactSnapshot): String? =
+        (department ?: snapshot.department)?.ifBlank { null }
 
     /** The merge base once this plan lands: [dto]'s value for each field the phone will then hold
      *  too, [base]'s for the rest. Without a [base], null unless every field agrees. */
@@ -70,7 +75,7 @@ data class DeviceContactUpdatePlan(
             phoneticFamilyName = pick(phoneticFamilyName, snapshot.phoneticFamilyName, dto.phoneticFamilyName, old.phoneticFamilyName),
             org = pick(org, snapshot.org, dto.org, old.org),
             title = pick(title, snapshot.title, dto.title, old.title),
-            department = pick(department, snapshot.department, dto.department, old.department),
+            department = pick(null, departmentAfter(snapshot), dto.department, old.department),
             notes = pick(notes, snapshot.notes, dto.notes, old.notes),
             birthday = pick(birthday, snapshot.birthday, dto.birthday, old.birthday),
             emails = pick(emails, snapshot.emails, dto.emails, old.emails),

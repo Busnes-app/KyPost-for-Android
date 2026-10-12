@@ -8,6 +8,7 @@ import org.kysecurity.mail.testing.FakeCallFactory
 import org.kysecurity.mail.testing.response
 import kotlinx.coroutines.runBlocking
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -74,12 +75,32 @@ class ComposePgpControllerTest {
     }
 
     @Test
-    fun composeState_withoutPairing_hidesEverything() = runBlocking {
+    fun composeState_withoutPairing_isUnknown() = runBlocking {
         val controller = ComposePgpController(
             pairingProvider = { null },
             bootstrapClient = PgpBootstrapClient(callFactory = FakeCallFactory { request -> response(request, "{}", 200) }),
             recipientKeyClient = RecipientKeyClient(callFactory = FakeCallFactory { request -> response(request, "{}", 200) }),
         )
+
+        assertNull(controller.composeState())
+    }
+
+    @Test
+    fun composeState_whenBootstrapFails_isUnknownNotNoIdentity() = runBlocking {
+        // Valid pairing, failed fetch: all-false flags here would read as "no identity" and let a
+        // client-custody account send in the clear.
+        val controller = ComposePgpController(
+            pairingProvider = { testPairing() },
+            bootstrapClient = PgpBootstrapClient(callFactory = FakeCallFactory { request -> response(request, "unavailable", 503) }),
+            recipientKeyClient = RecipientKeyClient(callFactory = FakeCallFactory { request -> response(request, "{}", 200) }),
+        )
+
+        assertNull(controller.composeState())
+    }
+
+    @Test
+    fun composeState_withoutIdentity_isKnown() = runBlocking {
+        val controller = controllerWith(bootstrapBody = """{"hasIdentity":false,"protection":""}""")
 
         assertEquals(
             PgpComposeState(canEncrypt = false, canSign = false, handoffToWebmail = false),
@@ -149,12 +170,12 @@ class ComposePgpControllerTest {
             enrollmentProbe = { enrolled },
         )
 
-        assertTrue(controller.composeState().handoffToWebmail, "unenrolled device hands off")
+        assertTrue(controller.composeState()!!.handoffToWebmail, "unenrolled device hands off")
         assertEquals(org.kysecurity.mail.pgp.DraftHandoffMode.OPEN_WITHOUT_SAVE, controller.draftHandoffMode())
 
         enrolled = true
 
-        assertTrue(controller.composeState().clientSide, "enrolling mid-session must take effect")
+        assertTrue(controller.composeState()!!.clientSide, "enrolling mid-session must take effect")
         assertEquals(org.kysecurity.mail.pgp.DraftHandoffMode.ENCRYPT_AND_SAVE, controller.draftHandoffMode())
         enrolled = false
         assertEquals(org.kysecurity.mail.pgp.DraftHandoffMode.OPEN_WITHOUT_SAVE, controller.draftHandoffMode())

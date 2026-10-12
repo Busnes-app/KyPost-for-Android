@@ -16,6 +16,8 @@ Owns production Android app code and resources.
 - A pinned client pins exactly the host it was built for; `CertificatePinner` passes every other host vacuously. So `PinnedCallFactoryProvider` hands back the `TlsPin` TOGETHER with the client, re-reading the pin INSIDE its lock, and `PinnedOrFallbackCallFactory` refuses any request whose host is not the pinned one. Every URL this app builds is same-origin with the pinned relay (`sameOrigin`, `resolvePullEndpoint`), so a mismatch means a re-pair landed under an in-flight call — refusing is the only answer that does not put device credentials on plain system trust. Never return a bare `Call.Factory` from the provider: it is the pairing of pin and client that makes the check possible.
 - Recovering a credential is NOT unpairing. `PushRepository.resetPairingCredential` drops the pairing proof and TLS pin while keeping mail, contacts and keys; `clearPairing`/`unpairDevice` stay the destructive pair, for a deliberate unpair and for `attemptPairing`'s account-replacement branch. A rotated certificate or a stranded device secret must route to the former — "Reconnect to server" on the pairing screen — never the latter. Because it keeps the data, it must also record whose: `SecurePairingStore.clearPairing(rememberForReconnect = true)` writes a `ReconnectExpectation` in the SAME commit that removes the pairing. `savePairing` spends it, the destructive clear drops it, and a second reconnect with no pairing left to name leaves the first one standing.
 - Registration and pull are each serialized by a coordinator-owned `Mutex` (`PushSyncCoordinator.registrationGate`, `PullSyncCoordinator.pullGate`), and the current pairing is read INSIDE the lock. Both are entered from several places at once — Firebase token rotation, UnifiedPush endpoint changes, foreground resync, the pairing screen, `PullWorker` — and both have read-then-write state that overlapping runs corrupt: every registration invalidates the previous `deviceSecret`, so a late reply persisting over a newer one strands the install; the pull cursor is read at the start and advanced at the end, so two runs notify the same batch twice. `NonCancellable` does not help with either — it guards a persist against cancellation, not against a competitor.
+- A UnifiedPush endpoint and its WebPush keys (`push_state`) mean "the distributor gave us this", not "the server has it" — `transport` says what is registered. `onNewEndpoint` stores them on arrival, paired or not, AFTER the abandoned-wipe guard. It captures `ProcessState.generation()` in the callback, and `PushRepository.storeUnifiedPushEndpoint` checks it INSIDE the DataStore write, so a callback released after an unpair or wipe stores nothing. Revocations (`onUnregistered`, the gms `onRegistrationFailed`) capture it the same way and clear through the same checked write (`forgetUnifiedPushEndpoint(generation)`); a stale one clears nothing and skips its error update and FCM fallback, because the coordinator's queue outlives a graph invalidation. Every UnifiedPush callback goes through `PushSyncCoordinator.enqueueUnifiedPush`, one FIFO queue fed synchronously from the callback, so a revocation can never be overtaken by the endpoint it revokes. The store-on-arrival exists because the fdroid build has no other credential, and the distributor usually answers before pairing, so the pairing screen offers the UnifiedPush choice before a device is paired. `attemptPairing` and `resyncActiveTransport` prefer a stored endpoint on every flavor, choosing inside `registrationGate`. It is dropped by a successful non-UnifiedPush registration, by `onUnregistered` and the gms `onRegistrationFailed` (`forgetUnifiedPushEndpoint`, under the gate), by `clearPairing`, and by the wipe (see the DataStore rule below). `resetPairingCredential` keeps it: the distributor is still registered and re-pairing needs it. `UnifiedPushEndpointTest` pins this.
+- A preferences DataStore is never removed by deleting its file alone. DataStore 1.1 keeps serving its in-memory cache for a file deleted underneath it, and a later edit re-reads the empty file, sees no change, and never refreshes that cache. The wipe relaunches in-process (`AppRestart`), so the old values stayed readable. Every deletion goes through `clearAndDelete` (`DataStoreFiles.kt`), which clears through DataStore and then deletes the file. Every store therefore has a `ReplaceFileCorruptionHandler`: without one, a malformed file throws on the clear and is never deleted, so the wipe fails on every retry. The wipe clears each store independently. That covers the wipe's `datastores` step (all three stores), the unpair purge (`mail_sync_state`, `contacts_state`) and `deletePlaintextMetadataStores`. A new DataStore must be added to `SecurityWipe`'s `dataStores`. `WipeResurrectionTest` and `AccountPurgeDataStoreTest` pin this.
 - Whether a pairing is an account replacement is `isAccountReplacement(incoming, currentPairing, reconnectExpectation)`, never "is there a pairing right now". A reconnect leaves account-scoped data with no pairing, so the pairing alone under-reports; the marker is the second input. `attemptPairing` purges on it and `PushPairingActivity` picks the replace-warning dialog from the same answer (`PushRepository.replacesAnotherAccount`), so the warning cannot disagree with what happens. No pairing and no marker is a first-ever pairing: it must purge nothing.
 - Account replacement is staged: `attemptPairing` registers FIRST and only then purges the account being replaced. Nothing may be destroyed before the replacement is proven, or an offline scan of a valid QR silently unpairs a working account. `clearPairing` returns the stores that survived the purge; a non-empty result during replacement refuses the new account and escalates to `SecurityWipe.wipeAndResetApp`, because no table carries a subscriber column and survivors are readable by whoever pairs next. Never let a purge failure become a log line.
 - A PIN change is staged, not swapped in place. The verifier (`app_lock_secure`) and the wrapped device secret (`push_pairing_secure`) are different preference files, so no single `commit()` covers both. `SecuritySettingsActivity.changePin` writes the new wrapping via `SecurePairingStore.stagePendingSecret` **before** `setPin`, `resolveDeviceSecret` tries the live wrapping then the staged one, and the following `savePairing` promotes and clears the staged copy. Without staging, a process death between the two files sealed the secret under a key no surviving PIN derived, `needsCredentialRewrap()` could not see it (it answers a scheme-version question only — `deviceSecretIsStranded` is the one that detects this), and the relay's eventual 409 read to the user as "re-pair this device". Both of its key derivations go through `CredentialCipher.deriveKeysOrNull` and abort the change on null: an unreadable Keystore pepper is not a wrong PIN, and letting `PepperUnavailableException` out killed the process mid-protocol. Both abort points sit ahead of `setPin`, so there is nothing staged to roll back. `SourceRulesTest.credentialDerivationsHandleAnUnavailableKeystore` keeps raw `deriveKeys` out of every caller but `AppLockManager`.
@@ -34,6 +36,9 @@ Owns production Android app code and resources.
 - MFA push 2FA: an incoming FCM data payload with `type: "mfa_challenge"` and `challengeId` is parsed by `MfaChallengePayloadParser` (distinct from the mail payload parser) and shown via a separate high-importance notification channel (`PushNotificationDispatcher.showMfaChallenge`). The notification carries **no Approve/Deny actions and no challenge detail** — it is tap-to-open only. Notification actions fire from the lock screen with no authentication, which let anyone holding the powered-on device approve a sign-in and bypassed the PIN/biometric/lockout/wipe apparatus entirely; the `MfaResponseReceiver` that backed them has been deleted. The decision happens only in `MfaApprovalActivity`, which re-authenticates via `BiometricPrompt` (`BIOMETRIC_STRONG or DEVICE_CREDENTIAL`) and re-checks `MfaChallengeTracker.isPending` before either button does anything. `MfaResponder.respond` POSTs to `{serverUrl}/api/mfa/push/respond` via `MfaResponseClient` using the same device-id/secret pairing credential as native register/pull. `MfaChallengeTracker` is SharedPreferences-backed, not in-memory: FCM delivers to short-lived processes, so an in-memory record was usually gone before the user tapped. Each challenge gets its own notification id — coalescing distinct challenges onto one id meant answering either cancelled both.
 - Push notifications are shown via Android notification channel and copied into in-app history preview. While `AppLockManager.locked` is true, title/text are replaced with a generic string and visibility is `VISIBILITY_SECRET`; while Hostile Location Protection is on, history is held in memory only and never written to the `push_state` DataStore.
 - Every screen except `UnlockActivity` and `MfaApprovalActivity` extends `security.LockedActivity`, which redirects to the unlock screen in `onStart` (and `finish()`es, so nothing is left underneath to reveal with Back) and applies `FLAG_SECURE`. Do not extend `AppCompatActivity` directly for a new screen. Both exceptions gate on `SecurityWipe.startupVerdict` themselves, and a gate that returns from `onCreate` without `finish()` still starts and resumes the activity — so each carries a stand-down flag (`redirectedToUnlock`, `awaitingStartupVerdict`) that every other lifecycle callback touching a `lateinit` view must honour.
+- A dialog is a separate window and does not inherit the Activity's `FLAG_SECURE`. Show every
+  `AlertDialog` with `.create().showSecurely()`; `SourceRulesTest.alertDialogBuildersAreShownSecurely`
+  refuses a builder chain ending in `.show()`.
 - The startup notices (credential reset, stranded downloads) are one-shot **per process**: the latch is spent when the dialog is built, and the pref behind it is cleared only by the user tapping OK. They are therefore claimed through `claimNotice` *after* the unlock redirect, and never by a screen that is going away — `MainActivity` sets `showsStartupNotices = false` because it routes on and finishes. A screen that finishes itself must do the same, or the notice (including "your cached mail is gone") dies unseen for the rest of the process. `StartupNoticeLatchTest` covers the gate.
 - Android 13+ notification runtime permission is requested from launcher UI.
 - `signon/` is KyIdentity sign-in through KyAuth's AccountManager account. Details:
@@ -42,6 +47,11 @@ Owns production Android app code and resources.
   - `KyIdentitySignOnActivity`: one account is used directly; zero or several go to `AccountManager.newChooseAccountIntent`, used only to pick (accounts are created in KyAuth, so no add-account fallback). Cancelling the chooser or KyAuth's prompt leaves the user on the sign-in screen with no message, except a chooser opened with zero accounts, which sets the `kyidentity_signon_no_account` hint. The account's `server_url` must equal the config's `issuerUrl` (`IssuerMatch.sameIssuer`, pure; both sides must parse; the error shows full canonical origins). `getAuthToken` passes option `KyIdentitySignOn.OPTION_ORIGIN` (`org.kysecurity.identity.origin`), the canonical origin (`relayOrigin`: scheme, punycoded lowercase host, port unless 443) of the URL the client connected to, parsed by the same `pairingEndpoint` path; an unusable URL is refused locally before `getAuthToken`; KyAuth's prompt names the relay host and binds the token to it, and refuses a missing or insecure one with `IllegalArgumentException` ("A secure relay address is required"), shown via the sanitised path below. `getAuthToken` and the exchange run in `KyPostApp.appScope`, not `lifecycleScope`: KyAuth's full-screen prompt stops KyPost, and with the "Immediately" lock (or a >30 s detour) `LockedActivity` redirects to Unlock and finishes this activity, which would cancel the flow and drop the approved token. The result (the parsed `PairingData`, never the token) goes to the process-scoped, single-use `PendingPairingLink` (cleared on `SecurityWipe` via `ProcessState`); `PushPairingActivity.onResume` takes it and runs `confirmAndApplyPairing`, so the host-confirm dialog still applies. If the activity is alive it also finishes and shows errors as status text; if destroyed it does neither. The token stays a local. The activity is `configChanges`-protected against rotation.
   - Flavors: KyAuth pins only `org.kysecurity.mail`, so the button shows only when `BuildConfig.APPLICATION_ID` is that and the authenticator pin passes. `github` and `fdroid` hide it until KyAuth pins them. KyAuth authors its own `AuthenticatorException`, `UnsupportedOperationException` and `IllegalArgumentException` texts; the activity shows their first line (at most 200 chars). Other failures show a generic string.
   - Device checklist (unverified on hardware): chooser with zero and with several accounts; cancelling KyAuth's prompt; visibility of an account KyAuth created before KyPost was installed; `getPackageInfo` on KyAuth succeeding through `<queries>`; rotation mid-flow; prompt shows the typed relay host; "Immediately" lock setting round trip (KyAuth prompt, unlock, pairing confirm dialog appears); 30 s grace with the chooser to KyAuth pairing detour; github-flavor refusal (button hidden).
+- After a registration succeeds from the pairing screen (`PushHomeViewModel.paired`, a conflated
+  channel, so a screen stopped by KyAuth's prompt still receives it), `AppLockOffer` suggests an
+  app lock once per install, and only if none is set. It is never forced: "Not now" is a final
+  answer. The offer is spent when shown, committed synchronously, so rotation or Back cannot make
+  it nag. Accepting opens Security settings.
 - `MainActivity` is a router, not a home screen: it sends paired devices to `InboxActivity` and
   unpaired devices to `PushPairingActivity`, then finishes itself. It passes `EXTRA_MESSAGE_ID`
   from push notifications to `InboxActivity` to
@@ -85,16 +95,69 @@ Owns production Android app code and resources.
      daily since=0 self-heal — a day of silently missing messages. The delta itself lands through
      `EmailDao.applyFolderDelta`, one transaction, so it cannot half-apply.
   2. HTTP 200 from `/api/inbox/actions` is transport success, not operation success: the relay
-     answers 200 with per-id `failed[]` (Mobile_Mail_Relay.md Part 2). `MailOutcome<MailActionOutcome>
+     answers 200 with per-id `failed[]` (docs/Mobile_Mail_Relay.md Part 2). `MailOutcome<MailActionOutcome>
      .appliedTo(id)` is the only gate on touching the local row — archive/spam/delete/move drop the
      cached row and `markRead` sets `status`, both **after** the relay confirms that id, never
      before. A rejection becomes `MailOutcome.ActionRejected`, not `UpstreamFailure`: the request
      did reach the server, and "Couldn't reach the mail server" sends the user to check a
      connection that is fine. `processed` is a count rather than a list, so `processed < 1` with an
      empty `failed[]` is also treated as rejected — an unconfirmed operation must not delete a
-     locally visible row. `markRead` is deliberately not optimistic: it already runs on `MailBackgroundExecutor`
-     and reports nothing, so a pre-emptive local write bought no responsiveness and left the row
-     lying about a state the server never reached.
+     locally visible row. The *display* is optimistic, Room is not: `PendingMailActions`
+     (in memory, session-scoped through `ProcessState`) makes `cachedEmails` hide a row with an
+     archive/spam/delete/move in flight and show a row read while the open's `markRead` is in
+     flight, and forgets both when the call fails. Each key holds its latest `PendingMail`, so an
+     earlier claim finishing never clears a later one's overlay. `markUnread` (KyPost-Server #350),
+     from the detail screen's Mark unread button and the inbox selection's overflow (Mark read /
+     Mark unread, one call per row; long-press stays select), takes no overlay: neither explicit
+     action repaints the row until the relay confirms, and both are session-guarded like the rest
+     (the generation is captured when the user acts). A server without the action answers 400
+     "unsupported action", which is toasted as is. The open's markRead (claimed with `beginRead`
+     before it is queued), the detail button and the inbox selection all go through
+     `ReadStateLane.ordered`, a process-wide chain: each read-state change waits for the one
+     requested before it (30 s at most), across screens and reopens. The pool has two threads, so
+     without it a read still in flight could land after the unread and win; it also means the
+     open's read overlay is gone before a later unread runs. The row repaint matches folder as well
+     as id. A confirmed removal stays in `removed`, and refresh and older-mail writes
+     drop those ids: an IMAP UID is never reused in its mailbox, so a refresh that read the window
+     before the removal must not resurrect it. The inbox puts a row whose swipe failed back in
+     place with a Retry snackbar. A row action carries the `MailAccount` (subscriberId, serverUrl)
+     its rows were read under; `RelayMailSource.performAction` sends nothing when the pairing it
+     builds the request from is a different account. The inbox drops a failure (no row, no Retry)
+     unless the session generation captured at the swipe is still current and the active pairing
+     (read on the worker, since the screen's account only updates on repaint) is still the row's
+     account. Every removal and the open's read is claimed on the caller's thread before it is queued
+     (`MailRepository.beginRemoval`/`beginRead` return a `PendingMail` carrying the generation
+     then): the overlay shows at once, the action is not sent if that generation has ended, and a
+     completion writes the removal set or Room only while it is current, under the lock the reset
+     takes. Refresh filtering and writes take that same lock. A task the executor refuses or
+     discards unrun calls `abandon`. `PushRepository.clearPairing` holds mail work
+     (`MailBackgroundExecutor.quiesce`) until the outgoing pairing is cleared. A failed read
+     notifies `setOverlayListener`, and the inbox repaints from the cache (a failed removal is the
+     inbox's own failure path to restore or drop, never a cache repaint); it also paints the
+     cache before every non-pull network refresh, so a row opened and marked read shows read at once.
+- **Older mail and reliable deltas (KyPost-Server #348/#349; each part degrades to the old
+  behaviour on a server without it).** Every `/api/inbox` request uses `WINDOW_LIMIT`: the relay
+  keeps one window and cursor per `limit`. `EmailEntity.inWindow` is false for rows older than the
+  window — paged in by "Load older mail" (`MailRepository.loadOlder`, `before=`) or reported
+  `agedOut` — and snapshots prune only `inWindow` rows, so the daily since=0 resync never drops
+  paged-in mail. A snapshot first takes absent rows dated before its oldest row out of the window
+  (they aged out unreported, e.g. under a forgotten cursor); it prunes only absent rows inside its
+  date range. `removed` still deletes any row. A page row is metadata only, so a held row keeps
+  its body and PGP/attachment flags and takes only status and labels. A body opened on an
+  out-of-window row is never cached: a paged row has no `pgpEncrypted`, which is what
+  `clearServerDecryptedBodies` keys on at enrollment. A delta with `hasMore`
+  pages down from `nextBefore` until a page holds an id Room already had, stores those rows, and
+  only then commits the cursor. The window and the walk are written in one Room transaction
+  (`EmailDao.inTransaction`). A failed or contradictory walk (no `nextBefore`, a page without
+  `hasMore`) stores nothing, not even the window, and keeps the old cursor: any stored row would
+  count as held, and a retry after newer mail would stop at it and commit past the gap. `delta: false` answering a
+  cursor is a snapshot. A `before=` answer without `hasMore` is a server that ignored it; it is
+  refused, never stored. A storage failure reading the row to page from or storing a page is reported as
+  `OLDER_MAIL_NOT_SAVED`, never thrown, and keeps the paging frontier and the footer for a retry; only an empty folder hides it. Known gaps: the relay tracks deletions only inside its window, so an
+  out-of-window row stays until the user acts on it; such rows are not healed by the daily resync
+  after a UIDVALIDITY reset; encrypted mail stored from a page (older mail, or delta overflow)
+  lacks its PGP flags because the page carries none, so it opens through `/api/mail/body` with no
+  webmail handoff; overflow paging stops after `MAX_OVERFLOW_PAGES`.
 - **`emails` is keyed on (folder, messageId), not messageId.** The relay's id is an IMAP UID,
   unique only within one mailbox, so INBOX and Archive can both hold `42`; under the old
   single-column key a refresh of either folder overwrote or relocated the other's row, and a
@@ -257,8 +320,10 @@ Owns production Android app code and resources.
   `pgpRowMarker` marks inbox rows for the two states that yield nothing readable (🔒 client-protected,
   ⚠ decrypt failed) and deliberately leaves server-decrypted rows unmarked — those open normally, so
   a marker would sit on most rows of a server-mode mailbox carrying nothing actionable. `EmailAdapter`
-  also sets a spelled-out `contentDescription` for those two, because screen readers announce emoji
-  inconsistently.
+  spells those two out in the row's `contentDescription`, because screen readers announce emoji
+  inconsistently, together with unread and attachment state (the dot and 📎 have no voice) and the
+  preview line, which the row-level description would otherwise hide. Inbox rows also carry Archive
+  and Delete accessibility actions, the screen-reader form of the swipes.
   A failed signature or a CHANGED signer key (`PgpSignatureState.KEY_CHANGED`) outranks both with
   ⚠. `SIGNER_UNKNOWN` deliberately does not mark: it is the ordinary state for a correspondent not
   yet in the address book, and a glyph on most rows carries nothing actionable.
@@ -306,6 +371,20 @@ Owns production Android app code and resources.
   itself. It is launched as an `ACTION_VIEW` intent so an installed PWA or the user's browser handles
   it, with the session it already has; **never** an in-app WebView, which would share no session and
   would put an account-password field inside this app.
+- **Reply threading (KyPost-Server #352).** Reply and Reply All send `replyToMessageId` and
+  `replyToMailbox` (the row's id and folder) on `/api/mail/send` only, never on drafts or
+  `/api/mail/send-pgp`; the fields are omitted when null, so an older relay sees the request it
+  always did and sends unthreaded. The reference reaches Compose through `ReplyThreadHandoff`, a
+  process-scoped map keyed by a random token on the Intent, because `ComposeActivity` is exported
+  and a plain extra would let any app thread its prefilled message onto mail in this mailbox. It
+  survives the lock in `CachedDraft.replyTo`. `MailOutcome.ReplyThreadingRefused` is one of the
+  relay's four exact refusal sentences (`isReplyThreadingRefusal`), matched whole: other 502s on
+  this endpoint can follow a delivery and quote SMTP text, so a word match could offer to re-send
+  mail that already went out. On a refusal (sent before any delivery) Compose asks whether to send
+  unthreaded and only re-sends on a yes. Any other failure, and every timeout, is reported and
+  never re-sent. `dispatchSend` allows one send in flight (the composer's `ComposeSend.InFlight`,
+  started or adopted after a rotation) and records the draft it sent, so the pickup and unthreaded
+  dialogs re-send from each other's result rather than looping.
 - `MailOutcome.ClientSideNeeded` is relay 409 carrying `clientSideNeeded` on `/api/mail/send` — a
   client-protected account asked the server to sign or encrypt and it refused rather than silently
   sending in the clear. `MailOutcome.RateLimited` is relay 429 with `Retry-After` (the per-device
@@ -368,12 +447,73 @@ Owns production Android app code and resources.
     the server-side one works by storing plaintext, which is what client custody exists to prevent.
   - `accountAddress` is bootstrap's `suggestedUserIDs[0]` and nothing else — the server derives it
     from the same expression `handleMailSendPGP` feeds to `resolveMailFrom`. Do not derive it from
-    the public key's User ID or the self-contact.
+    the public key's User ID or the self-contact. The whole list (account address plus verified
+    send-as aliases) is `addresses` (`accountAddresses()`), which Reply All (`replyAllRecipients`) leaves out.
   - `ComposePgpController` caches the **bootstrap**, not the composed state: custody is fixed at key
     creation but enrollment can change mid-process, so it is re-probed on every `composeState()`.
   - Sign-only is impossible (the relay accepts `multipart/encrypted` only), so the two chips are
     coupled when `clientSide`.
-- Inbox tabs come from the relay's `tabs`/`label` response fields.
+- Inbox tabs come from the relay's `tabs`/`label` response fields. IMAP system keywords (`$…`,
+  `\…`) are message state, never tabs: `KeywordTabs.isSystemKeyword` filters them in `buildTabs`
+  and on both the write and read side of `KeywordSettings`. They stay on `Email.keywords`, where
+  `isFlaggedPhishing` reads `$Phishing`.
+- Inbox search (`MailRepository.search` → `GET /api/mail/search?q=&mailbox=&limit=`) searches the
+  folder on screen, all fields. Results are never written to Room (they are a view of the folder,
+  not its sync window), each row is stamped with the searched mailbox, and they replace the list only while their query and folder are still on
+  screen (`applySearchResults`). A folder switch, a notification tap or editing the submitted text ends the search; a failed search shows the folder list. The query is
+  kept out of the saved-state Bundle. `InboxSearchTest` covers the stale-result guards.
+  Because a result has no Room row, opening one passes its To/Cc to the detail screen
+  (`email_sent_to`/`email_cc`). They seed Reply All and are handed to `fetchBody`, which uses them
+  when no row exists (`SearchResultReplyAllTest`).
+- `showThemed()` (`ThemedDialog.kt`) shows a native AlertDialog through `showSecurely()` and then
+  tints its native surface (shape and insets kept), title, message, buttons, list rows and fields in the active palette
+  (STYLE_GUIDE.md §6). A dialog is its own window, so the Activity's theme walk never reaches it.
+  `ThemedDialogsTest` names the dialogs that must use it. The message screen's eight actions use
+  `@dimen/detail_action_size`: 35dp below a 360dp window, 40dp from it, 44dp from 400dp, so all
+  eight are on screen at 320dp and 360dp (`EmailDetailActionRowTest` checks positions, since
+  overflowing fixed-size buttons keep their size and are only clipped).
+- "Move to folder" (`MoveToFolder.kt`, detail screen) offers INBOX, the relay's top-level folders
+  and the Archive subfolders, minus the message's own folder (`moveTargets`), and runs
+  `MailRepository.move`, so the local row goes only once the relay confirms the id.
+- Long-pressing an inbox row starts selection mode (an AppCompat `ActionMode`: Archive, Move,
+  Junk, Delete). Taps toggle rows, swipes are off, and a folder switch or search ends it. Bulk
+  actions go through `MailRepository.mutateAll`, one relay call per source folder, with the same
+  claim-before-queue guard as a single action (`beginRemovals`; session and account captured at
+  the tap). That method
+  applies rule 2 above to a batch: it drops only ids absent from `failed[]`, and only when
+  `processed` equals their count. A shortfall `failed[]` does not explain (the relay stops early on
+  a cancelled request) confirms none.
+  A selection holds at most `MAX_ACTION_IDS` (500, the relay's per-request cap); `toggleSelected`
+  is the only entry point and refuses the 501st row with a toast. Search results replacing the
+  list end the selection, so a bulk action never covers rows the user can no longer see.
+  Selected rows have their folder pinned when the action is tapped, and the optimistic removal
+  matches (folder, id), so a Move answered after a folder switch cannot hide a same-id row in the
+  folder now on screen (`aLateBulkMoveRemovesOnlyRowsFromTheirOwnFolder`).
+- Inbox swipes and bulk actions are undoable: the rows are hidden at once, a 5 s Snackbar offers
+  Undo, and the relay is asked nothing until the window closes. One bar covers everything held:
+  a new action replaces the bar (`DISMISS_EVENT_CONSECUTIVE` commits nothing), and its Undo takes
+  back every held action. The bar itself closes the window (`commitsOnDismiss`: timeout or
+  swipe), because Android stretches its timeout for the accessibility "time to take action"
+  setting and a separate timer would commit while Undo is still on screen. Only the bar on screen
+  commits: a replaced bar can still time out after its replacement shows, and that dismissal is
+  ignored (`onUndoBarDismissed`). `PendingRowActions`
+  runs each held action exactly once, at that dismissal or at `onStop` (leaving the screen
+  confirms it), or never once undone. A process killed in the foreground inside the window loses
+  the action, so the mail stays where it was. The detail screen's actions finish the Activity and
+  are not undoable. `InboxUndoTest` and `PendingRowActionsTest` cover this.
+- The folder picker's Sent and Drafts entries never guess a mailbox name. Each tap lists the
+  top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
+  the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A localized name
+  with no alias match shows "No Sent folder", because the relay exposes no special-use flag.
+- The inbox asks for `preview=1` (KyPost-Server #351): at most 200 characters of plain text the
+  server flattened from a body it already holds, shown muted under the sender in
+  `item_email.xml` as plain `TextView` text, never markup, with format characters (bidi
+  overrides, zero-width, tags; whole code points) dropped (`previewText`). A delta "updated" row carries none and keeps
+  its stored one; any other row takes what the server sent. It is never stored for a
+  `pgpEncrypted` row, whatever the server sends, and `clearServerDecryptedBodies` clears an
+  encrypted row's preview even without a cached body. An older server sends none and the row
+  shows no preview; a body is never used as one. The preview is not passed to the detail
+  screen: a summary must not be quoted or rendered as if it were the message.
 - The inbox is fetched with `bodies=0`, so **an inbox row never carries a body** and the `emails`
   table is a cache of the messages actually opened, not a mirror of the window. `fetchBody` fills a
   blank one from `GET /api/mail/body` and writes it back. Two rules hold this together, both with
@@ -391,6 +531,50 @@ Owns production Android app code and resources.
   HTML fallback/quoting, while HTML bodies must not be detected by content when the server supplied
   a mode. The detail screen renders known plain bodies in a native wrapping `TextView`, so email
   reading never requires horizontal scrolling.
+- Calendar invites (`mail/CalendarInvite.kt`, `CalendarHandoff.kt`). KyPost writes no calendar
+  and syncs none (DAVx5 does that). The detail screen downloads the first listed `text/calendar`
+  part (else `application/ics` / `.ics`) and parses it on the device with a strict RFC 5545
+  subset parser — no ical4j. Over 256 KiB, over 50 VEVENTs, or any structural error refuses the
+  whole invite; a refusal or throw only hides the card. Only a VEVENT's own properties count
+  (a VALARM's DESCRIPTION does not); RECURRENCE-ID overrides are never the headline event; an invite with no series master
+  (override-only, e.g. an Outlook single-occurrence update) does not parse and shows no card.
+  Lines are unfolded as bytes before UTF-8 decoding; dates resolve STRICT; format characters
+  (bidi, zero-width) are stripped from text and refused in addresses. The organizer is shown as
+  its bare `mailto:` address, never CN, and the card says when it is not the From address — the
+  sender writes both. A TZID over 128 chars, or one no IANA, last-2/3-segment or ICU Windows-name
+  lookup resolves, is read as floating and the card says so. **Add**
+  fires `ACTION_INSERT` on `Events.CONTENT_URI` (no calendar permission) and only on a tap;
+  CANCEL and REPLY offer no Add. Under Hostile Location Protection every calendar handoff,
+  including the "Create event from this email" overflow item (subject and body only, no date
+  guessing, never the decrypted body or protected subject), is confirmed first. A "Create
+  event" tap during the body fetch waits for it (`BodyFetchGate`) rather than going out
+  subject-only. The card is
+  only as reliable as the relay's listing: invites appear only when `hasAttachments` is true.
+- RSVP (Accept/Maybe/Decline on the invite card) sends an RFC 5546 REPLY through
+  `MailRepository.send` with `MailDraft.calendarReply` → `/api/mail/send` `calendarReply.ics`
+  (KyPost-Server #354), addressed to the ORGANIZER.
+  - `rsvpDraft` copies UID and SEQUENCE, restates RECURRENCE-ID without TZID (the REPLY has no
+    VTIMEZONE), adds DTSTAMP, folds at 75 octets. An unreadable SEQUENCE or RECURRENCE-ID means
+    no RSVP.
+  - ATTENDEE is the bootstrap `suggestedUserIDs` address the invite lists, else the primary; an
+    alias is also sent as `from`. No usable address means no RSVP.
+  - **Always** unencrypted and unsigned (the relay 400s `calendarReply` beside either flag), so
+    each RSVP is confirmed in a dialog that says so. The draft never sets `sign`/`encrypt`.
+  - Buttons need the relay's `calendarMethod` (#353): an older relay ignores `calendarReply` and
+    would send plain mail. Only a 200 carrying `"calendarReply": true` (#354) is an RSVP
+    (`rsvpResult`). A 200 without it means the organizer got plain mail: the user is told to
+    update the server, the RSVP is not marked sent, and nothing is retried.
+  - A refusal shows the relay's reason; nothing else is sent instead. Only a definite refusal
+    (`refusedBeforeSending`) re-arms the buttons; a timeout says "may have been sent".
+  - `RsvpTracker` (process-wide, keyed on UID + RECURRENCE-ID + SEQUENCE) owns RSVP state;
+    screens derive their buttons from its `phases` and a send never touches the Activity that
+    started it, so a rotation can neither double-send nor miss the outcome. A raised SEQUENCE
+    is answerable again. An unsure send stays locked across a rotation; a fresh open may retry.
+    The confirm captures `ProcessState.generation()` and `MailRepository.currentAccount()`.
+    `sendBoundRsvp` does no I/O once that session has ended, and `sendMail(draft, account)`
+    refuses a replaced pairing from the same read that authenticates the request (the
+    `MailAccount` shape of #155), so an old account's reply never reaches a new relay.
+    `RsvpTracker.complete` drops a completion from an ended session (no state, no toast).
 - `pgp/deliverReadOutcome` owns completed attachment arrays inside the worker until rendering
   accepts them. Cancellation across the dispatcher return, render rejection, or a rendering
   exception wipes unadopted bytes; successful adoption transfers cleanup to the detail Activity.
@@ -398,6 +582,16 @@ Owns production Android app code and resources.
   before anything reaches the WebView; "Show images" restores `<img src>` and nothing else. An
   `<iframe>` is dropped whole, because `srcdoc` carries an inline document no attribute strip
   reaches. `EmailDetailActivityTest` is the contract for that.
+- A tapped http(s) link in a message never opens directly. `mail/LinkTarget.kt` parses it once with
+  OkHttp's `HttpUrl`, which parses like a browser: userinfo is not the host, a backslash ends the
+  authority, and IDNs come out as `xn--` punycode. The confirm dialog shows that host, and the
+  re-serialized `HttpUrl` is what gets opened, so the confirmed host and the loaded page cannot
+  differ. The dialog is palette-themed (`showThemed`), with the host and address in the bundled
+  IBM Plex Mono. Separately, `blockExternalResources` outlines any anchor whose text reads as an
+  address on a different host (`linkTextMismatch`; `www.` and subdomains of the shown host agree)
+  and appends "⚠ real-host" after it. That is advisory: the confirm dialog is the guard. A
+  `$Phishing`-flagged message adds a warning to the dialog. `mailto:`/`tel:` open as
+  before, and every other scheme stays refused. `LinkTargetTest` covers the parsing.
 - Decrypted reader variants share a sanitizer-enforced aggregate data-image allowance, covering
   literal data URLs and rewritten CIDs even after "Show images". The 128 KiB inline ceiling leaves
   larger parts available for attachment open/save under the separate 4 MiB attachment budget.
@@ -410,6 +604,9 @@ Owns production Android app code and resources.
   The Inbox freshness label stays centered immediately below those tabs. Before the first
   successful refresh it reads "Not updated yet", so its row never appears empty and the first
   success does not shift the message list.
+  Each inbox row shows `atUtc` in the device zone (`inboxRowDate`: time for today, date otherwise,
+  blank if unparseable). The "No messages in {folder}" empty state shows only once that folder has
+  refreshed successfully (`inboxEmptyVisible`): a loading or unreachable folder never reads as empty.
   A refresh that lands mail above the top row scrolls to it when the list is at the top;
   otherwise a "N new messages" pill (`inbox_new_mail` plurals, polite live region) over the list
   counts it and scrolls up on tap. Only a repaint of the folder and tab already painted counts,
@@ -424,8 +621,16 @@ Owns production Android app code and resources.
   `Color.rgb`, so alpha in `line` survives as a fully opaque near-black in
   `applyEmptyStateBackground`. `ThemePaletteTableTest` holds both rules.
 - `SettingsActivity` is only a hub for existing settings surfaces: Security, Themes, Keywords,
-  Pairing, PGP Key, and About. Keep settings logic in the destination screens rather than
-  duplicating it in the hub.
+  Pairing, PGP Key, Signature, and About. Keep settings logic in the destination screens rather
+  than duplicating it in the hub; Signature's destination is `showSignatureDialog`.
+- The signature (`MailSignature.kt`) is plain text only, at most 1000 characters, in its own
+  private preferences file. It is account data: the pairing purge deletes the file, and so does
+  a security wipe. It is a user-typed setting, not mail metadata, so Hostile Location Protection
+  does not suppress it. Compose escapes it (`plainTextToHtml`) and puts it after an RFC 3676
+  `-- ` delimiter, above any quote (`withSignature`). It goes on new messages, replies and
+  forwards, but never above text another app shared in, which is the message itself. A
+  signature-only body counts as content, so Back on an untouched composer prompts once.
+  `ComposeSignatureTest` covers the escaping and the share exclusion.
 - Primary navigation uses `bottom_nav_menu.xml` for both phone bottom navigation and the `w600dp`
   rail on Inbox, Compose, Contacts, and Settings. The item order is Inbox, Compose, Lock, Contacts,
   Settings; Lock is an action that either locks immediately or opens Security when app lock is
@@ -441,6 +646,18 @@ Owns production Android app code and resources.
   selected primary destination for mail folders, but its
   displayed label must mirror the active folder so Junk/Trash/Archive do not leave Inbox highlighted
   by name.
+- Unread counts are local-cache counts, not server totals: each keyword chip shows how many unread
+  rows of the folder on screen carry it (`KeywordTabs.unreadCounts`, with a spelled-out
+  `contentDescription`), and the folder picker shows `EmailDao.unreadCounts()` per folder as of the
+  last cache read, Archive summing its subfolders (`unreadInFolderTree`). Counts are only ever
+  re-read from Room, never adjusted by arithmetic: a refresh reads rows and counts in one
+  transaction (`cachedEmailsAndUnread`), and a confirmed read, unread, swipe or bulk action
+  (once its Undo window lets it go) re-reads them on the Inbox IO thread whatever folder is on
+  screen (`recountUnread`); a detail-screen removal shows at the next refresh. Chip counts skip
+  rows held for Undo, as the list does. A
+  chip's keyword lives in its `tag`; its text carries the count, so never read the keyword from
+  the text. Paged-in rows count too, and their read state only refreshes when paged again. No
+  launcher badge.
 - Keyword refresh is best-effort every 90 seconds while inbox UI is foregrounded (both connection modes).
 - Background keyword staleness is accepted; app catches up on next foreground refresh.
 - Contact sync (`contacts/` package) mirrors `push/`'s repository+coordinator+singleton-graph shape:
@@ -497,6 +714,31 @@ Owns production Android app code and resources.
   `LegacyKeyMigrationTest.aBackfilledPin_takesASyncedRevocationOfItsKey`.
   Entry point is the Contacts nav item and the settings hub; CardDAV (the doc's alternative sync
   surface) has no mobile client — it is web/OS-driven.
+  The contacts list shows a sync banner from `ContactSyncRepository.observeSyncStatus`: "N changes
+  waiting" counts contacts (not outbox rows) with queued changes; "Sync stuck" with Retry and the
+  latest failure's first line appears once a queued change is over an hour old or
+  `STUCK_AFTER_FAILURES` syncs in a row failed. `ContactSyncHealth` keeps that failure count in
+  memory only, so a restart forgets it; the outbox age does not. `NotPaired` is not a failure.
+  vCard export (`contacts/VCard.kt` writer, `VCardShare.kt`): one contact from the detail screen
+  or all from the list, as 4.0 or 3.0, shared as `text/vcard` through
+  `EphemeralAttachmentBytes` (never storage; its 60 s TTL applies to the share sheet too).
+  Refused under Hostile Location Protection by the same `attachmentSaveOffered` rule as saving an
+  attachment, because the receiving app can persist it. The writer escapes every text value and
+  strips control characters from URLs and TYPE labels, so a field cannot inject a property;
+  `VCardWriterTest` holds that. The server uid is not exported. `VCardShareTest`
+  (instrumentation) reads each dialog choice back through the provider as a receiver would.
+  vCard import (list overflow) opens the system picker (`ACTION_OPEN_DOCUMENT`, no storage
+  permission) and treats the file as hostile: `readVCardImport` reads at most
+  `MAX_VCARD_IMPORT_BYTES` (256 KiB), then `parseVCards` requires strict UTF-8, vCard 3.0/4.0, and
+  balanced BEGIN/END, and refuses the whole file past `MAX_VCARD_IMPORT_CONTACTS` (200) or the
+  server's 64 values per field. It reads only the writer's properties: UID, KEY, PHOTO, groups and
+  encoded values are ignored, so a file can never pin a PGP key or pick a server uid. A preview
+  (count, first ten names, skipped cards) is confirmed before `ContactSyncRepository.queueImport`
+  queues every contact as an ordinary create in one transaction. It refuses while the outbox is
+  non-empty, because the push is not batched yet and a larger one could pass the server's
+  500-change cap. `VCardParserTest` holds the refusals and the writer round trip.
+  Its strings are `contacts_vcard_import_*`; `contacts_import_*` belongs to the separate
+  "Import from other accounts" consent dialog.
 - **CP2's `TYPE` columns are integer codes, not labels.** `Email`/`Phone`/`StructuredPostal` `TYPE`
   is DATA2, and the free-text name belongs in the paired `LABEL` (DATA3) with `TYPE_CUSTOM`;
   `DeviceContactFieldCoding` owns both directions of that mapping for every field kind. A label
@@ -535,10 +777,11 @@ Owns production Android app code and resources.
   refresh removes nothing, since the Room groups were not refreshed. Title matching can link two
   backend groups to one device row, so a row a live group still links to is kept and only the
   obsolete link goes. `DeviceGroupDeleteTest` covers that and the account-type scoping.
-- **Device merges are three-way.** `device_contact_links.syncedJson` (`MIGRATION_14_15`) holds the
+- **Device merges are three-way.** `device_contact_links.syncedJson` (`MIGRATION_15_16`) holds the
   `ContactDto` both sides agreed on after the last sync. It is written on create and by the push
   pass, per field: `DeviceContactUpdatePlan.nextBase` takes Room's value for each field the phone
-  will then hold too and keeps the old base for the rest — never by the pull, which runs before the phone has
+  will then hold too and keeps the old base for the rest, including fields the push never
+  writes (websites, IMs, relations, events) — never by the pull, which runs before the phone has
   the merge. With no old base it needs every field to agree. `DeviceContactMergeBaseTest`.
   `DeviceContactFieldMerge.againstBase` gives each field to the side that changed it since then,
   so a field emptied on either side stays empty. `same` compares as CP2 stores: null, blank and
@@ -632,7 +875,26 @@ Owns production Android app code and resources.
     `DatabaseMigration.kt`. **If this decision is ever revisited again, update this bullet and
     `AppLockStore.tripwire`'s KDoc in the same commit** — the previous change did not, and this
     file spent a release telling every reader the database was plaintext.
+- Every text field asks the keyboard not to learn what is typed (`IME_FLAG_NO_PERSONALIZED_LEARNING`).
+  XML fields declare `flagNoPersonalizedLearning` in `imeOptions`, and fields built in code call
+  `noPersonalizedLearning()`. `KeyboardPrivacyTest` fails on any new field without it. Keyboards
+  may ignore the flag. The compose body is out of reach: `RichHtmlEditorWebView` is a `final`
+  library WebView whose `onCreateInputConnection` cannot be overridden.
 - Compose's address-book and Send action icons use the active palette's `inkStrong` color.
+- Send needs a recipient and a body. A blank subject is legal (the relay doesn't require one), so
+  compose asks "Send without a subject?" instead of refusing (`sendReadiness`).
+  Every path to the relay (menu, that confirmation, the editor's export callback, the client send
+  and the pickup-fallback re-send) asks one gate, `custodyPermitsSend`, at the moment it would
+  send: custody can resolve while a prompt is open. Send stays disabled until custody is known.
+  `ComposePgpController.composeState()` returns null when it couldn't check (unpaired or bootstrap
+  failed); that is not "no identity" and must never be mapped to all-false flags, or a
+  client-custody account sends in the clear. Compose keeps custody unknown, shows a Retry
+  Snackbar, and retries on resume or a Send tap (`resolveCustody`).
+  `ComposeCustodyGuardTest` covers the confirmation path and a failed bootstrap.
+  On the client-encrypted path the protected `Subject` header is always written, empty if need
+  be, and `PgpMimeReader` reads a present-but-blank header as an empty subject. An absent header
+  still means "none", so the outer placeholder never stands in for a subject the sender left
+  blank.
 - STYLE_GUIDE.md §7 gaps are closed: `EmailDetailActivity`'s WebView renders the body in the real
   IBM Plex Mono font via a base64-inlined `@font-face` (`AppTheme.ibmPlexMonoFontFaceCss`, backed
   by `assets/fonts/IBMPlexMono-Regular.ttf`) rather than a `file://` base URL, to avoid granting
@@ -668,7 +930,7 @@ Owns production Android app code and resources.
 - The email `bodyMode` column is additive and requires `MIGRATION_10_11` plus a migration test when
   the schema contract changes again. `MIGRATION_11_12` re-keys `emails` on (folder, messageId);
   SQLite cannot alter a primary key, so it rebuilds the table and copies rows rather than dropping
-  the cache. `EmailDaoFolderScopeTest` is the authority on that key against real SQL — the JVM fake
+  the cache. `MIGRATION_14_15` adds `inWindow` (default 1: every earlier row came from the window). `EmailDaoFolderScopeTest` is the authority on that key against real SQL — the JVM fake
   in `MailRepositoryTest` mirrors it, and a fake keyed on the id alone reproduces the very bug the
   key exists to prevent.
 - The mail failure contract has JVM regression tests in `MailRepositoryTest`: a failed reconcile

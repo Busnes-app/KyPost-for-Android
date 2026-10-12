@@ -4,6 +4,8 @@ import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.text.TextUtils
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -16,13 +18,20 @@ import android.widget.Toast
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import org.kysecurity.mail.mail.AttachmentInfo
+import org.kysecurity.mail.mail.CalendarEvent
+import org.kysecurity.mail.mail.CalendarInvite
+import org.kysecurity.mail.mail.MailDraft
+import org.kysecurity.mail.mail.Rsvp
+import org.kysecurity.mail.mail.refusedBeforeSending
 import org.kysecurity.mail.mail.MailMessageBody
 import org.kysecurity.mail.mail.displayHeaderText
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRepository
 import org.kysecurity.mail.mail.MailRuntime
+import org.kysecurity.mail.mail.PendingMail
 import org.kysecurity.mail.mail.QuotedHtmlSanitizer
 import org.kysecurity.mail.mail.addressFromHeader
+import org.kysecurity.mail.mail.replyAllRecipients
 import org.kysecurity.mail.mail.userFacingMessage
 import org.kysecurity.mail.pgp.AndroidVaultOpener
 import org.kysecurity.mail.pgp.EncryptedMessageReader
@@ -86,6 +95,18 @@ class EmailDetailActivity : LockedActivity() {
     /** The message's real body, once the background fetch has answered. Reply/Forward quote this;
      *  see [quoteForReply] for why the 140-character preview was never an acceptable substitute. */
     private var fetchedBodyHtml: String? = null
+    private var fetchedBodyMode: String = ""
+    private val bodyFetch = BodyFetchGate()
+
+    /** The intent's subject: a decrypted protected subject never leaves for another app. */
+    private var envelopeSubject: String = ""
+    private var senderHeader: String = ""
+    private var phishingFlagged = false
+    private var rsvpDialog: android.app.Dialog? = null
+    private var rsvpInviteKey: String? = null
+
+    /** False after a configuration change: an unsure RSVP stays locked across a rotation. */
+    private var freshOpen = true
 
     /** The relay's signature verdict, overwritten by the local one once a local decrypt finishes. */
     private var pgpSignatureState: PgpSignatureState = PgpSignatureState.NONE
@@ -110,6 +131,9 @@ class EmailDetailActivity : LockedActivity() {
     private var toRecipients: List<String> = emptyList()
     private var ccRecipients: List<String> = emptyList()
 
+    /** Source of the user's own addresses, which Reply All leaves out. */
+    private val pgpController by lazy { ComposePgpController.from(this) }
+
     /** A configuration-change recreate is not a new open. Reopening after the task was cleared is,
      *  and that path builds a fresh instance with no saved state, so it marks read again. */
     private var markReadSubmitted = false
@@ -130,6 +154,9 @@ class EmailDetailActivity : LockedActivity() {
     }
 
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
+        freshOpen = savedInstanceState == null
+        // Cancelled on destroy, so only the live screen repaints.
+        lifecycleScope.launch { rsvpTracker.phases.collect { applyRsvpButtons() } }
         savedInstanceState?.let { state ->
             markReadSubmitted = state.getBoolean(STATE_MARK_READ_SUBMITTED, false)
             markReadSubmitCount = state.getInt(STATE_MARK_READ_COUNT, 0)
@@ -145,8 +172,13 @@ class EmailDetailActivity : LockedActivity() {
         val emailFolder = intent.getStringExtra("email_folder") ?: "INBOX"
         val emailSubject = intent.getStringExtra("email_subject") ?: "No subject"
         val emailSender = intent.getStringExtra("email_sender") ?: "Unknown sender"
-        val emailPreview = intent.getStringExtra("email_preview") ?: "No content"
+        // The inbox no longer sends one: a row preview is a 200-character summary, and quoting
+        // or rendering it would pass a fragment off as the whole message.
+        val emailPreview = intent.getStringExtra("email_preview").orEmpty()
         val emailBodyMode = intent.getStringExtra("email_body_mode").orEmpty()
+        // The row's own recipients, so Reply All has them even if the body fetch fails.
+        toRecipients = splitAddresses(intent.getStringExtra("email_sent_to").orEmpty())
+        ccRecipients = splitAddresses(intent.getStringExtra("email_cc").orEmpty())
         val hasAttachments = intent.getBooleanExtra("email_has_attachments", false)
         val pgpEncrypted = intent.getBooleanExtra("email_pgp_encrypted", false)
         // An unencrypted message was never going to become CLIENT_PROTECTED, so do not hold Reply.
@@ -157,7 +189,9 @@ class EmailDetailActivity : LockedActivity() {
             pgpVerified = intent.getBooleanExtra("email_pgp_verified", false),
             pgpSignerFingerprint = intent.getStringExtra("email_pgp_signer_fingerprint").orEmpty(),
         )
-        val phishingFlagged = intent.getBooleanExtra("email_suspicious", false)
+        phishingFlagged = intent.getBooleanExtra("email_suspicious", false)
+        envelopeSubject = emailSubject
+        senderHeader = emailSender
 
         setTitle(R.string.email_title)
 
@@ -188,13 +222,15 @@ class EmailDetailActivity : LockedActivity() {
 
         val actionArchive = findViewById<ImageButton>(R.id.actionArchive)
         val actionJunk = findViewById<ImageButton>(R.id.actionJunk)
+        val actionMove = findViewById<ImageButton>(R.id.actionMove)
         val actionDelete = findViewById<ImageButton>(R.id.actionDelete)
         val actionReply = findViewById<ImageButton>(R.id.actionReply)
         val actionReplyAll = findViewById<ImageButton>(R.id.actionReplyAll)
         val actionForward = findViewById<ImageButton>(R.id.actionForward)
+        val actionMarkUnread = findViewById<ImageButton>(R.id.actionMarkUnread)
         actionButtons = listOf(
             actionReply, actionReplyAll, actionForward,
-            actionArchive, actionJunk, actionDelete,
+            actionMarkUnread, actionArchive, actionMove, actionJunk, actionDelete,
         )
         replyForwardButtons = listOf(actionReply, actionReplyAll, actionForward)
         applyDetailChrome()
@@ -204,17 +240,31 @@ class EmailDetailActivity : LockedActivity() {
         if (!markReadSubmitted) {
             markReadSubmitted = true
             markReadSubmitCount++
-            MailBackgroundExecutor.submit { mailRepository.markRead(emailId, emailFolder) }
+            // Claimed here, before queueing: the inbox shows the row read from this moment, while
+            // the call itself waits its turn behind any read-state change requested before it.
+            val repository = mailRepository
+            val claim = repository.beginRead(emailId, emailFolder)
+            val markRead = ReadStateLane.ordered { repository.markRead(claim) }
+            MailBackgroundExecutor.submit(onDropped = { repository.abandon(claim) }) { markRead() }
         }
 
+        actionMarkUnread.setOnClickListener { markUnreadAndFinish(it, emailId, emailFolder) }
+
         actionArchive.setOnClickListener {
-            runMailActionAndFinish(getString(R.string.action_archive), emailId) { it.archive(emailId, emailFolder) }
+            runMailActionAndFinish(getString(R.string.action_archive), emailId, emailFolder) { repo, claim -> repo.archive(claim) }
         }
         actionDelete.setOnClickListener {
-            runMailActionAndFinish(getString(R.string.action_delete), emailId) { it.delete(emailId, emailFolder) }
+            runMailActionAndFinish(getString(R.string.action_delete), emailId, emailFolder) { repo, claim -> repo.delete(claim) }
+        }
+        actionMove.setOnClickListener {
+            pickMoveTarget(this, mailRepository, ioExecutor, emailFolder) { target ->
+                runMailActionAndFinish(getString(R.string.action_move), emailId, emailFolder) { repo, claim ->
+                    repo.move(claim, target)
+                }
+            }
         }
         actionJunk.setOnClickListener {
-            runMailActionAndFinish(getString(R.string.action_junk), emailId) { it.spam(emailId, emailFolder) }
+            runMailActionAndFinish(getString(R.string.action_junk), emailId, emailFolder) { repo, claim -> repo.spam(claim) }
         }
         actionReply.setOnClickListener {
             // Not isEnabled = false: a disabled ImageButton never reaches performClick, so no Toast.
@@ -227,6 +277,7 @@ class EmailDetailActivity : LockedActivity() {
                     to = extractAddress(emailSender),
                     subject = withPrefix(emailSubject, "Re:"),
                     bodyHtml = quoteForReply(emailSender, quoted),
+                    replyTo = ReplyRef(emailId, emailFolder),
                 )
             }
         }
@@ -235,15 +286,17 @@ class EmailDetailActivity : LockedActivity() {
                 Toast.makeText(this, R.string.email_pgp_reply_disabled, Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
-            val recipients = (listOf(extractAddress(emailSender)) + toRecipients.map(::extractAddress) + ccRecipients.map(::extractAddress))
-                .distinct()
-                .filter { it.isNotBlank() }
-            quotedBodyHtmlAsync(emailPreview) { quoted ->
-                openCompose(
-                    to = recipients.joinToString(", "),
-                    subject = withPrefix(emailSubject, "Re:"),
-                    bodyHtml = quoteForReply(emailSender, quoted),
-                )
+            lifecycleScope.launch {
+                val recipients =
+                    replyAllRecipients(emailSender, toRecipients, ccRecipients, pgpController.accountAddresses())
+                quotedBodyHtmlAsync(emailPreview) { quoted ->
+                    openCompose(
+                        to = recipients.joinToString(", "),
+                        subject = withPrefix(emailSubject, "Re:"),
+                        bodyHtml = quoteForReply(emailSender, quoted),
+                        replyTo = ReplyRef(emailId, emailFolder),
+                    )
+                }
             }
         }
         actionForward.setOnClickListener {
@@ -286,7 +339,7 @@ class EmailDetailActivity : LockedActivity() {
                     ).show()
                     return true
                 }
-                openExternally(request.url)
+                if (scheme == "http" || scheme == "https") confirmOpenLink(request.url.toString()) else openExternally(request.url)
                 return true
             }
         }
@@ -314,6 +367,7 @@ class EmailDetailActivity : LockedActivity() {
                     runOnUiThread {
                         if (isFinishing || isDestroyed) return@runOnUiThread
                         loading.visibility = android.view.View.GONE
+                        bodyFetch.settle()
                         Toast.makeText(this, R.string.email_body_render_failed, Toast.LENGTH_LONG).show()
                     }
                 }
@@ -331,7 +385,7 @@ class EmailDetailActivity : LockedActivity() {
         pgpDecryptError: String,
         loading: ProgressBar,
     ) {
-        val outcome = mailRepository.fetchBody(emailId, emailFolder)
+        val outcome = mailRepository.fetchBody(emailId, emailFolder, toRecipients, ccRecipients)
         val content = (outcome as? MailOutcome.Success)?.value
         // A failed fetch means "not cached", which is NOT the same as "the server sent no
         // body" — see MailRepository.fetchBody.
@@ -374,6 +428,8 @@ class EmailDetailActivity : LockedActivity() {
             lastRenderedHtml = htmlWithImages
             // A local decrypt must never reach this property; not `bodyToRender`, which is blanked.
             fetchedBodyHtml = content?.html?.takeIf { pgpState != PgpMessageState.CLIENT_PROTECTED }
+            fetchedBodyMode = bodyMode
+            bodyFetch.settle()
             val plainTextBody = content?.html?.takeIf { it.isNotBlank() }
                 ?: emailPreview.takeIf { mayFallBackToPreview(outcome) }.orEmpty()
             val plainText = plainTextBody.takeIf { isPlainTextBody(it, bodyMode) }
@@ -665,7 +721,7 @@ class EmailDetailActivity : LockedActivity() {
                 }
                 imagesBlockedBar.visibility = if (plainText == null && rendered.hasRemoteImages) View.VISIBLE else View.GONE
                 // The real subject from the encrypted part's protected headers; the envelope one is a placeholder.
-                outcome.body.protectedSubject?.takeIf { it.isNotBlank() }?.let { subjectView.text = it }
+                outcome.body.protectedSubject?.let { subjectView.text = it }
                 // The verdict actually safe to display — see displaySignatureVerdict's KDoc for why
                 // this can differ from outcome.signature itself.
                 val verdict = displaySignatureVerdict(outcome)
@@ -761,12 +817,192 @@ class EmailDetailActivity : LockedActivity() {
     private fun loadAttachments(emailId: String, emailFolder: String) {
         ioExecutor.execute {
             val outcome = mailRepository.listAttachments(emailId, emailFolder)
+            val infos = (outcome as? MailOutcome.Success)?.value.orEmpty()
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                val infos = (outcome as? MailOutcome.Success)?.value.orEmpty()
                 renderAttachments(emailId, emailFolder, infos)
             }
+            // After the chips: a slow or hostile invite must not hold up the attachment list.
+            val info = org.kysecurity.mail.mail.inviteAttachment(infos) ?: return@execute
+            val invite = runCatching { loadInvite(emailId, emailFolder, info) }
+                .onFailure { android.util.Log.w(TAG, "Invite not shown", it) }
+                .getOrNull() ?: return@execute
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                renderInvite(invite, info.calendarMethod)
+            }
         }
+    }
+
+    private fun loadInvite(emailId: String, emailFolder: String, info: AttachmentInfo): CalendarInvite? {
+        val bytes = (mailRepository.downloadAttachment(emailId, emailFolder, info.index) as? MailOutcome.Success)
+            ?.value?.bytes ?: return null
+        return org.kysecurity.mail.mail.parseCalendarInvite(bytes, java.time.ZoneId.systemDefault()) { windowsId ->
+            android.icu.util.TimeZone.getIDForWindowsID(windowsId, "001")
+        }
+    }
+
+    /** Shows the invite; adding it is always the user's tap, never automatic. */
+    private fun renderInvite(invite: CalendarInvite, listedMethod: String) {
+        val event = invite.primary
+        findViewById<TextView>(R.id.inviteMethod).text = invite.method.takeIf { it.isNotEmpty() }
+            ?.let { getString(R.string.invite_label_method, it) } ?: getString(R.string.invite_label)
+        findViewById<TextView>(R.id.inviteTitle).text = event.summary.ifEmpty { getString(R.string.invite_untitled) }
+        findViewById<TextView>(R.id.inviteDetails).text = listOfNotNull(
+            inviteWhenText(event, java.time.ZoneId.systemDefault(), java.util.Locale.getDefault()),
+            getString(R.string.invite_repeats).takeIf { event.rrule.isNotEmpty() },
+            event.location.takeIf { it.isNotEmpty() }?.let { getString(R.string.invite_where, it) },
+            event.organizer.takeIf { it.isNotEmpty() }?.let { getString(R.string.invite_organizer, it) },
+        ).joinToString("\n")
+        val notice = listOfNotNull(
+            getString(R.string.invite_phishing).takeIf { phishingFlagged },
+            // The organizer address is the sender's own claim; say when the From header disagrees.
+            getString(R.string.invite_organizer_not_sender, event.organizer).takeIf {
+                event.organizer.isNotEmpty() && !event.organizer.equals(extractAddress(senderHeader), ignoreCase = true)
+            },
+            getString(R.string.invite_cancelled).takeIf { invite.isCancelled },
+            getString(R.string.invite_updated).takeIf { invite.isUpdate },
+            event.unknownZone?.let { getString(R.string.invite_unknown_zone, it) },
+        ).joinToString("\n\n")
+        findViewById<TextView>(R.id.inviteNotice).apply {
+            text = notice
+            visibility = if (notice.isEmpty()) View.GONE else View.VISIBLE
+        }
+        findViewById<Button>(R.id.btnInviteAdd).apply {
+            visibility = if (invite.offersAdd) View.VISIBLE else View.GONE
+            setOnClickListener { handOffToCalendar(calendarInsertExtras(event)) }
+        }
+        findViewById<View>(R.id.inviteRsvpRow).visibility = if (invite.offersRsvp(listedMethod)) View.VISIBLE else View.GONE
+        findViewById<Button>(R.id.btnRsvpAccept).setOnClickListener { confirmRsvp(event, Rsvp.ACCEPTED) }
+        findViewById<Button>(R.id.btnRsvpTentative).setOnClickListener { confirmRsvp(event, Rsvp.TENTATIVE) }
+        findViewById<Button>(R.id.btnRsvpDecline).setOnClickListener { confirmRsvp(event, Rsvp.DECLINED) }
+        rsvpInviteKey = org.kysecurity.mail.mail.rsvpKey(event).also { rsvpTracker.opened(it, freshOpen) }
+        applyRsvpButtons()
+        findViewById<View>(R.id.emailInviteCard).visibility = View.VISIBLE
+        applyInviteChrome()
+    }
+
+    private fun rsvpButtons(): List<Button> =
+        listOf(R.id.btnRsvpAccept, R.id.btnRsvpTentative, R.id.btnRsvpDecline).map { findViewById(it) }
+
+    /** From [rsvpTracker], so a send started by a screen a rotation destroyed still lands here. */
+    private fun applyRsvpButtons() {
+        val key = rsvpInviteKey ?: return
+        rsvpButtons().forEach { it.isEnabled = rsvpTracker.canAnswer(key) }
+    }
+
+    /** Asks before every RSVP: it is mail the user sends, and it always goes unencrypted. */
+    private fun confirmRsvp(event: CalendarEvent, answer: Rsvp) {
+        val key = org.kysecurity.mail.mail.rsvpKey(event)
+        // Process-wide, so a rotation mid-send cannot offer the same answer twice.
+        if (!rsvpTracker.begin(key)) return
+        fun release() = rsvpTracker.cancel(key)
+        lifecycleScope.launch {
+            var dialogOwnsKey = false
+            try {
+                dialogOwnsKey = showRsvpDialog(event, answer, key, ::release)
+            } finally {
+                // No address, or a rotation cancelled the lookup: nothing is pending any more.
+                if (!dialogOwnsKey) release()
+            }
+        }
+    }
+
+    /** True once the dialog is up; from then on its dismiss listener owns [key]. */
+    private suspend fun showRsvpDialog(event: CalendarEvent, answer: Rsvp, key: String, release: () -> Unit): Boolean {
+        // The send is bound to the session and account it is confirmed under, read before the
+        // addresses: a later pairing must never receive this account's reply.
+        val session = ProcessState.generation()
+        val account = withContext(Dispatchers.IO) { mailRepository.currentAccount() }
+        val addresses = ComposePgpController.from(this).accountAddresses()
+        val attendee = account?.let { org.kysecurity.mail.mail.rsvpAttendee(event, addresses) }
+        if (attendee == null) {
+            Toast.makeText(this, R.string.rsvp_no_address, Toast.LENGTH_LONG).show()
+            return false
+        }
+        // Answering as an alias must also send from it, or the organizer sees a stranger reply.
+        val sendAs = attendee.takeUnless { it.equals(addresses.firstOrNull()?.trim(), ignoreCase = true) }.orEmpty()
+        val warning = getString(R.string.rsvp_confirm_not_sender).takeUnless {
+            event.organizer.equals(extractAddress(senderHeader), ignoreCase = true)
+        }
+        var sending = false
+        rsvpDialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.rsvp_confirm_title)
+            .setMessage(
+                listOfNotNull(
+                    getString(R.string.rsvp_confirm_message, answer.subjectPrefix, event.organizer, attendee),
+                    warning,
+                ).joinToString("\n\n"),
+            )
+            .setPositiveButton(R.string.rsvp_send) { _, _ ->
+                sending = true
+                sendRsvp(key, org.kysecurity.mail.mail.rsvpDraft(event, attendee, answer, java.time.Instant.now(), sendAs), account, session)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .setOnDismissListener {
+                rsvpDialog = null
+                if (!sending) release()
+            }
+            .showThemed()
+        return true
+    }
+
+    /** On the mail executor, so leaving the screen does not cancel a reply already on its way. */
+    private fun sendRsvp(key: String, draft: MailDraft, account: org.kysecurity.mail.mail.MailAccount, session: Long) {
+        val appContext = applicationContext
+        MailBackgroundExecutor.submit {
+            val outcome = runCatching { org.kysecurity.mail.mail.sendBoundRsvp(draft, account, session, mailRepository::send) }
+                .getOrElse { MailOutcome.UpstreamFailure(it.message ?: "Unexpected error") }
+                // The session ended before the send: nothing left this device, and no one to tell.
+                ?: return@submit
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                val result = org.kysecurity.mail.mail.rsvpResult(outcome)
+                // Never this Activity: a rotation may have replaced it. The current one observes this.
+                // An ended session (unpair, wipe) gets neither state nor feedback.
+                if (!rsvpTracker.complete(key, result, session)) return@post
+                val reason = outcome.userFacingMessage().orEmpty()
+                val message = when (result) {
+                    org.kysecurity.mail.mail.RsvpResult.SENT -> appContext.getString(R.string.rsvp_sent)
+                    org.kysecurity.mail.mail.RsvpResult.SENT_AS_PLAIN_MAIL -> appContext.getString(R.string.rsvp_sent_as_plain_mail)
+                    org.kysecurity.mail.mail.RsvpResult.REFUSED -> appContext.getString(R.string.rsvp_failed, reason)
+                    org.kysecurity.mail.mail.RsvpResult.MAYBE_SENT -> appContext.getString(R.string.rsvp_maybe_sent, reason)
+                }
+                Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun applyInviteChrome() {
+        applyOutlinedPanelBackground(this, findViewById(R.id.emailInviteCard))
+        applySectionEyebrowLabel(this, findViewById(R.id.inviteMethod))
+        applyWarningCalloutTheme(this, findViewById(R.id.inviteNotice))
+        applyPrimaryButtonTheme(this, findViewById(R.id.btnInviteAdd))
+        rsvpButtons().forEach { applyGhostButtonTheme(this, it) }
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        if (redirectedToUnlock) return false
+        menu.add(0, MENU_CREATE_EVENT, 0, R.string.calendar_create_event)
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        return super.onCreateOptionsMenu(menu)
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId != MENU_CREATE_EVENT) return super.onOptionsItemSelected(item)
+        // The body is read once its fetch has settled, not when tapped.
+        bodyFetch.whenSettled {
+            val subject = envelopeSubject
+            val body = fetchedBodyHtml
+            val mode = fetchedBodyMode
+            // Off Main: the body can be megabytes of HTML for jsoup.
+            ioExecutor.execute {
+                val extras = runCatching { emailEventExtras(subject, body, mode) }.getOrElse { emailEventExtras(subject, null, mode) }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) handOffToCalendar(extras)
+                }
+            }
+        }
+        return true
     }
 
     private fun renderAttachments(emailId: String, emailFolder: String, infos: List<AttachmentInfo>) {
@@ -996,13 +1232,54 @@ class EmailDetailActivity : LockedActivity() {
         // notice uses, so a security warning looks the same everywhere.
         applyWarningCalloutTheme(this, phishingBar)
         actionButtons.forEach { applyIconButtonTheme(this, it) }
+        applyInviteChrome()
     }
 
-    private fun runMailActionAndFinish(actionLabel: String, emailId: String, action: (MailRepository) -> MailOutcome<Unit>) {
+    /** Server first: the inbox shows the row unread only once the relay has confirmed it. */
+    private fun markUnreadAndFinish(button: View, emailId: String, emailFolder: String) {
+        button.isEnabled = false
+        val label = getString(R.string.action_mark_unread)
+        Toast.makeText(this, label, Toast.LENGTH_SHORT).show()
+        val repository = mailRepository
+        val session = ProcessState.generation()
+        val markUnread = ReadStateLane.ordered { repository.markUnread(emailId, emailFolder, session) }
+        MailBackgroundExecutor.submitReporting(this, label) {
+            var outcome: MailOutcome<Unit>? = null
+            try {
+                markUnread().also { outcome = it }
+            } finally {
+                runOnUiThread { onMarkUnreadDone(button, emailId, emailFolder, outcome) }
+            }
+        }
+    }
+
+    private fun onMarkUnreadDone(button: View, emailId: String, emailFolder: String, outcome: MailOutcome<Unit>?) {
+        if (isDestroyed) return
+        if (outcome !is MailOutcome.Success) {
+            button.isEnabled = true
+            return
+        }
+        setResult(
+            RESULT_OK,
+            Intent().putExtra(EXTRA_MARKED_UNREAD_ID, emailId).putExtra(EXTRA_MARKED_UNREAD_FOLDER, emailFolder),
+        )
+        finish()
+    }
+
+    private fun runMailActionAndFinish(
+        actionLabel: String,
+        emailId: String,
+        emailFolder: String,
+        action: (MailRepository, PendingMail) -> MailOutcome<Unit>,
+    ) {
         Toast.makeText(this, actionLabel, Toast.LENGTH_SHORT).show()
+        // Claimed before queueing, so the action belongs to the session the user acted in.
+        val claim = mailRepository.beginRemoval(emailId, emailFolder)
         // Reporting, not fire-and-forget: the row is removed optimistically, so a failure the user
         // never hears about reads as "it worked" until the message reappears on the next resync.
-        MailBackgroundExecutor.submitReporting(this, actionLabel) { action(mailRepository) }
+        MailBackgroundExecutor.submitReporting(this, actionLabel, onDropped = { mailRepository.abandon(claim) }) {
+            action(mailRepository, claim)
+        }
         // Tell InboxActivity which row to drop, or its onStart refresh races the in-flight mutation.
         setResult(RESULT_OK, Intent().putExtra(EXTRA_REMOVED_EMAIL_ID, emailId))
         finish()
@@ -1013,14 +1290,50 @@ class EmailDetailActivity : LockedActivity() {
         subject: String,
         bodyHtml: String,
         attachments: List<org.kysecurity.mail.mail.OutgoingAttachment> = emptyList(),
+        replyTo: ReplyRef? = null,
     ) {
-        val intent = Intent(this, ComposeActivity::class.java)
+        val intent = ComposeActivity.internalIntent(this)
         intent.putExtra(ComposeActivity.EXTRA_TO, to)
         intent.putExtra(ComposeActivity.EXTRA_SUBJECT, subject)
         intent.putExtra(ComposeActivity.EXTRA_BODY_HTML, bodyHtml)
+        replyTo?.let { intent.putExtra(ComposeActivity.EXTRA_REPLY_TOKEN, ReplyThreadHandoff.put(it)) }
         // Process-scoped handoff, not an Intent extra: 25 MB is far past Binder's ~1 MB limit.
         if (attachments.isNotEmpty()) ForwardAttachmentHandoff.put(attachments)
         startActivity(intent)
+    }
+
+    /** What a tapped http(s) link in the WebView runs. */
+    @androidx.annotation.VisibleForTesting
+    internal fun openLinkForTest(raw: String) = confirmOpenLink(raw)
+
+    /** Mail links lie about where they go; show the parsed host and open exactly what was shown. */
+    private fun confirmOpenLink(raw: String) {
+        val target = org.kysecurity.mail.mail.linkTargetOf(raw)
+        if (target == null) {
+            Toast.makeText(this, R.string.email_link_blocked_scheme, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val url = target.url.toString()
+        val shownUrl = url.take(LINK_PREVIEW_MAX_CHARS)
+        val message = android.text.SpannableStringBuilder(
+            getString(R.string.email_link_confirm_message, target.host, shownUrl),
+        )
+        // STYLE_GUIDE.md §2: addresses in IBM Plex Mono. The bundled face, not the downloadable one,
+        // which can block the main thread on a first fetch.
+        val mono = android.graphics.Typeface.createFromAsset(assets, "fonts/IBMPlexMono-Regular.ttf")
+        for (part in listOf(target.host, shownUrl)) {
+            val start = message.indexOf(part).takeIf { it >= 0 } ?: continue
+            message.setSpan(android.text.style.TypefaceSpan(mono), start, start + part.length, 0)
+        }
+        if (intent.getBooleanExtra("email_suspicious", false)) {
+            message.append("\n\n").append(getString(R.string.email_link_confirm_phishing))
+        }
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.email_link_confirm_title)
+            .setMessage(message)
+            .setPositiveButton(R.string.email_link_confirm_open) { _, _ -> openExternally(android.net.Uri.parse(url)) }
+            .setNegativeButton(android.R.string.cancel, null)
+            .showThemed()
     }
 
     /** CATEGORY_BROWSABLE + NEW_TASK: an email link must not reach non-browsable activities. */
@@ -1069,6 +1382,8 @@ class EmailDetailActivity : LockedActivity() {
     private fun extractAddress(raw: String): String = addressFromHeader(raw)
 
     override fun onDestroy() {
+        // Not leaked across a rotation; its dismiss listener releases the pending RSVP.
+        rsvpDialog?.dismiss()
         super.onDestroy()
         dropDecryptedAttachments()
         // No redirectedToUnlock guard: ioExecutor is a property initializer, so it exists even
@@ -1076,16 +1391,30 @@ class EmailDetailActivity : LockedActivity() {
         ioExecutor.shutdownNow()
     }
 
-    companion object {
+    companion object : ProcessScopedState {
         private const val TAG = "EmailDetailActivity"
 
+        private val rsvpTracker = org.kysecurity.mail.mail.RsvpTracker()
+
+        init {
+            ProcessState.register(this)
+        }
+
+        override fun resetForNewSession() {
+            rsvpTracker.clear()
+        }
+
         const val EXTRA_REMOVED_EMAIL_ID = "removed_email_id"
+        const val EXTRA_MARKED_UNREAD_ID = "marked_unread_email_id"
+        const val EXTRA_MARKED_UNREAD_FOLDER = "marked_unread_email_folder"
 
         private const val STATE_MARK_READ_SUBMITTED = "mark_read_submitted"
         private const val STATE_MARK_READ_COUNT = "mark_read_count"
+        private const val MENU_CREATE_EVENT = 1
 
         /** `intent:`, `file:`, `content:` and any app's custom scheme are refused. */
         private val SAFE_LINK_SCHEMES = setOf("http", "https", "mailto", "tel")
+        private const val LINK_PREVIEW_MAX_CHARS = 300
 
         /** Caps the quote sanitizer only: `Jsoup.clean` is quadratic in nesting depth, so a
          *  sender-chosen body past this size falls back to the escaped preview. NOT a
@@ -1289,6 +1618,13 @@ internal fun blockExternalResources(
     // images" clears blockNetworkLoads. A frame with no src and no srcdoc renders nothing anyway,
     // so there is nothing to preserve — the composer's Safelist drops the tag for the same reason.
     document.select("iframe").remove()
+    // Text naming one address over an href to another is the oldest phish in mail. Advisory: the
+    // tap still goes through the confirm dialog, which shows the real host either way.
+    document.select("a[href]").forEach { anchor ->
+        val real = org.kysecurity.mail.mail.linkTextMismatch(anchor.text(), anchor.attr("href")) ?: return@forEach
+        anchor.attr("style", anchor.attr("style") + ";outline:2px solid $COLOR_DANGER")
+        anchor.after(org.jsoup.nodes.Element("span").attr("style", "color:$COLOR_DANGER").text(" \u26A0 $real"))
+    }
     // `track` fetches over the network exactly like its sibling `source`, and never as an image.
     val resourceTags = if (keepImages && !keepInlineDataImages) "video, audio, source, track, embed, object" else "img, video, audio, source, track, embed, object"
     // Charge the entire URL, including prefix/padding, without decoding or copying its payload.
@@ -1526,6 +1862,7 @@ internal fun extensionForMimeType(mimeType: String): String? = when (
     "image/webp" -> "webp"
     "image/heic" -> "heic"
     "text/plain" -> "txt"
+    "text/vcard" -> "vcf"
     "audio/mpeg" -> "mp3"
     "audio/mp4" -> "m4a"
     "audio/ogg" -> "ogg"

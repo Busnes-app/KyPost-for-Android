@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 8 x 40dp fits a 360dp phone's 328dp. -->
+    <dimen name="detail_action_size">40dp</dimen>
+    <dimen name="detail_action_padding">10dp</dimen>
+</resources>

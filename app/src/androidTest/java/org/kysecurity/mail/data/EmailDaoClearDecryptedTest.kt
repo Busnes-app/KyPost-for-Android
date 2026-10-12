@@ -80,4 +80,20 @@ class EmailDaoClearDecryptedTest {
         assertEquals(1, dao.clearServerDecryptedBodies())
         assertEquals(0, dao.clearServerDecryptedBodies())
     }
+
+    /** With bodies=0 a server-decrypted row usually has no body cached, only a preview. */
+    @Test
+    fun itClearsAPreviewEvenWithoutACachedBody() {
+        dao.upsertAll(
+            listOf(
+                row("previewOnly", pgpEncrypted = true, body = null).copy(preview = "decrypted words"),
+                row("plain", pgpEncrypted = false, body = null).copy(preview = "lunch?"),
+            ),
+        )
+
+        assertEquals(1, dao.clearServerDecryptedBodies())
+        assertEquals("", dao.getById("previewOnly", "INBOX")!!.preview)
+        assertEquals("lunch?", dao.getById("plain", "INBOX")!!.preview)
+        assertEquals(0, dao.clearServerDecryptedBodies())
+    }
 }

@@ -16,7 +16,7 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   token mint (`/api/pgp/qr/token`), PGP bootstrap (`/api/pgp/bootstrap`), recipient key lookup
   (`/api/pgp/recipients/check`, and `/api/pgp/recipients/resolve` for client-side encrypted send
   only), mail relay (`/api/inbox`, `/api/inbox/folders`,
-  `/api/inbox/actions`, `/api/mail/draft`, `/api/mail/send`, `/api/mail/send-pgp`), MFA push-respond
+  `/api/inbox/actions`, `/api/mail/search`, `/api/mail/draft`, `/api/mail/send`, `/api/mail/send-pgp`), MFA push-respond
   (`/api/mfa/push/respond`), and self-deregistration (`/api/notifications/native/deregister`).
   `deviceSecret` is minted server-side once per successful `POST
   /api/notifications/native/register` call and returned only in that response — the app must
@@ -50,7 +50,9 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   cap on top.
 - `ProcessState.resetAll` is the session boundary: the wipe, the account purge
   (`purgeAccountScopedData`) and `AppRestart` all run it. It advances `ProcessState.generation()`
-  before resetting any holder. Work that outlives its caller (a callback, a background
+  before resetting any holder. The purge and the wipe also call `advanceGeneration()` as their
+  very first statement, before any data step, so outgoing-session work is stale for the whole
+  teardown (`PurgeSessionOrderTest`). Work that outlives its caller (a callback, a background
   completion) captures the generation when it starts and checks `ProcessState.isCurrent` before
   touching session state; a stale result is dropped. `SessionGenerationTest` pins the ordering.
 - `SecurityWipe.wipeAndResetApp` destroys local plaintext **before** any network call, records a
@@ -67,7 +69,16 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   A successful PIN or biometric unlock clears any pending grace deadline before exposing the app;
   otherwise an expired deadline can immediately re-lock the just-authenticated session.
   `ComposeDraftCache` is the in-memory backstop; it is deliberately never written to disk so
-  Hostile Location Protection needs no special case.
+  Hostile Location Protection needs no special case. The relay send runs in `KyPostApp.appScope`
+  through `ComposeSend` (process-scoped). Its session reset, run by `ProcessState.resetAll` at the
+  start of a wipe or account purge, cancels every running send and its OkHttp `Call` (handed over
+  through `MailSource.sendMail`'s `onCall`), waits up to 2 s for it to stop and zeroes its
+  attachments; a send queued before the reset never runs. The composer captures
+  `ProcessState.generation()` before the editor's asynchronous export; `ComposeSend.start` refuses
+  a submission whose generation has ended, or that arrives while a reset is still tearing down,
+  without calling the transport, and zeroes its attachments. A Compose that restores the
+  draft adopts a send still in flight and keeps Send disabled instead of sending it again. The
+  client-encrypted send still lives in `lifecycleScope`: its unlock prompt is bound to the Activity.
 - MFA approval (`push/MfaApprovalActivity`) must show the sign-in's context (IP, location, user
   agent, time) and, whenever the server supplies `matchDigits`, require a number match instead of
   a bare Approve button. A contentless approval prompt is what MFA-fatigue attacks harvest. All
@@ -81,7 +92,9 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   (`data/AppDatabase`) is the UI's read model for mail and the persistence layer for contacts.
 - A push notification tap must force a full inbox resync before opening its target message. The
   Room row may have stale body HTML or `bodyMode`; showing that cached row is fine for the list, but
-  opening it before the resync can render the detail screen with the wrong mode.
+  opening it before the resync can render the detail screen with the wrong mode. The tap is
+  consumed once: `InboxActivity` strips the extras from its Intent and ignores them on a recreate,
+  or a rotation reopens the message and resets the folder.
 - Avoid hardcoded secrets in committed files.
 - For user-visible behavior changes, update this file or a closer child AGENTS.md.
 - Settings ends with a Support KyPost action. The `play` flavor opens `TipActivity`, which sells
@@ -95,7 +108,7 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   cancellation. Never render purchase options until both INAPP and SUBS ownership queries succeed.
 - Settings links to the canonical KyPost privacy policy at
   `https://www.kypost.org/privacy.html`, immediately before the final Support KyPost action.
-- Contact autocomplete (ContactAutocomplete.md): `ComposeActivity`'s TO/CC/BCC fields are
+- Contact autocomplete (docs/ContactAutocomplete.md): `ComposeActivity`'s TO/CC/BCC fields are
   `RecipientInputView`s backed by `ContactDao.search` (name/email substring match, debounced
   150ms, top 5 shown). The address-book icon on the TO row opens `AddressBookSheet`
   (`contacts/` package), a `BottomSheetDialogFragment` offering TO/CC/BCC actions per contact.
@@ -105,11 +118,16 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
 - External compose entry (`mailto:`, `ACTION_SEND`, `ACTION_SEND_MULTIPLE`) is normalized by
   `ComposeIntentParser.kt`; use Android's `MailTo` parser and keep public-Intent quirks out of
   `ComposeActivity`. Shared attachments still enter through the Activity's existing bounded
-  attachment reader. An external compose request starts a new draft and must not restore an
+  attachment reader, which accepts only `content:` URIs from other packages' providers and
+  refuses a descriptor whose `/proc/self/fd` path is under this app's data directories. An external compose request starts a new draft and must not restore an
   unrelated `ComposeDraftCache` entry left by an earlier internal compose screen.
+  In-app launches go through `ComposeActivity.internalIntent` (the non-exported
+  `InternalComposeActivity` alias); only those read the `compose_*` extras, including prefilled
+  HTML. Every launch of the exported `ComposeActivity` gets public extras only, as plain text.
 - Inbox freshness is success-only and folder-scoped for the visible Activity lifetime. A failed
   refresh leaves the last confirmed time intact; it must not replace it with a sticky error or let
-  a late result from a previously selected folder paint the current folder.
+  a late result from a previously selected folder paint the current folder. A folder switch
+  clears the old rows at once and shows the loading state, then the new folder's cache.
 
 # Work Guidance
 

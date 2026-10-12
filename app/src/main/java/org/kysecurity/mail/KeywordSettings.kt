@@ -17,9 +17,9 @@ class KeywordSettings(context: Context) {
             List(array.length()) { array.getString(it) }
         }.getOrDefault(emptyList())
         // Filtered on read as well as on write: an install that stored the label before the
-        // write-side filter existed must not keep a relay-made All chip.
+        // write-side filter existed must not keep a relay-made All chip or a system-keyword one.
         return (saved.filter { it in all } + all.sortedBy { it.lowercase() })
-            .filterNot { it.isAllTab() }
+            .filterNot { it.isAllTab() || KeywordTabs.isSystemKeyword(it) }
             .distinct()
     }
 
@@ -32,7 +32,7 @@ class KeywordSettings(context: Context) {
         val cleaned = keywords.asSequence()
             .map { it.trim() }
             .filter { it.isNotBlank() && it.length <= MAX_KEYWORD_LENGTH }
-            .filterNot { it.isAllTab() }
+            .filterNot { it.isAllTab() || KeywordTabs.isSystemKeyword(it) }
             .toSet()
         if (cleaned.isEmpty()) return
         // LinkedHashSet: insertion-ordered, so takeLast() drops the oldest entries.

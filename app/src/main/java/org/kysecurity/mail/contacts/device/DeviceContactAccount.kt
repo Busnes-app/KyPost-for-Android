@@ -25,8 +25,10 @@ object DeviceContactAccount {
      * updates the one row and repairs installs whose account already exists. It writes only when
      * the flag is off: every write notifies the contacts observer, which runs another sync, which
      * called this again.
+     *
+     * @return true when it had to write the setting; false when it was already on and nothing
+     *  was written.
      */
-    /** True when it had to write the setting; false when it was already on and nothing was written. */
     fun makeContactsVisible(context: Context): Boolean {
         val resolver = context.applicationContext.contentResolver
         val visible = resolver.query(

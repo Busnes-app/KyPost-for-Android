@@ -96,6 +96,8 @@ When enabled:
   title and text to `system_server`, which records them in Notification History and
   `dumpsys notification` — an on-disk record in another UID that no wipe step here can
   reach. Withholding the content is the only control this app has over it.
+- Adding a calendar invite, or creating an event from an email, asks first: the event is
+  handed to the device's calendar app, which stores it where no KyPost wipe reaches.
 
 **Known limitation — notifications posted before protection was enabled.** Turning the
 mode on cannot retract what the OS already recorded. Clear Notification History from
@@ -196,6 +198,10 @@ is minted by the server at registration and returned exactly once.
 - **Encrypted mail is excluded from push payloads by the server**, regardless of the
   Content Preview setting, because native push travels through a relay and on to FCM/APNs
   in cleartext at every hop.
+- **Calendar RSVPs are always sent unencrypted and unsigned**, even from an account that
+  encrypts by default: the organizer's calendar server cannot read a PGP-wrapped reply, and
+  the relay refuses to combine the two. The reply carries the user's answer, address and the
+  event's UID. The app states this in the confirmation before each RSVP.
 #### Device enrollment
 
 - The sealed envelope that makes on-device decryption possible is accepted **gated behind

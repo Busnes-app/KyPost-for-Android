@@ -1,6 +1,7 @@
 package org.kysecurity.mail.contacts.device
 
 import android.Manifest
+import android.app.AppOpsManager
 import android.content.ContentProviderOperation
 import android.provider.ContactsContract
 import androidx.test.core.app.ApplicationProvider
@@ -34,7 +35,21 @@ class DeviceContactVisibilityTest {
         val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
         automation.grantRuntimePermission(context.packageName, Manifest.permission.READ_CONTACTS)
         automation.grantRuntimePermission(context.packageName, Manifest.permission.WRITE_CONTACTS)
+        // The grant lands at once, but the system syncs the matching app-ops after it, and CP2
+        // checks the app-op: a write straight after the grant failed with "App op not allowed".
+        awaitAppOpAllowed(AppOpsManager.OPSTR_READ_CONTACTS)
+        awaitAppOpAllowed(AppOpsManager.OPSTR_WRITE_CONTACTS)
         check(accounts.ensureAccount()) { "needs a sync account; is the device unlocked?" }
+    }
+
+    private fun awaitAppOpAllowed(op: String) {
+        val appOps = context.getSystemService(AppOpsManager::class.java)
+        val uid = context.applicationInfo.uid
+        val deadline = System.currentTimeMillis() + APP_OP_TIMEOUT_MS
+        while (appOps.unsafeCheckOpNoThrow(op, uid, context.packageName) != AppOpsManager.MODE_ALLOWED) {
+            check(System.currentTimeMillis() < deadline) { "$op still not allowed ${APP_OP_TIMEOUT_MS}ms after the grant" }
+            Thread.sleep(APP_OP_POLL_MS)
+        }
     }
 
     @After
@@ -139,5 +154,10 @@ class DeviceContactVisibilityTest {
 
         assertEquals("repeated opt-in must not duplicate the account's settings row", 1, rows)
         assertEquals(1, ungroupedVisible())
+    }
+
+    private companion object {
+        const val APP_OP_TIMEOUT_MS = 5_000L
+        const val APP_OP_POLL_MS = 50L
     }
 }

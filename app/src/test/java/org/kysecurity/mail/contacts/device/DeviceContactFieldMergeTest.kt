@@ -232,4 +232,30 @@ class DeviceContactFieldMergeTest {
     fun againstBase_withoutABase_keepsTheTwoWayRule() {
         assertEquals("Old notes", stringAgainstBase(room = "Old notes", device = null, base = null, known = false))
     }
+
+    /** What CP2 reads back for Room's own value is not a phone edit: Room still equals the base,
+     *  so Room's value stands. */
+    private fun <T> unchangedInRoom(room: T, readBack: T): T =
+        DeviceContactFieldMerge.againstBase(room, readBack, base = room, baseKnown = true) { _, _ -> error("not a conflict") }
+
+    @Test
+    fun aRelationLabelCp2ReadsAsOther_isNotAPhoneEdit() {
+        val room = listOf(ContactRelationDto(label = "mentor", name = "Grace"))
+
+        assertEquals(room, unchangedInRoom(room, listOf(ContactRelationDto(label = "other", name = "Grace"))))
+    }
+
+    @Test
+    fun anImLabelCp2DropsForAKnownService_isNotAPhoneEdit() {
+        val room = listOf(ContactImDto(service = "signal", label = "work", value = "+15550100"))
+
+        assertEquals(room, unchangedInRoom(room, listOf(ContactImDto(service = "signal", label = null, value = "+15550100"))))
+    }
+
+    @Test
+    fun anUnsetImServiceReadBackAsOther_isNotAPhoneEdit() {
+        val room = listOf(ContactImDto(service = null, label = null, value = "probe-im"))
+
+        assertEquals(room, unchangedInRoom(room, listOf(ContactImDto(service = "", label = "Other", value = "probe-im"))))
+    }
 }

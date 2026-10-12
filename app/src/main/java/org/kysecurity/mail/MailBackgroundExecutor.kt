@@ -13,6 +13,32 @@ private const val QUIESCE_TIMEOUT_MS = 2_000L
 
 private const val TAG = "MailBackground"
 
+/** Mark read and Mark unread reach the relay in the order they were asked for, from any screen.
+ *  The pool runs two tasks at once, so an unread could otherwise land before a read still in
+ *  flight and be undone by it. Call [ordered] when the user acts; the task it returns waits for
+ *  the one ordered before it, up to [WAIT_SECONDS] (a hung call must not wedge the pool). An
+ *  interrupt (a wipe quiescing the pool) propagates, and the block does not run. */
+internal object ReadStateLane {
+    const val WAIT_SECONDS = 30L
+
+    private var last: java.util.concurrent.CountDownLatch? = null
+
+    @Synchronized
+    fun <T> ordered(waitSeconds: Long = WAIT_SECONDS, block: () -> T): () -> T {
+        val previous = last
+        val done = java.util.concurrent.CountDownLatch(1)
+        last = done
+        return {
+            try {
+                previous?.await(waitSeconds, TimeUnit.SECONDS)
+                block()
+            } finally {
+                done.countDown()
+            }
+        }
+    }
+}
+
 // Mail mutations outlive the Activity that fired them, so the UI can update optimistically.
 object MailBackgroundExecutor {
     /** Null means suspended, and that is the whole point: a wipe that swapped in a fresh pool
@@ -34,20 +60,24 @@ object MailBackgroundExecutor {
      *  the process, and these tasks run blocking mail I/O whose failure modes include `quiesce()`
      *  interrupting them mid-call — a routine event during a wipe or a protection toggle, not a bug
      *  worth a crash. [submitReporting] already had this; the fire-and-forget path did not. */
-    fun submit(task: () -> Unit) {
-        post {
+    fun submit(onDropped: () -> Unit = {}, task: () -> Unit) {
+        post(onDropped) {
             runCatching(task).onFailure { android.util.Log.e(TAG, "Background mail task threw", it) }
         }
     }
 
-    /** Toasts against the application context: the Activity that started this has usually finished. */
+    /** Toasts against the application context: the Activity that started this has usually finished.
+     *  [onFailure] runs on the main thread first and returns true when a live screen showed it.
+     *  [onDropped] runs instead of [task] if the task is refused or discarded unrun. */
     fun submitReporting(
         context: Context,
         actionLabel: String,
+        onFailure: ((reason: String) -> Boolean)? = null,
+        onDropped: () -> Unit = {},
         task: () -> MailOutcome<*>,
     ) {
         val appContext = context.applicationContext
-        post {
+        post(onDropped) {
             val outcome = runCatching { task() }.getOrElse { error ->
                 android.util.Log.e(TAG, "$actionLabel threw", error)
                 MailOutcome.UpstreamFailure(error.message ?: "Unexpected error")
@@ -56,6 +86,7 @@ object MailBackgroundExecutor {
             val reason = outcome.userFacingMessage().orEmpty()
             android.util.Log.w(TAG, "$actionLabel failed: $reason")
             android.os.Handler(android.os.Looper.getMainLooper()).post {
+                if (onFailure?.invoke(reason) == true) return@post
                 Toast.makeText(
                     appContext,
                     appContext.getString(R.string.mail_action_failed, actionLabel, reason),
@@ -69,16 +100,20 @@ object MailBackgroundExecutor {
      *  [quiesce] has shut down throws `RejectedExecutionException` at whichever thread submitted —
      *  a UI thread, for a tap that arrived while the app was being wiped. The tap is refused
      *  either way; the difference is a log line instead of a crash. */
-    private fun post(work: Runnable) {
+    private fun post(onDropped: () -> Unit, work: Runnable) {
         synchronized(this) {
             val pool = executor
-            if (pool == null) {
-                android.util.Log.w(TAG, "Dropped a mail task: background work is suspended")
+            if (pool != null) {
+                pool.execute(DroppableTask(work, onDropped))
                 return
             }
-            pool.execute(work)
         }
+        android.util.Log.w(TAG, "Dropped a mail task: background work is suspended")
+        runCatching(onDropped)
     }
+
+    /** A queued task [quiesce] discards still gets to release what its submitter claimed. */
+    private class DroppableTask(private val work: Runnable, val onDropped: () -> Unit) : Runnable by work
 
     /** Stops in-flight work AND refuses new work until the matching [resume]; best-effort on the
      *  stopping, since socket reads ignore interrupts. Returns whether the running work finished.
@@ -90,7 +125,7 @@ object MailBackgroundExecutor {
             suspensions++
             executor.also { executor = null }
         } ?: return settled // Already suspended by an enclosing scope; nothing left to await.
-        previous.shutdownNow()
+        previous.shutdownNow().forEach { (it as? DroppableTask)?.onDropped?.let(::runCatching) }
         // awaitTermination returns false on timeout and throws only on interruption; report that.
         val awaited = try {
             previous.awaitTermination(QUIESCE_TIMEOUT_MS, TimeUnit.MILLISECONDS)

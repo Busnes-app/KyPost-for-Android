@@ -584,10 +584,8 @@ class DeviceContactRepository(
                     uid = dto.uid,
                     rawContactId = rawContactId,
                     deviceUpdatedAtEpochMs = System.currentTimeMillis(),
-                    // Title and department ride on the Organization row, written only with an org.
-                    syncedJson = syncedJsonOf(
-                        if (dto.org.isNullOrBlank()) dto.copy(title = null, department = null) else dto,
-                    ),
+                    // A department rides on the Organization row, written only with an org.
+                    syncedJson = syncedJsonOf(dto.copy(department = dto.department.takeUnless { dto.org.isNullOrBlank() })),
                 ),
             )
         }
@@ -676,7 +674,7 @@ class DeviceContactRepository(
             deleteRows(ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
             val company = (plan.org ?: currentSnapshot.org)?.ifBlank { null }
             val title = (plan.title ?: currentSnapshot.title)?.ifBlank { null }
-            val department = (plan.department ?: currentSnapshot.department)?.ifBlank { null }
+            val department = plan.departmentAfter(currentSnapshot)
             if (company != null || title != null || department != null) {
                 ops.add(
                     insertRow(ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
@@ -1036,7 +1034,8 @@ class DeviceContactRepository(
 
     // See createRawContactForDto: reads back the same deprecated Im rows it writes.
     @Suppress("DEPRECATION")
-    private suspend fun readRawContactSnapshot(rawContactId: Long): DeviceRawContactSnapshot? =
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    internal suspend fun readRawContactSnapshot(rawContactId: Long): DeviceRawContactSnapshot? =
         withContext(Dispatchers.IO) {
             val rawContactProjection = arrayOf(
                 ContactsContract.RawContacts._ID,
@@ -1053,17 +1052,20 @@ class DeviceContactRepository(
                 null,
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    Triple(
+                    RawContactRow(
                         cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts._ID)),
                         cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.CONTACT_ID)),
-                        cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_TYPE)),
+                        DeviceAccount(
+                            cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_TYPE)),
+                            cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_NAME)),
+                        ),
                     )
                 } else {
                     null
                 }
             } ?: return@withContext null
 
-            val (actualRawContactId, contactId, accountType) = rawContactData
+            val (actualRawContactId, contactId, account) = rawContactData
             val lastUpdated = queryContactLastUpdated(contactId)
 
             val dataProjection = arrayOf(
@@ -1246,8 +1248,9 @@ class DeviceContactRepository(
             return@withContext DeviceRawContactSnapshot(
                 rawContactId = actualRawContactId,
                 contactId = contactId,
-                accountType = accountType,
-                accountName = null,
+                // Both halves: import consent is per account, type and name.
+                accountType = account.type,
+                accountName = account.name,
                 lastUpdatedEpochMs = lastUpdated,
                 dirty = false,
                 fn = fn,
@@ -1280,3 +1283,5 @@ class DeviceContactRepository(
 private const val FOREIGN_LIVE_ROWS =
     "(${ContactsContract.RawContacts.ACCOUNT_TYPE} IS NULL OR ${ContactsContract.RawContacts.ACCOUNT_TYPE} != ?) AND " +
         "${ContactsContract.RawContacts.DELETED} = 0"
+
+private data class RawContactRow(val id: Long, val contactId: Long, val account: DeviceAccount)

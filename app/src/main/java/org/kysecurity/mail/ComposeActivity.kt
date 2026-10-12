@@ -1,5 +1,6 @@
 package org.kysecurity.mail
 
+import android.content.ContentResolver
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -7,6 +8,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.system.Os
 import android.text.TextUtils
 import android.view.Menu
 import android.view.MenuItem
@@ -18,9 +20,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.addCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationBarView
+import com.google.android.material.snackbar.Snackbar
 import com.infomaniak.lib.richhtmleditor.RichHtmlEditorWebView
 import org.kysecurity.mail.contacts.AddressBookSheet
 import org.kysecurity.mail.contacts.RecipientCandidate
@@ -30,6 +34,7 @@ import org.kysecurity.mail.data.DataRuntime
 import org.kysecurity.mail.mail.MailDraft
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRuntime
+import org.kysecurity.mail.mail.MailSendOutcome
 import org.kysecurity.mail.mail.OutgoingAttachment
 import org.kysecurity.mail.mail.userFacingMessage
 import org.kysecurity.mail.pgp.ClientEncryptedDraftSaver
@@ -50,11 +55,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.io.IOException
 import java.io.InputStream
-import java.util.concurrent.Executors
 import org.kysecurity.mail.security.LockedActivity
 import org.kysecurity.mail.security.showSecurely
 
@@ -83,11 +90,17 @@ class ComposeActivity : LockedActivity() {
     private lateinit var signChip: Chip
     private lateinit var webmailChip: Chip
     private lateinit var keylessWarning: android.widget.TextView
-    private val pgpController by lazy { ComposePgpController.from(this) }
+    private val pgpController by lazy { pgpControllerForTest ?: ComposePgpController.from(this) }
     private var sendMenuItem: MenuItem? = null
 
     /** Key held only by the user and this device not enrolled: Send is withdrawn while it holds. */
     private var handoffOnlyAccount = false
+
+    /** False until a bootstrap answer reaches [applyPgpComposeState]; nothing is sent before
+     *  custody is known. A failed bootstrap leaves it false (see [resolveCustody]). */
+    private var custodyKnown = false
+    private var custodyJob: Job? = null
+    private var custodyRetryBar: Snackbar? = null
 
     /** True when the encryption happens on this device and the send goes to `/api/mail/send-pgp`
      *  rather than `/api/mail/send`. From [PgpComposeState.clientSide]. */
@@ -99,7 +112,9 @@ class ComposeActivity : LockedActivity() {
     private val handoffOpener by lazy { AndroidVaultOpener(this) }
     private var handoffBusy = false
     private var handoffAttempt = 0L
-    private val ioExecutor = Executors.newSingleThreadExecutor()
+
+    /** The relay send this screen is waiting on, possibly started by the instance a rotation replaced. */
+    private var sending: ComposeSend.InFlight? = null
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /** The editor exports its HTML asynchronously, and a configuration change destroys this
@@ -120,6 +135,46 @@ class ComposeActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun discardPromptCountForTest(): Int = discardPromptCount
 
+    /** Null in production. Called when a send is committed, before the editor's export. */
+    @androidx.annotation.VisibleForTesting
+    internal var sendObserverForTest: (() -> Unit)? = null
+
+    /** Null in production. Stands in for the editor's own report, which arrives from its page. */
+    @androidx.annotation.VisibleForTesting
+    internal var bodyEmptyForTest: Boolean? = null
+
+    @androidx.annotation.VisibleForTesting
+    internal fun applyPgpComposeStateForTest(state: PgpComposeState) = applyPgpComposeState(state)
+
+    @androidx.annotation.VisibleForTesting
+    internal fun bodyReadyForTest(): Boolean = bodyEditor.isEmptyFlow.value == false
+
+    @androidx.annotation.VisibleForTesting
+    internal fun sendForTest() = sendEmail()
+
+    @androidx.annotation.VisibleForTesting
+    internal fun sendEnabledForTest(): Boolean? = sendMenuItem?.isEnabled
+
+    /** True once a custody lookup has finished, either way. */
+    @androidx.annotation.VisibleForTesting
+    internal fun custodySettledForTest(): Boolean = custodyJob?.isCompleted == true
+
+    /** Exactly what "Send without a subject?" runs when confirmed. */
+    @androidx.annotation.VisibleForTesting
+    internal fun confirmSendWithoutSubjectForTest() = sendEmail(allowEmptySubject = true)
+
+    @androidx.annotation.VisibleForTesting
+    internal fun activeDialogForTest(): AlertDialog? = activeDialog
+
+    @androidx.annotation.VisibleForTesting
+    internal fun isSendingForTest(): Boolean = sending != null
+
+    @androidx.annotation.VisibleForTesting
+    internal fun addAttachmentsForTest(uris: List<Uri>): Job = addAttachments(uris)
+
+    @androidx.annotation.VisibleForTesting
+    internal fun attachmentBytesForTest(): Long = attachments.sumOf { it.size.toLong() }
+
     private val bodyMirror = object : Runnable {
         override fun run() {
             bodyEditor.exportHtml { mirroredBodyHtml = it }
@@ -127,12 +182,20 @@ class ComposeActivity : LockedActivity() {
         }
     }
     private val attachments = mutableListOf<OutgoingAttachment>()
+    private val attachmentLock = Mutex()
 
     /** The in-flight preflight; cancelled so a late result cannot re-show a dismissed warning. */
     private var preflightJob: Job? = null
 
     /** The draft as sent, so the post-409 re-send reuses it byte-for-byte with one flag flipped. */
     private var sentDraft: MailDraft? = null
+
+    /** The message this composition answers; null for a new message or once the user chose to
+     *  send it unthreaded. */
+    private var replyTo: ReplyRef? = null
+
+    /** The session [sentDraft] was composed in; its pickup re-send must come from the same one. */
+    private var sentSession = 0L
 
     /** Set once the relay confirms delivery, so [onStop] does not re-cache a message that has
      *  already been sent — which would otherwise reappear as a "restored draft" next time. */
@@ -216,7 +279,7 @@ class ComposeActivity : LockedActivity() {
         keylessWarning = findViewById(R.id.composeKeylessWarning)
         applyWarningCalloutTheme(this, keylessWarning)
 
-        lifecycleScope.launch { applyPgpComposeState(pgpController.composeState()) }
+        resolveCustody()
 
         toInput = findViewById(R.id.composeToInput)
         ccInput = findViewById(R.id.composeCcInput)
@@ -249,6 +312,9 @@ class ComposeActivity : LockedActivity() {
         } else {
             ComposeDraftCache.take()
         }
+        // Taken either way, so a token cannot linger for a later composition.
+        val handedOff = ReplyThreadHandoff.take(intent.getStringExtra(EXTRA_REPLY_TOKEN))
+        replyTo = if (restored != null) restored.replyTo else handedOff.takeUnless { intent.isExternalComposeIntent() }
         restoredDraftForTest = restored
         if (restored != null) {
             subjectField.setText(restored.subject)
@@ -269,7 +335,14 @@ class ComposeActivity : LockedActivity() {
             ForwardAttachmentHandoff.clear()
             Toast.makeText(this, R.string.compose_draft_restored, Toast.LENGTH_SHORT).show()
         } else {
-            val (to, subject, bodyHtml) = parseComposeIntent(intent, ::plainTextToHtml)
+            val internal = intent.component?.className == INTERNAL_COMPOSE
+            val (to, subject, prefilledHtml) = parseComposeIntent(intent, internal, ::plainTextToHtml)
+            // Not above text another app asked to send: that is the message, not a quote.
+            val bodyHtml = if (intent.isExternalComposeIntent() && prefilledHtml.isNotBlank()) {
+                prefilledHtml
+            } else {
+                withSignature(prefilledHtml, plainTextToHtml(MailSignature.read(this)))
+            }
             subjectField.setText(subject)
             toInput.setInitialRecipients(to)
             mirroredBodyHtml = bodyHtml
@@ -277,7 +350,8 @@ class ComposeActivity : LockedActivity() {
 
             // A forward's attachments, handed over out-of-band because they are far too large for
             // an Intent extra — see [ForwardAttachmentHandoff].
-            val forwarded = ForwardAttachmentHandoff.take()
+            // Always taken so a leftover never outlives this screen; used only by in-app launches.
+            val forwarded = ForwardAttachmentHandoff.take().takeIf { internal }.orEmpty()
             if (forwarded.isNotEmpty()) {
                 // Re-checked HERE, not only in addAttachment: that guard covers files the user
                 // picks, and a forward walked straight past it with attachment sizes the relay
@@ -314,6 +388,13 @@ class ComposeActivity : LockedActivity() {
             if (streamUris != null) {
                 addAttachments(streamUris)
             }
+        }
+
+        // A send still in flight belongs to the draft just restored (a rotation, or the lock
+        // tearing the screen down): adopt it rather than offer Send again. A new composition
+        // must not inherit an unrelated send's result.
+        ComposeSend.current()?.let { inFlight ->
+            if (restored != null) awaitSend(inFlight) else ComposeSend.clear(inFlight)
         }
 
         boldChip.setOnClickListener { bodyEditor.toggleBold() }
@@ -358,6 +439,28 @@ class ComposeActivity : LockedActivity() {
         // post, not postDelayed: the first mirror has to exist before the first teardown can.
         mainHandler.removeCallbacks(bodyMirror)
         mainHandler.post(bodyMirror)
+        // Coming back (e.g. after reconnecting) is a natural moment to retry a failed lookup.
+        if (!custodyKnown) resolveCustody()
+    }
+
+    /** Couldn't-check is not "no identity": a failed bootstrap keeps custody unknown, so Send stays
+     *  blocked, and offers a retry. Only a real answer reaches [applyPgpComposeState]. */
+    private fun resolveCustody() {
+        if (custodyKnown || custodyJob?.isActive == true) return
+        custodyRetryBar?.dismiss()
+        custodyJob = lifecycleScope.launch {
+            val state = pgpController.composeState()
+            if (state != null) {
+                custodyRetryBar?.dismiss()
+                applyPgpComposeState(state)
+            } else {
+                applySendAvailability()
+                custodyRetryBar = Snackbar.make(rootView, R.string.compose_custody_check_failed, Snackbar.LENGTH_INDEFINITE)
+                    .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
+                    .setAction(R.string.compose_custody_retry) { resolveCustody() }
+                    .also { it.show() }
+            }
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -376,19 +479,25 @@ class ComposeActivity : LockedActivity() {
     /** Withdraws Send on an account this app cannot encrypt for. See [applyPgpComposeState]. */
     private fun applySendAvailability() {
         sendMenuItem?.isVisible = !handoffOnlyAccount
-        sendMenuItem?.isEnabled = !handoffOnlyAccount && !handoffBusy
+        sendMenuItem?.isEnabled = custodyKnown && !handoffOnlyAccount && !handoffBusy && sending == null
+    }
+
+    /** The one custody gate. Every path to the relay asks it, at the moment it would send, because
+     *  custody can resolve while a prompt is open. Hidden chips mean both flags false, so letting a
+     *  handoff-only account through is a cleartext send. */
+    private fun custodyPermitsSend(): Boolean {
+        if (custodyKnown && !handoffOnlyAccount) return true
+        val message = if (custodyKnown) R.string.compose_send_needs_webmail else R.string.compose_send_custody_pending
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        applySendAvailability()
+        resolveCustody()
+        return false
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             MENU_SEND -> {
-                // Belt and braces against a stale menu: the item is hidden for a handoff-only
-                // account, but a send that reached here would be a silent cleartext downgrade.
-                if (handoffOnlyAccount) {
-                    Toast.makeText(this, R.string.compose_send_needs_webmail, Toast.LENGTH_LONG).show()
-                } else {
-                    sendEmail()
-                }
+                sendEmail()
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -434,6 +543,7 @@ class ComposeActivity : LockedActivity() {
         // Unenrolled client-custody: hidden chips send both flags false, a silent cleartext downgrade.
         handoffOnlyAccount = state.handoffToWebmail
         clientSideAccount = state.clientSide
+        custodyKnown = true
         applySendAvailability()
         pgpChips.visibility =
             if (state.canEncrypt || state.canSign || state.handoffToWebmail) View.VISIBLE else View.GONE
@@ -507,8 +617,14 @@ class ComposeActivity : LockedActivity() {
 
     private fun showCreateLinkDialog() {
         val padding = (16 * resources.displayMetrics.density).toInt()
-        val urlField = EditText(this).apply { hint = getString(R.string.compose_link_dialog_url_hint) }
-        val textField = EditText(this).apply { hint = getString(R.string.compose_link_dialog_text_hint) }
+        val urlField = EditText(this).apply {
+            noPersonalizedLearning()
+            hint = getString(R.string.compose_link_dialog_url_hint)
+        }
+        val textField = EditText(this).apply {
+            noPersonalizedLearning()
+            hint = getString(R.string.compose_link_dialog_text_hint)
+        }
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(padding, padding, padding, 0)
@@ -532,9 +648,10 @@ class ComposeActivity : LockedActivity() {
         return TextUtils.htmlEncode(text).replace("\n", "<br>")
     }
 
-    /** Sequential, not concurrent: each is checked against the remaining budget before adding. */
-    private fun addAttachments(uris: List<Uri>) {
-        lifecycleScope.launch {
+    /** One [attachmentLock] covers every call: computing the remaining budget, reading the file and
+     *  adding it happen as one step, so concurrent picks are checked against each other's bytes. */
+    private fun addAttachments(uris: List<Uri>): Job = lifecycleScope.launch {
+        attachmentLock.withLock {
             for (uri in uris) {
                 if (isFinishing || isDestroyed) return@launch
                 addAttachment(uri)
@@ -550,6 +667,7 @@ class ComposeActivity : LockedActivity() {
         val picked = withContext(Dispatchers.IO) {
             var name = "attachment"
             var declaredSize = -1L
+            if (!isForeignContentUri(uri)) return@withContext PickedAttachment.Unreadable(name)
             runCatching {
                 resolver.query(uri, null, null, null, null)?.use { cursor ->
                     if (cursor.moveToFirst()) {
@@ -564,7 +682,12 @@ class ComposeActivity : LockedActivity() {
             if (declaredSize > budget) return@withContext PickedAttachment.TooLarge(name)
 
             val bytes = try {
-                resolver.openInputStream(uri)?.use { readAtMost(it, budget, declaredSize) }
+                (openDescriptorForTest?.invoke(uri) ?: resolver.openAssetFileDescriptor(uri, "r"))?.use { afd ->
+                    // The provider is foreign, but the file it hands back may still be ours.
+                    val path = Os.readlink("/proc/self/fd/${afd.parcelFileDescriptor.fd}")
+                    if (isUnderAny(path, appPrivateDirs())) return@withContext PickedAttachment.Unreadable(name)
+                    afd.createInputStream().use { readAtMost(it, budget, declaredSize) }
+                }
             } catch (e: AttachmentTooLargeException) {
                 // The provider under-reported, or omitted, OpenableColumns.SIZE.
                 android.util.Log.i(TAG, "Picked attachment exceeded the remaining budget", e)
@@ -601,6 +724,20 @@ class ComposeActivity : LockedActivity() {
         }
     }
 
+    /** Attachments come from other apps' providers only, never `file:` or this app's own. */
+    private fun isForeignContentUri(uri: Uri): Boolean {
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
+        // ContentResolver also accepts `userId@authority`; strip it as it does.
+        val authority = uri.authority?.substringAfterLast('@') ?: return false
+        // Null is an invisible foreign provider; only this package's own are refused.
+        return packageManager.resolveContentProvider(authority, 0)?.packageName != packageName
+    }
+
+    private fun appPrivateDirs(): List<String> =
+        listOf(applicationInfo.dataDir, applicationInfo.deviceProtectedDataDir)
+            .flatMap { listOf(it, File(it).canonicalPath) }
+            .distinct()
+
     /** Outcome of reading one picked document — named rather than a nullable pair so the three
      *  cases stay distinguishable at the call site. */
     private sealed class PickedAttachment {
@@ -626,24 +763,37 @@ class ComposeActivity : LockedActivity() {
         }
     }
 
-    private fun sendEmail() {
-        if (handoffBusy) return
+    private fun sendEmail(allowEmptySubject: Boolean = false) {
+        if (handoffBusy || sending != null) return
+        if (!custodyPermitsSend()) return
         val to = toInput.commaJoinedRecipients()
         val cc = ccInput.commaJoinedRecipients()
         val bcc = bccInput.commaJoinedRecipients()
         val subject = subjectField.text.toString().trim()
-        val isBodyEmpty = bodyEditor.isEmptyFlow.value != false
+        val isBodyEmpty = bodyEmptyForTest ?: (bodyEditor.isEmptyFlow.value != false)
 
-        if (to.isBlank() || subject.isBlank() || isBodyEmpty) {
-            Toast.makeText(this, R.string.compose_fill_all_fields, Toast.LENGTH_SHORT).show()
-            return
+        when (sendReadiness(to, subject, isBodyEmpty, allowEmptySubject)) {
+            SendReadiness.READY -> Unit
+            SendReadiness.INCOMPLETE -> {
+                Toast.makeText(this, R.string.compose_fill_all_fields, Toast.LENGTH_SHORT).show()
+                return
+            }
+            SendReadiness.CONFIRM_EMPTY_SUBJECT -> {
+                confirmEmptySubject()
+                return
+            }
         }
 
         sendMenuItem?.isEnabled = false
+        sendObserverForTest?.invoke()
+        // Captured before the async export: a session that ends while it runs refuses the send.
+        val session = ProcessState.generation()
 
         bodyEditor.exportHtml { html ->
-            // exportHtml's main-looper callback can fire after onDestroy shut ioExecutor down.
+            // exportHtml's main-looper callback can fire after onDestroy.
             if (isFinishing || isDestroyed) return@exportHtml
+            // Asked again: custody can resolve between the tap and this callback.
+            if (!custodyPermitsSend()) return@exportHtml
             val draft = MailDraft(
                 to = to, cc = cc, bcc = bcc, subject = subject, body = html, mode = "html",
                 attachments = attachments.toList(),
@@ -652,20 +802,33 @@ class ComposeActivity : LockedActivity() {
                 // Never on for a first attempt. Only the post-409 re-send sets it, and only after
                 // the user confirmed the dialog naming the addresses.
                 allowPickupFallback = false,
+                replyToMessageId = replyTo?.messageId,
+                replyToMailbox = replyTo?.mailbox,
             )
             sentDraft = draft
+            sentSession = session
             // A client-custody account encrypts here, not on the relay; both chips unchecked is deliberate.
             if (clientSideAccount && (draft.sign || draft.encrypt)) {
                 dispatchClientSend(draft)
             } else {
-                dispatchSend(draft)
+                dispatchSend(draft, session)
             }
         }
+    }
+
+    /** Mail without a subject is legal and sometimes meant; ask rather than refuse. */
+    private fun confirmEmptySubject() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.compose_empty_subject_title)
+            .setNegativeButton(R.string.compose_empty_subject_add) { _, _ -> subjectField.requestFocus() }
+            .setPositiveButton(R.string.compose_empty_subject_send) { _, _ -> sendEmail(allowEmptySubject = true) }
+            .showThemed()
     }
 
     /** Sender built on IO (Keystore), crypto on Default (Bouncy Castle); the prompt hops to Main. */
     private fun dispatchClientSend(draft: MailDraft) {
         if (sendJob?.isActive == true) return
+        if (!custodyPermitsSend()) return
         sendMenuItem?.isEnabled = false
         sendJob = lifecycleScope.launch {
             val sender = withContext(Dispatchers.IO) { clientSender() }
@@ -771,36 +934,69 @@ class ComposeActivity : LockedActivity() {
     }
 
     /** Shared by the first attempt and the confirmed re-send, so the re-send cannot drift. */
-    private fun dispatchSend(draft: MailDraft) {
-        ioExecutor.execute {
-            val outcome = MailRuntime.graph(this).repository.send(draft)
-            runOnUiThread {
-                // runOnUiThread still runs after finish(); an AlertDialog on a finishing Activity throws.
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                when (outcome) {
-                    is MailOutcome.Success -> {
-                        val warning = outcome.value.warning
-                        // The send already succeeded: surface the warning as a notice, never as a failure or a retry.
-                        val message = warning.ifBlank { getString(R.string.compose_send_success) }
-                        val length = if (warning.isBlank()) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
-                        Toast.makeText(this, message, length).show()
-                        sendSucceeded = true
-                        ComposeDraftCache.clear()
-                        finish()
-                    }
-                    is MailOutcome.PickupFallbackNeeded -> {
-                        sendMenuItem?.isEnabled = true
-                        confirmPickupFallback(outcome.keylessRecipients)
-                    }
-                    is MailOutcome.ClientSideNeeded -> {
-                        sendMenuItem?.isEnabled = true
-                        handOffToWebmail()
-                    }
-                    else -> {
-                        sendMenuItem?.isEnabled = true
-                        Toast.makeText(this, outcome.userFacingMessage(), Toast.LENGTH_LONG).show()
-                    }
-                }
+    private fun dispatchSend(draft: MailDraft, session: Long) {
+        // The pickup-fallback re-send arrives here without passing sendEmail.
+        if (!custodyPermitsSend()) return
+        // One /api/mail/send at a time: a double tap on a re-send dialog would otherwise send twice.
+        // [sending] is set before this returns, so a second tap in the same main-loop turn sees it.
+        if (sending != null) return
+        val app = application as KyPostApp
+        // The graph lookup inside: building it opens the database, which is not main-thread work.
+        awaitSend(
+            ComposeSend.start(app.appScope, draft, session) { d, onCall ->
+                MailRuntime.graph(app).repository.send(d, onCall = onCall)
+            },
+        )
+    }
+
+    /** Renders [sending], whether this screen started it or the one a rotation replaced did. */
+    private fun awaitSend(sending: ComposeSend.InFlight) {
+        this.sending = sending
+        sentDraft = sending.draft
+        sentSession = sending.session
+        sendMenuItem?.isEnabled = false
+        lifecycleScope.launch {
+            sending.outcome.join()
+            ComposeSend.clear(sending)
+            this@ComposeActivity.sending = null
+            // An AlertDialog on a finishing Activity throws.
+            if (isFinishing || isDestroyed) return@launch
+            // Cancelled by a session reset: there is no result to show.
+            if (sending.outcome.isCancelled) {
+                applySendAvailability()
+                return@launch
+            }
+            renderSendOutcome(sending.outcome.await())
+        }
+    }
+
+    private fun renderSendOutcome(outcome: MailOutcome<MailSendOutcome>) {
+        when (outcome) {
+            is MailOutcome.Success -> {
+                val warning = outcome.value.warning
+                // The send already succeeded: surface the warning as a notice, never as a failure or a retry.
+                val message = warning.ifBlank { getString(R.string.compose_send_success) }
+                val length = if (warning.isBlank()) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
+                Toast.makeText(this, message, length).show()
+                sendSucceeded = true
+                ComposeDraftCache.clear()
+                finish()
+            }
+            is MailOutcome.PickupFallbackNeeded -> {
+                sendMenuItem?.isEnabled = true
+                confirmPickupFallback(outcome.keylessRecipients)
+            }
+            is MailOutcome.ClientSideNeeded -> {
+                sendMenuItem?.isEnabled = true
+                handOffToWebmail()
+            }
+            is MailOutcome.ReplyThreadingRefused -> {
+                sendMenuItem?.isEnabled = true
+                confirmUnthreadedSend(outcome.message)
+            }
+            else -> {
+                sendMenuItem?.isEnabled = true
+                Toast.makeText(this, outcome.userFacingMessage(), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -816,9 +1012,26 @@ class ComposeActivity : LockedActivity() {
                 sendMenuItem?.isEnabled = false
                 // The same draft, one flag flipped. Not rebuilt: no re-export of the editor HTML,
                 // no re-encoded attachments, no second preflight.
-                dispatchSend(draft.copy(allowPickupFallback = true))
+                dispatchSend(draft.copy(allowPickupFallback = true), sentSession)
             }
             // FLAG_SECURE: this dialog names recipients and gates storing plaintext on the server.
+            .create()
+            .showSecurely()
+    }
+
+    /** Nothing was sent: the relay refuses a reply it cannot thread before any delivery. Re-sending
+     *  is the user's call, never automatic, and only ever follows this refusal (not a timeout). */
+    private fun confirmUnthreadedSend(reason: String) {
+        val draft = sentDraft ?: return
+        activeDialog = AlertDialog.Builder(this)
+            .setTitle(R.string.compose_unthreaded_title)
+            .setMessage(getString(R.string.compose_unthreaded_body, reason))
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.compose_unthreaded_confirm) { _, _ ->
+                sendMenuItem?.isEnabled = false
+                replyTo = null
+                dispatchSend(draft.copy(replyToMessageId = null, replyToMailbox = null), sentSession)
+            }
             .create()
             .showSecurely()
     }
@@ -912,7 +1125,7 @@ class ComposeActivity : LockedActivity() {
         handoffBusy = false
         handoffAttempt++
         webmailChip.isEnabled = true
-        sendMenuItem?.isEnabled = !handoffOnlyAccount
+        applySendAvailability()
     }
 
     /** Kept internal so device tests exercise the real failure/browser/cache behavior. */
@@ -968,6 +1181,7 @@ class ComposeActivity : LockedActivity() {
         attachments = attachments.toList(),
         encrypt = encryptChip.isChecked,
         sign = signChip.isChecked,
+        replyTo = replyTo,
     )
 
     /** Back on a finishing Activity drops the draft in [onStop]; typed mail must not go in silence.
@@ -1014,9 +1228,6 @@ class ComposeActivity : LockedActivity() {
         // Whatever the cache needed is already in it by now — onStop saved synchronously.
         mirroredBodyHtml = ""
         restoredDraftForTest = null
-        // No redirectedToUnlock guard: ioExecutor is a property initializer, so it exists even
-        // when onCreate bailed, and skipping shutdown would leak its thread.
-        ioExecutor.shutdownNow()
         // Dismiss rather than leave a shown AlertDialog referencing a destroyed Activity's window.
         activeDialog?.dismiss()
         discardDialog?.dismiss()
@@ -1024,6 +1235,16 @@ class ComposeActivity : LockedActivity() {
     }
 
     companion object {
+        /** Null in production. Replaces the bootstrap-backed controller for the next launch. */
+        @androidx.annotation.VisibleForTesting
+        @Volatile
+        internal var pgpControllerForTest: ComposePgpController? = null
+
+        /** Null in production. Stands in for a provider's `openAssetFileDescriptor`; null falls through. */
+        @androidx.annotation.VisibleForTesting
+        @Volatile
+        internal var openDescriptorForTest: ((Uri) -> android.content.res.AssetFileDescriptor?)? = null
+
         const val EXTRA_TO = "compose_to"
         const val EXTRA_SUBJECT = "compose_subject"
         const val EXTRA_BODY = "compose_body"
@@ -1031,6 +1252,15 @@ class ComposeActivity : LockedActivity() {
         /** A ready-made HTML quote, for Reply/Forward of an HTML message. Kept separate from
          *  [EXTRA_BODY] because that one is plain text and gets html-escaped on the way in. */
         const val EXTRA_BODY_HTML = "compose_body_html"
+
+        /** Non-exported alias in the manifest; the EXTRA_* above are read only through it. */
+        private const val INTERNAL_COMPOSE = "org.kysecurity.mail.InternalComposeActivity"
+
+        fun internalIntent(context: android.content.Context): Intent =
+            Intent().setClassName(context, INTERNAL_COMPOSE)
+
+        /** A [ReplyThreadHandoff] token, never the message id itself. */
+        const val EXTRA_REPLY_TOKEN = "compose_reply_token"
 
         private const val TAG = "ComposeActivity"
 
@@ -1056,6 +1286,10 @@ internal class AttachmentTooLargeException : IOException("Attachment exceeds the
  *  enough that the refusal below happens long before the heap notices. */
 private const val ATTACHMENT_COPY_BUFFER_BYTES = 64 * 1024
 
+/** True when [path] is one of [dirs] or inside one. */
+internal fun isUnderAny(path: String, dirs: List<String>): Boolean =
+    dirs.any { path == it || path.startsWith("$it/") }
+
 /** Reads [input] fully, or throws [AttachmentTooLargeException] past [limit] bytes. */
 internal fun readAtMost(input: InputStream, limit: Long, expectedSize: Long = -1L): ByteArray {
     // Pre-sized to avoid ByteArrayOutputStream's doubling plus copy; clamped against over-reports.
@@ -1071,3 +1305,12 @@ internal fun readAtMost(input: InputStream, limit: Long, expectedSize: Long = -1
         out.write(buffer, 0, read)
     }
 }
+
+internal enum class SendReadiness { READY, INCOMPLETE, CONFIRM_EMPTY_SUBJECT }
+
+internal fun sendReadiness(to: String, subject: String, bodyEmpty: Boolean, allowEmptySubject: Boolean): SendReadiness =
+    when {
+        to.isBlank() || bodyEmpty -> SendReadiness.INCOMPLETE
+        subject.isBlank() && !allowEmptySubject -> SendReadiness.CONFIRM_EMPTY_SUBJECT
+        else -> SendReadiness.READY
+    }

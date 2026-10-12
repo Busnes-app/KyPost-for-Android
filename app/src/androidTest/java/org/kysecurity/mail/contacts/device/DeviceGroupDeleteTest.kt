@@ -34,10 +34,13 @@ class DeviceGroupDeleteTest {
     private lateinit var db: AppDatabase
 
     /** The relay, answering `GET /api/groups` with [groupsJson]. */
-    private fun relay(groupsJson: String) = OkHttpClient.Builder().addInterceptor(
+    private fun relay(groupsJson: String) = relayBody("""{"groups":$groupsJson}""")
+
+    /** The relay, answering every request with HTTP 200 and [body] as it is. */
+    private fun relayBody(body: String) = OkHttpClient.Builder().addInterceptor(
         Interceptor { chain ->
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
-                .body("""{"groups":$groupsJson}""".toResponseBody("application/json".toMediaType())).build()
+                .body(body.toResponseBody("application/json".toMediaType())).build()
         },
     ).build()
 
@@ -100,6 +103,23 @@ class DeviceGroupDeleteTest {
 
         assertEquals(0, groupRows(rowId))
         assertEquals(null, db.groupLinkDao().getByGroupId("g-gone"))
+    }
+
+    /** A 200 reply without a groups list is no snapshot: the refresh fails and nothing is
+     *  removed, not the Room group, its device row, its link or the membership. */
+    @Test
+    fun aReplyWithoutAGroupsList_removesNothing() = runBlocking {
+        db.groupDao().upsertAll(listOf(org.kysecurity.mail.data.GroupEntity(id = "g-kept", name = "Snapshot Probe", rev = 1)))
+        val rowId = DeviceGroupLinker(context, db).ensureAndroidGroupRowId("g-kept", "Snapshot Probe")!!
+        val member = insertOwnRawContactInGroup(rowId)
+
+        val failed = repositoryAgainst(relayBody("{}")).syncAll()
+
+        assertEquals("the refresh must fail", true, "refreshGroups" in failed)
+        assertEquals(1, groupRows(rowId))
+        assertEquals(rowId, db.groupLinkDao().getByGroupId("g-kept")?.androidGroupRowId)
+        assertEquals(listOf("g-kept"), db.groupDao().getAll().map { it.id })
+        assertEquals(listOf(rowId), membershipsOf(member))
     }
 
     /** Two backend groups with one title share a device row; deleting one keeps the row. */

@@ -82,14 +82,14 @@ class DeviceContactImportConsentTest {
             beforeImport = beforeImport,
         )
 
-    /** A contact in the phone's own storage: no account at all. */
-    private fun insertLocalContact(name: String, email: String): Long {
+    /** A contact in the phone's own storage by default: no account at all. */
+    private fun insertLocalContact(name: String, email: String, account: DeviceAccount = DeviceAccount(null, null)): Long {
         val results = context.contentResolver.applyBatch(
             ContactsContract.AUTHORITY,
             arrayListOf(
                 ContentProviderOperation.newInsert(ContactsContract.RawContacts.CONTENT_URI)
-                    .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, null)
-                    .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, null)
+                    .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, account.type)
+                    .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, account.name)
                     .build(),
                 ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
                     .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
@@ -165,6 +165,65 @@ class DeviceContactImportConsentTest {
 
         assertEquals("failed stages $failed; ${importState()}", 1, queuedProbeCreates())
     }
+
+    /** Consent is per account, type and name: a named account's contacts are imported when that
+     *  account is chosen, not dropped by the check made just before the write.
+     *
+     *  The named account is not in AccountManager, and CP2 hard-deletes the rows of such accounts
+     *  each time it reconciles after an account change. setUp adds the sync account (tearDown
+     *  removed it), so that reconciliation runs on CP2's background thread and can land after the
+     *  insert: the probe is then gone before the scan reads it. A scan is retried only when the
+     *  probe row is provably gone; one that left the row in place and queued nothing is the bug. */
+    @Test
+    fun consentingToANamedAccount_importsItsContact() = runBlocking {
+        val named = DeviceAccount("org.example.invalid", "probe@example.invalid")
+        settings.setImportAccounts(destination, setOf(named.key))
+        var reaped = 0
+        while (true) {
+            settings.setLastForeignScanAtEpochMs(0L)
+            val rawContactId = insertLocalContact(NAMED_PROBE, "named-probe@example.com", named)
+            try {
+                val failed = repository.syncAll()
+
+                val created = db.pendingContactChangeDao().getAllPending()
+                    .filter { it.changeType == ContactSyncRepository.CHANGE_CREATE }
+                    .count { json.decodeFromString(ContactDto.serializer(), it.payloadJson).fn == NAMED_PROBE }
+                if (created == 0 && !rawContactExists(rawContactId) && ++reaped < MAX_REAPS) continue
+                assertEquals("failed stages $failed; reaped $reaped; ${importState()}", 1, created)
+                return@runBlocking
+            } finally {
+                context.contentResolver.delete(
+                    ContactsContract.RawContacts.CONTENT_URI.buildUpon()
+                        .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true").build(),
+                    "${ContactsContract.RawContacts._ID} = ?",
+                    arrayOf(rawContactId.toString()),
+                )
+            }
+        }
+    }
+
+    /** Consent is per account, type and name, and the check made just before each import reads
+     *  the account from the raw contact snapshot, so the snapshot must carry the name too. Read
+     *  on a row of this app's own account, the one named account a test can rely on: the
+     *  provider strips rows of an account type AccountManager does not know whenever the
+     *  device's accounts change. */
+    @Test
+    fun aSnapshotCarriesItsAccountName() = runBlocking {
+        val own = DeviceAccount(DeviceContactAccount.ACCOUNT_TYPE, DeviceContactAccount.ACCOUNT_NAME)
+        val rawContactId = insertLocalContact(NAMED_PROBE, "named-probe@example.com", own)
+
+        val snapshot = repository.readRawContactSnapshot(rawContactId)
+
+        assertEquals(own, snapshot?.let { DeviceAccount(it.accountType, it.accountName) })
+    }
+
+    private fun rawContactExists(rawContactId: Long): Boolean = context.contentResolver.query(
+        ContactsContract.RawContacts.CONTENT_URI,
+        arrayOf(ContactsContract.RawContacts._ID),
+        "${ContactsContract.RawContacts._ID} = ?",
+        arrayOf(rawContactId.toString()),
+        null,
+    )?.use { it.count > 0 } ?: false
 
     @Test
     fun consentWithdrawnDuringAScan_importsNothing() = runBlocking {
@@ -256,5 +315,10 @@ class DeviceContactImportConsentTest {
     private companion object {
         const val PROBE_NAME = "Import Consent Probe"
         const val SCAN_STARTED_AT = 42L
+        const val NAMED_PROBE = "Named Account Import Probe"
+
+        /** Each account change schedules at most one reconciliation; tearDown's removal and
+         *  setUp's add are two. One more for headroom, so a reap can never loop forever. */
+        const val MAX_REAPS = 3
     }
 }
