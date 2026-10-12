@@ -172,7 +172,9 @@ class EmailDetailActivity : LockedActivity() {
         val emailFolder = intent.getStringExtra("email_folder") ?: "INBOX"
         val emailSubject = intent.getStringExtra("email_subject") ?: "No subject"
         val emailSender = intent.getStringExtra("email_sender") ?: "Unknown sender"
-        val emailPreview = intent.getStringExtra("email_preview") ?: "No content"
+        // The inbox no longer sends one: a row preview is a 200-character summary, and quoting
+        // or rendering it would pass a fragment off as the whole message.
+        val emailPreview = intent.getStringExtra("email_preview").orEmpty()
         val emailBodyMode = intent.getStringExtra("email_body_mode").orEmpty()
         // The row's own recipients, so Reply All has them even if the body fetch fails.
         toRecipients = splitAddresses(intent.getStringExtra("email_sent_to").orEmpty())
