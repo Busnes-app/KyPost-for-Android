@@ -620,6 +620,41 @@ class RelayMailSourceTest {
     }
 
     @Test
+    fun renameFolder_putsTheFolderAndItsNewLeaf() {
+        val callFactory = FakeCallFactory { request -> jsonResponse(request, "", code = 200) }
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = callFactory,
+        )
+
+        assertTrue(source.renameFolder("Archive/Old", "New") is MailOutcome.Success)
+
+        val sent = callFactory.requests.single()
+        assertEquals("PUT", sent.method)
+        assertEquals("/api/inbox/folders", sent.url.encodedPath)
+        val body = okio.Buffer().also { sent.body!!.writeTo(it) }.readUtf8()
+        val fields = Json.parseToJsonElement(body).jsonObject
+        assertEquals("Archive/Old", fields["folder"]!!.jsonPrimitive.content)
+        assertEquals("New", fields["name"]!!.jsonPrimitive.content)
+        assertEquals("secret-1", sent.header(HEADER_DEVICE_SECRET))
+    }
+
+    @Test
+    fun folderMutations_surfaceTheServersRefusal() {
+        fun renameAgainst(code: Int, body: String) = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body, code) },
+        ).renameFolder("Archive/Old", "New")
+
+        val refused = renameAgainst(400, "built-in folders cannot be renamed")
+        assertEquals("built-in folders cannot be renamed", (refused as MailOutcome.BadRequest).message)
+        assertTrue(renameAgainst(502, "imap rename failed") is MailOutcome.UpstreamFailure)
+        assertTrue(renameAgainst(401, "") is MailOutcome.Unauthorized)
+    }
+
+    @Test
     fun deleteFolder_sendsPairingHeaders_notQueryParams() {
         val callFactory = FakeCallFactory { request -> jsonResponse(request, "", code = 200) }
         val source = RelayMailSource(

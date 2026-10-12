@@ -3,4 +3,7 @@
     <!-- setBold: the face it last applied, and the base it derived that face from. -->
     <item name="tag_bold_applied_face" type="id" />
     <item name="tag_bold_base_face" type="id" />
+    <!-- FoldersActivity builds its views in code. -->
+    <item name="foldersNew" type="id" />
+    <item name="foldersNameInput" type="id" />
 </resources>

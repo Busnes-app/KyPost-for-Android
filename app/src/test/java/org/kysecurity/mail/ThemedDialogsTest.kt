@@ -31,6 +31,8 @@ class ThemedDialogsTest {
             "contacts/ContactsListActivity.kt" to "importAccountsDialog",
             "EmailDetailActivity.kt" to "confirmOpenLink",
             "security/AppLockOffer.kt" to "showIfDue",
+            "FoldersActivity.kt" to "promptName",
+            "FoldersActivity.kt" to "confirmDelete",
         )
     }
 }
