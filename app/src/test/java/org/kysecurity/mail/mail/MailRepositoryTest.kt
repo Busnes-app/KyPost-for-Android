@@ -153,8 +153,6 @@ private class FakeMailSource(
     /** Runs while the action is "on the wire", so a test can look at the cache mid-flight. */
     var duringAction: (() -> Unit)? = null
 
-    override fun fetchInbox(mailbox: String, limit: Int, forceFullResync: Boolean) = fetchOutcome
-
     override fun performAction(
         action: MailAction,
         messageIds: List<String>,
