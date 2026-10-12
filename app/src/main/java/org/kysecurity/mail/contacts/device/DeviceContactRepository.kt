@@ -25,6 +25,8 @@ class DeviceContactRepository(
     private val db: AppDatabase,
     private val syncRepository: ContactSyncRepository,
     private val groupSyncRepository: GroupSyncRepository,
+    /** Runs just before each import is queued; tests use it to change consent mid-scan. */
+    private val beforeImport: suspend () -> Unit = {},
 ) {
     private val contentResolver = context.contentResolver
     private val groupLinker = DeviceGroupLinker(context, db)
@@ -325,7 +327,17 @@ class DeviceContactRepository(
 
     private suspend fun importNewDeviceContacts() = withContext(Dispatchers.IO) {
         val settings = DeviceContactSyncSettings(context)
+        // Importing uploads to the server: only from accounts the user picked for this pairing,
+        // and none by default.
+        val destination = syncRepository.destination() ?: return@withContext
+        // The session this scan belongs to; a pairing replacement or wipe ends it.
+        val session = org.kysecurity.mail.ProcessState.generation()
+        val revision = settings.consentRevision()
+        val consented = settings.importAccounts(destination)
+        if (consented.isEmpty()) return@withContext
         val watermarkMs = settings.lastForeignScanAtEpochMs()
+        // Taken before the query: a contact edited while the scan runs is newer, and read next time.
+        val scanStartedAtMs = System.currentTimeMillis()
 
         val projection = arrayOf(
             ContactsContract.RawContacts._ID,
@@ -334,8 +346,7 @@ class DeviceContactRepository(
             ContactsContract.RawContacts.ACCOUNT_NAME,
         )
 
-        val selection =
-            "(${ContactsContract.RawContacts.ACCOUNT_TYPE} IS NULL OR ${ContactsContract.RawContacts.ACCOUNT_TYPE} != ?)"
+        val selection = FOREIGN_LIVE_ROWS
         val selectionArgs = arrayOf(DeviceContactAccount.ACCOUNT_TYPE)
 
         val rawContactCandidates = mutableListOf<Long>()
@@ -349,6 +360,11 @@ class DeviceContactRepository(
             while (cursor.moveToNext()) {
                 val rawContactId = cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts._ID))
                 val contactId = cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.CONTACT_ID))
+                val account = DeviceAccount(
+                    cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_TYPE)),
+                    cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_NAME)),
+                )
+                if (account.key !in consented) continue
 
                 val lastUpdated = queryContactLastUpdated(contactId)
                 if (lastUpdated > watermarkMs) {
@@ -396,12 +412,39 @@ class DeviceContactRepository(
                 }
                 if (!alreadyImported) {
                     val newDto = candidate.toContactDto(UUID.randomUUID().toString(), 0)
-                    syncRepository.queueCreate(newDto)
+                    beforeImport()
+                    // Consent read now, not at scan start: it may have been withdrawn since.
+                    val account = DeviceAccount(candidate.accountType, candidate.accountName).key
+                    val current = settings.whileConsented(destination, account) {
+                        // Checked under the consent lock the purge also takes, so the session and
+                        // the pairing cannot change between this check and the write.
+                        val stillCurrent = org.kysecurity.mail.ProcessState.isCurrent(session) &&
+                            syncRepository.destination() == destination
+                        if (stillCurrent) syncRepository.queueCreate(newDto)
+                        stillCurrent
+                    }
+                    // The pairing this scan started under is gone: nothing more may be queued.
+                    if (current == false) return@withContext
                 }
             }
         }
 
-        settings.setLastForeignScanAtEpochMs(System.currentTimeMillis())
+        settings.advanceScanWatermark(revision, scanStartedAtMs)
+    }
+
+    /** Accounts other than ours holding live contacts, for the import consent screen. */
+    suspend fun foreignContactAccounts(): List<DeviceAccount> = withContext(Dispatchers.IO) {
+        val found = linkedSetOf<DeviceAccount>()
+        contentResolver.query(
+            ContactsContract.RawContacts.CONTENT_URI,
+            arrayOf(ContactsContract.RawContacts.ACCOUNT_TYPE, ContactsContract.RawContacts.ACCOUNT_NAME),
+            FOREIGN_LIVE_ROWS,
+            arrayOf(DeviceContactAccount.ACCOUNT_TYPE),
+            null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) found += DeviceAccount(cursor.getString(0), cursor.getString(1))
+        }
+        found.toList()
     }
 
     /** True when [existingContact] and the candidate share any email or phone, normalized the same
@@ -993,17 +1036,20 @@ class DeviceContactRepository(
                 null,
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    Triple(
+                    RawContactRow(
                         cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts._ID)),
                         cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.CONTACT_ID)),
-                        cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_TYPE)),
+                        DeviceAccount(
+                            cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_TYPE)),
+                            cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_NAME)),
+                        ),
                     )
                 } else {
                     null
                 }
             } ?: return@withContext null
 
-            val (actualRawContactId, contactId, accountType) = rawContactData
+            val (actualRawContactId, contactId, account) = rawContactData
             val lastUpdated = queryContactLastUpdated(contactId)
 
             val dataProjection = arrayOf(
@@ -1060,8 +1106,9 @@ class DeviceContactRepository(
                         ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE -> {
                             val given = data2?.takeIf { it.isNotBlank() }
                             val family = data3?.takeIf { it.isNotBlank() }
-                            val middle = data4?.takeIf { it.isNotBlank() }
-                            val prefix = data5?.takeIf { it.isNotBlank() }
+                            // StructuredName.PREFIX is DATA4 and MIDDLE_NAME is DATA5.
+                            val prefix = data4?.takeIf { it.isNotBlank() }
+                            val middle = data5?.takeIf { it.isNotBlank() }
                             val suffix = data6?.takeIf { it.isNotBlank() }
                             fn = listOfNotNull(prefix, given, middle, family, suffix).joinToString(" ")
                             if (fn.isBlank()) fn = data1
@@ -1172,8 +1219,9 @@ class DeviceContactRepository(
             return@withContext DeviceRawContactSnapshot(
                 rawContactId = actualRawContactId,
                 contactId = contactId,
-                accountType = accountType,
-                accountName = null,
+                // Both halves: import consent is per account, type and name.
+                accountType = account.type,
+                accountName = account.name,
                 lastUpdatedEpochMs = lastUpdated,
                 dirty = false,
                 fn = fn,
@@ -1194,3 +1242,10 @@ class DeviceContactRepository(
             )
         }
 }
+
+/** Live raw contacts of every account but ours, including the account-less local store. */
+private const val FOREIGN_LIVE_ROWS =
+    "(${ContactsContract.RawContacts.ACCOUNT_TYPE} IS NULL OR ${ContactsContract.RawContacts.ACCOUNT_TYPE} != ?) AND " +
+        "${ContactsContract.RawContacts.DELETED} = 0"
+
+private data class RawContactRow(val id: Long, val contactId: Long, val account: DeviceAccount)

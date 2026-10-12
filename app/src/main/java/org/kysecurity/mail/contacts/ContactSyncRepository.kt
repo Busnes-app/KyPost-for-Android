@@ -7,6 +7,7 @@ import org.kysecurity.mail.data.RecipientPinEntity
 import org.kysecurity.mail.pgp.PgpFingerprint
 import org.kysecurity.mail.pgp.withVerifiedRevocation
 import org.kysecurity.mail.push.PairingData
+import org.kysecurity.mail.signon.relayOrigin
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -136,6 +137,12 @@ class ContactSyncRepository(
         is ContactSyncResult.ServiceUnavailable -> ContactSyncOutcome.ServiceUnavailable(result.message)
         is ContactSyncResult.BadRequest -> ContactSyncOutcome.Retry(result.message)
         is ContactSyncResult.Retryable -> ContactSyncOutcome.Retry(result.message)
+    }
+
+    /** Where this device's contact changes go: the relay's canonical origin and the account on
+     *  it. Null when unpaired or the relay URL would be refused. */
+    suspend fun destination(): String? = pairingProvider()?.let { pairing ->
+        relayOrigin(pairing.serverUrl)?.let { "$it\n${pairing.subscriberId}" }
     }
 
     /** Deliberately does not call [sync]; the caller must trigger the follow-up sync itself. */

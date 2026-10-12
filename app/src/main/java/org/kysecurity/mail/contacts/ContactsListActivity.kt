@@ -22,6 +22,7 @@ import org.kysecurity.mail.applyKyPostTopBar
 import org.kysecurity.mail.applyPrimaryNavigationInsets
 import org.kysecurity.mail.applyPrimaryNavigationTheme
 import org.kysecurity.mail.applyThemeToActivity
+import org.kysecurity.mail.getStoredThemePalette
 import org.kysecurity.mail.applyTopInsetWithHeader
 import org.kysecurity.mail.contacts.device.DeviceContactsRuntime
 import org.kysecurity.mail.contacts.device.DeviceContactSyncEnabler
@@ -29,6 +30,7 @@ import org.kysecurity.mail.contacts.device.DeviceContactSyncScheduler
 import org.kysecurity.mail.data.ContactEntity
 import org.kysecurity.mail.pgp.hasPgpIdentity
 import org.kysecurity.mail.setupPrimaryNavigation
+import org.kysecurity.mail.showThemed
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.kysecurity.mail.security.LockedActivity
@@ -204,6 +206,7 @@ class ContactsListActivity : LockedActivity() {
         if (pickMode) return false
         menu?.add(0, MENU_REFRESH, 0, R.string.contacts_refresh)
         menu?.add(0, MENU_DEVICE_SYNC, 0, R.string.contacts_device_sync_enable)
+        menu?.add(0, MENU_IMPORT_ACCOUNTS, 0, R.string.contacts_import_menu)
         menu?.add(0, MENU_DEDUPE, 0, R.string.contacts_dedupe)
         menu?.add(0, MENU_EXPORT, 0, R.string.contacts_export_vcard)
         return super.onCreateOptionsMenu(menu)
@@ -218,6 +221,7 @@ class ContactsListActivity : LockedActivity() {
                 deviceSyncItem.title = getString(
                     if (isEnabled) R.string.contacts_device_sync_disable else R.string.contacts_device_sync_enable,
                 )
+                menu.findItem(MENU_IMPORT_ACCOUNTS)?.isVisible = isEnabled
             } catch (e: Exception) {
                 android.util.Log.e("ContactsListActivity", "Error getting device sync status", e)
                 deviceSyncItem.title = getString(R.string.contacts_device_sync_enable)
@@ -239,6 +243,10 @@ class ContactsListActivity : LockedActivity() {
                 } else {
                     syncEnabler.checkAndEnable()
                 }
+                true
+            }
+            MENU_IMPORT_ACCOUNTS -> {
+                showImportAccounts()
                 true
             }
             MENU_DEDUPE -> {
@@ -275,6 +283,89 @@ class ContactsListActivity : LockedActivity() {
             }
             else -> super.onOptionsItemSelected(item)
         }
+    }
+
+    /** Per-account consent: importing uploads those contacts to the server, so nothing is checked
+     *  until the user checks it. */
+    /** The accounts import can choose from; replaced in tests to stand in for the provider. */
+    @androidx.annotation.VisibleForTesting
+    internal var foreignAccounts: suspend () -> List<org.kysecurity.mail.contacts.device.DeviceAccount> =
+        { DeviceContactsRuntime.graph(this).repository.foreignContactAccounts() }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun showImportAccounts() {
+        val graph = DeviceContactsRuntime.graph(this)
+        // Permission can be revoked in Android settings while sync stays on: ask again instead of
+        // querying a provider that will refuse. Enabling is idempotent once it is granted.
+        val canRead = androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CONTACTS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!canRead) {
+            syncEnabler.checkAndEnable()
+            return
+        }
+        lifecycleScope.launch {
+            // Cancellation is not a SecurityException, so it still propagates.
+            val accounts = try {
+                foreignAccounts()
+            } catch (e: SecurityException) {
+                Toast.makeText(this@ContactsListActivity, R.string.contacts_device_sync_permission_denied, Toast.LENGTH_LONG).show()
+                syncEnabler.checkAndEnable()
+                return@launch
+            }
+            if (accounts.isEmpty()) {
+                Toast.makeText(this@ContactsListActivity, R.string.contacts_import_none, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            // Consent belongs to this pairing; a different server or account starts with none.
+            val destination = ContactsRuntime.graph(this@ContactsListActivity).repository.destination()
+            if (destination == null) {
+                Toast.makeText(this@ContactsListActivity, R.string.connection_mode_relay_not_paired, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val chosen = graph.settings.importAccounts(destination).toMutableSet()
+            importAccountsDialog(accounts, chosen) {
+                lifecycleScope.launch {
+                    graph.settings.setImportAccounts(destination, chosen)
+                    graph.coordinator.syncNowAsync()
+                }
+            }
+        }
+    }
+
+    /** One checkbox per account, ticked for those in [chosen], which tracks the ticks. Shown
+     *  through [showThemed]: the native dialog in the active palette (STYLE_GUIDE §3, §6). */
+    @androidx.annotation.VisibleForTesting
+    internal fun importAccountsDialog(
+        accounts: List<org.kysecurity.mail.contacts.device.DeviceAccount>,
+        chosen: MutableSet<String>,
+        onSave: () -> Unit,
+    ): androidx.appcompat.app.AlertDialog {
+        val accent = android.graphics.Color.parseColor(getStoredThemePalette(this).accent)
+        val padding = (16 * resources.displayMetrics.density).toInt()
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(padding, padding, padding, 0)
+            addView(android.widget.TextView(context).apply { setText(R.string.contacts_import_message) })
+            for (account in accounts) {
+                addView(
+                    android.widget.CheckBox(context).apply {
+                        text = account.name?.let { "$it (${account.type})" }
+                            ?: getString(R.string.contacts_import_local_account)
+                        buttonTintList = android.content.res.ColorStateList.valueOf(accent)
+                        isChecked = account.key in chosen
+                        setOnCheckedChangeListener { _, checked ->
+                            if (checked) chosen += account.key else chosen -= account.key
+                        }
+                    },
+                )
+            }
+        }
+        return androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.contacts_import_title)
+            .setView(android.widget.ScrollView(this).apply { addView(container) })
+            .setPositiveButton(R.string.contacts_import_save) { _, _ -> onSave() }
+            .setNegativeButton(R.string.cancel, null)
+            .showThemed()
     }
 
     // User-triggered, so — unlike the silent foreground/post-edit auto-sync — this one reports its
@@ -346,7 +437,8 @@ class ContactsListActivity : LockedActivity() {
         private const val MENU_REFRESH = 0
         private const val MENU_DEVICE_SYNC = 1
         private const val MENU_DEDUPE = 2
-        private const val MENU_EXPORT = 3
+        private const val MENU_IMPORT_ACCOUNTS = 3
+        private const val MENU_EXPORT = 4
 
         /** When true, a tap returns the uid via [EXTRA_RESULT_UID] instead of opening the editor. */
         const val EXTRA_PICK_MODE = "pick_mode"

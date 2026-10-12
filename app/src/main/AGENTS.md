@@ -659,6 +659,22 @@ Owns production Android app code and resources.
   live-row lookup before any create. Linked rows from before SOURCE_ID are backfilled.
   `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_13_14` indexes the link table's
   `rawContactId`.
+- **Importing another account's contacts uploads them, so it is per-account opt-in.**
+  `importNewDeviceContacts` reads only raw contacts whose `DeviceAccount` (type, name; both null
+  for the phone's own storage) is in `DeviceContactSyncSettings.importAccounts()`, which is empty
+  by default and stored under a key no earlier build wrote — installs that imported everything
+  start with nothing chosen. Consent is bound to the pairing it was given under
+  (`ContactSyncRepository.destination`: the relay's canonical origin and the subscriber id); any
+  other pairing reads none. It is checked again for each contact just before it is queued, inside
+  `whileConsented`, which shares a lock with `setImportAccounts`, so withdrawing consent stops a
+  scan already running. Inside that lock the scan also checks that its session
+  (`ProcessState.generation()`, captured at scan start) and its pairing destination are still
+  current, and abandons the scan if not. The account purge's database step runs under the same
+  lock and clears consent (`clearConsentDuring`): the purge advances the generation only at its
+  end, so this is what stops an import from landing in the outbox the next pairing inherits. Adding an account rewinds the scan watermark so its existing contacts
+  are seen; a scan moves the watermark to its own start time only if `consentRevision` is
+  unchanged since it began, so a rewind made mid-scan survives it. The choice is the Contacts menu's "Import from other accounts…" dialog, whose copy
+  says the contacts go to the user's KyPost server. `DeviceContactImportConsentTest`.
 - **Deletes reach the phone through Room.** `syncAll`'s `removeDeletedContacts` stage removes the
   raw contact of every link whose Room contact is gone, so server tombstones, snapshot prunes and
   local deletes share one path. A device-side delete is queued and then hard-deleted as the sync
