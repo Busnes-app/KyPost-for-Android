@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Declares KyPost the sync adapter for its own contacts account, which is what lets contacts
+     apps treat those raw contacts as editable rather than read-only. -->
+<sync-adapter xmlns:android="http://schemas.android.com/apk/res/android"
+    android:contentAuthority="com.android.contacts"
+    android:accountType="@string/contact_account_type"
+    android:supportsUploading="true"
+    android:userVisible="false" />

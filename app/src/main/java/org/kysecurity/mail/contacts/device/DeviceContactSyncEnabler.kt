@@ -14,9 +14,18 @@ class DeviceContactSyncEnabler(
     private val activity: AppCompatActivity,
     private val permissionLauncher: ActivityResultLauncher<Array<String>>,
     private val onEnabled: () -> Unit = {},
+    /** The account-setup request this screen serves, or null when enabling from the menu. */
+    private val setupToken: () -> Long? = { null },
 ) {
+    /** A setup screen whose request a newer one displaced must not act on it. */
+    private fun displaced(): Boolean = setupToken()?.let { !PendingAccountSetup.isCurrent(it) } == true
+
     /** True when permissions had to be requested; the caller must wait for the launcher callback. */
     fun checkAndEnable(): Boolean {
+        if (displaced()) {
+            activity.finish()
+            return false
+        }
         // Refused, not just defaulted off: synced contacts land in the OS contacts provider, which
         // Hostile Location Protection's in-memory database does not cover.
         if (!DeviceContactsRuntime.graph(activity).syncPermitted()) {
@@ -48,6 +57,10 @@ class DeviceContactSyncEnabler(
     }
 
     fun enableAfterPermissionGrant() {
+        if (displaced()) {
+            activity.finish()
+            return
+        }
         val graph = DeviceContactsRuntime.graph(activity)
         if (!graph.syncPermitted()) {
             Toast.makeText(activity, R.string.contacts_device_sync_blocked_hostile_location, Toast.LENGTH_LONG).show()
@@ -61,7 +74,14 @@ class DeviceContactSyncEnabler(
                     Toast.makeText(activity, R.string.contacts_device_sync_account_failed, Toast.LENGTH_LONG).show()
                     return@launch
                 }
+                // Rechecked after the suspension above: the request may have been displaced since.
+                if (displaced()) {
+                    activity.finish()
+                    return@launch
+                }
                 graph.settings.setEnabled(true)
+                setupToken()?.let { PendingAccountSetup.complete(it, DeviceContactAccount.ACCOUNT_NAME) }
+                    ?: PendingAccountSetup.complete(DeviceContactAccount.ACCOUNT_NAME)
                 graph.observer.register()
                 DeviceContactSyncScheduler.ensurePeriodic(activity)
                 graph.coordinator.syncNowAsync()

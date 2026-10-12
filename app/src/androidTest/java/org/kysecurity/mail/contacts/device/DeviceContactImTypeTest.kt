@@ -302,6 +302,26 @@ class DeviceContactImTypeTest {
         assertEquals(ContactsContract.CommonDataKinds.Relation.TYPE_BROTHER.toString(), types["Probe Brother"])
     }
 
+    /** Room holds the relation with no label; the phone files it as Brother. The kept type is
+     *  found under the same readback label Room's null reads back as, "other". */
+    @Test
+    fun anUnlabelledRelationKeepsThePhonesBrotherTypeWhenAnotherIsAppended() = runBlocking {
+        val uid = syncRepository.queueCreate(ContactDto(fn = "Unlabelled Relation Probe", relations = listOf(ContactRelationDto(label = null, name = "Probe Sibling"))))
+        repository.syncAll()
+        val rawContactId = db.deviceContactLinkDao().getByUid(uid)!!.rawContactId
+        val relation = ContactsContract.CommonDataKinds.Relation.CONTENT_ITEM_TYPE
+        setColumns(rawContactId, relation, ContactsContract.CommonDataKinds.Relation.NAME, "Probe Sibling", ContentValues().apply {
+            put(ContactsContract.CommonDataKinds.Relation.TYPE, ContactsContract.CommonDataKinds.Relation.TYPE_BROTHER)
+            putNull(ContactsContract.CommonDataKinds.Relation.LABEL)
+        })
+
+        appendInRoomAndSync(uid) { it.copy(relations = it.relations + ContactRelationDto(label = "friend", name = "Probe Friend")) }
+
+        val types = columnByKey(rawContactId, relation, ContactsContract.CommonDataKinds.Relation.NAME, ContactsContract.CommonDataKinds.Relation.TYPE)
+        assertEquals("both relations are on the phone", setOf("Probe Sibling", "Probe Friend"), types.keys)
+        assertEquals(ContactsContract.CommonDataKinds.Relation.TYPE_BROTHER.toString(), types["Probe Sibling"])
+    }
+
     /** An unlabelled Other event reads with no label and must not be written back as custom. */
     @Test
     fun anOtherEventKeepsItsTypeWhenAnotherEventIsAppended() = runBlocking {
