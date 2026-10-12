@@ -13,8 +13,9 @@ data class GroupDto(
     val updatedAt: String? = null,
 )
 
-/** `GET /api/groups` responds `{"groups": [...]}`, not a bare array. */
+/** `GET /api/groups` responds `{"groups": [...]}`, not a bare array. `groups` is required: a
+ *  reply without it must fail the refresh, not read as "no groups" and delete them all. */
 @Serializable
 data class GroupsListResponseDto(
-    val groups: List<GroupDto> = emptyList(),
+    val groups: List<GroupDto>,
 )
