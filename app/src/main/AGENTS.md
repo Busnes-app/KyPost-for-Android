@@ -700,6 +700,10 @@ Owns production Android app code and resources.
 - Compose's address-book and Send action icons use the active palette's `inkStrong` color.
 - Send needs a recipient and a body. A blank subject is legal (the relay doesn't require one), so
   compose asks "Send without a subject?" instead of refusing (`sendReadiness`).
+  Every path to the relay (menu, that confirmation, the editor's export callback, the client send
+  and the pickup-fallback re-send) asks one gate, `custodyPermitsSend`, at the moment it would
+  send: custody can resolve while a prompt is open. Send stays disabled until custody is known.
+  `ComposeCustodyGuardTest` covers the confirmation path.
   On the client-encrypted path the protected `Subject` header is always written, empty if need
   be, and `PgpMimeReader` reads a present-but-blank header as an empty subject. An absent header
   still means "none", so the outer placeholder never stands in for a subject the sender left

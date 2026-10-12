@@ -92,6 +92,9 @@ class ComposeActivity : LockedActivity() {
     /** Key held only by the user and this device not enrolled: Send is withdrawn while it holds. */
     private var handoffOnlyAccount = false
 
+    /** False until [applyPgpComposeState] has run once; nothing is sent before custody is known. */
+    private var custodyKnown = false
+
     /** True when the encryption happens on this device and the send goes to `/api/mail/send-pgp`
      *  rather than `/api/mail/send`. From [PgpComposeState.clientSide]. */
     private var clientSideAccount = false
@@ -405,19 +408,24 @@ class ComposeActivity : LockedActivity() {
     /** Withdraws Send on an account this app cannot encrypt for. See [applyPgpComposeState]. */
     private fun applySendAvailability() {
         sendMenuItem?.isVisible = !handoffOnlyAccount
-        sendMenuItem?.isEnabled = !handoffOnlyAccount && !handoffBusy
+        sendMenuItem?.isEnabled = custodyKnown && !handoffOnlyAccount && !handoffBusy
+    }
+
+    /** The one custody gate. Every path to the relay asks it, at the moment it would send, because
+     *  custody can resolve while a prompt is open. Hidden chips mean both flags false, so letting a
+     *  handoff-only account through is a cleartext send. */
+    private fun custodyPermitsSend(): Boolean {
+        if (custodyKnown && !handoffOnlyAccount) return true
+        val message = if (custodyKnown) R.string.compose_send_needs_webmail else R.string.compose_send_custody_pending
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        applySendAvailability()
+        return false
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             MENU_SEND -> {
-                // Belt and braces against a stale menu: the item is hidden for a handoff-only
-                // account, but a send that reached here would be a silent cleartext downgrade.
-                if (handoffOnlyAccount) {
-                    Toast.makeText(this, R.string.compose_send_needs_webmail, Toast.LENGTH_LONG).show()
-                } else {
-                    sendEmail()
-                }
+                sendEmail()
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -463,6 +471,7 @@ class ComposeActivity : LockedActivity() {
         // Unenrolled client-custody: hidden chips send both flags false, a silent cleartext downgrade.
         handoffOnlyAccount = state.handoffToWebmail
         clientSideAccount = state.clientSide
+        custodyKnown = true
         applySendAvailability()
         pgpChips.visibility =
             if (state.canEncrypt || state.canSign || state.handoffToWebmail) View.VISIBLE else View.GONE
@@ -677,6 +686,7 @@ class ComposeActivity : LockedActivity() {
 
     private fun sendEmail(allowEmptySubject: Boolean = false) {
         if (handoffBusy) return
+        if (!custodyPermitsSend()) return
         val to = toInput.commaJoinedRecipients()
         val cc = ccInput.commaJoinedRecipients()
         val bcc = bccInput.commaJoinedRecipients()
@@ -701,6 +711,8 @@ class ComposeActivity : LockedActivity() {
         bodyEditor.exportHtml { html ->
             // exportHtml's main-looper callback can fire after onDestroy shut ioExecutor down.
             if (isFinishing || isDestroyed) return@exportHtml
+            // Asked again: custody can resolve between the tap and this callback.
+            if (!custodyPermitsSend()) return@exportHtml
             val draft = MailDraft(
                 to = to, cc = cc, bcc = bcc, subject = subject, body = html, mode = "html",
                 attachments = attachments.toList(),
@@ -732,6 +744,7 @@ class ComposeActivity : LockedActivity() {
     /** Sender built on IO (Keystore), crypto on Default (Bouncy Castle); the prompt hops to Main. */
     private fun dispatchClientSend(draft: MailDraft) {
         if (sendJob?.isActive == true) return
+        if (!custodyPermitsSend()) return
         sendMenuItem?.isEnabled = false
         sendJob = lifecycleScope.launch {
             val sender = withContext(Dispatchers.IO) { clientSender() }
@@ -838,6 +851,8 @@ class ComposeActivity : LockedActivity() {
 
     /** Shared by the first attempt and the confirmed re-send, so the re-send cannot drift. */
     private fun dispatchSend(draft: MailDraft) {
+        // The pickup-fallback re-send arrives here without passing sendEmail.
+        if (!custodyPermitsSend()) return
         ioExecutor.execute {
             val outcome = MailRuntime.graph(this).repository.send(draft)
             runOnUiThread {
@@ -978,7 +993,7 @@ class ComposeActivity : LockedActivity() {
         handoffBusy = false
         handoffAttempt++
         webmailChip.isEnabled = true
-        sendMenuItem?.isEnabled = !handoffOnlyAccount
+        applySendAvailability()
     }
 
     /** Kept internal so device tests exercise the real failure/browser/cache behavior. */
