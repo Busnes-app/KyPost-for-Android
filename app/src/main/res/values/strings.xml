@@ -98,6 +98,8 @@
         <item quantity="other">%d selected</item>
     </plurals>
     <string name="move_to_title">Move to</string>
+    <string name="action_mark_unread">Mark unread</string>
+    <string name="action_mark_read">Mark read</string>
     <string name="action_delete">Delete</string>
     <string name="action_reply">Reply</string>
     <string name="action_reply_all">Reply all</string>

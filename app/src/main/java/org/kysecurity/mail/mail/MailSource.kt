@@ -115,7 +115,7 @@ data class MailPage(val messages: List<Email>, val hasMore: Boolean?, val nextBe
 data class FolderInfo(val path: String, val deletable: Boolean)
 data class FolderListResult(val parent: String, val folders: List<FolderInfo>)
 
-enum class MailAction { DELETE, ARCHIVE, SPAM, READ, MOVE }
+enum class MailAction { DELETE, ARCHIVE, SPAM, READ, UNREAD, MOVE }
 
 data class MailActionOutcome(val processed: Int, val failed: List<Pair<String, String>>)
 

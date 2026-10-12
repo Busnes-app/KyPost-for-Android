@@ -12,7 +12,8 @@
         android:padding="16dp"
         android:clipToPadding="false">
 
-        <!-- 40dp below a 360dp window, so all seven fit a 320dp phone (values-w360dp: 44dp). -->
+        <!-- Eight actions share this row: @dimen/detail_action_size is 35dp below a 360dp window,
+             40dp from it and 44dp from 400dp, so all eight fit at 320dp and 360dp. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -30,7 +31,7 @@
                     android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_reply"
-                    android:padding="10dp"
+                    android:padding="@dimen/detail_action_padding"
                     android:src="@drawable/ic_reply" />
 
                 <ImageButton
@@ -39,7 +40,7 @@
                     android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_reply_all"
-                    android:padding="10dp"
+                    android:padding="@dimen/detail_action_padding"
                     android:src="@drawable/ic_reply_all" />
 
                 <ImageButton
@@ -48,7 +49,7 @@
                     android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_forward"
-                    android:padding="10dp"
+                    android:padding="@dimen/detail_action_padding"
                     android:src="@drawable/ic_forward" />
 
             </LinearLayout>
@@ -64,12 +65,21 @@
                 android:orientation="horizontal">
 
                 <ImageButton
+                    android:id="@+id/actionMarkUnread"
+                    android:layout_width="@dimen/detail_action_size"
+                    android:layout_height="@dimen/detail_action_size"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/action_mark_unread"
+                    android:padding="@dimen/detail_action_padding"
+                    android:src="@drawable/ic_mark_unread" />
+
+                <ImageButton
                     android:id="@+id/actionArchive"
                     android:layout_width="@dimen/detail_action_size"
                     android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_archive"
-                    android:padding="10dp"
+                    android:padding="@dimen/detail_action_padding"
                     android:src="@drawable/ic_archive" />
 
                 <ImageButton
@@ -78,7 +88,7 @@
                     android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_move"
-                    android:padding="10dp"
+                    android:padding="@dimen/detail_action_padding"
                     android:src="@drawable/ic_move" />
 
                 <ImageButton
@@ -87,7 +97,7 @@
                     android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_junk"
-                    android:padding="10dp"
+                    android:padding="@dimen/detail_action_padding"
                     android:src="@drawable/ic_spam" />
 
                 <ImageButton
@@ -96,7 +106,7 @@
                     android:layout_height="@dimen/detail_action_size"
                     android:background="?attr/selectableItemBackgroundBorderless"
                     android:contentDescription="@string/action_delete"
-                    android:padding="10dp"
+                    android:padding="@dimen/detail_action_padding"
                     android:src="@drawable/ic_delete" />
 
             </LinearLayout>

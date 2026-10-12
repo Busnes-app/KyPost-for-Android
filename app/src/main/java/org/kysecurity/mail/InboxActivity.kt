@@ -121,6 +121,10 @@ class InboxActivity : LockedActivity() {
                 searchResults = searchResults?.filter { it.id != removedId }
                 renderFilteredEmails()
             }
+            // Already confirmed by the relay and written to Room; this only repaints the row.
+            val unreadId = result.data?.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_ID)
+            val unreadFolder = result.data?.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_FOLDER)
+            if (unreadId != null && unreadFolder != null) showStatus(unreadId, unreadFolder, "unread")
         }
     }
 
@@ -368,6 +372,35 @@ class InboxActivity : LockedActivity() {
             renderFilteredEmails()
         }
         outcome?.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
+    }
+
+    /** Server first: the row changes only once the relay confirms, so a server without the
+     *  unread action leaves it as it was and the failure is toasted. */
+    private fun setReadState(email: Email, read: Boolean) {
+        val folder = email.sourceFolder()
+        val label = getString(if (read) R.string.action_mark_read else R.string.action_mark_unread)
+        val repository = mailRepository
+        // Ordered with any read a detail screen left in flight, so this cannot be undone by it.
+        val setState = ReadStateLane.ordered {
+            if (read) repository.markRead(email.id, folder) else repository.markUnread(email.id, folder)
+        }
+        MailBackgroundExecutor.submitReporting(this, label) {
+            val outcome = setState()
+            if (outcome is MailOutcome.Success) {
+                runOnUiThread { showStatus(email.id, folder, if (read) "read" else "unread") }
+            }
+            outcome
+        }
+    }
+
+    /** Matches folder as well as id: after a folder switch the list can still hold another
+     *  mailbox's rows, and a UID repeats across mailboxes. */
+    private fun showStatus(id: String, folder: String, status: String) {
+        if (redirectedToUnlock || isDestroyed) return
+        allEmails = allEmails.map { if (it.id == id && it.sourceFolder() == folder) it.copy(status = status) else it }
+        searchResults = searchResults?.map { if (it.id == id && it.sourceFolder() == folder) it.copy(status = status) else it }
+        rebuildTabs(allEmails)
+        renderFilteredEmails()
     }
 
     /** The row's own mailbox, not the screen's. An IMAP UID is unique only within one folder, so
@@ -762,6 +795,9 @@ class InboxActivity : LockedActivity() {
             add(MENU_BULK_MOVE, R.string.action_move, R.drawable.ic_move)
             add(MENU_BULK_JUNK, R.string.action_junk, R.drawable.ic_spam)
             add(MENU_BULK_DELETE, R.string.action_delete, R.drawable.ic_delete)
+            // Overflow: no undo bar, they are server first like the detail screen's button.
+            menu.add(0, MENU_BULK_MARK_READ, MENU_BULK_MARK_READ, R.string.action_mark_read)
+            menu.add(0, MENU_BULK_MARK_UNREAD, MENU_BULK_MARK_UNREAD, R.string.action_mark_unread)
             return true
         }
 
@@ -776,6 +812,8 @@ class InboxActivity : LockedActivity() {
                 MENU_BULK_ARCHIVE -> submitRowsAction(chosen, getString(R.string.action_archive), MailAction.ARCHIVE)
                 MENU_BULK_JUNK -> submitRowsAction(chosen, getString(R.string.action_junk), MailAction.SPAM)
                 MENU_BULK_DELETE -> submitRowsAction(chosen, getString(R.string.action_delete), MailAction.DELETE)
+                MENU_BULK_MARK_READ -> chosen.filter { it.status == "unread" }.forEach { setReadState(it, read = true) }
+                MENU_BULK_MARK_UNREAD -> chosen.filter { it.status != "unread" }.forEach { setReadState(it, read = false) }
                 MENU_BULK_MOVE -> {
                     val pick = moveTargetPickerForTest
                         ?: { from, then -> pickMoveTarget(this@InboxActivity, mailRepository, ioExecutor, from, then) }
@@ -1134,6 +1172,13 @@ class InboxActivity : LockedActivity() {
         selectionCallback.onActionItemClicked(mode, mode.menu.findItem(MENU_BULK_MOVE))
     }
 
+    /** Runs the selection overflow's Mark read / Mark unread handler, as tapping it would. */
+    @androidx.annotation.VisibleForTesting
+    internal fun bulkMarkForTest(read: Boolean) {
+        val mode = selectionMode ?: return
+        selectionCallback.onActionItemClicked(mode, mode.menu.findItem(if (read) MENU_BULK_MARK_READ else MENU_BULK_MARK_UNREAD))
+    }
+
     /** Null in production. Stands in for the folder picker, which answers asynchronously. */
     @androidx.annotation.VisibleForTesting
     internal var moveTargetPickerForTest: ((from: String, then: (String) -> Unit) -> Unit)? = null
@@ -1174,6 +1219,8 @@ class InboxActivity : LockedActivity() {
         private const val MENU_BULK_MOVE = 11
         private const val MENU_BULK_JUNK = 12
         private const val MENU_BULK_DELETE = 13
+        private const val MENU_BULK_MARK_READ = 14
+        private const val MENU_BULK_MARK_UNREAD = 15
         const val STATE_FOLDER = "inbox_folder"
         const val STATE_TAB = "inbox_tab"
         const val STATE_SCROLL = "inbox_scroll"

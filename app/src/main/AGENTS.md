@@ -99,7 +99,15 @@ Owns production Android app code and resources.
      empty `failed[]` is also treated as rejected — an unconfirmed operation must not delete a
      locally visible row. `markRead` is deliberately not optimistic: it already runs on `MailBackgroundExecutor`
      and reports nothing, so a pre-emptive local write bought no responsiveness and left the row
-     lying about a state the server never reached.
+     lying about a state the server never reached. `markUnread` (KyPost-Server #350) follows the
+     same rule, from the detail screen's Mark unread button and the inbox selection's overflow
+     (Mark read / Mark unread, one call per row; long-press stays select); neither repaints the
+     row until the relay confirms. A server without the action answers 400 "unsupported
+     action", which is toasted as is. The open's
+     markRead, the detail button and the inbox selection all go through `ReadStateLane.ordered`, a
+     process-wide chain: each read-state change waits for the one requested before it (30 s at
+     most), across screens and reopens. The pool has two threads, so without it a read still in
+     flight could land after the unread and win. The row repaint matches folder as well as id.
 - **Older mail and reliable deltas (KyPost-Server #348/#349; each part degrades to the old
   behaviour on a server without it).** Every `/api/inbox` request uses `WINDOW_LIMIT`: the relay
   keeps one window and cursor per `limit`. `EmailEntity.inWindow` is false for rows older than the
@@ -415,10 +423,10 @@ Owns production Android app code and resources.
 - `showThemed()` (`ThemedDialog.kt`) shows a native AlertDialog through `showSecurely()` and then
   tints its native surface (shape and insets kept), title, message, buttons, list rows and fields in the active palette
   (STYLE_GUIDE.md §6). A dialog is its own window, so the Activity's theme walk never reaches it.
-  `ThemedDialogsTest` names the dialogs that must use it. The message screen's seven actions use
-  `@dimen/detail_action_size`: 40dp below a 360dp window, 44dp from it, so all seven are on
-  screen at 320dp (`EmailDetailActionRowTest` checks positions, since overflowing fixed-size
-  buttons keep their size and are only clipped).
+  `ThemedDialogsTest` names the dialogs that must use it. The message screen's eight actions use
+  `@dimen/detail_action_size`: 35dp below a 360dp window, 40dp from it, 44dp from 400dp, so all
+  eight are on screen at 320dp and 360dp (`EmailDetailActionRowTest` checks positions, since
+  overflowing fixed-size buttons keep their size and are only clipped).
 - "Move to folder" (`MoveToFolder.kt`, detail screen) offers INBOX, the relay's top-level folders
   and the Archive subfolders, minus the message's own folder (`moveTargets`), and runs
   `MailRepository.move`, so the local row goes only once the relay confirms the id.
