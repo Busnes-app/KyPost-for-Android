@@ -77,6 +77,35 @@ class MailBackgroundExecutorTest {
         assertTrue(runsATask())
     }
 
+    /** A submitter that claimed state for its task (a hidden row) must hear that the task never ran. */
+    @Test
+    fun aRefusedSubmissionReportsItsDrop() {
+        MailBackgroundExecutor.quiesce()
+        val dropped = AtomicBoolean(false)
+
+        MailBackgroundExecutor.submit(onDropped = { dropped.set(true) }) {}
+
+        assertTrue(dropped.get())
+    }
+
+    @Test
+    fun aQueuedTaskDiscardedByQuiesceReportsItsDrop() {
+        val hold = CountDownLatch(1)
+        val busy = CountDownLatch(2)
+        // Both pool threads busy, so the third task waits in the queue.
+        repeat(2) { MailBackgroundExecutor.submit { busy.countDown(); hold.await(5, TimeUnit.SECONDS) } }
+        assertTrue(busy.await(5, TimeUnit.SECONDS))
+        val dropped = AtomicBoolean(false)
+        val ran = AtomicBoolean(false)
+        MailBackgroundExecutor.submit(onDropped = { dropped.set(true) }) { ran.set(true) }
+
+        MailBackgroundExecutor.quiesce()
+        hold.countDown()
+
+        assertTrue(dropped.get())
+        assertFalse(ran.get())
+    }
+
     /** The race the wipe actually loses: submissions still arriving while the teardown runs. Not
      *  one of them may start after `quiesce()` returns, which is the instant its caller closes the
      *  database and deletes the file. */

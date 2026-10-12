@@ -50,6 +50,7 @@ internal class FakeMailSource : MailSource {
         messageIds: List<String>,
         mailbox: String,
         targetMailbox: String?,
+        account: MailAccount?,
     ): MailOutcome<MailActionOutcome> {
         val gate = when (action) {
             MailAction.READ -> readGates.poll()

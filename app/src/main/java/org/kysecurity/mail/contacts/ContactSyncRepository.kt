@@ -178,6 +178,14 @@ class ContactSyncRepository(
         return localUid
     }
 
+    /** All or nothing, and only into an empty outbox: until the push is batched, a larger push
+     *  could pass the server's 500-change cap and wedge the outbox. False means it was not empty. */
+    suspend fun queueImport(contacts: List<ContactDto>): Boolean = db.withTransaction {
+        if (db.pendingContactChangeDao().getAllPending().isNotEmpty()) return@withTransaction false
+        contacts.forEach { queueCreate(it) }
+        true
+    }
+
     /** [verifiedInPerson] is set only by the PGP QR flow, after an out-of-band comparison. It is
      *  the one way a key becomes this device's pin for the contact's addresses, replacing any
      *  earlier pin for them; see [recordVerifiedKey]. */
