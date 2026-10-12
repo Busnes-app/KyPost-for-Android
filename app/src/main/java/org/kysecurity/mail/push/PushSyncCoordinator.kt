@@ -187,9 +187,10 @@ class PushSyncCoordinator(
         syncLocked(endpoint, PushTransport.UNIFIED_PUSH, p256dh, auth)
     }
 
-    /** The distributor revoked the endpoint (onUnregistered); it must never be registered again. */
-    suspend fun forgetUnifiedPushEndpoint() = registrationGate.withLock {
-        repository.updateUnifiedPushRegistration(endpoint = null, p256dh = null, auth = null)
+    /** The distributor revoked the endpoint, in session [generation]; it must never be registered
+     *  again. False, clearing nothing, once that session has ended. */
+    suspend fun forgetUnifiedPushEndpoint(generation: Long): Boolean = registrationGate.withLock {
+        repository.storeUnifiedPushEndpoint(endpoint = null, p256dh = null, auth = null, generation = generation)
     }
 
     private suspend fun syncAndPersist(

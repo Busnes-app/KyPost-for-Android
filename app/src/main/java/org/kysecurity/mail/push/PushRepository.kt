@@ -380,7 +380,7 @@ class PushRepository(
     }
 
     override suspend fun storeUnifiedPushEndpoint(
-        endpoint: String,
+        endpoint: String?,
         p256dh: String?,
         auth: String?,
         generation: Long,

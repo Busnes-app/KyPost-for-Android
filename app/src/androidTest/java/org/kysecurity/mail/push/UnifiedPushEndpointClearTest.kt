@@ -43,4 +43,21 @@ class UnifiedPushEndpointClearTest {
         assertNull(state.unifiedPushP256dh)
         assertNull(state.unifiedPushAuth)
     }
+
+    /** A revocation captured before the session ended must not clear what the next one stored;
+     *  a revocation in the current session still clears it. */
+    @Test
+    fun aRevocationOnlyClearsItsOwnSession(): Unit = runBlocking {
+        val graph = PushRuntime.graph(context)
+        val stale = org.kysecurity.mail.ProcessState.generation()
+        org.kysecurity.mail.ProcessState.advanceGeneration()
+        val current = org.kysecurity.mail.ProcessState.generation()
+        graph.syncCoordinator.acceptUnifiedPushEndpoint("https://ntfy.example/new", "p256dh", "auth", current)
+
+        graph.syncCoordinator.forgetUnifiedPushEndpoint(stale)
+        assertEquals("https://ntfy.example/new", graph.repository.state.first().unifiedPushEndpoint)
+
+        graph.syncCoordinator.forgetUnifiedPushEndpoint(current)
+        assertNull(graph.repository.state.first().unifiedPushEndpoint)
+    }
 }
