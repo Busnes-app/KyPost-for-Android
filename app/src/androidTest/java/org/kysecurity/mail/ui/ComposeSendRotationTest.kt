@@ -1,6 +1,5 @@
 package org.kysecurity.mail.ui
 
-import android.content.Intent
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -40,7 +39,8 @@ class ComposeSendRotationTest {
     @Test
     fun aRecreatedComposeAdoptsTheSendInFlightAndShowsItsResult() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val intent = Intent(context, ComposeActivity::class.java)
+        // internalIntent: only an in-app launch may prefill recipients (ComposeIntentParser).
+        val intent = ComposeActivity.internalIntent(context)
             .putExtra(ComposeActivity.EXTRA_TO, "recipient@example.com")
             .putExtra(ComposeActivity.EXTRA_SUBJECT, "Quarterly numbers")
         val release = CountDownLatch(1)
