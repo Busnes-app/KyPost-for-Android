@@ -71,6 +71,28 @@ class KeywordSettingsBoundsTest {
         assertEquals(listOf("Gamma", "Alpha", "Beta", "Delta"), settings.getOrderedKeywords())
     }
 
+    /** The inbox remembers every keyword a row carries, IMAP flags included; those are not tabs. */
+    @Test
+    fun rememberKeywords_dropsImapSystemKeywords() {
+        val settings = KeywordSettings(context)
+        settings.rememberKeywords(setOf("\$Phishing", "\\Seen", "Work"))
+
+        // The stored set, not getOrderedKeywords(): that read filters on its own and would hide a
+        // write-side regression.
+        assertEquals(setOf("Work"), settings.getAllKeywords())
+    }
+
+    /** An install that stored them before the write-side filter must not keep their chips. */
+    @Test
+    fun getOrderedKeywords_hidesSystemKeywordsAlreadyStored() {
+        context.getSharedPreferences(KeywordSettings.PREFS_NAME, Context.MODE_PRIVATE).edit()
+            .putStringSet("all_keywords", setOf("\$Phishing", "Work"))
+            .putString("keyword_order", """["${'$'}Phishing","Work"]""")
+            .commit()
+
+        assertEquals(listOf("Work"), KeywordSettings(context).getOrderedKeywords())
+    }
+
     /** Under Hostile Location Protection the labels describe the user's mail and must not reach this
      *  plaintext file at all. */
     @Test
