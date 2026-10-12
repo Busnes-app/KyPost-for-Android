@@ -432,7 +432,10 @@ Owns production Android app code and resources.
     creation but enrollment can change mid-process, so it is re-probed on every `composeState()`.
   - Sign-only is impossible (the relay accepts `multipart/encrypted` only), so the two chips are
     coupled when `clientSide`.
-- Inbox tabs come from the relay's `tabs`/`label` response fields.
+- Inbox tabs come from the relay's `tabs`/`label` response fields. IMAP system keywords (`$…`,
+  `\…`) are message state, never tabs: `KeywordTabs.isSystemKeyword` filters them in `buildTabs`
+  and on both the write and read side of `KeywordSettings`. They stay on `Email.keywords`, where
+  `isFlaggedPhishing` reads `$Phishing`.
 - Inbox search (`MailRepository.search` → `GET /api/mail/search?q=&mailbox=&limit=`) searches the
   folder on screen, all fields. Results are never written to Room (they are a view of the folder,
   not its sync window), each row is stamped with the searched mailbox, and they replace the list only while their query and folder are still on
