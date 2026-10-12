@@ -272,7 +272,15 @@ class MigrationTest {
     @Test
     fun migrate16To17_addsANullWokenAt_keepingRows() {
         helper.createDatabase(TEST_DB, 16).apply {
-            execSQL(insertV11Email(messageId = "42", folder = "INBOX", subject = "Cached"))
+            // The v11 row plus inWindow, NOT NULL since v16.
+            execSQL(
+                "INSERT INTO emails " +
+                    "(messageId, folder, sender, sentTo, cc, bcc, subject, preview, bodyMode, label, " +
+                    "keywordsJson, status, hasAttachments, sourceMode, pgpEncrypted, pgpSigned, " +
+                    "pgpVerified, pgpSignerFingerprint, pgpDecryptError, inWindow) " +
+                    "VALUES ('42', 'INBOX', 'a@example.com', '', '', '', 'Cached', '', '', '', " +
+                    "'[]', 'unread', 0, 'relay', 0, 0, 0, '', '', 1)",
+            )
             close()
         }
 
