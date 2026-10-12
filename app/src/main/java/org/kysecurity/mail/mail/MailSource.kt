@@ -264,8 +264,13 @@ interface MailSource {
     fun currentAccount(): MailAccount?
 
     /** A non-null [account] is checked against the pairing the request is built from; on a
-     *  mismatch nothing is sent. */
-    fun sendMail(draft: MailDraft, account: MailAccount? = null): MailOutcome<MailSendOutcome>
+     *  mismatch nothing is sent. [onCall] receives the HTTP call before it runs, so its owner can
+     *  cancel it. */
+    fun sendMail(
+        draft: MailDraft,
+        account: MailAccount? = null,
+        onCall: (okhttp3.Call) -> Unit = {},
+    ): MailOutcome<MailSendOutcome>
 
     /** Relays ciphertext this device already built; a different endpoint and failure set. */
     fun sendClientEncrypted(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome>

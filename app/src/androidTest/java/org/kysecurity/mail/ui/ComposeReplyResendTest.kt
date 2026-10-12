@@ -15,6 +15,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.kysecurity.mail.ComposeActivity
 import org.kysecurity.mail.ComposeDraftCache
+import org.kysecurity.mail.ComposeSend
 import org.kysecurity.mail.ReplyRef
 import org.kysecurity.mail.ReplyThreadHandoff
 import org.kysecurity.mail.mail.MailDraft
@@ -34,6 +35,7 @@ class ComposeReplyResendTest {
     @Before
     fun installRelay() {
         ComposeDraftCache.clear()
+        ComposeSend.resetForNewSession()
         MailRuntime.invalidate()
         MailRuntime.sourceForTest = source
     }
@@ -41,6 +43,8 @@ class ComposeReplyResendTest {
     @After
     fun releaseRelay() {
         ComposeDraftCache.clear()
+        // Sends outlive the Activity (ComposeSend); one left running must not leak into the next test.
+        ComposeSend.resetForNewSession()
         MailRuntime.sourceForTest = null
         MailRuntime.invalidate()
     }

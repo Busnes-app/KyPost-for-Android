@@ -176,7 +176,7 @@ private class FakeMailSource(
     override fun deleteFolder(folder: String) = unsupported()
     override fun saveDraft(draft: MailDraft) = unsupported()
     override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft) = unsupported()
-    override fun sendMail(draft: MailDraft, account: MailAccount?) = unsupported()
+    override fun sendMail(draft: MailDraft, account: MailAccount?, onCall: (okhttp3.Call) -> Unit) = unsupported()
     override fun sendClientEncrypted(message: ClientEncryptedMessage) = unsupported()
     /** Null keeps the old throwing behaviour, so tests asserting "must never reach the relay"
      *  still fail loudly rather than against a plausible-looking success. */
