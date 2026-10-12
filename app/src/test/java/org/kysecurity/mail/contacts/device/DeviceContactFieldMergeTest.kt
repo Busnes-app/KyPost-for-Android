@@ -238,11 +238,17 @@ class DeviceContactFieldMergeTest {
     private fun <T> unchangedInRoom(room: T, readBack: T): T =
         DeviceContactFieldMerge.againstBase(room, readBack, base = room, baseKnown = true) { _, _ -> error("not a conflict") }
 
+    /** The readback is computed the way the writer and the snapshot code it, so the rule holds
+     *  whatever CP2 keeps of the label. */
     @Test
     fun aRelationLabelCp2ReadsAsOther_isNotAPhoneEdit() {
         val room = listOf(ContactRelationDto(label = "mentor", name = "Grace"))
+        val readBack = DeviceContactFieldCoding.relationLabelFromType(
+            DeviceContactFieldCoding.relationType("mentor"),
+            DeviceContactFieldCoding.relationCustomLabel("mentor"),
+        )
 
-        assertEquals(room, unchangedInRoom(room, listOf(ContactRelationDto(label = "other", name = "Grace"))))
+        assertEquals(room, unchangedInRoom(room, listOf(ContactRelationDto(label = readBack, name = " Grace "))))
     }
 
     @Test

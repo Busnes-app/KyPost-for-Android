@@ -239,16 +239,16 @@ class DeviceContactUpdatePlanTest {
         assertEquals(emptyList(), plan.emails)
     }
 
-    /** The push never writes websites: a website Room cleared is still on the phone, so its base
-     *  stays the old value while the fields that did reach the phone advance. */
+    /** A plan that leaves a field off, here the website Room cleared, leaves the phone holding the
+     *  old value, so that field's base stays put while the fields that did reach the phone advance. */
     @Test
-    fun nextBase_keepsTheOldBaseForAFieldThePushNeverWrites() {
+    fun nextBase_keepsTheOldBaseForAFieldThePlanLeavesOff() {
         val site = listOf(ContactUrlDto(value = "https://example.invalid"))
         val base = ContactDto(uid = "u1", fn = "Ada Lovelace", notes = "Old", websites = site)
         val dto = base.copy(notes = "New", websites = emptyList())
         val device = snapshot(notes = "Old").copy(websites = site)
 
-        val plan = DeviceContactUpdatePlan.of(dto, device, roomNewer, deviceOlder, base = base)
+        val plan = DeviceContactUpdatePlan(notes = "New")
         val next = plan.nextBase(dto, device, base)!!
 
         assertEquals("New", next.notes)
