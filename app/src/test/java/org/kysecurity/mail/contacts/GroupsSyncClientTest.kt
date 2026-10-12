@@ -68,6 +68,19 @@ private fun groupsResponse(request: Request, body: String, code: Int, message: S
 
 class GroupsSyncClientTest {
 
+    /** A reply without the list is not "the user has no groups": the refresh that follows would
+     *  delete every group on the phone. Only an explicit empty list means none. */
+    @Test
+    fun pull_200_withoutAGroupsList_isNotASnapshot() = runBlocking {
+        val missing = GroupsSyncClient(callFactory = GroupsFakeCallFactory { groupsResponse(it, "{}", 200) })
+            .pull("https://relay.example.com/", "device-1", "secret-1")
+        val empty = GroupsSyncClient(callFactory = GroupsFakeCallFactory { groupsResponse(it, """{"groups":[]}""", 200) })
+            .pull("https://relay.example.com/", "device-1", "secret-1")
+
+        assertTrue("got $missing", missing is GroupsSyncResult.Retryable)
+        assertEquals(GroupsSyncResult.Success(emptyList()), empty)
+    }
+
     @Test
     fun pull_200_decodesGroupsAndSendsExpectedRequest() = runBlocking {
         val callFactory = GroupsFakeCallFactory { request ->

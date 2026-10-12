@@ -68,6 +68,23 @@ class DeviceGroupLinker(
         return resultUri.lastPathSegment?.toLongOrNull()
     }
 
+    /** Deletes the device group of a backend group that no longer exists. Ownership is checked:
+     *  as the sync adapter CP2 would delete any account's group. The link goes only on success. */
+    suspend fun removeAndroidGroup(link: GroupLinkEntity) = withContext(Dispatchers.IO) {
+        val uri = ContactsContract.Groups.CONTENT_URI.buildUpon()
+            .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true")
+            .build()
+        runCatching {
+            contentResolver.delete(
+                uri,
+                "${ContactsContract.Groups._ID} = ? AND ${ContactsContract.Groups.ACCOUNT_TYPE} = ?",
+                arrayOf(link.androidGroupRowId.toString(), DeviceContactAccount.ACCOUNT_TYPE),
+            )
+        }.onSuccess { db.groupLinkDao().deleteByGroupId(link.groupId) }
+            .onFailure { android.util.Log.e("DeviceContactSync", "Could not delete group ${link.androidGroupRowId}", it) }
+        Unit
+    }
+
     /** Public so the full-refresh cycle can rename already-linked groups, not just new ones. */
     suspend fun renameIfNeeded(androidGroupRowId: Long, groupName: String) = withContext(Dispatchers.IO) {
         val currentTitle = contentResolver.query(
@@ -90,6 +107,15 @@ class DeviceGroupLinker(
             }
         }
     }
+}
+
+/** Links whose backend group is gone, each with whether its device row goes too. Title matching
+ *  can link two backend groups to one row, so a row a live group still links to is kept. */
+internal fun groupRemovals(links: List<GroupLinkEntity>, groups: List<GroupEntity>): List<Pair<GroupLinkEntity, Boolean>> {
+    val live = groups.mapTo(HashSet()) { it.id }
+    val (kept, gone) = links.partition { it.groupId in live }
+    val stillUsed = kept.mapTo(HashSet()) { it.androidGroupRowId }
+    return gone.map { it to (it.androidGroupRowId !in stillUsed) }
 }
 
 /** A link whose backend group is gone is skipped — there is no fresh name to rename to. */
