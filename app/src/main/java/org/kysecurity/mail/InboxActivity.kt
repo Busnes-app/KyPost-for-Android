@@ -347,9 +347,24 @@ class InboxActivity : LockedActivity() {
     }
 
     private fun setupRecyclerView() {
-        adapter = EmailAdapter(emptyList(), onEmailLongClick = ::toggleSelected) { email ->
-            if (selectionMode != null) toggleSelected(email) else openEmailDetail(email)
-        }
+        adapter = EmailAdapter(
+            emptyList(),
+            onEmailLongClick = ::toggleSelected,
+            onEmailClick = { email -> if (selectionMode != null) toggleSelected(email) else openEmailDetail(email) },
+            // Like the swipes, off while selecting.
+            rowActions = listOf(
+                R.string.action_archive to { email: Email ->
+                    if (selectionMode == null) {
+                        submitRowAction(email, getString(R.string.action_archive), mailRepository::archive)
+                    }
+                },
+                R.string.action_delete to { email: Email ->
+                    if (selectionMode == null) {
+                        submitRowAction(email, getString(R.string.action_delete), mailRepository::delete)
+                    }
+                },
+            ),
+        )
         recyclerView.layoutManager = LinearLayoutManager(this)
         recyclerView.adapter = androidx.recyclerview.widget.ConcatAdapter(adapter, olderFooter)
         recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
