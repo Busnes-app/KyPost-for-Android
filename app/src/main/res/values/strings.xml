@@ -306,6 +306,8 @@
     <string name="compose_fill_all_fields">Fill in the recipient and message.</string>
     <string name="compose_empty_subject_title">Send without a subject?</string>
     <string name="compose_send_custody_pending">Still checking this account\'s encryption settings. Try again in a moment.</string>
+    <string name="compose_custody_check_failed">Couldn\'t check this account\'s encryption settings, so Send is off.</string>
+    <string name="compose_custody_retry">Retry</string>
     <string name="compose_empty_subject_add">Add subject</string>
     <string name="compose_empty_subject_send">Send</string>
     <string name="push_pairing_status_not_paired">Not paired</string>

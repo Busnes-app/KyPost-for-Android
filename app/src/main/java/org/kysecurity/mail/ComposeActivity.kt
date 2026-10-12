@@ -20,9 +20,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.addCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationBarView
+import com.google.android.material.snackbar.Snackbar
 import com.infomaniak.lib.richhtmleditor.RichHtmlEditorWebView
 import org.kysecurity.mail.contacts.AddressBookSheet
 import org.kysecurity.mail.contacts.RecipientCandidate
@@ -86,14 +88,17 @@ class ComposeActivity : LockedActivity() {
     private lateinit var signChip: Chip
     private lateinit var webmailChip: Chip
     private lateinit var keylessWarning: android.widget.TextView
-    private val pgpController by lazy { ComposePgpController.from(this) }
+    private val pgpController by lazy { pgpControllerForTest ?: ComposePgpController.from(this) }
     private var sendMenuItem: MenuItem? = null
 
     /** Key held only by the user and this device not enrolled: Send is withdrawn while it holds. */
     private var handoffOnlyAccount = false
 
-    /** False until [applyPgpComposeState] has run once; nothing is sent before custody is known. */
+    /** False until a bootstrap answer reaches [applyPgpComposeState]; nothing is sent before
+     *  custody is known. A failed bootstrap leaves it false (see [resolveCustody]). */
     private var custodyKnown = false
+    private var custodyJob: Job? = null
+    private var custodyRetryBar: Snackbar? = null
 
     /** True when the encryption happens on this device and the send goes to `/api/mail/send-pgp`
      *  rather than `/api/mail/send`. From [PgpComposeState.clientSide]. */
@@ -139,6 +144,13 @@ class ComposeActivity : LockedActivity() {
 
     @androidx.annotation.VisibleForTesting
     internal fun sendForTest() = sendEmail()
+
+    @androidx.annotation.VisibleForTesting
+    internal fun sendEnabledForTest(): Boolean? = sendMenuItem?.isEnabled
+
+    /** True once a custody lookup has finished, either way. */
+    @androidx.annotation.VisibleForTesting
+    internal fun custodySettledForTest(): Boolean = custodyJob?.isCompleted == true
 
     /** Exactly what "Send without a subject?" runs when confirmed. */
     @androidx.annotation.VisibleForTesting
@@ -240,7 +252,7 @@ class ComposeActivity : LockedActivity() {
         keylessWarning = findViewById(R.id.composeKeylessWarning)
         applyWarningCalloutTheme(this, keylessWarning)
 
-        lifecycleScope.launch { applyPgpComposeState(pgpController.composeState()) }
+        resolveCustody()
 
         toInput = findViewById(R.id.composeToInput)
         ccInput = findViewById(R.id.composeCcInput)
@@ -390,6 +402,28 @@ class ComposeActivity : LockedActivity() {
         // post, not postDelayed: the first mirror has to exist before the first teardown can.
         mainHandler.removeCallbacks(bodyMirror)
         mainHandler.post(bodyMirror)
+        // Coming back (e.g. after reconnecting) is a natural moment to retry a failed lookup.
+        if (!custodyKnown) resolveCustody()
+    }
+
+    /** Couldn't-check is not "no identity": a failed bootstrap keeps custody unknown, so Send stays
+     *  blocked, and offers a retry. Only a real answer reaches [applyPgpComposeState]. */
+    private fun resolveCustody() {
+        if (custodyKnown || custodyJob?.isActive == true) return
+        custodyRetryBar?.dismiss()
+        custodyJob = lifecycleScope.launch {
+            val state = pgpController.composeState()
+            if (state != null) {
+                custodyRetryBar?.dismiss()
+                applyPgpComposeState(state)
+            } else {
+                applySendAvailability()
+                custodyRetryBar = Snackbar.make(rootView, R.string.compose_custody_check_failed, Snackbar.LENGTH_INDEFINITE)
+                    .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
+                    .setAction(R.string.compose_custody_retry) { resolveCustody() }
+                    .also { it.show() }
+            }
+        }
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -419,6 +453,7 @@ class ComposeActivity : LockedActivity() {
         val message = if (custodyKnown) R.string.compose_send_needs_webmail else R.string.compose_send_custody_pending
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         applySendAvailability()
+        resolveCustody()
         return false
     }
 
@@ -1105,6 +1140,11 @@ class ComposeActivity : LockedActivity() {
     }
 
     companion object {
+        /** Null in production. Replaces the bootstrap-backed controller for the next launch. */
+        @androidx.annotation.VisibleForTesting
+        @Volatile
+        internal var pgpControllerForTest: ComposePgpController? = null
+
         /** Null in production. Stands in for a provider's `openAssetFileDescriptor`; null falls through. */
         @androidx.annotation.VisibleForTesting
         @Volatile

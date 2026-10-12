@@ -703,7 +703,11 @@ Owns production Android app code and resources.
   Every path to the relay (menu, that confirmation, the editor's export callback, the client send
   and the pickup-fallback re-send) asks one gate, `custodyPermitsSend`, at the moment it would
   send: custody can resolve while a prompt is open. Send stays disabled until custody is known.
-  `ComposeCustodyGuardTest` covers the confirmation path.
+  `ComposePgpController.composeState()` returns null when it couldn't check (unpaired or bootstrap
+  failed); that is not "no identity" and must never be mapped to all-false flags, or a
+  client-custody account sends in the clear. Compose keeps custody unknown, shows a Retry
+  Snackbar, and retries on resume or a Send tap (`resolveCustody`).
+  `ComposeCustodyGuardTest` covers the confirmation path and a failed bootstrap.
   On the client-encrypted path the protected `Subject` header is always written, empty if need
   be, and `PgpMimeReader` reads a present-but-blank header as an empty subject. An absent header
   still means "none", so the outer placeholder never stands in for a subject the sender left
