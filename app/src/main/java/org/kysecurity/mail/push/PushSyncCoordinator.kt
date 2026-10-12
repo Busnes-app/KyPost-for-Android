@@ -1,6 +1,12 @@
 package org.kysecurity.mail.push
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -21,6 +27,8 @@ class PushSyncCoordinator(
      *  [PushGraph] supplies the channel's own [ChannelPush], and a caller that forgets now fails
      *  to compile rather than silently registering the wrong transport. */
     private val fetchRegistrationCredential: suspend () -> PushRegistrationCredential?,
+    /** Where UnifiedPush callback work runs; see [enqueueUnifiedPush]. */
+    private val eventScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
 ) {
     /** ONE registration at a time, process-wide.
      *
@@ -32,6 +40,24 @@ class PushSyncCoordinator(
      *  back except a re-pair. `NonCancellable` never addressed this: it protects a persist from
      *  cancellation, not from a competing registration. */
     private val registrationGate = Mutex()
+
+    /** UnifiedPush callback work, one at a time in arrival order. Separate launches let a
+     *  revocation run before the endpoint it revokes, which was then stored again. */
+    private val unifiedPushEvents = Channel<suspend PushSyncCoordinator.() -> Unit>(Channel.UNLIMITED)
+
+    init {
+        eventScope.launch {
+            for (event in unifiedPushEvents) {
+                try {
+                    event()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    android.util.Log.e("PushSyncCoordinator", "UnifiedPush event failed", e)
+                }
+            }
+        }
+    }
 
     /** The error every deferred registration reports, so the pairing screen shows one explanation
      *  rather than a transport-specific one per entry point. */
@@ -52,7 +78,9 @@ class PushSyncCoordinator(
         val credentialState = repository.currentCredentialState()
         if (credentialState is PushRepository.PairingCredentialState.Unavailable) return credentialGateDeferral()
 
-        val credential = fetchRegistrationCredential()
+        // A known UnifiedPush endpoint is the user's distributor choice, on either channel.
+        val credential = repository.state.first().unifiedPushCredential()
+            ?: fetchRegistrationCredential()
             ?: return NativeRegistrationResult.Error(UNAVAILABLE_CREDENTIAL)
 
         // NonCancellable: the server has already invalidated the previous secret by the time it answers.
@@ -88,6 +116,8 @@ class PushSyncCoordinator(
             // window until some later resync happens to repair it.
             result.tlsPin?.let { repository.saveTlsPin(it) }
             persistSuccess(pairing, result, credentialState)
+            // After the replacement purge above, which clears the endpoint along with the pairing.
+            recordUnifiedPush(credential.transport, credential.token, credential.p256dh, credential.auth)
             result
         }
     }
@@ -130,19 +160,36 @@ class PushSyncCoordinator(
 
     /** Resyncs on the active transport; to force FCM call [syncCurrentPairingToken] directly. */
     suspend fun resyncActiveTransport(): NativeRegistrationResult {
-        val state = repository.state.first()
-        val endpoint = state.unifiedPushEndpoint
-        // Set only after a successful unifiedpush registration, and cleared on any other sync.
-        return if (endpoint != null) {
-            syncAndPersist(
-                token = endpoint,
-                transport = PushTransport.UNIFIED_PUSH,
-                p256dh = state.unifiedPushP256dh,
-                auth = state.unifiedPushAuth,
-            )
-        } else {
-            syncCurrentPairingToken()
+        // Chosen inside the gate, so an endpoint forgotten meanwhile is not registered again.
+        registrationGate.withLock {
+            repository.state.first().unifiedPushCredential()
+                ?.let { return syncLocked(it.token, it.transport, it.p256dh, it.auth) }
         }
+        return syncCurrentPairingToken()
+    }
+
+    /** Queues UnifiedPush callback work. Call it from the callback itself: arrival order is run order. */
+    fun enqueueUnifiedPush(event: suspend PushSyncCoordinator.() -> Unit) {
+        unifiedPushEvents.trySend(event)
+    }
+
+    /** A new endpoint from the distributor, captured in session [generation]. Stored even when
+     *  unpaired, since the distributor often answers before pairing, then registered if paired. */
+    suspend fun acceptUnifiedPushEndpoint(
+        endpoint: String,
+        p256dh: String?,
+        auth: String?,
+        generation: Long,
+    ): NativeRegistrationResult = registrationGate.withLock {
+        if (!repository.storeUnifiedPushEndpoint(endpoint, p256dh, auth, generation)) {
+            return NativeRegistrationResult.Error("The session ended before the endpoint arrived")
+        }
+        syncLocked(endpoint, PushTransport.UNIFIED_PUSH, p256dh, auth)
+    }
+
+    /** The distributor revoked the endpoint (onUnregistered); it must never be registered again. */
+    suspend fun forgetUnifiedPushEndpoint() = registrationGate.withLock {
+        repository.updateUnifiedPushRegistration(endpoint = null, p256dh = null, auth = null)
     }
 
     private suspend fun syncAndPersist(
@@ -151,6 +198,16 @@ class PushSyncCoordinator(
         p256dh: String? = null,
         auth: String? = null,
     ): NativeRegistrationResult = registrationGate.withLock {
+        syncLocked(token, transport, p256dh, auth)
+    }
+
+    /** Caller holds [registrationGate]. */
+    private suspend fun syncLocked(
+        token: String,
+        transport: PushTransport?,
+        p256dh: String?,
+        auth: String?,
+    ): NativeRegistrationResult {
         // Read INSIDE the gate, not by the caller before it: a registration that completed while
         // this one queued replaced the deviceSecret, and re-registering with the stale one is the
         // request the server rejects.
@@ -181,7 +238,7 @@ class PushSyncCoordinator(
         }
 
         // NonCancellable as in attemptPairing: the replacement secret is already minted by now.
-        withContext(NonCancellable) {
+        return withContext(NonCancellable) {
             registerAndPersist(pairing, token, transport, p256dh, auth, credentialState)
         }
     }
@@ -205,16 +262,21 @@ class PushSyncCoordinator(
             is NativeRegistrationResult.Success -> {
                 persistSuccess(pairing, result, credentialState)
                 narrowLegacyTlsPin(result.tlsPin)
-                // Gate on the transport we requested: older servers return null and would wipe what we set.
-                if (transport == PushTransport.UNIFIED_PUSH) {
-                    repository.updateUnifiedPushRegistration(endpoint = token, p256dh = p256dh, auth = auth)
-                } else {
-                    repository.updateUnifiedPushRegistration(endpoint = null, p256dh = null, auth = null)
-                }
+                recordUnifiedPush(transport, token, p256dh, auth)
             }
             is NativeRegistrationResult.Error -> repository.updateSyncState(lastSyncAtEpochMs = null, syncError = result.message)
         }
         return result
+    }
+
+    /** After a successful registration: a UnifiedPush one keeps its endpoint, any other drops it.
+     *  Gated on the transport we requested: older servers return null and would wipe what we set. */
+    private suspend fun recordUnifiedPush(transport: PushTransport?, token: String, p256dh: String?, auth: String?) {
+        if (transport == PushTransport.UNIFIED_PUSH) {
+            repository.updateUnifiedPushRegistration(endpoint = token, p256dh = p256dh, auth = auth)
+        } else {
+            repository.updateUnifiedPushRegistration(endpoint = null, p256dh = null, auth = null)
+        }
     }
 
     /** Narrows a legacy whole-chain pin set to the leaf [fresh] was observed on. Once.

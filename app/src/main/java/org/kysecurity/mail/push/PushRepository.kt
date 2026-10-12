@@ -1,6 +1,8 @@
 package org.kysecurity.mail.push
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
@@ -8,6 +10,8 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import org.kysecurity.mail.ScopedValue
+import org.kysecurity.mail.contacts.contactsDataStore
+import org.kysecurity.mail.mail.mailSyncDataStore
 import org.kysecurity.mail.security.AppLockStore
 import org.kysecurity.mail.security.SecurityRuntime
 import kotlinx.coroutines.flow.Flow
@@ -19,7 +23,11 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.IOException
 
-private val Context.pushDataStore by preferencesDataStore(name = "push_state")
+internal val Context.pushDataStore by preferencesDataStore(
+    name = "push_state",
+    // Metadata only: a corrupt file reads as empty instead of blocking every wipe and unpair.
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 private val KEY_LAST_SYNC_AT = longPreferencesKey("sync_last_at")
 private val KEY_LAST_PUSH_AT = longPreferencesKey("push_last_received_at")
@@ -232,11 +240,11 @@ class PushRepository(
         }
         // Scoping makes a stale value unreadable, not absent — these files must actually be deleted.
         // contacts_state is legacy: kept in this list so older installs do not keep the old file.
-        listOf("mail_sync_state", "contacts_state").forEach { name ->
-            step("datastore/$name") {
-                val file = java.io.File(context.filesDir, "datastore/$name.preferences_pb")
-                !file.exists() || file.delete()
-            }
+        listOf(
+            "mail_sync_state" to context.mailSyncDataStore,
+            "contacts_state" to context.contactsDataStore,
+        ).forEach { (name, store) ->
+            step("datastore/$name") { org.kysecurity.mail.clearAndDelete(context, name, store) }
         }
         // Every process-static holder at once via the registry, not by name — enumeration missed one.
         step("enrollment") { org.kysecurity.mail.pgp.EnrollmentTeardown.destroy(context).isEmpty() }
@@ -270,10 +278,8 @@ class PushRepository(
             prefs.remove(KEY_LAST_SYNC_AT)
             prefs.remove(KEY_LAST_PUSH_AT)
             // Registration state that belongs to the credential being reset, not to the account.
+            // The UnifiedPush endpoint stays: the distributor is still registered, and re-pairing needs it.
             prefs.remove(KEY_TRANSPORT)
-            prefs.remove(KEY_UNIFIEDPUSH_ENDPOINT)
-            prefs.remove(KEY_UNIFIEDPUSH_P256DH)
-            prefs.remove(KEY_UNIFIEDPUSH_AUTH)
         }
     }
 
@@ -352,13 +358,33 @@ class PushRepository(
         }
     }
 
-    /** Persisted so a resync can resend them; they only ever arrive via onNewEndpoint. Null clears. */
+    /** Persisted so pairing and resyncs can send them; they only ever arrive via onNewEndpoint. Null clears. */
     override suspend fun updateUnifiedPushRegistration(endpoint: String?, p256dh: String?, auth: String?) {
+        context.pushDataStore.edit { it.putUnifiedPush(endpoint, p256dh, auth) }
+    }
+
+    private fun MutablePreferences.putUnifiedPush(endpoint: String?, p256dh: String?, auth: String?) {
+        if (endpoint.isNullOrBlank()) remove(KEY_UNIFIEDPUSH_ENDPOINT) else this[KEY_UNIFIEDPUSH_ENDPOINT] = endpoint
+        if (p256dh.isNullOrBlank()) remove(KEY_UNIFIEDPUSH_P256DH) else this[KEY_UNIFIEDPUSH_P256DH] = p256dh
+        if (auth.isNullOrBlank()) remove(KEY_UNIFIEDPUSH_AUTH) else this[KEY_UNIFIEDPUSH_AUTH] = auth
+    }
+
+    override suspend fun storeUnifiedPushEndpoint(
+        endpoint: String,
+        p256dh: String?,
+        auth: String?,
+        generation: Long,
+    ): Boolean {
+        var stored = false
+        // Checked inside the write: a purge or wipe advances the generation before its own
+        // clear, so this either lands before that clear or sees the session already over.
         context.pushDataStore.edit { prefs ->
-            if (endpoint.isNullOrBlank()) prefs.remove(KEY_UNIFIEDPUSH_ENDPOINT) else prefs[KEY_UNIFIEDPUSH_ENDPOINT] = endpoint
-            if (p256dh.isNullOrBlank()) prefs.remove(KEY_UNIFIEDPUSH_P256DH) else prefs[KEY_UNIFIEDPUSH_P256DH] = p256dh
-            if (auth.isNullOrBlank()) prefs.remove(KEY_UNIFIEDPUSH_AUTH) else prefs[KEY_UNIFIEDPUSH_AUTH] = auth
+            if (org.kysecurity.mail.ProcessState.isCurrent(generation)) {
+                prefs.putUnifiedPush(endpoint, p256dh, auth)
+                stored = true
+            }
         }
+        return stored
     }
 
     /** The durable pull cursor for [subscriberId], scoped so a new subscriber starts clean. */
@@ -440,7 +466,14 @@ data class PushState(
     val deliveryMode: DeliveryMode = DeliveryMode.PUSH,
     val pullEndpoint: String? = null,
     val transport: PushTransport? = null,
+    /** The distributor's current endpoint, stored on arrival, paired or not. Known, not
+     *  necessarily registered: [transport] says what the server has. */
     val unifiedPushEndpoint: String? = null,
     val unifiedPushP256dh: String? = null,
     val unifiedPushAuth: String? = null,
-)
+) {
+    fun unifiedPushCredential(): PushRegistrationCredential? =
+        unifiedPushEndpoint?.takeIf { it.isNotBlank() }?.let {
+            PushRegistrationCredential(it, PushTransport.UNIFIED_PUSH, unifiedPushP256dh, unifiedPushAuth)
+        }
+}

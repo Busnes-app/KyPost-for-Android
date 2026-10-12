@@ -12,11 +12,19 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.kysecurity.mail.contacts.contactsDataStore
+import org.kysecurity.mail.mail.mailSyncDataStore
+import org.kysecurity.mail.push.pushDataStore
 import java.io.File
 import java.io.IOException
 
-/** DataStore has no delete API, so the backing files go directly; a wipe always relaunches. */
-private val DATASTORE_NAMES = listOf("push_state", "contacts_state", "mail_sync_state")
+/** Every preferences DataStore, by file name. Each is cleared through DataStore before its file
+ *  goes: see [org.kysecurity.mail.clearAndDelete]. */
+private fun dataStores(context: Context) = mapOf(
+    "push_state" to context.pushDataStore,
+    "contacts_state" to context.contactsDataStore,
+    "mail_sync_state" to context.mailSyncDataStore,
+)
 
 /** Retained because a later step still needs them: ordering, the wipe marker and the ledger.
  *  These are retained by the MID-wipe sweep only; [PREFS_NAMES_RETAINED_FINAL] is what actually
@@ -165,11 +173,15 @@ object SecurityWipe {
         step("database") { closeAndDeleteDatabase(appContext) }
         step("datastores") {
             // Checked, like every other step: `push_state` holds 30 sender/subject pairs.
-            val undeleted = DATASTORE_NAMES.map { name ->
-                name to File(appContext.filesDir, "datastore/$name.preferences_pb")
-            }.filter { (_, file) -> file.exists() && !file.delete() }
+            // Through DataStore, not just the file: the process survives the relaunch.
+            // Per store: one that fails must not stop the others from being cleared.
+            val undeleted = dataStores(appContext).filterNot { (name, store) ->
+                runCatching { org.kysecurity.mail.clearAndDelete(appContext, name, store) }
+                    .onFailure { android.util.Log.e(TAG, "Failed to clear datastore $name", it) }
+                    .getOrDefault(false)
+            }.keys
             if (undeleted.isNotEmpty()) {
-                throw IOException("Failed to delete datastores: ${undeleted.map { it.first }}")
+                throw IOException("Failed to delete datastores: $undeleted")
             }
         }
 
@@ -502,8 +514,8 @@ object SecurityWipe {
     /** Removes metadata written before Hostile Location Protection was turned on. */
     suspend fun deletePlaintextMetadataStores(context: Context) = withContext(Dispatchers.IO + NonCancellable) {
         val appContext = context.applicationContext
-        DATASTORE_NAMES.forEach { name ->
-            runCatching { File(appContext.filesDir, "datastore/$name.preferences_pb").delete() }
+        dataStores(appContext).forEach { (name, store) ->
+            runCatching { org.kysecurity.mail.clearAndDelete(appContext, name, store) }
                 .onFailure { android.util.Log.e(TAG, "Failed to delete datastore $name", it) }
         }
         METADATA_PREFS_NAMES.forEach { name ->

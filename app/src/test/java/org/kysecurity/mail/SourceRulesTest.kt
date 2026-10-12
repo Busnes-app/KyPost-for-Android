@@ -4,6 +4,7 @@ import org.junit.Test
 import java.io.File
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 class SourceRulesTest {
 
@@ -59,6 +60,18 @@ class SourceRulesTest {
             "Call IncomingPushRouter.route(data) and branch on IncomingPush instead. " +
                 "See IncomingPushRouter for why this is one decision and not one per transport.",
         )
+    }
+
+    /** onNewEndpoint stores the endpoint even when unpaired, so the abandoned-wipe guard must
+     *  return before the coordinator call that both stores and registers it. */
+    @Test
+    fun unifiedPushEndpointIsRefusedAfterAnAbandonedWipe() {
+        val text = mainSources().single { it.relativePath.endsWith("push/KyPostUnifiedPushService.kt") }.readText()
+        val body = text.substringAfter("override fun onNewEndpoint(").substringBefore("override fun ")
+        val guard = body.indexOf("SecurityWipe.blockedByAbandonedWipe(")
+        val firstCall = body.indexOf("syncCoordinator.")
+        assertTrue(guard >= 0 && firstCall > guard, "the guard must precede the coordinator call")
+        assertTrue(Regex("""\breturn\b""").containsMatchIn(body.substring(guard, firstCall)), "the guard must return")
     }
 
     @Test
