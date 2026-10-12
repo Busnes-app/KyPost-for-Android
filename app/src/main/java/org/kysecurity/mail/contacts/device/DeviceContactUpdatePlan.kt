@@ -27,6 +27,11 @@ data class DeviceContactUpdatePlan(
     fun leavesDeviceMatching(dto: ContactDto, snapshot: DeviceRawContactSnapshot): Boolean =
         nextBase(dto, snapshot, base = null) != null
 
+    /** The department the phone holds once this plan lands: an organization rewrite writes
+     *  Room's, or keeps the phone's when Room has none; otherwise the row is not touched. */
+    fun departmentAfter(dto: ContactDto, snapshot: DeviceRawContactSnapshot): String? =
+        if (org == null) snapshot.department else dto.department?.takeIf { it.isNotBlank() } ?: snapshot.department
+
     /** The merge base once this plan lands: [dto]'s value for each field the phone will then hold
      *  too, [base]'s for the rest. Without a [base], null unless every field agrees. */
     fun nextBase(dto: ContactDto, snapshot: DeviceRawContactSnapshot, base: ContactDto?): ContactDto? {
@@ -46,7 +51,7 @@ data class DeviceContactUpdatePlan(
             websites = pick(null, snapshot.websites, dto.websites, old.websites),
             relations = pick(null, snapshot.relations, dto.relations, old.relations),
             events = pick(null, snapshot.events, dto.events, old.events),
-            department = pick(null, snapshot.department, dto.department, old.department),
+            department = pick(null, departmentAfter(dto, snapshot), dto.department, old.department),
             phoneticGivenName = pick(null, snapshot.phoneticGivenName, dto.phoneticGivenName, old.phoneticGivenName),
             phoneticFamilyName = pick(null, snapshot.phoneticFamilyName, dto.phoneticFamilyName, old.phoneticFamilyName),
         )

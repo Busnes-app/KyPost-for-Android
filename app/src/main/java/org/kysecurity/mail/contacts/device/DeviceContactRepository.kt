@@ -694,7 +694,7 @@ class DeviceContactRepository(
             // fields, identically: DEPARTMENT lacked the fallback, so a department typed
             // in the system Contacts app vanished the first time Room's org won.
             val title = dto.title?.takeIf { it.isNotBlank() } ?: currentSnapshot.title
-            val department = dto.department?.takeIf { it.isNotBlank() } ?: currentSnapshot.department
+            val department = plan.departmentAfter(dto, currentSnapshot)
             if (org.isNotBlank() || !title.isNullOrBlank() || !department.isNullOrBlank()) {
                 ops.add(
                     insertRow(ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
