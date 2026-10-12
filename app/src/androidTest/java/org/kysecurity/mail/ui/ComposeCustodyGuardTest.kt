@@ -1,25 +1,32 @@
 package org.kysecurity.mail.ui
 
 import androidx.test.core.app.ActivityScenario
+import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.action.ViewActions.click
+import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.RootMatchers.isDialog
+import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import java.io.IOException
+import java.util.concurrent.atomic.AtomicInteger
+import okhttp3.Call
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import okhttp3.Call
 import org.kysecurity.mail.ComposeActivity
 import org.kysecurity.mail.ComposeDraftCache
 import org.kysecurity.mail.ComposePgpController
+import org.kysecurity.mail.R
 import org.kysecurity.mail.mail.MailRuntime
 import org.kysecurity.mail.pgp.PgpBootstrapClient
 import org.kysecurity.mail.pgp.PgpComposeState
 import org.kysecurity.mail.pgp.RecipientKeyClient
 import org.kysecurity.mail.push.PairingData
-import java.io.IOException
-import java.util.concurrent.atomic.AtomicInteger
 
 /** Every way to Send obeys the account's custody, including a confirmation answered after
  *  custody turned out to be webmail-only. */
@@ -85,6 +92,8 @@ class ComposeCustodyGuardTest {
         throw AssertionError("condition not met within 10 s")
     }
 
+    /** Taps the real prompt. Custody is known (no PGP identity) when the prompt is raised, then
+     *  turns webmail-only before Send is tapped: the tap must not reach the relay. */
     @Test
     fun custodyResolvedWhileTheSubjectPromptIsOpenStopsTheSend() {
         val sends = AtomicInteger()
@@ -97,13 +106,15 @@ class ComposeCustodyGuardTest {
                 it.sendObserverForTest = { sends.incrementAndGet() }
                 // The editor's own report comes from its page, which CI emulators never finish.
                 it.bodyEmptyForTest = false
-                // Custody resolves to webmail-only after the prompt was raised...
-                it.applyPgpComposeStateForTest(
-                    PgpComposeState(canEncrypt = false, canSign = false, handoffToWebmail = true),
-                )
-                // ...and then the prompt's Send runs its callback.
-                it.confirmSendWithoutSubjectForTest()
+                it.applyPgpComposeStateForTest(PgpComposeState(canEncrypt = false, canSign = false, handoffToWebmail = false))
+                it.sendForTest()
             }
+            onView(withText(R.string.compose_empty_subject_title)).inRoot(isDialog()).check(matches(isDisplayed()))
+
+            scenario.onActivity {
+                it.applyPgpComposeStateForTest(PgpComposeState(canEncrypt = false, canSign = false, handoffToWebmail = true))
+            }
+            onView(withText(R.string.compose_empty_subject_send)).inRoot(isDialog()).perform(click())
             instrumentation.waitForIdleSync()
 
             assertEquals("a webmail-only account went on to send", 0, sends.get())
