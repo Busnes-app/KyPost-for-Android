@@ -74,4 +74,27 @@ class PendingAccountSetupTest {
         PendingAccountSetup.cancel(second)
         assertEquals(listOf("a cancelled", "b cancelled"), answers)
     }
+
+    @Test
+    fun completingADisplacedTokenAnswersNothing() {
+        val first = hold("a")
+        hold("b")
+        PendingAccountSetup.complete(first, "KyPost")
+
+        assertEquals(listOf("a cancelled"), answers)
+    }
+
+    /** Resumed once, and only while that request is still held. */
+    @Test
+    fun anInterruptedRequestIsResumedOnce() {
+        val first = hold("a")
+        PendingAccountSetup.markInterrupted(first)
+
+        assertEquals(first, PendingAccountSetup.takeInterrupted())
+        assertNull(PendingAccountSetup.takeInterrupted())
+
+        PendingAccountSetup.markInterrupted(first)
+        hold("b")
+        assertNull(PendingAccountSetup.takeInterrupted(), "a newer request is not the interrupted one")
+    }
 }

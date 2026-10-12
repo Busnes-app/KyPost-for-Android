@@ -51,9 +51,10 @@ class MainActivity : LockedActivity() {
         lifecycleScope.launch {
             val configured = PushRuntime.graph(this@MainActivity).repository.state.first().pairing != null
 
-            // An "Add account" request the app-lock redirect interrupted resumes where it was going.
-            // Process-local state, never read from the (exported) launch intent.
-            val setupToken = org.kysecurity.mail.contacts.device.PendingAccountSetup.pendingToken
+            // An "Add account" request the app-lock redirect interrupted resumes where it was going,
+            // once; any other launch goes where it was going. Process-local state, never read from
+            // the (exported) launch intent.
+            val setupToken = org.kysecurity.mail.contacts.device.PendingAccountSetup.takeInterrupted()
             val targetIntent = if (setupToken != null) {
                 org.kysecurity.mail.contacts.ContactsListActivity.setupIntent(this@MainActivity, setupToken)
             } else if (configured) {

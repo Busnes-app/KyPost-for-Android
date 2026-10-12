@@ -15,6 +15,8 @@ object PendingAccountSetup : ProcessScopedState {
 
     private var held: Request? = null
     private var lastToken = 0L
+    /** The request whose setup screen the app-lock redirect closed, to resume once after unlock. */
+    private var interrupted: Long? = null
 
     init { ProcessState.register(this) }
 
@@ -37,16 +39,32 @@ object PendingAccountSetup : ProcessScopedState {
         take()?.onAdded?.invoke(accountName)
     }
 
+    /** Completes only while [token]'s request is the one held. */
+    fun complete(token: Long, accountName: String) {
+        takeIf(token)?.onAdded?.invoke(accountName)
+    }
+
+    /** [token]'s setup screen was closed by the app-lock redirect; see [takeInterrupted]. */
+    fun markInterrupted(token: Long) {
+        synchronized(this) { if (held?.token == token) interrupted = token }
+    }
+
+    /** The interrupted request to resume, once, and only while it is still the one held. */
+    fun takeInterrupted(): Long? = synchronized(this) { interrupted.also { interrupted = null }?.takeIf { it == held?.token } }
+
     fun cancel() {
         take()?.onCancelled?.invoke()
     }
 
     /** Cancels only while [token]'s request is the one held. */
     fun cancel(token: Long) {
-        synchronized(this) { held?.takeIf { it.token == token }?.also { held = null } }?.onCancelled?.invoke()
+        takeIf(token)?.onCancelled?.invoke()
     }
 
     override fun resetForNewSession() = cancel()
 
-    private fun take(): Request? = synchronized(this) { held.also { held = null } }
+    private fun take(): Request? = synchronized(this) { held.also { held = null; interrupted = null } }
+
+    private fun takeIf(token: Long): Request? =
+        synchronized(this) { held?.takeIf { it.token == token }?.also { held = null; interrupted = null } }
 }

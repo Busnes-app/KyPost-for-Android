@@ -68,6 +68,7 @@ class ContactsListActivity : LockedActivity() {
     private val syncEnabler = DeviceContactSyncEnabler(
         activity = this,
         permissionLauncher = contactPermissionLauncher,
+        setupToken = { setupToken.takeIf { accountSetup } },
         onEnabled = {
             invalidateOptionsMenu()
             if (accountSetup) finish()
@@ -178,7 +179,7 @@ class ContactsListActivity : LockedActivity() {
             when {
                 // Nothing new would be enabled: answer with the account that is already there.
                 graph.settings.isEnabled() && graph.accountManager.accountExists() -> {
-                    PendingAccountSetup.complete(DeviceContactAccount.ACCOUNT_NAME)
+                    PendingAccountSetup.complete(setupToken, DeviceContactAccount.ACCOUNT_NAME)
                     finish()
                 }
                 !setupConfirmed -> askToEnableForSetup()
@@ -219,6 +220,8 @@ class ContactsListActivity : LockedActivity() {
         setupDialog = null
         super.onDestroy()
         if (accountSetup && isFinishing && !redirectedToUnlock) PendingAccountSetup.cancel(setupToken)
+        // The lock redirect closed this screen: MainActivity resumes this request, once, after unlock.
+        if (accountSetup && redirectedToUnlock) PendingAccountSetup.markInterrupted(setupToken)
     }
 
     override fun onStartUnlocked() {
