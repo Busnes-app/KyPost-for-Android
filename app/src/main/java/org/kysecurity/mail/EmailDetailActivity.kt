@@ -1231,7 +1231,7 @@ class EmailDetailActivity : LockedActivity() {
         bodyHtml: String,
         attachments: List<org.kysecurity.mail.mail.OutgoingAttachment> = emptyList(),
     ) {
-        val intent = Intent(this, ComposeActivity::class.java)
+        val intent = ComposeActivity.internalIntent(this)
         intent.putExtra(ComposeActivity.EXTRA_TO, to)
         intent.putExtra(ComposeActivity.EXTRA_SUBJECT, subject)
         intent.putExtra(ComposeActivity.EXTRA_BODY_HTML, bodyHtml)
@@ -1756,6 +1756,7 @@ internal fun extensionForMimeType(mimeType: String): String? = when (
     "image/webp" -> "webp"
     "image/heic" -> "heic"
     "text/plain" -> "txt"
+    "text/vcard" -> "vcf"
     "audio/mpeg" -> "mp3"
     "audio/mp4" -> "m4a"
     "audio/ogg" -> "ogg"
