@@ -30,6 +30,7 @@ import org.kysecurity.mail.mail.MailRepository
 import org.kysecurity.mail.mail.MailRuntime
 import org.kysecurity.mail.mail.QuotedHtmlSanitizer
 import org.kysecurity.mail.mail.addressFromHeader
+import org.kysecurity.mail.mail.replyAllRecipients
 import org.kysecurity.mail.mail.userFacingMessage
 import org.kysecurity.mail.pgp.AndroidVaultOpener
 import org.kysecurity.mail.pgp.EncryptedMessageReader
@@ -128,6 +129,9 @@ class EmailDetailActivity : LockedActivity() {
 
     private var toRecipients: List<String> = emptyList()
     private var ccRecipients: List<String> = emptyList()
+
+    /** Source of the user's own addresses, which Reply All leaves out. */
+    private val pgpController by lazy { ComposePgpController.from(this) }
 
     /** A configuration-change recreate is not a new open. Reopening after the task was cleared is,
      *  and that path builds a fresh instance with no saved state, so it marks read again. */
@@ -268,15 +272,16 @@ class EmailDetailActivity : LockedActivity() {
                 Toast.makeText(this, R.string.email_pgp_reply_disabled, Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
-            val recipients = (listOf(extractAddress(emailSender)) + toRecipients.map(::extractAddress) + ccRecipients.map(::extractAddress))
-                .distinct()
-                .filter { it.isNotBlank() }
-            quotedBodyHtmlAsync(emailPreview) { quoted ->
-                openCompose(
-                    to = recipients.joinToString(", "),
-                    subject = withPrefix(emailSubject, "Re:"),
-                    bodyHtml = quoteForReply(emailSender, quoted),
-                )
+            lifecycleScope.launch {
+                val recipients =
+                    replyAllRecipients(emailSender, toRecipients, ccRecipients, pgpController.accountAddresses())
+                quotedBodyHtmlAsync(emailPreview) { quoted ->
+                    openCompose(
+                        to = recipients.joinToString(", "),
+                        subject = withPrefix(emailSubject, "Re:"),
+                        bodyHtml = quoteForReply(emailSender, quoted),
+                    )
+                }
             }
         }
         actionForward.setOnClickListener {
