@@ -29,9 +29,16 @@ data class DeviceRawContactSnapshot(
     val phoneticGivenName: String? = null,
     val phoneticFamilyName: String? = null,
     val department: String? = null,
-    /** Read only so an update that rewrites the Organization row does not erase a title typed on
-     *  the device; nothing carries it into Room yet. */
     val title: String? = null,
+    /** The columns Room has no slot for (type, label, IM protocol) of each IM, website, relation
+     *  and event row the phone holds, keyed by [keptRowKey] as the rebuild will see the row, in
+     *  row order for duplicates, so a rebuild puts them back. */
+    val keptRows: Map<String, List<Map<String, String?>>> = emptyMap(),
+    val givenName: String? = null,
+    val familyName: String? = null,
+    val middleName: String? = null,
+    val prefix: String? = null,
+    val suffix: String? = null,
 )
 
 data class DeviceContactCandidate(
@@ -70,3 +77,8 @@ data class DeviceFieldSet(
     val phoneticFamilyName: String? = null,
     val department: String? = null,
 )
+
+/** One row's identity as Room sees it: its kind, what tells it apart besides its value (an IM's
+ *  written protocol, a label) and the value. The same value on two services is two IMs. */
+internal fun keptRowKey(mimeType: String, qualifier: String?, value: String): String =
+    "$mimeType\n${qualifier.orEmpty()}\n$value"

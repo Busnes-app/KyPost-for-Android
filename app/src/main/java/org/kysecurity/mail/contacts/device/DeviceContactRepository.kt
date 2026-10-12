@@ -2,6 +2,10 @@ package org.kysecurity.mail.contacts.device
 
 import android.content.Context
 import android.provider.ContactsContract
+import android.provider.ContactsContract.CommonDataKinds.Event as EVT
+import android.provider.ContactsContract.CommonDataKinds.Im as IM
+import android.provider.ContactsContract.CommonDataKinds.Relation as REL
+import android.provider.ContactsContract.CommonDataKinds.Website as WEB
 import org.kysecurity.mail.contacts.ContactAddressDto
 import org.kysecurity.mail.contacts.ContactDto
 import org.kysecurity.mail.contacts.ContactEventDto
@@ -179,15 +183,12 @@ class DeviceContactRepository(
                 merge({ it.phoneticGivenName }, snapshot.phoneticGivenName, DeviceContactFieldMerge::mergeStringField)
             val mergedPhoneticFamilyName =
                 merge({ it.phoneticFamilyName }, snapshot.phoneticFamilyName, DeviceContactFieldMerge::mergeStringField)
-
-            val changed = mergedFn != roomDto.fn || mergedOrg != roomDto.org ||
-                mergedNotes != roomDto.notes || mergedBirthday != roomDto.birthday ||
-                mergedEmails != roomDto.emails || mergedPhones != roomDto.phones ||
-                mergedAddresses != roomDto.addresses || mergedIms != roomDto.ims ||
-                mergedWebsites != roomDto.websites || mergedRelations != roomDto.relations ||
-                mergedEvents != roomDto.events || mergedDepartment != roomDto.department ||
-                mergedPhoneticGivenName != roomDto.phoneticGivenName ||
-                mergedPhoneticFamilyName != roomDto.phoneticFamilyName
+            val mergedTitle = merge({ it.title }, snapshot.title, DeviceContactFieldMerge::mergeStringField)
+            val mergedGivenName = merge({ it.givenName }, snapshot.givenName, DeviceContactFieldMerge::mergeStringField)
+            val mergedFamilyName = merge({ it.familyName }, snapshot.familyName, DeviceContactFieldMerge::mergeStringField)
+            val mergedMiddleName = merge({ it.middleName }, snapshot.middleName, DeviceContactFieldMerge::mergeStringField)
+            val mergedPrefix = merge({ it.prefix }, snapshot.prefix, DeviceContactFieldMerge::mergeStringField)
+            val mergedSuffix = merge({ it.suffix }, snapshot.suffix, DeviceContactFieldMerge::mergeStringField)
 
             val mergedDto = roomDto.copy(
                 fn = mergedFn ?: "",
@@ -204,7 +205,14 @@ class DeviceContactRepository(
                 department = mergedDepartment,
                 phoneticGivenName = mergedPhoneticGivenName,
                 phoneticFamilyName = mergedPhoneticFamilyName,
+                title = mergedTitle,
+                givenName = mergedGivenName,
+                familyName = mergedFamilyName,
+                middleName = mergedMiddleName,
+                prefix = mergedPrefix,
+                suffix = mergedSuffix,
             )
+            val changed = mergedDto != roomDto
             if (changed) {
                 // Any device-side change to a keyed contact changes who that key is displayed
                 // beside, and the carried-over key hides it from toEntity's rotation check.
@@ -437,9 +445,6 @@ class DeviceContactRepository(
         }
     }
 
-    // ContactsContract.CommonDataKinds.Im is deprecated with no replacement mimetype, and the IM
-    // rows it names are still the ones present on device.
-    @Suppress("DEPRECATION")
     private suspend fun createRawContactForDto(dto: ContactDto) = withContext(Dispatchers.IO) {
         val ops = arrayListOf<android.content.ContentProviderOperation>()
 
@@ -548,58 +553,14 @@ class DeviceContactRepository(
             )
         }
 
-        for (im in dto.ims) {
-            ops.add(
-                android.content.ContentProviderOperation.newInsert(dataUriBase)
-                    .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, rawContactUriIndex)
-                    .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE)
-                    .withValue(ContactsContract.CommonDataKinds.Im.DATA, im.value)
-                    .withValue(ContactsContract.CommonDataKinds.Im.PROTOCOL, ContactsContract.CommonDataKinds.Im.PROTOCOL_CUSTOM)
-                    .withValue(
-                        ContactsContract.CommonDataKinds.Im.CUSTOM_PROTOCOL,
-                        DeviceContactFieldCoding.imCustomProtocolLabel(im.service, im.label),
-                    )
-                    .build(),
-            )
-        }
-
-        for (website in dto.websites) {
-            ops.add(
-                android.content.ContentProviderOperation.newInsert(dataUriBase)
-                    .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, rawContactUriIndex)
-                    .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Website.CONTENT_ITEM_TYPE)
-                    .withValue(ContactsContract.CommonDataKinds.Website.URL, website.value)
-                    .withValue(ContactsContract.CommonDataKinds.Website.TYPE, ContactsContract.CommonDataKinds.Website.TYPE_CUSTOM)
-                    .withValue(ContactsContract.CommonDataKinds.Website.LABEL, website.label)
-                    .build(),
-            )
-        }
-
-        for (relation in dto.relations) {
-            ops.add(
-                android.content.ContentProviderOperation.newInsert(dataUriBase)
-                    .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, rawContactUriIndex)
-                    .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Relation.CONTENT_ITEM_TYPE)
-                    .withValue(ContactsContract.CommonDataKinds.Relation.NAME, relation.name)
-                    .withValue(ContactsContract.CommonDataKinds.Relation.TYPE, DeviceContactFieldCoding.relationType(relation.label))
-                    .withValue(ContactsContract.CommonDataKinds.Relation.LABEL, DeviceContactFieldCoding.relationCustomLabel(relation.label))
-                    .build(),
-            )
-        }
-
-        // Additional dates beyond birthday -- birthday keeps its own separate Event row above
-        // (same MIMETYPE, TYPE_BIRTHDAY), untouched by this loop.
-        for (event in dto.events) {
-            ops.add(
-                android.content.ContentProviderOperation.newInsert(dataUriBase)
-                    .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, rawContactUriIndex)
-                    .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Event.CONTENT_ITEM_TYPE)
-                    .withValue(ContactsContract.CommonDataKinds.Event.START_DATE, event.date)
-                    .withValue(ContactsContract.CommonDataKinds.Event.TYPE, DeviceContactFieldCoding.eventType(event.label))
-                    .withValue(ContactsContract.CommonDataKinds.Event.LABEL, DeviceContactFieldCoding.eventCustomLabel(event.label))
-                    .build(),
-            )
-        }
+        fun newRow(mimeType: String) = android.content.ContentProviderOperation.newInsert(dataUriBase)
+            .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, rawContactUriIndex)
+            .withValue(ContactsContract.Data.MIMETYPE, mimeType)
+        ops += imRows(dto.ims, ::newRow)
+        ops += websiteRows(dto.websites, ::newRow)
+        ops += relationRows(dto.relations, ::newRow)
+        // Additional dates beyond birthday, which keeps its own TYPE_BIRTHDAY row above.
+        ops += eventRows(dto.events, ::newRow)
 
         // Resolved before the batch: GROUP_ROW_ID is a plain value, not a back-reference target.
         val androidGroupRowIds = dto.groupIDs.mapNotNull { groupId ->
@@ -688,36 +649,40 @@ class DeviceContactRepository(
             )
         }
 
-        // The name row always exists and carries the structured parts the merge does not cover,
-        // so it stays a targeted update of DISPLAY_NAME alone.
-        plan.displayName?.let { displayName ->
+        // A null plan field is untouched; a blank one is cleared (written as null, or rows removed).
+        if (plan.hasNameChange()) {
             ops.add(
                 android.content.ContentProviderOperation.newUpdate(dataUriBase)
                     .withSelection(
                         "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
-                        arrayOf(
-                            rawContactIdArg,
-                            ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE,
-                        ),
+                        arrayOf(rawContactIdArg, ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE),
                     )
-                    .withValue(ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME, displayName)
+                    .apply {
+                        listOf(
+                            ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME to plan.displayName,
+                            ContactsContract.CommonDataKinds.StructuredName.GIVEN_NAME to plan.givenName,
+                            ContactsContract.CommonDataKinds.StructuredName.FAMILY_NAME to plan.familyName,
+                            ContactsContract.CommonDataKinds.StructuredName.MIDDLE_NAME to plan.middleName,
+                            ContactsContract.CommonDataKinds.StructuredName.PREFIX to plan.prefix,
+                            ContactsContract.CommonDataKinds.StructuredName.SUFFIX to plan.suffix,
+                            ContactsContract.CommonDataKinds.StructuredName.PHONETIC_GIVEN_NAME to plan.phoneticGivenName,
+                            ContactsContract.CommonDataKinds.StructuredName.PHONETIC_FAMILY_NAME to plan.phoneticFamilyName,
+                        ).forEach { (column, value) -> if (value != null) withValue(column, value.ifBlank { null }) }
+                    }
                     .build(),
             )
         }
 
-        // A blank plan value is a clear: the rows go and nothing replaces them.
-        plan.org?.let { org ->
+        // One row holds company, title and department, so it is rebuilt from all three.
+        if (plan.hasOrganizationChange()) {
             deleteRows(ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
-            // The row is replaced wholesale and nothing reads a device-typed title or
-            // department into Room, so the device's own value is what keeps it. Both
-            // fields, identically: DEPARTMENT lacked the fallback, so a department typed
-            // in the system Contacts app vanished the first time Room's org won.
-            val title = dto.title?.takeIf { it.isNotBlank() } ?: currentSnapshot.title
-            val department = plan.departmentAfter(dto, currentSnapshot)
-            if (org.isNotBlank() || !title.isNullOrBlank() || !department.isNullOrBlank()) {
+            val company = (plan.org ?: currentSnapshot.org)?.ifBlank { null }
+            val title = (plan.title ?: currentSnapshot.title)?.ifBlank { null }
+            val department = plan.departmentAfter(currentSnapshot)
+            if (company != null || title != null || department != null) {
                 ops.add(
                     insertRow(ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
-                        .withValue(ContactsContract.CommonDataKinds.Organization.COMPANY, org.ifBlank { null })
+                        .withValue(ContactsContract.CommonDataKinds.Organization.COMPANY, company)
                         .withValue(ContactsContract.CommonDataKinds.Organization.TITLE, title)
                         .withValue(ContactsContract.CommonDataKinds.Organization.DEPARTMENT, department)
                         .build(),
@@ -799,6 +764,28 @@ class DeviceContactRepository(
             }
         }
 
+        plan.ims?.let {
+            deleteRows(ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE)
+            ops += imRows(it, ::insertRow, kept = currentSnapshot.keptRows)
+        }
+        plan.websites?.let {
+            deleteRows(ContactsContract.CommonDataKinds.Website.CONTENT_ITEM_TYPE)
+            ops += websiteRows(it, ::insertRow, kept = currentSnapshot.keptRows)
+        }
+        plan.relations?.let {
+            deleteRows(ContactsContract.CommonDataKinds.Relation.CONTENT_ITEM_TYPE)
+            ops += relationRows(it, ::insertRow, kept = currentSnapshot.keptRows)
+        }
+        plan.events?.let {
+            // Every Event row but the birthday, which has its own plan field.
+            deleteRows(
+                ContactsContract.CommonDataKinds.Event.CONTENT_ITEM_TYPE,
+                " AND (${ContactsContract.CommonDataKinds.Event.TYPE} IS NULL OR " +
+                    "${ContactsContract.CommonDataKinds.Event.TYPE} != ${ContactsContract.CommonDataKinds.Event.TYPE_BIRTHDAY})",
+            )
+            ops += eventRows(it, ::insertRow, kept = currentSnapshot.keptRows)
+        }
+
         val applied = runCatching {
             contentResolver.applyBatch(ContactsContract.AUTHORITY, ops)
         }.onFailure {
@@ -814,6 +801,77 @@ class DeviceContactRepository(
                     syncedJson = synced,
                 ),
             )
+        }
+    }
+
+    // Shared by create and update so the two cannot encode a field differently. Im is deprecated
+    // with no replacement mimetype, and its rows are still the ones present on device.
+    @Suppress("DEPRECATION")
+    // [kept] (DeviceRawContactSnapshot.keptRows) holds, per row the phone already has, the columns
+    // Room has no slot for. Each row is written in Room's encoding, then a row Room still names the
+    // same way takes the phone's columns back, in row order for duplicates, so a rebuild does not
+    // turn Home/Work, a built-in IM protocol, Brother or Other into a custom value.
+    private class KeptRows(kept: Map<String, List<Map<String, String?>>>) {
+        private val remaining = kept.mapValues { ArrayDeque(it.value) }
+
+        fun restore(row: android.content.ContentProviderOperation.Builder, mimeType: String, qualifier: String?, value: String) =
+            row.apply { remaining[keptRowKey(mimeType, qualifier, value)]?.removeFirstOrNull()?.forEach { (c, v) -> withValue(c, v) } }
+    }
+
+    private fun imRows(
+        ims: List<ContactImDto>,
+        newRow: (String) -> android.content.ContentProviderOperation.Builder,
+        kept: Map<String, List<Map<String, String?>>> = emptyMap(),
+    ): List<android.content.ContentProviderOperation> = KeptRows(kept).let { k ->
+        ims.map { im ->
+            val protocol = DeviceContactFieldCoding.imCustomProtocolLabel(im.service, im.label)
+            val row = newRow(IM.CONTENT_ITEM_TYPE)
+                .withValue(IM.DATA, im.value)
+                .withValue(IM.PROTOCOL, IM.PROTOCOL_CUSTOM)
+                .withValue(IM.CUSTOM_PROTOCOL, protocol)
+            k.restore(row, IM.CONTENT_ITEM_TYPE, protocol, im.value).build()
+        }
+    }
+
+    private fun websiteRows(
+        websites: List<ContactUrlDto>,
+        newRow: (String) -> android.content.ContentProviderOperation.Builder,
+        kept: Map<String, List<Map<String, String?>>> = emptyMap(),
+    ): List<android.content.ContentProviderOperation> = KeptRows(kept).let { k ->
+        websites.map { website ->
+            val row = newRow(WEB.CONTENT_ITEM_TYPE)
+                .withValue(WEB.URL, website.value)
+                .withValue(WEB.TYPE, WEB.TYPE_CUSTOM)
+                .withValue(WEB.LABEL, website.label)
+            k.restore(row, WEB.CONTENT_ITEM_TYPE, website.label, website.value).build()
+        }
+    }
+
+    private fun relationRows(
+        relations: List<ContactRelationDto>,
+        newRow: (String) -> android.content.ContentProviderOperation.Builder,
+        kept: Map<String, List<Map<String, String?>>> = emptyMap(),
+    ): List<android.content.ContentProviderOperation> = KeptRows(kept).let { k ->
+        relations.map { relation ->
+            val row = newRow(REL.CONTENT_ITEM_TYPE)
+                .withValue(REL.NAME, relation.name)
+                .withValue(REL.TYPE, DeviceContactFieldCoding.relationType(relation.label))
+                .withValue(REL.LABEL, DeviceContactFieldCoding.relationCustomLabel(relation.label))
+            k.restore(row, REL.CONTENT_ITEM_TYPE, relation.label, relation.name).build()
+        }
+    }
+
+    private fun eventRows(
+        events: List<ContactEventDto>,
+        newRow: (String) -> android.content.ContentProviderOperation.Builder,
+        kept: Map<String, List<Map<String, String?>>> = emptyMap(),
+    ): List<android.content.ContentProviderOperation> = KeptRows(kept).let { k ->
+        events.map { event ->
+            val row = newRow(EVT.CONTENT_ITEM_TYPE)
+                .withValue(EVT.START_DATE, event.date)
+                .withValue(EVT.TYPE, DeviceContactFieldCoding.eventType(event.label))
+                .withValue(EVT.LABEL, DeviceContactFieldCoding.eventCustomLabel(event.label))
+            k.restore(row, EVT.CONTENT_ITEM_TYPE, event.label, event.date).build()
         }
     }
 
@@ -1040,12 +1098,21 @@ class DeviceContactRepository(
             var birthday: String? = null
             var department: String? = null
             var title: String? = null
+            var given: String? = null
+            var family: String? = null
+            var middle: String? = null
+            var prefix: String? = null
+            var suffix: String? = null
             var phoneticGivenName: String? = null
             var phoneticFamilyName: String? = null
             val emails = mutableListOf<ContactFieldDto>()
             val phones = mutableListOf<ContactFieldDto>()
             val addresses = mutableListOf<ContactAddressDto>()
             val ims = mutableListOf<ContactImDto>()
+            val keptRows = mutableMapOf<String, MutableList<Map<String, String?>>>()
+            fun keep(mimeType: String, qualifier: String?, value: String, vararg columns: Pair<String, String?>) {
+                keptRows.getOrPut(keptRowKey(mimeType, qualifier, value)) { mutableListOf() } += columns.toMap()
+            }
             val websites = mutableListOf<ContactUrlDto>()
             val relations = mutableListOf<ContactRelationDto>()
             val events = mutableListOf<ContactEventDto>()
@@ -1072,12 +1139,12 @@ class DeviceContactRepository(
 
                     when (mimeType) {
                         ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE -> {
-                            val given = data2?.takeIf { it.isNotBlank() }
-                            val family = data3?.takeIf { it.isNotBlank() }
+                            given = data2?.takeIf { it.isNotBlank() }
+                            family = data3?.takeIf { it.isNotBlank() }
                             // StructuredName.PREFIX is DATA4 and MIDDLE_NAME is DATA5.
-                            val prefix = data4?.takeIf { it.isNotBlank() }
-                            val middle = data5?.takeIf { it.isNotBlank() }
-                            val suffix = data6?.takeIf { it.isNotBlank() }
+                            prefix = data4?.takeIf { it.isNotBlank() }
+                            middle = data5?.takeIf { it.isNotBlank() }
+                            suffix = data6?.takeIf { it.isNotBlank() }
                             fn = listOfNotNull(prefix, given, middle, family, suffix).joinToString(" ")
                             if (fn.isBlank()) fn = data1
                             phoneticGivenName = data7?.takeIf { it.isNotBlank() }
@@ -1120,6 +1187,7 @@ class DeviceContactRepository(
                                 val label = DeviceContactFieldCoding.eventLabelFromType(typeInt)
                                     ?: data3?.takeIf { it.isNotBlank() }
                                 events.add(ContactEventDto(label = label, date = data1))
+                                keep(EVT.CONTENT_ITEM_TYPE, label, data1, EVT.TYPE to data2, EVT.LABEL to data3)
                             }
                         }
 
@@ -1131,6 +1199,9 @@ class DeviceContactRepository(
                                 val service = DeviceContactFieldCoding.imServiceFromCustomProtocolLabel(customProtocol)
                                 val label = if (service.isEmpty()) customProtocol else null
                                 ims.add(ContactImDto(service = service, label = label, value = data1))
+                                // Keyed as imRows writes it back: no custom protocol is "Other".
+                                val written = DeviceContactFieldCoding.imCustomProtocolLabel(service, label)
+                                keep(IM.CONTENT_ITEM_TYPE, written, data1, IM.TYPE to data2, IM.LABEL to data3, IM.PROTOCOL to data5, IM.CUSTOM_PROTOCOL to data6)
                             }
                         }
 
@@ -1138,18 +1209,15 @@ class DeviceContactRepository(
                             if (data1.isNotBlank()) {
                                 val label = data3?.takeIf { it.isNotBlank() }
                                 websites.add(ContactUrlDto(label = label, value = data1))
+                                keep(WEB.CONTENT_ITEM_TYPE, label, data1, WEB.TYPE to data2, WEB.LABEL to data3)
                             }
                         }
 
                         ContactsContract.CommonDataKinds.Relation.CONTENT_ITEM_TYPE -> {
                             if (data1.isNotBlank()) {
-                                val typeInt = data2?.toIntOrNull()
-                                relations.add(
-                                    ContactRelationDto(
-                                        label = DeviceContactFieldCoding.relationLabelFromType(typeInt),
-                                        name = data1,
-                                    ),
-                                )
+                                val label = DeviceContactFieldCoding.relationLabelFromType(data2?.toIntOrNull(), data3)
+                                relations.add(ContactRelationDto(label = label, name = data1))
+                                keep(REL.CONTENT_ITEM_TYPE, label, data1, REL.TYPE to data2, REL.LABEL to data3)
                             }
                         }
 
@@ -1207,6 +1275,12 @@ class DeviceContactRepository(
                 phoneticFamilyName = phoneticFamilyName,
                 department = department,
                 title = title,
+                keptRows = keptRows,
+                givenName = given,
+                familyName = family,
+                middleName = middle,
+                prefix = prefix,
+                suffix = suffix,
             )
         }
 }

@@ -226,6 +226,15 @@ class DeviceContactFieldCodingTest {
         assertEquals("other", DeviceContactFieldCoding.relationLabelFromType(null))
     }
 
+    /** "Mentor" is written as TYPE_CUSTOM + LABEL; reading it back as "other" rewrote it on the server. */
+    @Test
+    fun relationLabel_aCustomLabel_roundTrips() {
+        val type = DeviceContactFieldCoding.relationType("Mentor")
+        val label = DeviceContactFieldCoding.relationCustomLabel("Mentor")
+
+        assertEquals("Mentor", DeviceContactFieldCoding.relationLabelFromType(type, label))
+    }
+
     @Test
     fun eventLabelFromType_anniversaryConstant_mapsBackToAnniversary() {
         assertEquals("anniversary", DeviceContactFieldCoding.eventLabelFromType(Event.TYPE_ANNIVERSARY))
