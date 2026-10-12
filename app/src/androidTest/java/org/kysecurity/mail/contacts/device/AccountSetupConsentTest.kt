@@ -209,4 +209,48 @@ class AccountSetupConsentTest {
         assertEquals("the displaced request: one cancel", 1 to 0, first.errors.get() to first.results.get())
         assertEquals("the newer request: one account", 0 to 1, second.errors.get() to second.results.get())
     }
+
+    /** Screen A's confirmation is still open when request B displaces A. Confirming A must not
+     *  enable sync or answer B: a screen acts only on its own request. */
+    @Test
+    fun confirmingADisplacedRequest_enablesNothingAndLeavesTheNewOneWaiting() {
+        val authenticator = KyPostContactAuthenticator(context)
+        val first = RecordingResponse()
+        val second = RecordingResponse()
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+        ActivityScenario.launch<ContactsListActivity>(requestSetup(authenticator, first)).use { scenario ->
+            instrumentation.waitForIdleSync()
+            requestSetup(authenticator, second)
+            scenario.onActivity { activity ->
+                val dialog = activity.setupDialog
+                assertNotNull("A's confirmation is still on screen", dialog)
+                dialog!!.getButton(DialogInterface.BUTTON_POSITIVE).performClick()
+            }
+            instrumentation.waitForIdleSync()
+
+            assertFalse("B must not be answered", second.answered.await(3, TimeUnit.SECONDS))
+            assertTrue("B is still waiting", PendingAccountSetup.pendingToken != null)
+            assertFalse("sync stays off", settings.isEnabled())
+            assertFalse("no account is created", accounts.accountExists())
+        }
+    }
+
+    /** A launch while a request is pending, with no lock redirect in between, is an ordinary
+     *  launch: it goes where it was going, not to a second setup screen. */
+    @Test
+    fun anOrdinaryLaunchWhileARequestIsPending_doesNotReopenSetup() {
+        PendingAccountSetup.hold(onAdded = {}, onCancelled = {})
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val setupScreen = instrumentation.addMonitor(ContactsListActivity::class.java.name, null, false)
+        try {
+            ActivityScenario.launch(org.kysecurity.mail.MainActivity::class.java).use {
+                val opened = instrumentation.waitForMonitorWithTimeout(setupScreen, 5_000)
+                opened?.finish()
+                assertEquals("no setup screen for a request nothing interrupted", null, opened)
+            }
+        } finally {
+            instrumentation.removeMonitor(setupScreen)
+        }
+    }
 }
