@@ -11,6 +11,7 @@ import org.kysecurity.mail.contacts.device.DeviceContactSyncScheduler
 import org.kysecurity.mail.contacts.device.DeviceContactSyncSettings
 import org.kysecurity.mail.contacts.device.DeviceContactsRuntime
 import org.junit.After
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -21,6 +22,15 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class ImportWithoutContactsPermissionTest {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+
+    /** Granted, so the recovery re-enables sync in place instead of raising the system permission
+     *  dialog, which would cover the screen and outlive this test. The refusal comes from the seam. */
+    @Before
+    fun grant() {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        automation.grantRuntimePermission(context.packageName, android.Manifest.permission.READ_CONTACTS)
+        automation.grantRuntimePermission(context.packageName, android.Manifest.permission.WRITE_CONTACTS)
+    }
 
     @After
     fun tearDown() {
