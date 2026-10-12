@@ -28,6 +28,7 @@ import org.kysecurity.mail.mail.displayHeaderText
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRepository
 import org.kysecurity.mail.mail.MailRuntime
+import org.kysecurity.mail.mail.PendingMail
 import org.kysecurity.mail.mail.QuotedHtmlSanitizer
 import org.kysecurity.mail.mail.addressFromHeader
 import org.kysecurity.mail.mail.replyAllRecipients
@@ -237,26 +238,31 @@ class EmailDetailActivity : LockedActivity() {
         if (!markReadSubmitted) {
             markReadSubmitted = true
             markReadSubmitCount++
+            // Claimed here, before queueing: the inbox shows the row read from this moment, while
+            // the call itself waits its turn behind any read-state change requested before it.
             val repository = mailRepository
-            val markRead = ReadStateLane.ordered { repository.markRead(emailId, emailFolder) }
-            MailBackgroundExecutor.submit { markRead() }
+            val claim = repository.beginRead(emailId, emailFolder)
+            val markRead = ReadStateLane.ordered { repository.markRead(claim) }
+            MailBackgroundExecutor.submit(onDropped = { repository.abandon(claim) }) { markRead() }
         }
 
         actionMarkUnread.setOnClickListener { markUnreadAndFinish(it, emailId, emailFolder) }
 
         actionArchive.setOnClickListener {
-            runMailActionAndFinish(getString(R.string.action_archive), emailId) { it.archive(emailId, emailFolder) }
+            runMailActionAndFinish(getString(R.string.action_archive), emailId, emailFolder) { repo, claim -> repo.archive(claim) }
         }
         actionDelete.setOnClickListener {
-            runMailActionAndFinish(getString(R.string.action_delete), emailId) { it.delete(emailId, emailFolder) }
+            runMailActionAndFinish(getString(R.string.action_delete), emailId, emailFolder) { repo, claim -> repo.delete(claim) }
         }
         actionMove.setOnClickListener {
             pickMoveTarget(this, mailRepository, ioExecutor, emailFolder) { target ->
-                runMailActionAndFinish(getString(R.string.action_move), emailId) { it.move(emailId, emailFolder, target) }
+                runMailActionAndFinish(getString(R.string.action_move), emailId, emailFolder) { repo, claim ->
+                    repo.move(claim, target)
+                }
             }
         }
         actionJunk.setOnClickListener {
-            runMailActionAndFinish(getString(R.string.action_junk), emailId) { it.spam(emailId, emailFolder) }
+            runMailActionAndFinish(getString(R.string.action_junk), emailId, emailFolder) { repo, claim -> repo.spam(claim) }
         }
         actionReply.setOnClickListener {
             // Not isEnabled = false: a disabled ImageButton never reaches performClick, so no Toast.
@@ -1231,7 +1237,8 @@ class EmailDetailActivity : LockedActivity() {
         val label = getString(R.string.action_mark_unread)
         Toast.makeText(this, label, Toast.LENGTH_SHORT).show()
         val repository = mailRepository
-        val markUnread = ReadStateLane.ordered { repository.markUnread(emailId, emailFolder) }
+        val session = ProcessState.generation()
+        val markUnread = ReadStateLane.ordered { repository.markUnread(emailId, emailFolder, session) }
         MailBackgroundExecutor.submitReporting(this, label) {
             var outcome: MailOutcome<Unit>? = null
             try {
@@ -1255,11 +1262,20 @@ class EmailDetailActivity : LockedActivity() {
         finish()
     }
 
-    private fun runMailActionAndFinish(actionLabel: String, emailId: String, action: (MailRepository) -> MailOutcome<Unit>) {
+    private fun runMailActionAndFinish(
+        actionLabel: String,
+        emailId: String,
+        emailFolder: String,
+        action: (MailRepository, PendingMail) -> MailOutcome<Unit>,
+    ) {
         Toast.makeText(this, actionLabel, Toast.LENGTH_SHORT).show()
+        // Claimed before queueing, so the action belongs to the session the user acted in.
+        val claim = mailRepository.beginRemoval(emailId, emailFolder)
         // Reporting, not fire-and-forget: the row is removed optimistically, so a failure the user
         // never hears about reads as "it worked" until the message reappears on the next resync.
-        MailBackgroundExecutor.submitReporting(this, actionLabel) { action(mailRepository) }
+        MailBackgroundExecutor.submitReporting(this, actionLabel, onDropped = { mailRepository.abandon(claim) }) {
+            action(mailRepository, claim)
+        }
         // Tell InboxActivity which row to drop, or its onStart refresh races the in-flight mutation.
         setResult(RESULT_OK, Intent().putExtra(EXTRA_REMOVED_EMAIL_ID, emailId))
         finish()

@@ -97,17 +97,39 @@ Owns production Android app code and resources.
      did reach the server, and "Couldn't reach the mail server" sends the user to check a
      connection that is fine. `processed` is a count rather than a list, so `processed < 1` with an
      empty `failed[]` is also treated as rejected — an unconfirmed operation must not delete a
-     locally visible row. `markRead` is deliberately not optimistic: it already runs on `MailBackgroundExecutor`
-     and reports nothing, so a pre-emptive local write bought no responsiveness and left the row
-     lying about a state the server never reached. `markUnread` (KyPost-Server #350) follows the
-     same rule, from the detail screen's Mark unread button and the inbox selection's overflow
-     (Mark read / Mark unread, one call per row; long-press stays select); neither repaints the
-     row until the relay confirms. A server without the action answers 400 "unsupported
-     action", which is toasted as is. The open's
-     markRead, the detail button and the inbox selection all go through `ReadStateLane.ordered`, a
-     process-wide chain: each read-state change waits for the one requested before it (30 s at
-     most), across screens and reopens. The pool has two threads, so without it a read still in
-     flight could land after the unread and win. The row repaint matches folder as well as id.
+     locally visible row. The *display* is optimistic, Room is not: `PendingMailActions`
+     (in memory, session-scoped through `ProcessState`) makes `cachedEmails` hide a row with an
+     archive/spam/delete/move in flight and show a row read while the open's `markRead` is in
+     flight, and forgets both when the call fails. Each key holds its latest `PendingMail`, so an
+     earlier claim finishing never clears a later one's overlay. `markUnread` (KyPost-Server #350),
+     from the detail screen's Mark unread button and the inbox selection's overflow (Mark read /
+     Mark unread, one call per row; long-press stays select), takes no overlay: neither explicit
+     action repaints the row until the relay confirms, and both are session-guarded like the rest
+     (the generation is captured when the user acts). A server without the action answers 400
+     "unsupported action", which is toasted as is. The open's markRead (claimed with `beginRead`
+     before it is queued), the detail button and the inbox selection all go through
+     `ReadStateLane.ordered`, a process-wide chain: each read-state change waits for the one
+     requested before it (30 s at most), across screens and reopens. The pool has two threads, so
+     without it a read still in flight could land after the unread and win; it also means the
+     open's read overlay is gone before a later unread runs. The row repaint matches folder as well
+     as id. A confirmed removal stays in `removed`, and refresh and older-mail writes
+     drop those ids: an IMAP UID is never reused in its mailbox, so a refresh that read the window
+     before the removal must not resurrect it. The inbox puts a row whose swipe failed back in
+     place with a Retry snackbar. A row action carries the `MailAccount` (subscriberId, serverUrl)
+     its rows were read under; `RelayMailSource.performAction` sends nothing when the pairing it
+     builds the request from is a different account. The inbox drops a failure (no row, no Retry)
+     unless the session generation captured at the swipe is still current and the active pairing
+     (read on the worker, since the screen's account only updates on repaint) is still the row's
+     account. Every removal and the open's read is claimed on the caller's thread before it is queued
+     (`MailRepository.beginRemoval`/`beginRead` return a `PendingMail` carrying the generation
+     then): the overlay shows at once, the action is not sent if that generation has ended, and a
+     completion writes the removal set or Room only while it is current, under the lock the reset
+     takes. Refresh filtering and writes take that same lock. A task the executor refuses or
+     discards unrun calls `abandon`. `PushRepository.clearPairing` holds mail work
+     (`MailBackgroundExecutor.quiesce`) until the outgoing pairing is cleared. A failed read
+     notifies `setOverlayListener`, and the inbox repaints from the cache (a failed removal is the
+     inbox's own failure path to restore or drop, never a cache repaint); it also paints the
+     cache before every non-pull network refresh, so a row opened and marked read shows read at once.
 - **Older mail and reliable deltas (KyPost-Server #348/#349; each part degrades to the old
   behaviour on a server without it).** Every `/api/inbox` request uses `WINDOW_LIMIT`: the relay
   keeps one window and cursor per `limit`. `EmailEntity.inWindow` is false for rows older than the
@@ -130,8 +152,7 @@ Owns production Android app code and resources.
   out-of-window row stays until the user acts on it; such rows are not healed by the daily resync
   after a UIDVALIDITY reset; encrypted mail stored from a page (older mail, or delta overflow)
   lacks its PGP flags because the page carries none, so it opens through `/api/mail/body` with no
-  webmail handoff; a row deleted locally while a page is in flight can be written back (no
-  pending-action set yet); overflow paging stops after `MAX_OVERFLOW_PAGES`.
+  webmail handoff; overflow paging stops after `MAX_OVERFLOW_PAGES`.
 - **`emails` is keyed on (folder, messageId), not messageId.** The relay's id is an IMAP UID,
   unique only within one mailbox, so INBOX and Archive can both hold `42`; under the old
   single-column key a refresh of either folder overwrote or relocated the other's row, and a
@@ -432,7 +453,9 @@ Owns production Android app code and resources.
   `MailRepository.move`, so the local row goes only once the relay confirms the id.
 - Long-pressing an inbox row starts selection mode (an AppCompat `ActionMode`: Archive, Move,
   Junk, Delete). Taps toggle rows, swipes are off, and a folder switch or search ends it. Bulk
-  actions go through `MailRepository.mutateAll`, one relay call per source folder. That method
+  actions go through `MailRepository.mutateAll`, one relay call per source folder, with the same
+  claim-before-queue guard as a single action (`beginRemovals`; session and account captured at
+  the tap). That method
   applies rule 2 above to a batch: it drops only ids absent from `failed[]`, and only when
   `processed` equals their count. A shortfall `failed[]` does not explain (the relay stops early on
   a cancelled request) confirms none.
