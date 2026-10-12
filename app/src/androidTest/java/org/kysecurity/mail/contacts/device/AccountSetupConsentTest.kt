@@ -251,6 +251,13 @@ class AccountSetupConsentTest {
             }
         } finally {
             instrumentation.removeMonitor(setupScreen)
+            // MainActivity routed on to another screen; close it so it does not outlive the test.
+            instrumentation.runOnMainSync {
+                androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry.getInstance()
+                    .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED)
+                    .forEach { it.finish() }
+            }
+            instrumentation.waitForIdleSync()
         }
     }
 }
