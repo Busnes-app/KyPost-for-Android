@@ -287,8 +287,11 @@ class MailRepository(
     fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> =
         relaySource.saveClientEncryptedDraft(draft)
 
-    fun send(draft: MailDraft, account: MailAccount? = null): MailOutcome<MailSendOutcome> =
-        relaySource.sendMail(draft, account)
+    fun send(
+        draft: MailDraft,
+        account: MailAccount? = null,
+        onCall: (okhttp3.Call) -> Unit = {},
+    ): MailOutcome<MailSendOutcome> = relaySource.sendMail(draft, account, onCall)
 
     fun currentAccount(): MailAccount? = relaySource.currentAccount()
 

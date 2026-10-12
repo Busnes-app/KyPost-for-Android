@@ -375,8 +375,9 @@ Owns production Android app code and resources.
   this endpoint can follow a delivery and quote SMTP text, so a word match could offer to re-send
   mail that already went out. On a refusal (sent before any delivery) Compose asks whether to send
   unthreaded and only re-sends on a yes. Any other failure, and every timeout, is reported and
-  never re-sent. `dispatchSend` allows one send in flight and records the draft it sent, so the
-  pickup and unthreaded dialogs re-send from each other's result rather than looping.
+  never re-sent. `dispatchSend` allows one send in flight (the composer's `ComposeSend.InFlight`,
+  started or adopted after a rotation) and records the draft it sent, so the pickup and unthreaded
+  dialogs re-send from each other's result rather than looping.
 - `MailOutcome.ClientSideNeeded` is relay 409 carrying `clientSideNeeded` on `/api/mail/send` — a
   client-protected account asked the server to sign or encrypt and it refused rather than silently
   sending in the clear. `MailOutcome.RateLimited` is relay 429 with `Retry-After` (the per-device
