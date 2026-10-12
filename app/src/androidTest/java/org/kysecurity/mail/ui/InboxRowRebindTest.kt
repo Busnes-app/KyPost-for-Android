@@ -109,7 +109,7 @@ class InboxRowRebindTest {
                 activity.applyRefreshedEmails(FOLDER, listOf(email("unread")), isFinal = true, errorMessage = null)
                 val chip = activity.findViewById<ChipGroup>(R.id.keywordChipGroup)
                     .let { group -> (0 until group.childCount).map { group.getChildAt(it) as Chip } }
-                    .first { it.text == KEYWORD }
+                    .first { it.tag == KEYWORD }
                 assertTrue(chip.typeface.isBold)
 
                 activity.applyRefreshedEmails(FOLDER, listOf(email("read")), isFinal = true, errorMessage = null)

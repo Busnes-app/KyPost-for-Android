@@ -1,12 +1,6 @@
 package org.kysecurity.mail.ui
 
-import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ActivityScenario
-import androidx.test.espresso.Espresso.onIdle
-import androidx.test.espresso.Espresso.onView
-import androidx.test.espresso.action.ViewActions.click
-import androidx.test.espresso.matcher.RootMatchers.isPlatformPopup
-import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
@@ -17,7 +11,6 @@ import org.junit.runner.RunWith
 import org.kysecurity.mail.Email
 import org.kysecurity.mail.InboxActivity
 import org.kysecurity.mail.KeywordTabs
-import org.kysecurity.mail.R
 import org.kysecurity.mail.data.DataRuntime
 import org.kysecurity.mail.data.EmailEntity
 import org.kysecurity.mail.mail.MailAction
@@ -69,16 +62,12 @@ class InboxFolderCountTest {
             }
             scenario.awaitCount(FOLDER, 1)
             scenario.onActivity { activity ->
-                activity.setEmailsForTest(
-                    listOf(Email(id = ID, subject = "s", sender = "a", preview = "", folder = FOLDER, status = "unread")),
-                )
+                val row = Email(id = ID, subject = "s", sender = "a", preview = "", folder = FOLDER, status = "unread")
+                activity.setEmailsForTest(listOf(row))
+                // A long-press selects the row; Mark read is in the selection bar's overflow.
+                activity.toggleSelectedForTest(row)
+                activity.bulkMarkForTest(read = true)
             }
-            onIdle()
-            scenario.onActivity { activity ->
-                activity.findViewById<RecyclerView>(R.id.recyclerViewInbox)
-                    .findViewHolderForAdapterPosition(0)!!.itemView.performLongClick()
-            }
-            onView(withText(context.getString(R.string.action_mark_read))).inRoot(isPlatformPopup()).perform(click())
 
             // Move on, and let the other folder's refresh land, before the read completes.
             scenario.onActivity { activity ->
