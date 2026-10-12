@@ -8,6 +8,22 @@ import org.kysecurity.mail.contacts.ContactRelationDto
 import org.kysecurity.mail.contacts.ContactUrlDto
 
 object DeviceContactFieldMerge {
+    /** Three-way merge against [base], the value both sides held after the last sync. A side still
+     *  equal to it did not change, so the other side wins, including a field it emptied. Without a
+     *  base, or with a change on both sides, [twoWay] decides; it cannot tell cleared from unset. */
+    fun <T> againstBase(room: T, device: T, base: T?, baseKnown: Boolean, twoWay: (T, T) -> T): T = when {
+        !baseKnown -> twoWay(room, device)
+        same(device, base) -> room
+        same(room, base) -> device
+        else -> twoWay(room, device)
+    }
+
+    /** Null, blank and empty are one value: CP2 drops an empty row, so "" never round-trips. */
+    fun same(a: Any?, b: Any?): Boolean = a == b || (isUnset(a) && isUnset(b))
+
+    private fun isUnset(v: Any?): Boolean =
+        v == null || (v is String && v.isBlank()) || (v is Collection<*> && v.isEmpty())
+
     fun <T> mergeField(
         roomValue: T?,
         deviceValue: T?,
