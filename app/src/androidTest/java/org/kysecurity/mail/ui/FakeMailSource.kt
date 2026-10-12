@@ -1,10 +1,12 @@
 package org.kysecurity.mail.ui
 
+import org.kysecurity.mail.Email
 import org.kysecurity.mail.mail.AttachmentInfo
 import org.kysecurity.mail.mail.ClientEncryptedDraft
 import org.kysecurity.mail.mail.ClientEncryptedMessage
 import org.kysecurity.mail.mail.DownloadedAttachment
 import org.kysecurity.mail.mail.FolderListResult
+import org.kysecurity.mail.mail.MailAccount
 import org.kysecurity.mail.mail.MailAction
 import org.kysecurity.mail.mail.MailActionOutcome
 import org.kysecurity.mail.mail.MailDraft
@@ -58,7 +60,9 @@ internal class FakeMailSource : MailSource {
         return actionOutcome(action).also { completed += action }
     }
 
-    override fun sendMail(draft: MailDraft): MailOutcome<MailSendOutcome> {
+    override fun currentAccount(): MailAccount? = null
+
+    override fun sendMail(draft: MailDraft, account: MailAccount?): MailOutcome<MailSendOutcome> {
         sends += draft
         return sendOutcomes.poll(10, TimeUnit.SECONDS) ?: MailOutcome.UpstreamFailure("no stubbed send outcome")
     }
@@ -71,6 +75,8 @@ internal class FakeMailSource : MailSource {
         MailOutcome.Success(MailMessageBody(html = "", toAddresses = emptyList(), ccAddresses = emptyList()))
     override fun listAttachments(messageId: String, folder: String): MailOutcome<List<AttachmentInfo>> =
         MailOutcome.Success(emptyList())
+    override fun searchMail(query: String, mailbox: String, limit: Int): MailOutcome<List<Email>> =
+        MailOutcome.UpstreamFailure("test relay")
     override fun listFolders(parent: String?): MailOutcome<FolderListResult> = MailOutcome.UpstreamFailure("test relay")
     override fun createFolder(parent: String, name: String): MailOutcome<Unit> = MailOutcome.UpstreamFailure("test relay")
     override fun renameFolder(folder: String, name: String): MailOutcome<Unit> = MailOutcome.UpstreamFailure("test relay")
