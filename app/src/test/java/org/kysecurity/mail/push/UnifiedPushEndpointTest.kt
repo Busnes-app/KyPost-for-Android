@@ -105,7 +105,7 @@ class UnifiedPushEndpointTest {
         val coordinator = coordinator(store)
         coordinator.acceptUnifiedPushEndpoint(endpoint, "p256dh-1", "auth-1", ProcessState.generation())
 
-        coordinator.forgetUnifiedPushEndpoint()
+        coordinator.forgetUnifiedPushEndpoint(ProcessState.generation())
         coordinator.attemptPairing(pairing)
 
         assertEquals("fcm-token", lastBody()["deviceToken"]?.jsonPrimitive?.content)
@@ -136,11 +136,30 @@ class UnifiedPushEndpointTest {
         coordinator.enqueueUnifiedPush {
             acceptUnifiedPushEndpoint(endpoint, "p256dh-1", "auth-1", ProcessState.generation())
         }
-        coordinator.enqueueUnifiedPush { forgetUnifiedPushEndpoint() }
+        coordinator.enqueueUnifiedPush { forgetUnifiedPushEndpoint(ProcessState.generation()) }
         dispatcher.runNewestFirst()
 
         assertEquals(null, store.state.first().unifiedPushEndpoint)
         coordinator.attemptPairing(pairing)
         assertEquals("fcm-token", lastBody()["deviceToken"]?.jsonPrimitive?.content)
+    }
+
+    /** A revocation queued before a relaunch must not clear the endpoint the new session stored. */
+    @Test
+    fun aRevocationFromAnEndedSessionLeavesTheNewEndpoint() = runBlocking {
+        val store = FakePushStore()
+        val oldEvents = ManualDispatcher()
+        val old = coordinator(store, CoroutineScope(oldEvents))
+        val captured = ProcessState.generation()
+        old.enqueueUnifiedPush { forgetUnifiedPushEndpoint(captured) }
+
+        ProcessState.advanceGeneration()
+        coordinator(store).acceptUnifiedPushEndpoint(endpoint, "p256dh-1", "auth-1", ProcessState.generation())
+        oldEvents.runNewestFirst()
+
+        val state = store.state.first()
+        assertEquals(endpoint, state.unifiedPushEndpoint)
+        assertEquals("p256dh-1", state.unifiedPushP256dh)
+        assertEquals("auth-1", state.unifiedPushAuth)
     }
 }
