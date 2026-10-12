@@ -121,6 +121,8 @@ class InboxActivity : LockedActivity() {
 
     /** The folder the list last painted from a refresh; only a repaint of it can bring new mail. */
     private var paintedFolder: String? = null
+    /** Unread rows per folder in the cache, as of the last refresh; labels the folder picker. */
+    private var unreadByFolder: Map<String, Int> = emptyMap()
 
     private val refreshRunnable = object : Runnable {
         override fun run() {
@@ -140,6 +142,7 @@ class InboxActivity : LockedActivity() {
             if (removedId != null) {
                 allEmails = allEmails.filter { it.id != removedId }
                 searchResults = searchResults?.filter { it.id != removedId }
+                rebuildTabs(allEmails)
                 renderFilteredEmails()
             }
             // Already confirmed by the relay and written to Room; this only repaints the row.
@@ -365,12 +368,16 @@ class InboxActivity : LockedActivity() {
         ioExecutor.execute {
             var outcome: MailOutcome<MailPage>? = null
             var emails: List<Email>? = null
+            var unread: Map<String, Int>? = null
             var failed = false
             try {
                 // The anchor is read from Room, not allEmails: right after a folder switch that is
                 // still the old folder.
                 outcome = mailRepository.loadOlderFrom(folder, frontier)
-                emails = mailRepository.cachedEmails(folder)
+                mailRepository.cachedEmailsAndUnread(folder).let { (rows, counts) ->
+                    emails = rows
+                    unread = counts
+                }
             } catch (e: RuntimeException) {
                 // An exception here would kill the worker thread and the app with it.
                 android.util.Log.w("InboxActivity", "Loading older mail failed", e)
@@ -380,7 +387,11 @@ class InboxActivity : LockedActivity() {
                 if (failed && outcome == null) outcome = MailOutcome.BadRequest(OLDER_MAIL_NOT_SAVED)
                 val result = outcome
                 val painted = emails
-                runOnUiThread { onOlderMailLoaded(folder, result, painted) }
+                val counts = unread
+                runOnUiThread {
+                    counts?.let { unreadByFolder = it }
+                    onOlderMailLoaded(folder, result, painted)
+                }
             }
         }
     }
@@ -431,6 +442,8 @@ class InboxActivity : LockedActivity() {
      *  mailbox's rows, and a UID repeats across mailboxes. */
     private fun showStatus(id: String, folder: String, status: String) {
         if (redirectedToUnlock || isDestroyed) return
+        // Whatever folder is on screen: the picker counts every folder.
+        recountUnread()
         allEmails = allEmails.map { if (it.id == id && it.sourceFolder() == folder) it.copy(status = status) else it }
         searchResults = searchResults?.map { if (it.id == id && it.sourceFolder() == folder) it.copy(status = status) else it }
         rebuildTabs(allEmails)
@@ -493,7 +506,8 @@ class InboxActivity : LockedActivity() {
     private fun setupTabs() {
         keywordChips.setOnCheckedStateChangeListener { group, checkedIds ->
             val checkedId = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
-            val tab = (group.findViewById<Chip>(checkedId))?.text?.toString().orEmpty().ifBlank { KeywordTabs.ALL }
+            // The tag, not the text: the text carries the unread count.
+            val tab = (group.findViewById<Chip>(checkedId))?.tag as? String ?: KeywordTabs.ALL
             // A chip rebuild re-checks the same tab; only a real switch makes the count stale.
             if (tab != selectedTab) hideNewMailPill()
             selectedTab = tab
@@ -547,7 +561,8 @@ class InboxActivity : LockedActivity() {
         // Not only on a cold open: returning from a message must show its read overlay now, not
         // after the network answers. A pull re-reads the folder and paints once.
         if (showCacheFirst || !forceFullResync) {
-            val cached = mailRepository.cachedEmails(folder)
+            val (cached, unread) = mailRepository.cachedEmailsAndUnread(folder)
+            runOnUiThread { unreadByFolder = unread }
             if (cached.isNotEmpty()) {
                 runOnUiThread {
                     applyRefreshedEmails(folder, cached, isFinal = false, errorMessage = null, account = account)
@@ -557,7 +572,8 @@ class InboxActivity : LockedActivity() {
         beforeNetworkRefreshForTest?.invoke(folder)
         val outcome: MailOutcome<MailFetchResult> =
             mailRepository.refreshFolder(folder, forceFullResync = forceFullResync)
-        val emails = mailRepository.cachedEmails(folder)
+        val (emails, unread) = mailRepository.cachedEmailsAndUnread(folder)
+        runOnUiThread { unreadByFolder = unread }
         val errorMessage = outcome.userFacingMessage()
         keywordSettings.rememberKeywords(emails.flatMap { it.keywords }.toSet())
         runOnUiThread {
@@ -630,9 +646,9 @@ class InboxActivity : LockedActivity() {
 
         val current = mutableListOf<String>()
         for (index in 0 until keywordChips.childCount) {
-            current.add((keywordChips.getChildAt(index) as? Chip)?.text?.toString().orEmpty())
+            current.add((keywordChips.getChildAt(index) as? Chip)?.tag as? String ?: "")
         }
-        val checked = keywordChips.findViewById<Chip?>(keywordChips.checkedChipId)?.text?.toString()
+        val checked = keywordChips.findViewById<Chip?>(keywordChips.checkedChipId)?.tag as? String
         // With All hidden there may be no tab at all; then All is still the right filter, unchipped.
         if (!tabs.contains(selectedTab)) {
             selectedTab = tabs.firstOrNull() ?: KeywordTabs.ALL
@@ -641,6 +657,7 @@ class InboxActivity : LockedActivity() {
             keywordChips.removeAllViews()
             tabs.forEach { keyword ->
                 val chip = Chip(this).apply {
+                    tag = keyword
                     text = keyword
                     isCheckable = true
                     isClickable = true
@@ -653,11 +670,19 @@ class InboxActivity : LockedActivity() {
 
         // Unread counts change on a refresh even when the keyword set does not, so refresh always.
         val dotSizePx = (7 * resources.displayMetrics.density).toInt()
+        // Rows held for Undo are hidden, so they are not counted either.
+        val held = heldActions.heldEmails().map { it.rowKey() }.toSet()
+        val unreadByTab = KeywordTabs.unreadCounts(emails.filter { it.rowKey() !in held })
         for (index in 0 until keywordChips.childCount) {
             val chip = keywordChips.getChildAt(index) as? Chip ?: continue
-            val keyword = chip.text.toString()
-            val hasUnread = emails.any {
-                it.status == "unread" && (keyword == KeywordTabs.ALL || it.keywords.contains(keyword))
+            val keyword = chip.tag as? String ?: continue
+            val unread = unreadByTab[keyword] ?: 0
+            val hasUnread = unread > 0
+            chip.text = withUnread(keyword, unread)
+            chip.contentDescription = if (hasUnread) {
+                resources.getQuantityString(R.plurals.tab_unread_description, unread, keyword, unread)
+            } else {
+                null
             }
             chip.setBold(hasUnread)
             chip.isChipIconVisible = hasUnread
@@ -714,6 +739,26 @@ class InboxActivity : LockedActivity() {
     private fun hideNewMailPill() {
         newMailCount = 0
         newMailPill.visibility = View.GONE
+    }
+
+    /** Counts come from the local cache, so they cover the mail this device holds. The label is
+     *  bidi-isolated so a right-to-left name cannot swallow the number. */
+    private fun withUnread(label: String, unread: Int): String =
+        if (unread > 0) {
+            getString(R.string.label_with_unread, androidx.core.text.BidiFormatter.getInstance().unicodeWrap(label), unread)
+        } else {
+            label
+        }
+
+    /** Re-reads the picker's counts from Room after a confirmed change, never adjusting them by
+     *  arithmetic, which a snapshot taken after the change would count twice. On [ioExecutor],
+     *  which runs every refresh too, so an older snapshot cannot land after this one. */
+    private fun recountUnread() {
+        if (isDestroyed || ioExecutor.isShutdown) return
+        ioExecutor.execute {
+            val unread = mailRepository.unreadCounts()
+            runOnUiThread { unreadByFolder = unread }
+        }
     }
 
     private fun switchFolder(folder: String) {
@@ -890,7 +935,8 @@ class InboxActivity : LockedActivity() {
                 val claims = mailRepository.beginRemovals(rows.map { it.id }, folder, session)
                 val dropped = { claims.forEach(mailRepository::abandon) }
                 MailBackgroundExecutor.submitReporting(this, label, onDropped = dropped) {
-                    mailRepository.mutateAll(action, claims, target, account)
+                    // Whatever the outcome: a partial failure can still have applied some rows.
+                    mailRepository.mutateAll(action, claims, target, account).also { runOnUiThread { recountUnread() } }
                 }
             }
         }
@@ -903,9 +949,11 @@ class InboxActivity : LockedActivity() {
             val keys = emails.map { it.rowKey() }.toSet()
             allEmails = allEmails.filter { it.rowKey() !in keys }
             searchResults = searchResults?.filter { it.rowKey() !in keys }
+            rebuildTabs(allEmails)
             renderFilteredEmails()
             send()
         }
+        rebuildTabs(allEmails)
         renderFilteredEmails()
         // One bar for everything held: the new bar replaces the last, and its Undo covers both.
         val rows = heldActions.heldEmails().size
@@ -917,7 +965,10 @@ class InboxActivity : LockedActivity() {
         undoBar = Snackbar.make(recyclerView, message, UNDO_WINDOW_MS.toInt())
             .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
             .setAction(R.string.undo) {
-                if (heldActions.undoAll()) renderFilteredEmails()
+                if (heldActions.undoAll()) {
+                    rebuildTabs(allEmails)
+                    renderFilteredEmails()
+                }
             }
             .addCallback(object : Snackbar.Callback() {
                 override fun onDismissed(transientBottomBar: Snackbar?, event: Int) =
@@ -942,10 +993,15 @@ class InboxActivity : LockedActivity() {
 
     private fun showFolderPickerPopup(anchor: View) {
         val popupMenu = PopupMenu(this, anchor)
-        popupMenu.menu.add(0, 0, 0, getString(R.string.nav_inbox)).isChecked = currentFolder == "INBOX"
-        popupMenu.menu.add(0, 1, 1, getString(R.string.nav_junk)).isChecked = currentFolder == "Junk"
-        popupMenu.menu.add(0, 2, 2, getString(R.string.nav_trash)).isChecked = currentFolder == "Trash"
-        popupMenu.menu.add(0, 3, 3, getString(R.string.nav_archive)).isChecked =
+        val unread = unreadByFolder
+        popupMenu.menu.add(0, 0, 0, withUnread(getString(R.string.nav_inbox), unread["INBOX"] ?: 0)).isChecked =
+            currentFolder == "INBOX"
+        popupMenu.menu.add(0, 1, 1, withUnread(getString(R.string.nav_junk), unread["Junk"] ?: 0)).isChecked =
+            currentFolder == "Junk"
+        popupMenu.menu.add(0, 2, 2, withUnread(getString(R.string.nav_trash), unread["Trash"] ?: 0)).isChecked =
+            currentFolder == "Trash"
+        val archiveUnread = KeywordTabs.unreadInFolderTree(unread, ARCHIVE_PARENT_FOLDER)
+        popupMenu.menu.add(0, 3, 3, withUnread(getString(R.string.nav_archive), archiveUnread)).isChecked =
             currentFolder == ARCHIVE_PARENT_FOLDER || currentFolder.startsWith("$ARCHIVE_PARENT_FOLDER/")
         popupMenu.menu.add(0, 4, 4, getString(SpecialFolder.SENT.label)).isChecked =
             specialFolderOf(currentFolder) == SpecialFolder.SENT
@@ -1021,7 +1077,8 @@ class InboxActivity : LockedActivity() {
         }
         val popupMenu = PopupMenu(this, anchor)
         folders.forEachIndexed { index, folder ->
-            popupMenu.menu.add(0, index, index, folder.path.substringAfterLast('/')).isChecked =
+            val label = withUnread(folder.path.substringAfterLast('/'), unreadByFolder[folder.path] ?: 0)
+            popupMenu.menu.add(0, index, index, label).isChecked =
                 currentFolder == folder.path
         }
         popupMenu.menu.setGroupCheckable(0, true, true)
@@ -1165,6 +1222,7 @@ class InboxActivity : LockedActivity() {
                 rowActionObserverForTest?.invoke(email.id, sourceFolder)
                 // [mutate] takes the folder through the claim: it has no way to reach for currentFolder.
                 mutate(claim, account).also {
+                    if (it is MailOutcome.Success) runOnUiThread { recountUnread() }
                     val active = activeAccountForTest?.invoke() ?: mailRepository.currentAccount()
                     pairingChanged.set(account != active)
                 }
@@ -1194,6 +1252,7 @@ class InboxActivity : LockedActivity() {
         }
         if (sourceFolder == currentFolder && allEmails.none { it.id == email.id }) {
             allEmails = allEmails.toMutableList().apply { add(index.coerceIn(0, size), email) }
+            rebuildTabs(allEmails)
             renderFilteredEmails()
         }
         Snackbar.make(recyclerView, getString(R.string.mail_action_failed, label, reason), Snackbar.LENGTH_LONG)
@@ -1222,6 +1281,12 @@ class InboxActivity : LockedActivity() {
 
     @androidx.annotation.VisibleForTesting
     internal fun allEmailsForTest(): List<Email> = allEmails
+
+    @androidx.annotation.VisibleForTesting
+    internal fun unreadByFolderForTest(): Map<String, Int> = unreadByFolder
+
+    @androidx.annotation.VisibleForTesting
+    internal fun refreshForTest() = refreshInbox()
 
     /** Seeds the list the way a refresh would. */
     @androidx.annotation.VisibleForTesting
