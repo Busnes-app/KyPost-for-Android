@@ -647,6 +647,9 @@ class InboxActivity : LockedActivity() {
         selectionMode?.finish()
         exitSearch()
         emptyText.visibility = View.GONE
+        // Empty, so refreshInbox takes its cold-open path: loading state, then this folder's cache.
+        allEmails = emptyList()
+        renderFilteredEmails()
         applyFolderTitle()
         renderFreshness()
         refreshInbox()
