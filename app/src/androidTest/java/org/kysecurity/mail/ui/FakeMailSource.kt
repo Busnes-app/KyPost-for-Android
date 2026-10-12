@@ -63,7 +63,11 @@ internal class FakeMailSource : MailSource {
 
     override fun currentAccount(): MailAccount? = null
 
-    override fun sendMail(draft: MailDraft, account: MailAccount?): MailOutcome<MailSendOutcome> {
+    override fun sendMail(
+        draft: MailDraft,
+        account: MailAccount?,
+        onCall: (okhttp3.Call) -> Unit,
+    ): MailOutcome<MailSendOutcome> {
         sends += draft
         return sendOutcomes.poll(10, TimeUnit.SECONDS) ?: MailOutcome.UpstreamFailure("no stubbed send outcome")
     }
