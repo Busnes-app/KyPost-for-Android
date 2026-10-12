@@ -58,6 +58,9 @@ data class RelayEmailDto(
     val keywords: List<String> = emptyList(),
     val status: String = "unread",
     val atUtc: String? = null,
+    /** When a snoozed message returned to INBOX (KyPost-Server #386). An "updated" row without it
+     *  means the pin was removed. */
+    val wokenAt: String? = null,
     // Warm-path hint for the inbox paperclip badge; false when the server
     // hasn't warmed the message yet (see backend mailcache.Entry).
     val hasAttachments: Boolean = false,

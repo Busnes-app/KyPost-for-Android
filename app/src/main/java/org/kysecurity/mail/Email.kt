@@ -16,6 +16,8 @@ data class Email(
     val label: String = "",
     val status: String = "unread",
     val atUtc: String? = null,
+    /** Set while a woken snooze is pinned: the list sorts by it, the row still shows [atUtc]. */
+    val wokenAt: String? = null,
     val hasAttachments: Boolean = false,
     val sourceMode: String = "relay",
     val pgpEncrypted: Boolean = false,

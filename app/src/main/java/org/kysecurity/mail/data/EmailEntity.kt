@@ -29,6 +29,7 @@ data class EmailEntity(
     val keywordsJson: String = "[]",
     val status: String = "unread",
     val atUtc: String? = null,
+    val wokenAt: String? = null,
     val hasAttachments: Boolean = false,
     val sourceMode: String,
     // Cached so a client-protected message is not indistinguishable from one with an empty body.

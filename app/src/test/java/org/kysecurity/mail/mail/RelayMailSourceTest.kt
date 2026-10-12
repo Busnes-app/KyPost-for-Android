@@ -378,7 +378,7 @@ class RelayMailSourceTest {
               "byTab": {
                 "Work": [
                   {"messageId": "m1", "sender": "a@example.com", "subject": "New", "body": "Full body", "label": "Work", "status": "unread", "changeType": "new"},
-                  {"messageId": "m2", "sender": "b@example.com", "subject": "Updated", "label": "Work", "status": "read", "changeType": "updated"}
+                  {"messageId": "m2", "sender": "b@example.com", "subject": "Updated", "label": "Work", "status": "read", "changeType": "updated", "wokenAt": "2026-10-12T09:00:00Z"}
                 ]
               },
               "cursor": "cursor-2",
@@ -402,6 +402,8 @@ class RelayMailSourceTest {
         assertEquals(2, result.messages.size)
         assertNull(result.messages.first { it.id == "m2" }.body)
         assertEquals("Full body", result.messages.first { it.id == "m1" }.body)
+        assertEquals("2026-10-12T09:00:00Z", result.messages.first { it.id == "m2" }.wokenAt)
+        assertNull(result.messages.first { it.id == "m1" }.wokenAt)
         assertEquals("cursor-2", outcome.checkpoint().cursor)
     }
 

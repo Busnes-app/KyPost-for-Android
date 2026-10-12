@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.AdapterListUpdateCallback
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListUpdateCallback
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.chip.Chip
 import org.kysecurity.mail.pgp.PgpMessageState
 import org.kysecurity.mail.pgp.PgpSignatureState
 import org.kysecurity.mail.pgp.pgpMessageStateOf
@@ -46,6 +47,7 @@ class EmailAdapter(
         private val subjectTextView: TextView = view.findViewById(R.id.textViewSubject)
         private val senderTextView: TextView = view.findViewById(R.id.textViewSender)
         private val dateTextView: TextView = view.findViewById(R.id.textViewDate)
+        private val snoozedBadge: Chip = view.findViewById(R.id.snoozedBadge)
         private val previewTextView: TextView = view.findViewById(R.id.textViewPreview)
 
         /** Removed on rebind: a recycled row must not keep acting on the email it showed before. */
@@ -82,6 +84,9 @@ class EmailAdapter(
             }
             senderTextView.text = email.sender
             dateTextView.text = inboxRowDate(email.atUtc, ZonedDateTime.now(), Locale.getDefault())
+            val woken = email.wokenAt != null
+            snoozedBadge.visibility = if (woken) View.VISIBLE else View.GONE
+            if (woken) applyStatusBadgeTheme(context, snoozedBadge, active = false)
             // Plain text into a TextView: the relay already flattened it, and nothing here parses it.
             previewTextView.text = email.preview
             previewTextView.visibility = if (email.preview.isBlank()) View.GONE else View.VISIBLE
@@ -93,6 +98,7 @@ class EmailAdapter(
                 context.getString(R.string.email_row_from, email.sender),
                 email.preview.takeIf { it.isNotBlank() },
                 dateTextView.text.toString().takeIf { it.isNotBlank() },
+                context.getString(R.string.email_row_snoozed).takeIf { woken },
                 context.getString(R.string.email_row_has_attachments).takeIf { email.hasAttachments },
             ).joinToString(", ")
             actionIds.forEach { ViewCompat.removeAccessibilityAction(itemView, it) }

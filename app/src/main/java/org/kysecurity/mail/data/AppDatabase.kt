@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ContactSyncStateEntity::class,
         RecipientPinEntity::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -221,6 +221,13 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_15_16 = object : Migration(15, 16) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `device_contact_links` ADD COLUMN `syncedJson` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** Woken-snooze pin; null until the relay sends one. */
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `emails` ADD COLUMN `wokenAt` TEXT")
             }
         }
     }

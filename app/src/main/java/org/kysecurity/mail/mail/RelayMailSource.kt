@@ -685,6 +685,7 @@ private fun RelayEmailDto.toUiEmail(tab: String): Email {
         label = emailLabel,
         status = status,
         atUtc = atUtc,
+        wokenAt = wokenAt,
         hasAttachments = hasAttachments,
         sourceMode = "relay",
         pgpEncrypted = pgpEncrypted,

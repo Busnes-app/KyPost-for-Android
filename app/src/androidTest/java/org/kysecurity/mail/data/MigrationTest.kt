@@ -269,6 +269,22 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate16To17_addsANullWokenAt_keepingRows() {
+        helper.createDatabase(TEST_DB, 16).apply {
+            execSQL(insertV11Email(messageId = "42", folder = "INBOX", subject = "Cached"))
+            close()
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 17, true, AppDatabase.MIGRATION_16_17)
+
+        migrated.query("SELECT subject, wokenAt FROM emails WHERE messageId = '42'").use { cursor ->
+            assertEquals(true, cursor.moveToFirst())
+            assertEquals("Cached", cursor.getString(0))
+            assertEquals(true, cursor.isNull(1))
+        }
+    }
+
     private fun insertV11Email(messageId: String, folder: String, subject: String) =
         "INSERT INTO emails " +
             "(messageId, folder, sender, sentTo, cc, bcc, subject, preview, bodyMode, label, " +
