@@ -7,6 +7,7 @@
 
     <EditText
         android:id="@+id/addressBookSearchField"
+        android:imeOptions="flagNoPersonalizedLearning"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="@string/address_book_search_hint"

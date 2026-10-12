@@ -62,6 +62,7 @@
 
             <EditText
                 android:id="@+id/editContactName"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:hint="@string/contacts_name_hint"
@@ -78,6 +79,7 @@
 
             <EditText
                 android:id="@+id/editContactGivenName"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="textPersonName"
@@ -93,6 +95,7 @@
 
             <EditText
                 android:id="@+id/editContactFamilyName"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="textPersonName"
@@ -108,6 +111,7 @@
 
             <EditText
                 android:id="@+id/editContactMiddleName"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="textPersonName"
@@ -123,6 +127,7 @@
 
             <EditText
                 android:id="@+id/editContactPrefix"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="text"
@@ -138,6 +143,7 @@
 
             <EditText
                 android:id="@+id/editContactSuffix"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="text"
@@ -153,6 +159,7 @@
 
             <EditText
                 android:id="@+id/editContactNickname"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="text"
@@ -168,6 +175,7 @@
 
             <EditText
                 android:id="@+id/editContactPhoneticGivenName"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="text"
@@ -183,6 +191,7 @@
 
             <EditText
                 android:id="@+id/editContactPhoneticFamilyName"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="text"
@@ -198,6 +207,7 @@
 
             <EditText
                 android:id="@+id/editContactPronouns"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="text"
@@ -221,6 +231,7 @@
 
             <EditText
                 android:id="@+id/editContactOrg"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="text"
@@ -236,6 +247,7 @@
 
             <EditText
                 android:id="@+id/editContactTitle"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="text"
@@ -251,6 +263,7 @@
 
             <EditText
                 android:id="@+id/editContactDepartment"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="text"
@@ -368,6 +381,7 @@
 
             <EditText
                 android:id="@+id/editContactBirthday"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:hint="@string/contacts_birthday_hint"
@@ -415,6 +429,7 @@
 
             <EditText
                 android:id="@+id/editContactNotes"
+                android:imeOptions="flagNoPersonalizedLearning"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="textMultiLine"

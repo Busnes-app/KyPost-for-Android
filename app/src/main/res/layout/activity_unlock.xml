@@ -18,6 +18,7 @@
 
     <EditText
         android:id="@+id/unlockPinField"
+        android:imeOptions="flagNoPersonalizedLearning"
         android:layout_width="200dp"
         android:layout_height="wrap_content"
         android:importantForAutofill="no"
