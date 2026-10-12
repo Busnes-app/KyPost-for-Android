@@ -50,6 +50,9 @@ data class RelayEmailDto(
     // empty one, so callers know not to overwrite/clear a locally cached body.
     val body: String? = null,
     val bodyMode: String = "",
+    /** One line of plain text from `preview=1` (KyPost-Server #351). Absent where the server holds
+     *  no body for the row: delta "updated" entries, `before=` pages, encrypted mail. */
+    val preview: String? = null,
     val label: String = "",
     // `omitempty` server-side, so an absent key means the message has no keywords.
     val keywords: List<String> = emptyList(),
@@ -80,6 +83,11 @@ data class RelayInboxResponseDto(
     val cursor: String = "",
     val delta: Boolean = false,
     val removed: List<String> = emptyList(),
+    /** Fell below the window but still exists: keep (KyPost-Server #349). */
+    val agedOut: List<String> = emptyList(),
+    /** Null when absent: a pre-#348 server, which ignores `before=` entirely. */
+    val hasMore: Boolean? = null,
+    val nextBefore: String? = null,
 )
 
 @Serializable

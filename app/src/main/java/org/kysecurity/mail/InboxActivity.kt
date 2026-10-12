@@ -4,7 +4,6 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -30,11 +29,16 @@ import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import org.kysecurity.mail.mail.FolderInfo
 import org.kysecurity.mail.mail.MAX_ACTION_IDS
+import org.kysecurity.mail.mail.MailAccount
 import org.kysecurity.mail.mail.MailAction
+import org.kysecurity.mail.mail.PendingMail
 import org.kysecurity.mail.mail.MailFetchResult
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRepository
 import org.kysecurity.mail.mail.MailRuntime
+import org.kysecurity.mail.mail.MailPage
+import org.kysecurity.mail.mail.OLDER_MAIL_NOT_SAVED
+import org.kysecurity.mail.mail.OLDER_MAIL_UNSUPPORTED
 import org.kysecurity.mail.mail.isFlaggedPhishing
 import org.kysecurity.mail.mail.notifiedMessage
 import org.kysecurity.mail.mail.userFacingMessage
@@ -59,6 +63,10 @@ class InboxActivity : LockedActivity() {
     private lateinit var inboxContent: View
     private lateinit var newMailPill: Chip
     private lateinit var adapter: EmailAdapter
+    private val olderFooter = LoadOlderAdapter { loadOlderMail() }
+    /** Per folder: where the next older page starts, and folders with nothing older left. */
+    private val olderFrontier = mutableMapOf<String, String>()
+    private val olderExhausted = mutableSetOf<String>()
     private val ioExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var mailRepository: MailRepository
@@ -70,6 +78,25 @@ class InboxActivity : LockedActivity() {
      *  at the moment it actually runs, so a test can see the folder that action really used. */
     @androidx.annotation.VisibleForTesting
     internal var rowActionObserverForTest: ((String, String) -> Unit)? = null
+
+    /** Null in production. Called on the main thread once a failed row action has been shown. */
+    @androidx.annotation.VisibleForTesting
+    internal var rowActionFailureShownForTest: (() -> Unit)? = null
+
+    /** Null in production. Called on the main thread when an earlier account's outcome is dropped. */
+    @androidx.annotation.VisibleForTesting
+    internal var rowActionDroppedForTest: (() -> Unit)? = null
+
+    /** Null in production. Runs on the IO thread after the cache paint, before the network fetch. */
+    @androidx.annotation.VisibleForTesting
+    internal var beforeNetworkRefreshForTest: ((folder: String) -> Unit)? = null
+
+    /** Null in production. Stands in for the active pairing's account in a row action's check. */
+    @androidx.annotation.VisibleForTesting
+    internal var activeAccountForTest: (() -> MailAccount?)? = null
+
+    /** The account the rows on screen were read under; row actions carry it to the request. */
+    @Volatile private var shownAccount: MailAccount? = null
     private var lastAppliedThemeName: String = ""
     private var pendingScrollPosition: Int = 0
 
@@ -115,6 +142,10 @@ class InboxActivity : LockedActivity() {
                 searchResults = searchResults?.filter { it.id != removedId }
                 renderFilteredEmails()
             }
+            // Already confirmed by the relay and written to Room; this only repaints the row.
+            val unreadId = result.data?.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_ID)
+            val unreadFolder = result.data?.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_FOLDER)
+            if (unreadId != null && unreadFolder != null) showStatus(unreadId, unreadFolder, "unread")
         }
     }
 
@@ -141,22 +172,22 @@ class InboxActivity : LockedActivity() {
         setupBottomNav()
         setupSwipeGestures()
 
-        val msgId = intent.getStringExtra(PushNotificationDispatcher.EXTRA_MESSAGE_ID)
-        if (msgId != null) {
-            setPendingMessage(
-                msgId,
-                intent.getStringExtra(PushNotificationDispatcher.EXTRA_SENDER),
-                intent.getStringExtra(PushNotificationDispatcher.EXTRA_SUBJECT),
-            )
+        // A recreate already consumed the tap; re-reading it reopens the message and resets the folder.
+        if (savedInstanceState == null && takeNotificationTarget(intent)) {
             currentFolder = "INBOX"
         }
     }
 
-    private fun setPendingMessage(msgId: String, sender: String?, subject: String?) {
-        pendingMessageId = msgId
-        pendingSender = sender
-        pendingSubject = subject
+    /** Moves a notification's target into the pending fields and off [intent], so it acts once. */
+    private fun takeNotificationTarget(intent: Intent): Boolean {
+        pendingMessageId = intent.getStringExtra(PushNotificationDispatcher.EXTRA_MESSAGE_ID) ?: return false
+        pendingSender = intent.getStringExtra(PushNotificationDispatcher.EXTRA_SENDER)
+        pendingSubject = intent.getStringExtra(PushNotificationDispatcher.EXTRA_SUBJECT)
         pendingMessageDeadlineMs = System.currentTimeMillis() + PENDING_MESSAGE_TIMEOUT_MS
+        intent.removeExtra(PushNotificationDispatcher.EXTRA_MESSAGE_ID)
+        intent.removeExtra(PushNotificationDispatcher.EXTRA_SENDER)
+        intent.removeExtra(PushNotificationDispatcher.EXTRA_SUBJECT)
+        return true
     }
 
     private fun applyFolderTitle() {
@@ -180,8 +211,19 @@ class InboxActivity : LockedActivity() {
     }
 
     override fun onStartUnlocked() {
+        // A failed read clears its overlay; repaint from the cache so the row shows unread again.
+        mailRepository.setOverlayListener { runOnUiThread { repaintFromCache() } }
         refreshInbox()
         scheduleNextRefresh()
+    }
+
+    private fun repaintFromCache() {
+        if (isFinishing || isDestroyed) return
+        val folder = currentFolder
+        ioExecutor.execute {
+            val cached = mailRepository.cachedEmails(folder)
+            runOnUiThread { applyRefreshedEmails(folder, cached, isFinal = false, errorMessage = null) }
+        }
     }
 
     override fun onResume() {
@@ -196,7 +238,6 @@ class InboxActivity : LockedActivity() {
 
         applyThemeToActivity(this)
         applyInboxThemeChrome()
-        adapter.notifyDataSetChanged()
         rebuildTabs(allEmails)
         renderFilteredEmails()
     }
@@ -204,6 +245,7 @@ class InboxActivity : LockedActivity() {
     override fun onStop() {
         super.onStop()
         if (redirectedToUnlock) return
+        mailRepository.setOverlayListener(null)
         heldActions.flush()
         // Nothing is left for its Undo to take back.
         undoBar?.dismiss()
@@ -292,13 +334,7 @@ class InboxActivity : LockedActivity() {
         super.onNewIntent(intent)
         if (redirectedToUnlock) return
         setIntent(intent)
-        val msgId = intent.getStringExtra(PushNotificationDispatcher.EXTRA_MESSAGE_ID)
-        if (msgId != null) {
-            setPendingMessage(
-                msgId,
-                intent.getStringExtra(PushNotificationDispatcher.EXTRA_SENDER),
-                intent.getStringExtra(PushNotificationDispatcher.EXTRA_SUBJECT),
-            )
+        if (takeNotificationTarget(intent)) {
             currentFolder = "INBOX"
             exitSearch()
             applyFolderTitle()
@@ -312,12 +348,93 @@ class InboxActivity : LockedActivity() {
             if (selectionMode != null) toggleSelected(email) else openEmailDetail(email)
         }
         recyclerView.layoutManager = LinearLayoutManager(this)
-        recyclerView.adapter = adapter
+        recyclerView.adapter = androidx.recyclerview.widget.ConcatAdapter(adapter, olderFooter)
         recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                 if (!recyclerView.canScrollVertically(-1)) hideNewMailPill()
             }
         })
+    }
+
+    /** Pages from the last page's `nextBefore`; the first page starts at the oldest row held. */
+    private fun loadOlderMail() {
+        if (olderFooter.loading) return
+        val folder = currentFolder
+        val frontier = olderFrontier[folder]
+        olderFooter.loading = true
+        ioExecutor.execute {
+            var outcome: MailOutcome<MailPage>? = null
+            var emails: List<Email>? = null
+            var failed = false
+            try {
+                // The anchor is read from Room, not allEmails: right after a folder switch that is
+                // still the old folder.
+                outcome = mailRepository.loadOlderFrom(folder, frontier)
+                emails = mailRepository.cachedEmails(folder)
+            } catch (e: RuntimeException) {
+                // An exception here would kill the worker thread and the app with it.
+                android.util.Log.w("InboxActivity", "Loading older mail failed", e)
+                failed = true
+            } finally {
+                // Null means "nothing to page from" only when nothing failed.
+                if (failed && outcome == null) outcome = MailOutcome.BadRequest(OLDER_MAIL_NOT_SAVED)
+                val result = outcome
+                val painted = emails
+                runOnUiThread { onOlderMailLoaded(folder, result, painted) }
+            }
+        }
+    }
+
+    private fun onOlderMailLoaded(folder: String, outcome: MailOutcome<MailPage>?, emails: List<Email>?) {
+        olderFooter.loading = false
+        val message = (outcome as? MailOutcome.BadRequest)?.message
+        when {
+            outcome is MailOutcome.Success -> {
+                val next = outcome.value.nextBefore
+                if (outcome.value.hasMore == true && next != null) olderFrontier[folder] = next else olderExhausted += folder
+            }
+            outcome == null || message == OLDER_MAIL_UNSUPPORTED -> olderExhausted += folder
+            // A stale frontier answers 400 forever; retry from the oldest row instead. Any other
+            // failure (network, storage) keeps the frontier, so the retry asks for the same page.
+            outcome is MailOutcome.BadRequest && message != OLDER_MAIL_NOT_SAVED -> olderFrontier.remove(folder)
+        }
+        if (folder != currentFolder) return
+        if (emails != null) {
+            allEmails = emails
+            rebuildTabs(emails)
+            renderFilteredEmails()
+        }
+        outcome?.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
+    }
+
+    /** Server first: the row changes only once the relay confirms, so a server without the
+     *  unread action leaves it as it was and the failure is toasted. */
+    private fun setReadState(email: Email, read: Boolean) {
+        val folder = email.sourceFolder()
+        val label = getString(if (read) R.string.action_mark_read else R.string.action_mark_unread)
+        val repository = mailRepository
+        val session = ProcessState.generation()
+        // Ordered with any read a detail screen left in flight, so this cannot be undone by it.
+        val setState = ReadStateLane.ordered {
+            if (read) repository.markRead(email.id, folder, session) else repository.markUnread(email.id, folder, session)
+        }
+        MailBackgroundExecutor.submitReporting(this, label) {
+            val outcome = setState()
+            if (outcome is MailOutcome.Success) {
+                runOnUiThread { showStatus(email.id, folder, if (read) "read" else "unread") }
+            }
+            outcome
+        }
+    }
+
+    /** Matches folder as well as id: after a folder switch the list can still hold another
+     *  mailbox's rows, and a UID repeats across mailboxes. */
+    private fun showStatus(id: String, folder: String, status: String) {
+        if (redirectedToUnlock || isDestroyed) return
+        allEmails = allEmails.map { if (it.id == id && it.sourceFolder() == folder) it.copy(status = status) else it }
+        searchResults = searchResults?.map { if (it.id == id && it.sourceFolder() == folder) it.copy(status = status) else it }
+        rebuildTabs(allEmails)
+        renderFilteredEmails()
     }
 
     /** The row's own mailbox, not the screen's. An IMAP UID is unique only within one folder, so
@@ -329,7 +446,6 @@ class InboxActivity : LockedActivity() {
         intent.putExtra("email_id", email.id)
         intent.putExtra("email_subject", email.subject)
         intent.putExtra("email_sender", email.sender)
-        intent.putExtra("email_preview", email.preview)
         intent.putExtra("email_body_mode", email.bodyMode)
         intent.putExtra("email_folder", email.sourceFolder())
         // A search result has no Room row, so these are the only copy of its recipients.
@@ -426,12 +542,19 @@ class InboxActivity : LockedActivity() {
     private fun refreshInboxOnIo(folder: String, showCacheFirst: Boolean, forceFullResync: Boolean) {
         // Already obsolete before it started: fetching a folder nobody is looking at buys nothing.
         if (folder != currentFolder) return
-        if (showCacheFirst) {
+        // Read before the rows: the account they are shown, and acted on, under.
+        val account = mailRepository.currentAccount()
+        // Not only on a cold open: returning from a message must show its read overlay now, not
+        // after the network answers. A pull re-reads the folder and paints once.
+        if (showCacheFirst || !forceFullResync) {
             val cached = mailRepository.cachedEmails(folder)
             if (cached.isNotEmpty()) {
-                runOnUiThread { applyRefreshedEmails(folder, cached, isFinal = false, errorMessage = null) }
+                runOnUiThread {
+                    applyRefreshedEmails(folder, cached, isFinal = false, errorMessage = null, account = account)
+                }
             }
         }
+        beforeNetworkRefreshForTest?.invoke(folder)
         val outcome: MailOutcome<MailFetchResult> =
             mailRepository.refreshFolder(folder, forceFullResync = forceFullResync)
         val emails = mailRepository.cachedEmails(folder)
@@ -444,6 +567,7 @@ class InboxActivity : LockedActivity() {
                 isFinal = true,
                 errorMessage = errorMessage,
                 refreshedAt = System.currentTimeMillis().takeIf { outcome is MailOutcome.Success },
+                account = account,
             )
         }
     }
@@ -458,8 +582,10 @@ class InboxActivity : LockedActivity() {
         isFinal: Boolean,
         errorMessage: String?,
         refreshedAt: Long? = null,
+        account: MailAccount? = shownAccount,
     ) {
         if (folder != currentFolder) return
+        shownAccount = account
         // A failed fetch un-confirms the folder: its emptiness is no longer known.
         if (isFinal) loadedFolder = folder.takeIf { refreshedAt != null }
         // Snapshotted before rebuildTabs: a chip rebuild re-renders through the tab listener.
@@ -533,7 +659,7 @@ class InboxActivity : LockedActivity() {
             val hasUnread = emails.any {
                 it.status == "unread" && (keyword == KeywordTabs.ALL || it.keywords.contains(keyword))
             }
-            chip.setTypeface(chip.typeface, if (hasUnread) Typeface.BOLD else Typeface.NORMAL)
+            chip.setBold(hasUnread)
             chip.isChipIconVisible = hasUnread
             if (hasUnread) {
                 chip.chipIconSize = dotSizePx.toFloat()
@@ -560,6 +686,7 @@ class InboxActivity : LockedActivity() {
         val added = if (results == null) previous?.let { newRowsAbove(it, filtered) } ?: 0 else 0
         val wasAtTop = !recyclerView.canScrollVertically(-1)
         adapter.updateEmails(filtered)
+        olderFooter.shown = results == null && allEmails.isNotEmpty() && currentFolder !in olderExhausted
         keywordChipScroll.visibility = if (searchQuery == null) View.VISIBLE else View.GONE
         emptyText.text = if (results != null) {
             getString(R.string.search_no_results)
@@ -596,6 +723,9 @@ class InboxActivity : LockedActivity() {
         selectionMode?.finish()
         exitSearch()
         emptyText.visibility = View.GONE
+        // Empty, so refreshInbox takes its cold-open path: loading state, then this folder's cache.
+        allEmails = emptyList()
+        renderFilteredEmails()
         applyFolderTitle()
         renderFreshness()
         refreshInbox()
@@ -709,6 +839,9 @@ class InboxActivity : LockedActivity() {
             add(MENU_BULK_MOVE, R.string.action_move, R.drawable.ic_move)
             add(MENU_BULK_JUNK, R.string.action_junk, R.drawable.ic_spam)
             add(MENU_BULK_DELETE, R.string.action_delete, R.drawable.ic_delete)
+            // Overflow: no undo bar, they are server first like the detail screen's button.
+            menu.add(0, MENU_BULK_MARK_READ, MENU_BULK_MARK_READ, R.string.action_mark_read)
+            menu.add(0, MENU_BULK_MARK_UNREAD, MENU_BULK_MARK_UNREAD, R.string.action_mark_unread)
             return true
         }
 
@@ -723,6 +856,8 @@ class InboxActivity : LockedActivity() {
                 MENU_BULK_ARCHIVE -> submitRowsAction(chosen, getString(R.string.action_archive), MailAction.ARCHIVE)
                 MENU_BULK_JUNK -> submitRowsAction(chosen, getString(R.string.action_junk), MailAction.SPAM)
                 MENU_BULK_DELETE -> submitRowsAction(chosen, getString(R.string.action_delete), MailAction.DELETE)
+                MENU_BULK_MARK_READ -> chosen.filter { it.status == "unread" }.forEach { setReadState(it, read = true) }
+                MENU_BULK_MARK_UNREAD -> chosen.filter { it.status != "unread" }.forEach { setReadState(it, read = false) }
                 MENU_BULK_MOVE -> {
                     val pick = moveTargetPickerForTest
                         ?: { from, then -> pickMoveTarget(this@InboxActivity, mailRepository, ioExecutor, from, then) }
@@ -748,10 +883,15 @@ class InboxActivity : LockedActivity() {
         if (emails.isEmpty()) return
         // Grouped now, not when the timer fires: by then the screen may show another folder.
         val byFolder = emails.groupBy { it.sourceFolder() }
+        // As for one row: the session and account at the tap, not when Undo lets the action go.
+        val account = shownAccount
+        val session = ProcessState.generation()
         holdForUndo(emails, label) {
             byFolder.forEach { (folder, rows) ->
-                MailBackgroundExecutor.submitReporting(this, label) {
-                    mailRepository.mutateAll(action, rows.map { it.id }, folder, target)
+                val claims = mailRepository.beginRemovals(rows.map { it.id }, folder, session)
+                val dropped = { claims.forEach(mailRepository::abandon) }
+                MailBackgroundExecutor.submitReporting(this, label, onDropped = dropped) {
+                    mailRepository.mutateAll(action, claims, target, account)
                 }
             }
         }
@@ -927,14 +1067,16 @@ class InboxActivity : LockedActivity() {
             0,
             ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT
         ) {
+            // No swipes in selection mode, nor on the "Load older mail" footer.
             override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int =
-                if (selectionMode != null) 0 else super.getSwipeDirs(recyclerView, viewHolder)
+                if (selectionMode != null || viewHolder.bindingAdapter !== adapter) 0 else super.getSwipeDirs(recyclerView, viewHolder)
 
             override fun onMove(
                 recyclerView: RecyclerView,
                 viewHolder: RecyclerView.ViewHolder,
                 target: RecyclerView.ViewHolder
             ): Boolean = false
+
 
             override fun onChildDraw(
                 c: Canvas,
@@ -980,7 +1122,7 @@ class InboxActivity : LockedActivity() {
 
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                 val position = viewHolder.bindingAdapterPosition
-                if (position < 0 || position >= adapter.itemCount) return
+                if (viewHolder.bindingAdapter !== adapter || position < 0 || position >= adapter.itemCount) return
                 val email = adapter.getEmailAt(position)
                 when (direction) {
                     ItemTouchHelper.LEFT ->
@@ -1002,16 +1144,66 @@ class InboxActivity : LockedActivity() {
     private fun submitRowAction(
         email: Email,
         label: String,
-        mutate: (id: String, folder: String) -> MailOutcome<Unit>,
+        mutate: RowMutation,
     ) {
         val sourceFolder = email.sourceFolder()
+        // Same reasoning as sourceFolder: the row belongs to the account it was painted under, and
+        // to the session current at the swipe, however long Undo holds it.
+        val account = shownAccount
+        val session = ProcessState.generation()
+        // (folder, id): a Retry tapped after switching folders must not hide another folder's UID.
+        fun isTheRow(row: Email) = row.id == email.id && row.sourceFolder() == sourceFolder
+        val index = allEmails.indexOfFirst(::isTheRow)
         holdForUndo(listOf(email), label) {
-            MailBackgroundExecutor.submitReporting(this, label) {
+            val claim = mailRepository.beginRemoval(email.id, sourceFolder, session)
+            // Decided on the worker: reading the pairing is disk and crypto. Until the next repaint
+            // [shownAccount] still names the old account, so it cannot answer this alone.
+            val pairingChanged = java.util.concurrent.atomic.AtomicBoolean(false)
+            val onFailure = { reason: String ->
+                restoreFailedRow(email, sourceFolder, account, session, pairingChanged.get(), index, label, reason, mutate)
+            }
+            MailBackgroundExecutor.submitReporting(this, label, onFailure, onDropped = { mailRepository.abandon(claim) }) {
                 rowActionObserverForTest?.invoke(email.id, sourceFolder)
-                // [mutate] takes the folder as an argument: it has no way to reach for currentFolder.
-                mutate(email.id, sourceFolder)
+                // [mutate] takes the folder through the claim: it has no way to reach for currentFolder.
+                mutate(claim, account).also {
+                    val active = activeAccountForTest?.invoke() ?: mailRepository.currentAccount()
+                    pairingChanged.set(account != active)
+                }
             }
         }
+    }
+
+    /** Puts a row whose action failed back where it was, with Retry. False once this screen is
+     *  gone, so the executor falls back to its toast. An outcome from an earlier account is
+     *  dropped: neither its row nor a Retry belongs on this one. */
+    private fun restoreFailedRow(
+        email: Email,
+        sourceFolder: String,
+        account: MailAccount?,
+        session: Long,
+        pairingChanged: Boolean,
+        index: Int,
+        label: String,
+        reason: String,
+        mutate: RowMutation,
+    ): Boolean {
+        if (isFinishing || isDestroyed) return false
+        fun stillOurs() = !pairingChanged && ProcessState.isCurrent(session) && account == shownAccount
+        if (!stillOurs()) {
+            rowActionDroppedForTest?.invoke()
+            return true
+        }
+        if (sourceFolder == currentFolder && allEmails.none { it.id == email.id }) {
+            allEmails = allEmails.toMutableList().apply { add(index.coerceIn(0, size), email) }
+            renderFilteredEmails()
+        }
+        Snackbar.make(recyclerView, getString(R.string.mail_action_failed, label, reason), Snackbar.LENGTH_LONG)
+            .setAction(R.string.action_retry) { if (stillOurs()) submitRowAction(email, label, mutate) }
+            // Above the phone's bottom bar; the w600dp rail runs the full height beside the list.
+            .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
+            .show()
+        rowActionFailureShownForTest?.invoke()
+        return true
     }
 
     /** An id names a message only within its folder. */
@@ -1079,9 +1271,21 @@ class InboxActivity : LockedActivity() {
         selectionCallback.onActionItemClicked(mode, mode.menu.findItem(MENU_BULK_MOVE))
     }
 
+    /** Runs the selection overflow's Mark read / Mark unread handler, as tapping it would. */
+    @androidx.annotation.VisibleForTesting
+    internal fun bulkMarkForTest(read: Boolean) {
+        val mode = selectionMode ?: return
+        selectionCallback.onActionItemClicked(mode, mode.menu.findItem(if (read) MENU_BULK_MARK_READ else MENU_BULK_MARK_UNREAD))
+    }
+
     /** Null in production. Stands in for the folder picker, which answers asynchronously. */
     @androidx.annotation.VisibleForTesting
     internal var moveTargetPickerForTest: ((from: String, then: (String) -> Unit) -> Unit)? = null
+
+    @androidx.annotation.VisibleForTesting
+    internal fun setShownAccountForTest(account: MailAccount?) {
+        shownAccount = account
+    }
 
     @androidx.annotation.VisibleForTesting
     internal fun setPendingScrollPositionForTest(position: Int) {
@@ -1090,6 +1294,14 @@ class InboxActivity : LockedActivity() {
 
     @androidx.annotation.VisibleForTesting
     internal fun pendingScrollPositionForTest(): Int = pendingScrollPosition
+
+    @androidx.annotation.VisibleForTesting
+    internal fun pendingMessageIdForTest(): String? = pendingMessageId
+
+    @androidx.annotation.VisibleForTesting
+    internal fun clearPendingMessageForTest() {
+        pendingMessageId = null
+    }
 
     @androidx.annotation.VisibleForTesting
     internal fun firstVisiblePositionForTest(): Int =
@@ -1111,6 +1323,8 @@ class InboxActivity : LockedActivity() {
         private const val MENU_BULK_MOVE = 11
         private const val MENU_BULK_JUNK = 12
         private const val MENU_BULK_DELETE = 13
+        private const val MENU_BULK_MARK_READ = 14
+        private const val MENU_BULK_MARK_UNREAD = 15
         const val STATE_FOLDER = "inbox_folder"
         const val STATE_TAB = "inbox_tab"
         const val STATE_SCROLL = "inbox_scroll"
@@ -1146,3 +1360,6 @@ internal fun newRowsAbove(old: List<Email>, new: List<Email>): Int {
     val oldIds = old.mapTo(HashSet()) { it.id }
     return new.takeWhile { it.id !in oldIds }.size
 }
+
+/** (claim, account) -> outcome; the account is checked when the request is built. */
+private typealias RowMutation = (PendingMail, MailAccount?) -> MailOutcome<Unit>

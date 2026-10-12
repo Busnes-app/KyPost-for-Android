@@ -20,11 +20,40 @@ private class FakeEmailDao : EmailDao {
     /** Throws on the next write, to stand in for "Room failed / storage filled / process died". */
     var failNextWrite = false
 
+    /** Throws on the next folder read, once. */
+    var failNextFolderRead = false
+
+    /** Throws when an upsert carries this id, to fail one write among several. */
+    var failUpsertOf: String? = null
+
+    /** Mirrors Room: a throw inside rolls every write back. */
+    override fun inTransaction(block: () -> Unit) {
+        val before = LinkedHashMap(rows)
+        try {
+            block()
+        } catch (e: Exception) {
+            rows.clear()
+            rows.putAll(before)
+            throw e
+        }
+    }
+
+    /** Runs at the start of [upsertAll], so a test can hold a refresh mid-write. */
+    var beforeUpsert: (() -> Unit)? = null
+
     private fun key(id: String, folder: String) = folder to id
 
-    override fun getByFolder(folder: String): List<EmailEntity> = rows.values.filter { it.folder == folder }
+    override fun getByFolder(folder: String): List<EmailEntity> {
+        if (failNextFolderRead) {
+            failNextFolderRead = false
+            throw IllegalStateException("simulated Room read failure")
+        }
+        return rows.values.filter { it.folder == folder }
+    }
     override fun upsertAll(emails: List<EmailEntity>) {
+        beforeUpsert?.invoke()
         if (failNextWrite) throw IllegalStateException("simulated Room failure")
+        if (emails.any { it.messageId == failUpsertOf }) throw IllegalStateException("simulated Room failure")
         emails.forEach { rows[key(it.messageId, it.folder)] = it }
     }
     override fun updateStatus(id: String, folder: String, status: String) {
@@ -33,10 +62,18 @@ private class FakeEmailDao : EmailDao {
     override fun deleteById(id: String, folder: String) { rows.remove(key(id, folder)) }
     override fun clearAll() { rows.clear() }
     override fun getById(id: String, folder: String): EmailEntity? = rows[key(id, folder)]
+    override fun getIds(folder: String): List<String> = getByFolder(folder).map { it.messageId }
     override fun pruneStaleInFolder(folder: String, keepIds: List<String>) {
         val keep = keepIds.toSet()
-        rows.values.filter { it.folder == folder && it.messageId !in keep }
+        rows.values.filter { it.folder == folder && it.inWindow && it.messageId !in keep }
             .forEach { rows.remove(key(it.messageId, it.folder)) }
+    }
+    override fun markAgedOutBefore(folder: String, oldest: String, keepIds: List<String>) {
+        rows.values.filter { it.folder == folder && (it.atUtc ?: return@filter false) < oldest && it.messageId !in keepIds }
+            .forEach { rows[key(it.messageId, it.folder)] = it.copy(inWindow = false) }
+    }
+    override fun markAgedOut(folder: String, ids: List<String>) {
+        ids.forEach { id -> rows[key(id, folder)]?.let { rows[key(id, folder)] = it.copy(inWindow = false) } }
     }
 
     /** Mirrors the real query. The authority on the SQL itself is `EmailDaoLazyBodyTest`. */
@@ -48,7 +85,7 @@ private class FakeEmailDao : EmailDao {
     /** Mirrors the real query's predicate. The authority on the SQL itself is
      *  `EmailDaoClearDecryptedTest`, which runs it against a real Room database. */
     override fun clearServerDecryptedBodies(): Int {
-        val hits = rows.values.filter { it.pgpEncrypted && !it.body.isNullOrEmpty() }
+        val hits = rows.values.filter { it.pgpEncrypted && (!it.body.isNullOrEmpty() || it.preview.isNotEmpty()) }
         hits.forEach { rows[key(it.messageId, it.folder)] = it.copy(body = "", preview = "") }
         return hits.size
     }
@@ -96,19 +133,39 @@ private class FakeMailSource(
     var actionOutcome: MailOutcome<MailActionOutcome> = MailOutcome.Success(MailActionOutcome(1, emptyList())),
 ) : MailSource {
     val actions = mutableListOf<Triple<MailAction, List<String>, String>>()
+    val limits = mutableListOf<Int>()
 
-    override fun fetchInbox(mailbox: String, limit: Int, forceFullResync: Boolean) = fetchOutcome
+    /** Answers `before=` requests in order; the befores asked for are recorded. */
+    val olderPages = ArrayDeque<MailOutcome<MailPage>>()
+    val befores = mutableListOf<String>()
+
+    override fun fetchInbox(mailbox: String, limit: Int, forceFullResync: Boolean): MailOutcome<MailFetchResult> {
+        limits += limit
+        return fetchOutcome
+    }
+
+    override fun fetchOlder(mailbox: String, limit: Int, before: String): MailOutcome<MailPage> {
+        limits += limit
+        befores += before
+        return olderPages.removeFirstOrNull() ?: unsupported()
+    }
+
+    /** Runs while the action is "on the wire", so a test can look at the cache mid-flight. */
+    var duringAction: (() -> Unit)? = null
 
     override fun performAction(
         action: MailAction,
         messageIds: List<String>,
         mailbox: String,
         targetMailbox: String?,
+        account: MailAccount?,
     ): MailOutcome<MailActionOutcome> {
         actions += Triple(action, messageIds, mailbox)
+        duringAction?.invoke()
         return actionOutcome
     }
 
+    override fun currentAccount(): MailAccount? = null
     override fun listFolders(parent: String?) = unsupported()
     override fun searchMail(query: String, mailbox: String, limit: Int) = unsupported()
     override fun createFolder(parent: String, name: String) = unsupported()
@@ -117,7 +174,6 @@ private class FakeMailSource(
     override fun saveDraft(draft: MailDraft) = unsupported()
     override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft) = unsupported()
     override fun sendMail(draft: MailDraft, account: MailAccount?) = unsupported()
-    override fun currentAccount(): MailAccount? = null
     override fun sendClientEncrypted(message: ClientEncryptedMessage) = unsupported()
     /** Null keeps the old throwing behaviour, so tests asserting "must never reach the relay"
      *  still fail loudly rather than against a plausible-looking success. */
@@ -160,6 +216,13 @@ private fun repository(
 ) = MailRepository(emailDao = dao, relaySource = source, cursorProvider = cursors)
 
 class MailRepositoryTest {
+
+    /** Some tests here run resetAll, which seals the process-wide draft cache; only take()
+     *  unseals it. Left sealed, a later test class's save() silently does nothing. */
+    @org.junit.After
+    fun unsealTheDraftCache() {
+        org.kysecurity.mail.ComposeDraftCache.take()
+    }
 
     @Test
     fun nonDeltaResult_replacesFolderSnapshotWholesale() {
@@ -857,5 +920,801 @@ class MailRepositoryTest {
 
         assertTrue(repository(dao, source).markRead("42", "INBOX") is MailOutcome.Success)
         assertEquals("read", dao.getById("42", "INBOX")?.status)
+    }
+
+    // --- Older mail and reliable deltas (KyPost-Server #348, #349) -------------------------------
+
+    private fun snapshotOf(vararg ids: String) =
+        MailFetchResult(tabs = emptyList(), messages = ids.map { email(it, body = null) }, isDelta = false)
+
+    private fun page(vararg ids: String, hasMore: Boolean? = true, next: String? = "next-${ids.lastOrNull()}") =
+        MailOutcome.Success(MailPage(ids.map { email(it, body = null) }, hasMore, next))
+
+    /** agedOut is mail that still exists below the window. Deleting it lost real mail on every
+     *  arrival; keeping it as a window row let the next snapshot prune it instead. */
+    @Test
+    fun agedOutRowIsKeptAndSurvivesTheNextSnapshot() {
+        val dao = FakeEmailDao()
+        dao.put(row("old", "INBOX"))
+
+        reconcileFetchResult(
+            dao, "INBOX", "relay",
+            MailFetchResult(tabs = emptyList(), messages = listOf(email("new")), isDelta = true, agedOutMessageIds = listOf("old")),
+        )
+        reconcileFetchResult(dao, "INBOX", "relay", snapshotOf("new"))
+
+        assertEquals(setOf("INBOX" to "old", "INBOX" to "new"), dao.rows.keys)
+    }
+
+    @Test
+    fun removedStillDeletesARowOutsideTheWindow() {
+        val dao = FakeEmailDao()
+        dao.put(row("old", "INBOX").copy(inWindow = false))
+
+        reconcileFetchResult(
+            dao, "INBOX", "relay",
+            MailFetchResult(tabs = emptyList(), messages = emptyList(), isDelta = true, removedMessageIds = listOf("old")),
+        )
+
+        assertTrue(dao.rows.isEmpty())
+    }
+
+    /** The daily since=0 snapshot lists only the window; mail the user paged in is older than it. */
+    @Test
+    fun pagedInMailSurvivesTheDailySnapshot() {
+        val dao = FakeEmailDao()
+        dao.put(row("w1", "INBOX"))
+        val source = FakeMailSource(fetchOutcome = MailOutcome.Success(snapshotOf("w1")))
+        source.olderPages += page("p1", "p2")
+        val repo = repository(dao, source)
+
+        assertTrue(repo.loadOlder("INBOX", "w1") is MailOutcome.Success)
+        repo.refreshFolder("INBOX", forceFullResync = true)
+
+        assertEquals(setOf("INBOX" to "w1", "INBOX" to "p1", "INBOX" to "p2"), dao.rows.keys)
+    }
+
+    /** A page row is metadata only. Taking it whole would clear the PGP flags that keep a
+     *  client-protected message from being fetched, and a cached body. */
+    @Test
+    fun anOlderPageRefreshesReadStateButKeepsWhatOnlyTheWindowCarries() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX", body = "cached", pgpEncrypted = true).copy(hasAttachments = true))
+        val source = FakeMailSource()
+        source.olderPages += MailOutcome.Success(MailPage(listOf(email("42", body = null, status = "read")), true, "41"))
+
+        repository(dao, source).loadOlder("INBOX", "43")
+
+        val kept = dao.getById("42", "INBOX")!!
+        assertEquals("read", kept.status)
+        assertEquals("cached", kept.body)
+        assertTrue(kept.pgpEncrypted)
+        assertTrue(kept.hasAttachments)
+        assertTrue("a held window row stays a window row", kept.inWindow)
+    }
+
+    /** A server without before= answers with its newest window. That is not older mail. */
+    @Test
+    fun olderPageFromAServerWithoutPagingIsRefusedAndStoresNothing() {
+        val dao = FakeEmailDao()
+        val source = FakeMailSource()
+        source.olderPages += page("w1", hasMore = null, next = null)
+
+        val outcome = repository(dao, source).loadOlder("INBOX", "w9")
+
+        assertEquals(OLDER_MAIL_UNSUPPORTED, (outcome as MailOutcome.BadRequest).message)
+        assertTrue(dao.rows.isEmpty())
+    }
+
+    private fun overflowDelta() = MailFetchResult(
+        tabs = emptyList(),
+        messages = listOf(email("n1", body = null)),
+        isDelta = true,
+        hasMore = true,
+        nextBefore = "n1",
+        checkpoint = MailCheckpoint(subscriberId = "sub-1", cursor = "c-2", wasFullResync = false),
+    )
+
+    /** More new mail than the window holds: page down to mail already held, then commit. */
+    @Test
+    fun deltaOverflowPagesDownToHeldMailBeforeCommittingTheCursor() {
+        val dao = FakeEmailDao()
+        dao.put(row("held", "INBOX"))
+        val cursors = FakeCursorProvider()
+        val source = FakeMailSource(fetchOutcome = MailOutcome.Success(overflowDelta()))
+        source.olderPages += page("o1", next = "o1")
+        source.olderPages += page("o2", "held", next = "held")
+
+        val outcome = repository(dao, source, cursors).refreshFolder("INBOX")
+
+        assertTrue(outcome is MailOutcome.Success)
+        assertEquals(listOf("n1", "o1"), source.befores)
+        assertEquals(setOf("held", "n1", "o1", "o2"), dao.rows.keys.map { it.second }.toSet())
+        assertEquals(listOf(Triple("sub-1", "INBOX", "c-2")), cursors.saved)
+    }
+
+    /** The skipped mail is only reachable from the old cursor, so a failed page must not advance
+     *  it — and the pages that did arrive must not be stored, or the retry would stop at them as
+     *  "held" and commit past the page that failed. */
+    @Test
+    fun deltaOverflowWithAFailedPageKeepsTheCursorAndTheRetryWalksEveryPage() {
+        val dao = FakeEmailDao()
+        dao.put(row("held", "INBOX"))
+        val cursors = FakeCursorProvider()
+        val source = FakeMailSource(fetchOutcome = MailOutcome.Success(overflowDelta()))
+        source.olderPages += page("o1", next = "o1")
+        source.olderPages += MailOutcome.UpstreamFailure("imap down")
+        val repo = repository(dao, source, cursors)
+
+        assertTrue(repo.refreshFolder("INBOX") is MailOutcome.UpstreamFailure)
+        assertTrue(cursors.saved.isEmpty())
+        assertEquals(setOf("held"), dao.rows.keys.map { it.second }.toSet())
+
+        source.befores.clear()
+        source.olderPages += page("o1", next = "o1")
+        source.olderPages += page("o2", "held", next = "held")
+        assertTrue(repo.refreshFolder("INBOX") is MailOutcome.Success)
+
+        assertEquals(listOf("n1", "o1"), source.befores)
+        assertEquals(setOf("held", "n1", "o1", "o2"), dao.rows.keys.map { it.second }.toSet())
+        assertEquals(listOf(Triple("sub-1", "INBOX", "c-2")), cursors.saved)
+    }
+
+    /** A failed walk must leave nothing that a retry could mistake for held mail. If the window
+     *  were stored, newer mail arriving before the retry pushes it below the next window, the
+     *  retry's first page holds it, and the walk stops and commits above the mail it skipped. */
+    @Test
+    fun aFailedOverflowStoresNothingSoARetryAfterNewMailStillReachesHeldMail() {
+        val dao = FakeEmailDao()
+        dao.put(row("held", "INBOX"))
+        val cursors = FakeCursorProvider()
+        val source = FakeMailSource(
+            fetchOutcome = MailOutcome.Success(overflowDelta().copy(messages = listOf(email("w2", body = null)), nextBefore = "w2")),
+        )
+        source.olderPages += page("o1", next = "o1")
+        source.olderPages += MailOutcome.UpstreamFailure("imap down")
+        val repo = repository(dao, source, cursors)
+
+        assertTrue(repo.refreshFolder("INBOX") is MailOutcome.UpstreamFailure)
+        assertEquals("nothing from a failed walk is stored", setOf("held"), dao.rows.keys.map { it.second }.toSet())
+
+        // Newer mail arrived: w2 is now below the window, the first thing the retry pages into.
+        source.fetchOutcome = MailOutcome.Success(overflowDelta().copy(messages = listOf(email("w3", body = null)), nextBefore = "w3"))
+        source.befores.clear()
+        source.olderPages += page("w2", next = "w2")
+        source.olderPages += page("o1", next = "o1")
+        source.olderPages += page("o2", "held", next = "held")
+        assertTrue(repo.refreshFolder("INBOX") is MailOutcome.Success)
+
+        assertEquals(listOf("w3", "w2", "o1"), source.befores)
+        assertEquals(setOf("held", "w3", "w2", "o1", "o2"), dao.rows.keys.map { it.second }.toSet())
+        assertEquals(listOf(Triple("sub-1", "INBOX", "c-2")), cursors.saved)
+    }
+
+    /** A crash while storing the walk must not leave the window behind as held mail. */
+    @Test
+    fun windowAndOverflowAreStoredTogetherOrNotAtAll() {
+        val dao = FakeEmailDao()
+        dao.put(row("held", "INBOX"))
+        dao.failUpsertOf = "o1"
+        val cursors = FakeCursorProvider()
+        val source = FakeMailSource(fetchOutcome = MailOutcome.Success(overflowDelta()))
+        source.olderPages += page("o1", "held", next = "held")
+
+        runCatching { repository(dao, source, cursors).refreshFolder("INBOX") }
+
+        assertEquals(setOf("held"), dao.rows.keys.map { it.second }.toSet())
+        assertTrue(cursors.saved.isEmpty())
+    }
+
+    /** Overflow with nowhere to page from cannot be reached, so the cursor must not pass it. */
+    @Test
+    fun deltaOverflowWithoutAUsableNextBeforeKeepsTheCursor() {
+        val cursors = FakeCursorProvider()
+        val source = FakeMailSource(fetchOutcome = MailOutcome.Success(overflowDelta().copy(nextBefore = null)))
+
+        assertTrue(repository(FakeEmailDao(), source, cursors).refreshFolder("INBOX") is MailOutcome.UpstreamFailure)
+        assertTrue(cursors.saved.isEmpty())
+    }
+
+    /** `delta: false` answering a cursor (the window forgot it) is a snapshot: it replaces the
+     *  window, and a window row older than all of it aged out unreported, so it is kept. */
+    @Test
+    fun snapshotForAForgottenCursorKeepsOlderRowsAndPrunesOnlyAbsentNewerOnes() {
+        val dao = FakeEmailDao()
+        dao.put(row("gone", "INBOX").copy(atUtc = "2026-05-02T00:00:00Z"))
+        dao.put(row("aged", "INBOX").copy(atUtc = "2026-01-01T00:00:00Z"))
+        dao.put(row("paged", "INBOX").copy(atUtc = "2025-01-01T00:00:00Z", inWindow = false))
+        val snapshot = MailFetchResult(
+            tabs = emptyList(),
+            messages = listOf(email("w1", body = null).copy(atUtc = "2026-05-01T00:00:00Z")),
+            isDelta = false,
+            checkpoint = MailCheckpoint(subscriberId = "sub-1", cursor = "c-new", wasFullResync = false),
+        )
+
+        repository(dao, FakeMailSource(fetchOutcome = MailOutcome.Success(snapshot))).refreshFolder("INBOX")
+
+        assertEquals(setOf("w1", "aged", "paged"), dao.rows.keys.map { it.second }.toSet())
+        assertEquals(false, dao.getById("aged", "INBOX")?.inWindow)
+    }
+
+    /** The relay keeps a window and cursor per limit; a cursor sent with another limit is unknown. */
+    @Test
+    fun windowAndPagesAlwaysAskForTheSameLimit() {
+        val source = FakeMailSource(fetchOutcome = MailOutcome.Success(overflowDelta()))
+        source.olderPages += page("o1", hasMore = false, next = null)
+        source.olderPages += page("o0", hasMore = false, next = null)
+        val repo = repository(FakeEmailDao(), source)
+
+        repo.refreshFolder("INBOX")
+        repo.loadOlder("INBOX", "o1")
+
+        assertEquals(listOf(WINDOW_LIMIT, WINDOW_LIMIT, WINDOW_LIMIT), source.limits)
+    }
+
+    /** Enrollment drops server-decrypted plaintext by the pgpEncrypted flag, which an older page
+     *  never carries. A body cached on such a row would outlive that purge. */
+    @Test
+    fun aBodyOpenedOnAnOutOfWindowRowIsNotCached() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX", body = null).copy(inWindow = false))
+        val source = FakeMailSource().apply {
+            bodyOutcome = MailOutcome.Success(
+                MailMessageBody(html = "decrypted by the server", toAddresses = emptyList(), ccAddresses = emptyList()),
+            )
+        }
+
+        val body = (repository(dao, source).fetchBody("42", "INBOX") as MailOutcome.Success).value
+
+        assertEquals("decrypted by the server", body.html)
+        assertNull(dao.getById("42", "INBOX")?.body)
+    }
+
+    /** A full disk while storing a page must come back as a failure the screen can show, not an
+     *  exception that kills the Inbox's worker thread and the app with it. */
+    @Test
+    fun aStorageFailureWhileLoadingOlderMailIsReportedNotThrown() {
+        val dao = FakeEmailDao()
+        dao.failUpsertOf = "p1"
+        val source = FakeMailSource()
+        source.olderPages += page("p1", next = "p1")
+
+        val outcome = repository(dao, source).loadOlder("INBOX", "w1")
+
+        assertEquals(OLDER_MAIL_NOT_SAVED, (outcome as MailOutcome.BadRequest).message)
+        assertTrue(dao.rows.isEmpty())
+    }
+
+    /** A failed read of the row to page from is a storage failure the user can retry, never "no
+     *  older mail": the screen hides the footer for good on a null. */
+    @Test
+    fun aFailedAnchorReadIsAStorageFailureAndTheRetryPages() {
+        val dao = FakeEmailDao()
+        dao.put(row("w1", "INBOX"))
+        dao.failNextFolderRead = true
+        val source = FakeMailSource()
+        source.olderPages += page("p1", next = "p1")
+        val repo = repository(dao, source)
+
+        assertEquals(OLDER_MAIL_NOT_SAVED, (repo.loadOlderFrom("INBOX", null) as MailOutcome.BadRequest).message)
+
+        assertTrue(repo.loadOlderFrom("INBOX", null) is MailOutcome.Success)
+        assertEquals(listOf("w1"), source.befores)
+    }
+
+    @Test
+    fun anEmptyFolderHasNothingToPageFrom() {
+        assertNull(repository(FakeEmailDao(), FakeMailSource()).loadOlderFrom("INBOX", null))
+    }
+
+    // --- Mark unread (KyPost-Server #350) --------------------------------------------------------
+
+    @Test
+    fun markUnreadSuccess_marksTheRowUnreadInItsFolderOnly() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX", status = "read"))
+        dao.put(row("42", "Archive", status = "read"))
+        val source = FakeMailSource(actionOutcome = MailOutcome.Success(MailActionOutcome(processed = 1, failed = emptyList())))
+
+        assertTrue(repository(dao, source).markUnread("42", "INBOX") is MailOutcome.Success)
+
+        assertEquals(MailAction.UNREAD, source.actions.single().first)
+        assertEquals("unread", dao.getById("42", "INBOX")?.status)
+        assertEquals("read", dao.getById("42", "Archive")?.status)
+    }
+
+    /** A server without the action answers 400; the row stays read and the reason reaches the user. */
+    @Test
+    fun markUnreadOnAServerWithoutTheAction_keepsTheRowAndReportsWhy() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX", status = "read"))
+        val source = FakeMailSource(actionOutcome = MailOutcome.BadRequest("unsupported action"))
+
+        val outcome = repository(dao, source).markUnread("42", "INBOX")
+
+        assertEquals("unsupported action", outcome.userFacingMessage())
+        assertEquals("read", dao.getById("42", "INBOX")?.status)
+    }
+
+    @Test
+    fun markUnreadRejected_keepsTheRowRead() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX", status = "read"))
+        val source = FakeMailSource(
+            actionOutcome = MailOutcome.Success(MailActionOutcome(processed = 0, failed = listOf("42" to "no such message"))),
+        )
+
+        assertTrue(repository(dao, source).markUnread("42", "INBOX") is MailOutcome.ActionRejected)
+        assertEquals("read", dao.getById("42", "INBOX")?.status)
+    }
+
+    // --- optimistic display: in memory only, Room keeps confirmed state ---------------------------
+
+    private fun snapshot(vararg ids: String) =
+        MailOutcome.Success(MailFetchResult(tabs = emptyList(), messages = ids.map { email(it, body = null) }))
+
+    @Test
+    fun aRowWithAnActionInFlightIsHiddenEvenFromARefresh() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        dao.put(row("7", "INBOX"))
+        val source = FakeMailSource(fetchOutcome = snapshot("42", "7"))
+        val repository = repository(dao, source)
+        var seen: List<String>? = null
+        source.duringAction = {
+            repository.refreshFolder("INBOX")
+            seen = repository.cachedEmails("INBOX").map { it.id }
+        }
+
+        repository.archive("42", "INBOX")
+
+        assertEquals(listOf("7"), seen)
+    }
+
+    @Test
+    fun aFailedActionShowsTheRowAgain() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource(actionOutcome = MailOutcome.ServiceUnavailable("relay is down"))
+        val repository = repository(dao, source)
+
+        repository.delete("42", "INBOX")
+
+        assertEquals(listOf("42"), repository.cachedEmails("INBOX").map { it.id })
+    }
+
+    /** The refresh read the window before the delete landed and writes after it. An IMAP UID is
+     *  never reused in its mailbox, so that row is stale and must not come back. */
+    @Test
+    fun aRefreshThatReadTheWindowBeforeADeleteDoesNotResurrectIt() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource(fetchOutcome = snapshot("42", "7"))
+        val repository = repository(dao, source)
+
+        repository.delete("42", "INBOX")
+        repository.refreshFolder("INBOX")
+
+        assertEquals(setOf("INBOX" to "7"), dao.rows.keys)
+        assertEquals(listOf("7"), repository.cachedEmails("INBOX").map { it.id })
+    }
+
+    @Test
+    fun aDeltaThatReadTheWindowBeforeADeleteDoesNotResurrectIt() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource(
+            fetchOutcome = MailOutcome.Success(
+                MailFetchResult(tabs = emptyList(), messages = listOf(email("42", body = null)), isDelta = true),
+            ),
+        )
+        val repository = repository(dao, source)
+
+        repository.delete("42", "INBOX")
+        repository.refreshFolder("INBOX")
+
+        assertTrue(dao.rows.isEmpty())
+    }
+
+    @Test
+    fun aRemovalIsScopedToItsFolder() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        dao.put(row("42", "Archive"))
+        val repository = repository(dao, FakeMailSource())
+
+        repository.delete("42", "INBOX")
+
+        assertEquals(listOf("42"), repository.cachedEmails("Archive").map { it.id })
+    }
+
+    /** 3.9: the opened message must not stay bold while the read flag is on the wire. */
+    @Test
+    fun markReadInFlight_showsTheRowReadButLeavesRoomUnconfirmed() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource()
+        val repository = repository(dao, source)
+        var shown: String? = null
+        var stored: String? = null
+        source.duringAction = {
+            shown = repository.cachedEmails("INBOX").single().status
+            stored = dao.getById("42", "INBOX")?.status
+        }
+
+        repository.markRead(repository.beginRead("42", "INBOX"))
+
+        assertEquals("read", shown)
+        assertEquals("unread", stored)
+    }
+
+    /** UIDs are small integers in every account: the next account's INBOX 42 must not stay hidden. */
+    @Test
+    fun aSessionResetForgetsTheProcessWideRemovals() {
+        PendingMailActions.process.removed += "INBOX" to "42"
+
+        org.kysecurity.mail.ProcessState.resetAll()
+
+        assertTrue(PendingMailActions.process.removed.isEmpty())
+    }
+
+    /** The session ends while the delete is on the wire, and the next one caches a message with the
+     *  same folder and UID. The late success belongs to the old session and must touch nothing. */
+    @Test
+    fun aDeleteCompletingAfterASessionResetLeavesTheNextSessionsMessage() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val pending = PendingMailActions()
+        val source = FakeMailSource()
+        val repository = MailRepository(dao, source, FakeCursorProvider(), pending)
+        source.duringAction = {
+            org.kysecurity.mail.ProcessState.resetAll()
+            pending.resetForNewSession()
+            dao.rows.clear()
+            dao.put(row("42", "INBOX", status = "unread").copy(subject = "next session"))
+        }
+
+        repository.delete("42", "INBOX")
+
+        assertEquals("next session", dao.getById("42", "INBOX")?.subject)
+        assertEquals(listOf("42"), repository.cachedEmails("INBOX").map { it.id })
+        assertTrue(pending.removed.isEmpty())
+    }
+
+    @Test
+    fun aMarkReadCompletingAfterASessionResetLeavesTheNextSessionsMessageUnread() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val pending = PendingMailActions()
+        val source = FakeMailSource()
+        val repository = MailRepository(dao, source, FakeCursorProvider(), pending)
+        source.duringAction = {
+            org.kysecurity.mail.ProcessState.resetAll()
+            pending.resetForNewSession()
+            dao.rows.clear()
+            dao.put(row("42", "INBOX"))
+        }
+
+        repository.markRead(repository.beginRead("42", "INBOX"))
+
+        assertEquals("unread", dao.getById("42", "INBOX")?.status)
+    }
+
+    /** An old-session action finishing must not clear the same key for a newer action in flight. */
+    @Test
+    fun aStaleCompletionDoesNotClearANewerPendingRemoval() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val pending = PendingMailActions()
+        val source = FakeMailSource(actionOutcome = MailOutcome.ServiceUnavailable("down"))
+        val repository = MailRepository(dao, source, FakeCursorProvider(), pending)
+        source.duringAction = {
+            org.kysecurity.mail.ProcessState.resetAll()
+            pending.resetForNewSession()
+            pending.removing["INBOX" to "42"] = PendingMail("42", "INBOX", org.kysecurity.mail.ProcessState.generation(), read = false)
+        }
+
+        repository.delete("42", "INBOX")
+
+        assertTrue(pending.removing.containsKey("INBOX" to "42"))
+    }
+
+    // --- actions begun on the caller's thread, run later on a worker ------------------------------
+
+    /** Queued under the old account; by the time a worker runs it, the purge has reset the session
+     *  and a replacement row with the same folder and UID is cached, while the old pairing is not
+     *  yet cleared and would still authenticate a request. */
+    @Test
+    fun aDeleteQueuedBeforeAnAccountReplacementSendsNothingAndKeepsTheReplacementRow() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val pending = PendingMailActions()
+        val source = FakeMailSource()
+        val repository = MailRepository(dao, source, FakeCursorProvider(), pending)
+        val queued = repository.beginRemoval("42", "INBOX")
+
+        org.kysecurity.mail.ProcessState.advanceGeneration()
+        org.kysecurity.mail.ProcessState.resetAll()
+        pending.resetForNewSession()
+        dao.rows.clear()
+        dao.put(row("42", "INBOX").copy(subject = "replacement"))
+        repository.delete(queued)
+
+        assertTrue("the old session's request was sent", source.actions.isEmpty())
+        assertEquals("replacement", dao.getById("42", "INBOX")?.subject)
+        assertEquals(listOf("42"), repository.cachedEmails("INBOX").map { it.id })
+        assertTrue(pending.removed.isEmpty())
+    }
+
+    /** The row is hidden from the moment the action is begun, not from when a worker picks it up. */
+    @Test
+    fun aRemovalBegunButNotYetRunIsHiddenFromARefresh() {
+        val dao = FakeEmailDao()
+        val repository = repository(dao, FakeMailSource(fetchOutcome = snapshot("42", "7")))
+
+        repository.beginRemoval("42", "INBOX")
+        repository.refreshFolder("INBOX")
+
+        assertEquals(listOf("7"), repository.cachedEmails("INBOX").map { it.id })
+    }
+
+    @Test
+    fun aReadBegunButNotYetRunShowsTheRowRead() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val repository = repository(dao, FakeMailSource())
+
+        repository.beginRead("42", "INBOX")
+
+        assertEquals("read", repository.cachedEmails("INBOX").single().status)
+    }
+
+    @Test
+    fun anAbandonedRemovalShowsTheRowAgain() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val repository = repository(dao, FakeMailSource())
+
+        repository.abandon(repository.beginRemoval("42", "INBOX"))
+
+        assertEquals(listOf("42"), repository.cachedEmails("INBOX").map { it.id })
+    }
+
+    /** A failed read clears its overlay, and the list showing it has to repaint to say so. */
+    @Test
+    fun aFailedReadTellsTheListToRepaint() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val repository = repository(dao, FakeMailSource(actionOutcome = MailOutcome.ServiceUnavailable("down")))
+        var repaints = 0
+        repository.setOverlayListener { repaints++ }
+
+        repository.markRead(repository.beginRead("42", "INBOX"))
+
+        assertEquals(1, repaints)
+        assertEquals("unread", repository.cachedEmails("INBOX").single().status)
+    }
+
+    /** An explicit Mark read or Mark unread is server first: no overlay while it is on the wire. */
+    @Test
+    fun anExplicitMarkReadTakesNoOverlay() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource()
+        val repository = repository(dao, source)
+        var shown: String? = null
+        source.duringAction = { shown = repository.cachedEmails("INBOX").single().status }
+
+        repository.markRead("42", "INBOX")
+
+        assertEquals("unread", shown)
+        assertEquals("read", dao.getById("42", "INBOX")?.status)
+    }
+
+    /** Open, Mark unread, reopen: ReadStateLane runs read, unread, read. The first read finishing
+     *  must not drop the reopen's overlay while its read is still queued. */
+    @Test
+    fun anEarlierReadFinishingKeepsALaterReadsOverlay() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource()
+        val repository = repository(dao, source)
+        val first = repository.beginRead("42", "INBOX")
+        val second = repository.beginRead("42", "INBOX")
+
+        repository.markRead(first)
+        repository.markUnread("42", "INBOX")
+
+        assertEquals("unread", dao.getById("42", "INBOX")?.status)
+        assertEquals("read", repository.cachedEmails("INBOX").single().status)
+        repository.abandon(second)
+        assertEquals("unread", repository.cachedEmails("INBOX").single().status)
+    }
+
+    /** Captured when the user acted, then the session ended before the lane ran it. */
+    @Test
+    fun aMarkUnreadFromAnEndedSessionSendsNothing() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX", status = "read"))
+        val source = FakeMailSource()
+        val repository = repository(dao, source)
+        val session = org.kysecurity.mail.ProcessState.generation()
+
+        org.kysecurity.mail.ProcessState.advanceGeneration()
+        val outcome = repository.markUnread("42", "INBOX", session)
+
+        assertTrue(outcome is MailOutcome.Unauthorized)
+        assertTrue(source.actions.isEmpty())
+        assertEquals("read", dao.getById("42", "INBOX")?.status)
+    }
+
+    /** The bulk path: claimed under the old account, run after the replacement cached rows with the
+     *  same folder and UIDs. Nothing is sent and the replacement rows stay. */
+    @Test
+    fun aBulkDeleteQueuedBeforeAnAccountReplacementSendsNothingAndKeepsTheReplacementRows() {
+        val dao = FakeEmailDao()
+        dao.put(row("1", "INBOX"))
+        dao.put(row("2", "INBOX"))
+        val pending = PendingMailActions()
+        val source = FakeMailSource(actionOutcome = MailOutcome.Success(MailActionOutcome(processed = 2, failed = emptyList())))
+        val repository = MailRepository(dao, source, FakeCursorProvider(), pending)
+        val claims = repository.beginRemovals(listOf("1", "2"), "INBOX")
+
+        org.kysecurity.mail.ProcessState.advanceGeneration()
+        org.kysecurity.mail.ProcessState.resetAll()
+        pending.resetForNewSession()
+        dao.rows.clear()
+        dao.put(row("1", "INBOX").copy(subject = "replacement 1"))
+        dao.put(row("2", "INBOX").copy(subject = "replacement 2"))
+        repository.mutateAll(MailAction.DELETE, claims)
+
+        assertTrue("the old session's request was sent", source.actions.isEmpty())
+        assertEquals(setOf("INBOX" to "1", "INBOX" to "2"), dao.rows.keys)
+        assertEquals(setOf("1", "2"), repository.cachedEmails("INBOX").map { it.id }.toSet())
+        assertTrue(pending.removed.isEmpty())
+    }
+
+    /** Undo holds an action before it is claimed. The claim carries the session of the tap, so a
+     *  reset during the Undo window still stops it. */
+    @Test
+    fun aClaimTakenAfterUndoWithTheTapsSessionSendsNothingOnceItEnded() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource()
+        val repository = repository(dao, source)
+        val tapped = org.kysecurity.mail.ProcessState.generation()
+        org.kysecurity.mail.ProcessState.advanceGeneration()
+
+        repository.delete(repository.beginRemoval("42", "INBOX", tapped))
+
+        assertTrue(source.actions.isEmpty())
+        assertEquals(setOf("INBOX" to "42"), dao.rows.keys)
+    }
+
+    /** The same race at the last step: the reset lands while the relay call is in flight. */
+    @Test
+    fun aBulkDeleteCompletingAfterAResetTouchesNothing() {
+        val dao = FakeEmailDao()
+        dao.put(row("1", "INBOX"))
+        val pending = PendingMailActions()
+        val source = FakeMailSource(actionOutcome = MailOutcome.Success(MailActionOutcome(processed = 1, failed = emptyList())))
+        val repository = MailRepository(dao, source, FakeCursorProvider(), pending)
+        source.duringAction = {
+            org.kysecurity.mail.ProcessState.resetAll()
+            pending.resetForNewSession()
+            dao.rows.clear()
+            dao.put(row("1", "INBOX").copy(subject = "replacement"))
+        }
+
+        repository.mutateAll(MailAction.DELETE, repository.beginRemovals(listOf("1"), "INBOX"))
+
+        assertEquals("replacement", dao.getById("1", "INBOX")?.subject)
+        assertTrue(pending.removed.isEmpty())
+    }
+
+    /** A failed removal is the inbox's to restore (or to drop, if the account moved on); a cache
+     *  repaint behind its back would override that decision. */
+    @Test
+    fun aFailedRemovalDoesNotAskTheListToRepaint() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val repository = repository(dao, FakeMailSource(actionOutcome = MailOutcome.ServiceUnavailable("down")))
+        var repaints = 0
+        repository.setOverlayListener { repaints++ }
+
+        repository.delete(repository.beginRemoval("42", "INBOX"))
+
+        assertEquals(0, repaints)
+    }
+
+    /** A refresh that filtered before the delete landed, and writes after it, must not write the
+     *  row back: the removal waits for a refresh write already under way. */
+    @Test
+    fun aConfirmedDeleteIsNotUndoneByARefreshWriteAlreadyUnderWay() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val repository = repository(dao, FakeMailSource(fetchOutcome = snapshot("42", "7")))
+        val writing = java.util.concurrent.CountDownLatch(1)
+        val resume = java.util.concurrent.CountDownLatch(1)
+        dao.beforeUpsert = {
+            dao.beforeUpsert = null
+            writing.countDown()
+            resume.await(5, java.util.concurrent.TimeUnit.SECONDS)
+        }
+        val refresh = Thread { repository.refreshFolder("INBOX") }.apply { start() }
+        assertTrue(writing.await(5, java.util.concurrent.TimeUnit.SECONDS))
+
+        val delete = Thread { repository.delete(repository.beginRemoval("42", "INBOX")) }.apply { start() }
+        delete.join(500) // Without the shared lock the delete finishes here, ahead of the write.
+        resume.countDown()
+        refresh.join(5_000)
+        delete.join(5_000)
+
+        assertTrue("the deleted row was written back", !dao.rows.containsKey("INBOX" to "42"))
+    }
+
+    /** An older page read before the delete landed carries the row too. */
+    @Test
+    fun aConfirmedDeleteIsNotWrittenBackByAnOlderPage() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource()
+        source.olderPages += page("42", "41")
+        val repository = repository(dao, source)
+
+        repository.delete(repository.beginRemoval("42", "INBOX"))
+        repository.loadOlder("INBOX", "43")
+
+        assertEquals(setOf("INBOX" to "41"), dao.rows.keys)
+    }
+
+    @Test
+    fun markReadFailure_showsTheRowUnreadAgain() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val repository = repository(dao, FakeMailSource(actionOutcome = MailOutcome.ServiceUnavailable("down")))
+
+        repository.markRead(repository.beginRead("42", "INBOX"))
+
+        assertEquals("unread", repository.cachedEmails("INBOX").single().status)
+    }
+
+    // --- Preview snippet (KyPost-Server #351) ----------------------------------------------------
+
+    /** "updated" rows carry no preview; the stored one stays, except on encrypted mail. */
+    @Test
+    fun anUpdatedRowKeepsItsPreviewUnlessEncrypted() {
+        val dao = FakeEmailDao()
+        dao.put(row("1", "INBOX").copy(preview = "stored snippet"))
+        dao.put(row("2", "INBOX").copy(preview = "stored snippet"))
+
+        reconcileFetchResult(
+            dao, "INBOX", "relay",
+            MailFetchResult(
+                tabs = emptyList(),
+                messages = listOf(
+                    email("1", body = null, status = "read").copy(preview = ""),
+                    email("2", body = null, status = "read").copy(preview = "", pgpEncrypted = true),
+                ),
+                isDelta = true,
+                updatedMessageIds = setOf("1", "2"),
+            ),
+        )
+
+        assertEquals("stored snippet", dao.getById("1", "INBOX")?.preview)
+        assertEquals("", dao.getById("2", "INBOX")?.preview)
+    }
+
+    @Test
+    fun aNewPreviewReplacesTheStoredOne() {
+        val dao = FakeEmailDao()
+        dao.put(row("1", "INBOX").copy(preview = "old"))
+
+        reconcileFetchResult(
+            dao, "INBOX", "relay",
+            MailFetchResult(tabs = emptyList(), messages = listOf(email("1", body = null).copy(preview = "new")), isDelta = false),
+        )
+
+        assertEquals("new", dao.getById("1", "INBOX")?.preview)
     }
 }

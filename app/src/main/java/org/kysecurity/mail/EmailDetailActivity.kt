@@ -28,8 +28,10 @@ import org.kysecurity.mail.mail.displayHeaderText
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRepository
 import org.kysecurity.mail.mail.MailRuntime
+import org.kysecurity.mail.mail.PendingMail
 import org.kysecurity.mail.mail.QuotedHtmlSanitizer
 import org.kysecurity.mail.mail.addressFromHeader
+import org.kysecurity.mail.mail.replyAllRecipients
 import org.kysecurity.mail.mail.userFacingMessage
 import org.kysecurity.mail.pgp.AndroidVaultOpener
 import org.kysecurity.mail.pgp.EncryptedMessageReader
@@ -129,6 +131,9 @@ class EmailDetailActivity : LockedActivity() {
     private var toRecipients: List<String> = emptyList()
     private var ccRecipients: List<String> = emptyList()
 
+    /** Source of the user's own addresses, which Reply All leaves out. */
+    private val pgpController by lazy { ComposePgpController.from(this) }
+
     /** A configuration-change recreate is not a new open. Reopening after the task was cleared is,
      *  and that path builds a fresh instance with no saved state, so it marks read again. */
     private var markReadSubmitted = false
@@ -167,7 +172,9 @@ class EmailDetailActivity : LockedActivity() {
         val emailFolder = intent.getStringExtra("email_folder") ?: "INBOX"
         val emailSubject = intent.getStringExtra("email_subject") ?: "No subject"
         val emailSender = intent.getStringExtra("email_sender") ?: "Unknown sender"
-        val emailPreview = intent.getStringExtra("email_preview") ?: "No content"
+        // The inbox no longer sends one: a row preview is a 200-character summary, and quoting
+        // or rendering it would pass a fragment off as the whole message.
+        val emailPreview = intent.getStringExtra("email_preview").orEmpty()
         val emailBodyMode = intent.getStringExtra("email_body_mode").orEmpty()
         // The row's own recipients, so Reply All has them even if the body fetch fails.
         toRecipients = splitAddresses(intent.getStringExtra("email_sent_to").orEmpty())
@@ -220,9 +227,10 @@ class EmailDetailActivity : LockedActivity() {
         val actionReply = findViewById<ImageButton>(R.id.actionReply)
         val actionReplyAll = findViewById<ImageButton>(R.id.actionReplyAll)
         val actionForward = findViewById<ImageButton>(R.id.actionForward)
+        val actionMarkUnread = findViewById<ImageButton>(R.id.actionMarkUnread)
         actionButtons = listOf(
             actionReply, actionReplyAll, actionForward,
-            actionArchive, actionMove, actionJunk, actionDelete,
+            actionMarkUnread, actionArchive, actionMove, actionJunk, actionDelete,
         )
         replyForwardButtons = listOf(actionReply, actionReplyAll, actionForward)
         applyDetailChrome()
@@ -232,22 +240,31 @@ class EmailDetailActivity : LockedActivity() {
         if (!markReadSubmitted) {
             markReadSubmitted = true
             markReadSubmitCount++
-            MailBackgroundExecutor.submit { mailRepository.markRead(emailId, emailFolder) }
+            // Claimed here, before queueing: the inbox shows the row read from this moment, while
+            // the call itself waits its turn behind any read-state change requested before it.
+            val repository = mailRepository
+            val claim = repository.beginRead(emailId, emailFolder)
+            val markRead = ReadStateLane.ordered { repository.markRead(claim) }
+            MailBackgroundExecutor.submit(onDropped = { repository.abandon(claim) }) { markRead() }
         }
 
+        actionMarkUnread.setOnClickListener { markUnreadAndFinish(it, emailId, emailFolder) }
+
         actionArchive.setOnClickListener {
-            runMailActionAndFinish(getString(R.string.action_archive), emailId) { it.archive(emailId, emailFolder) }
+            runMailActionAndFinish(getString(R.string.action_archive), emailId, emailFolder) { repo, claim -> repo.archive(claim) }
         }
         actionDelete.setOnClickListener {
-            runMailActionAndFinish(getString(R.string.action_delete), emailId) { it.delete(emailId, emailFolder) }
+            runMailActionAndFinish(getString(R.string.action_delete), emailId, emailFolder) { repo, claim -> repo.delete(claim) }
         }
         actionMove.setOnClickListener {
             pickMoveTarget(this, mailRepository, ioExecutor, emailFolder) { target ->
-                runMailActionAndFinish(getString(R.string.action_move), emailId) { it.move(emailId, emailFolder, target) }
+                runMailActionAndFinish(getString(R.string.action_move), emailId, emailFolder) { repo, claim ->
+                    repo.move(claim, target)
+                }
             }
         }
         actionJunk.setOnClickListener {
-            runMailActionAndFinish(getString(R.string.action_junk), emailId) { it.spam(emailId, emailFolder) }
+            runMailActionAndFinish(getString(R.string.action_junk), emailId, emailFolder) { repo, claim -> repo.spam(claim) }
         }
         actionReply.setOnClickListener {
             // Not isEnabled = false: a disabled ImageButton never reaches performClick, so no Toast.
@@ -268,15 +285,16 @@ class EmailDetailActivity : LockedActivity() {
                 Toast.makeText(this, R.string.email_pgp_reply_disabled, Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
-            val recipients = (listOf(extractAddress(emailSender)) + toRecipients.map(::extractAddress) + ccRecipients.map(::extractAddress))
-                .distinct()
-                .filter { it.isNotBlank() }
-            quotedBodyHtmlAsync(emailPreview) { quoted ->
-                openCompose(
-                    to = recipients.joinToString(", "),
-                    subject = withPrefix(emailSubject, "Re:"),
-                    bodyHtml = quoteForReply(emailSender, quoted),
-                )
+            lifecycleScope.launch {
+                val recipients =
+                    replyAllRecipients(emailSender, toRecipients, ccRecipients, pgpController.accountAddresses())
+                quotedBodyHtmlAsync(emailPreview) { quoted ->
+                    openCompose(
+                        to = recipients.joinToString(", "),
+                        subject = withPrefix(emailSubject, "Re:"),
+                        bodyHtml = quoteForReply(emailSender, quoted),
+                    )
+                }
             }
         }
         actionForward.setOnClickListener {
@@ -1215,11 +1233,51 @@ class EmailDetailActivity : LockedActivity() {
         applyInviteChrome()
     }
 
-    private fun runMailActionAndFinish(actionLabel: String, emailId: String, action: (MailRepository) -> MailOutcome<Unit>) {
+    /** Server first: the inbox shows the row unread only once the relay has confirmed it. */
+    private fun markUnreadAndFinish(button: View, emailId: String, emailFolder: String) {
+        button.isEnabled = false
+        val label = getString(R.string.action_mark_unread)
+        Toast.makeText(this, label, Toast.LENGTH_SHORT).show()
+        val repository = mailRepository
+        val session = ProcessState.generation()
+        val markUnread = ReadStateLane.ordered { repository.markUnread(emailId, emailFolder, session) }
+        MailBackgroundExecutor.submitReporting(this, label) {
+            var outcome: MailOutcome<Unit>? = null
+            try {
+                markUnread().also { outcome = it }
+            } finally {
+                runOnUiThread { onMarkUnreadDone(button, emailId, emailFolder, outcome) }
+            }
+        }
+    }
+
+    private fun onMarkUnreadDone(button: View, emailId: String, emailFolder: String, outcome: MailOutcome<Unit>?) {
+        if (isDestroyed) return
+        if (outcome !is MailOutcome.Success) {
+            button.isEnabled = true
+            return
+        }
+        setResult(
+            RESULT_OK,
+            Intent().putExtra(EXTRA_MARKED_UNREAD_ID, emailId).putExtra(EXTRA_MARKED_UNREAD_FOLDER, emailFolder),
+        )
+        finish()
+    }
+
+    private fun runMailActionAndFinish(
+        actionLabel: String,
+        emailId: String,
+        emailFolder: String,
+        action: (MailRepository, PendingMail) -> MailOutcome<Unit>,
+    ) {
         Toast.makeText(this, actionLabel, Toast.LENGTH_SHORT).show()
+        // Claimed before queueing, so the action belongs to the session the user acted in.
+        val claim = mailRepository.beginRemoval(emailId, emailFolder)
         // Reporting, not fire-and-forget: the row is removed optimistically, so a failure the user
         // never hears about reads as "it worked" until the message reappears on the next resync.
-        MailBackgroundExecutor.submitReporting(this, actionLabel) { action(mailRepository) }
+        MailBackgroundExecutor.submitReporting(this, actionLabel, onDropped = { mailRepository.abandon(claim) }) {
+            action(mailRepository, claim)
+        }
         // Tell InboxActivity which row to drop, or its onStart refresh races the in-flight mutation.
         setResult(RESULT_OK, Intent().putExtra(EXTRA_REMOVED_EMAIL_ID, emailId))
         finish()
@@ -1231,7 +1289,7 @@ class EmailDetailActivity : LockedActivity() {
         bodyHtml: String,
         attachments: List<org.kysecurity.mail.mail.OutgoingAttachment> = emptyList(),
     ) {
-        val intent = Intent(this, ComposeActivity::class.java)
+        val intent = ComposeActivity.internalIntent(this)
         intent.putExtra(ComposeActivity.EXTRA_TO, to)
         intent.putExtra(ComposeActivity.EXTRA_SUBJECT, subject)
         intent.putExtra(ComposeActivity.EXTRA_BODY_HTML, bodyHtml)
@@ -1343,6 +1401,8 @@ class EmailDetailActivity : LockedActivity() {
         }
 
         const val EXTRA_REMOVED_EMAIL_ID = "removed_email_id"
+        const val EXTRA_MARKED_UNREAD_ID = "marked_unread_email_id"
+        const val EXTRA_MARKED_UNREAD_FOLDER = "marked_unread_email_folder"
 
         private const val STATE_MARK_READ_SUBMITTED = "mark_read_submitted"
         private const val STATE_MARK_READ_COUNT = "mark_read_count"
@@ -1798,6 +1858,7 @@ internal fun extensionForMimeType(mimeType: String): String? = when (
     "image/webp" -> "webp"
     "image/heic" -> "heic"
     "text/plain" -> "txt"
+    "text/vcard" -> "vcf"
     "audio/mpeg" -> "mp3"
     "audio/mp4" -> "m4a"
     "audio/ogg" -> "ogg"

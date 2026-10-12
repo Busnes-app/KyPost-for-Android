@@ -25,8 +25,11 @@ class DeviceContactRepository(
     private val db: AppDatabase,
     private val syncRepository: ContactSyncRepository,
     private val groupSyncRepository: GroupSyncRepository,
+    /** Runs just before each import is queued; tests use it to change consent mid-scan. */
+    private val beforeImport: suspend () -> Unit = {},
 ) {
     private val contentResolver = context.contentResolver
+    private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
     private val groupLinker = DeviceGroupLinker(context, db)
     private val hostileLocationSettings = org.kysecurity.mail.security.HostileLocationSettings(context)
 
@@ -55,7 +58,9 @@ class DeviceContactRepository(
                 groupSyncRepository.sync()
                 reconcileGroupRenames()
             },
+            stage("adoptLostLinks") { adoptLostLinks() },
             stage("pullDeviceChanges") { pullDeviceChangesForOwnAccount() },
+            stage("removeDeletedContacts") { removeRowsOfDeletedContacts() },
             stage("importNewDeviceContacts") { importNewDeviceContacts() },
             stage("pushRoomChanges") { pushRoomChangesToDevice() },
         )
@@ -115,7 +120,8 @@ class DeviceContactRepository(
                         restoreDeletedRawContact(rawContactId)
                     } else {
                         syncRepository.queueDelete(link.uid, 0)
-                        db.deviceContactLinkDao().deleteByUid(link.uid)
+                        // Purges the tombstone: CP2 keeps DELETED=1 rows until their adapter does.
+                        deleteDeviceRawContact(link.uid)
                     }
                 } else if (!deleted && dirty && link != null) {
                     dirtyRawContacts.add(rawContactId)
@@ -137,103 +143,28 @@ class DeviceContactRepository(
             val roomUpdatedAtEpochMs = roomDto.updatedAt?.let { DeviceContactConflictResolver.parseIso(it) }
             val deviceUpdatedAtEpochMs = snapshot.lastUpdatedEpochMs
 
-            val mergedFn = DeviceContactFieldMerge.mergeStringField(
-                roomValue = roomDto.fn,
-                deviceValue = snapshot.fn,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
+            val base = baseOf(link)
+            fun <T> merge(field: (ContactDto) -> T, device: T, twoWay: (T, T, Long?, Long?) -> T): T =
+                DeviceContactFieldMerge.againstBase(field(roomDto), device, base?.let(field), base != null) { r, d ->
+                    twoWay(r, d, roomUpdatedAtEpochMs, deviceUpdatedAtEpochMs)
+                }
 
-            val mergedOrg = DeviceContactFieldMerge.mergeStringField(
-                roomValue = roomDto.org,
-                deviceValue = snapshot.org,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
-
-            val mergedNotes = DeviceContactFieldMerge.mergeStringField(
-                roomValue = roomDto.notes,
-                deviceValue = snapshot.notes,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
-
-            val mergedBirthday = DeviceContactFieldMerge.mergeStringField(
-                roomValue = roomDto.birthday,
-                deviceValue = snapshot.birthday,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
-
-            val mergedEmails = DeviceContactFieldMerge.mergeEmailList(
-                roomEmails = roomDto.emails,
-                deviceEmails = snapshot.emails,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
-
-            val mergedPhones = DeviceContactFieldMerge.mergePhoneList(
-                roomPhones = roomDto.phones,
-                devicePhones = snapshot.phones,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
-
-            val mergedAddresses = DeviceContactFieldMerge.mergeAddressList(
-                roomAddresses = roomDto.addresses,
-                deviceAddresses = snapshot.addresses,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
-
-            val mergedIms = DeviceContactFieldMerge.mergeImList(
-                roomIms = roomDto.ims,
-                deviceIms = snapshot.ims,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
-
-            val mergedWebsites = DeviceContactFieldMerge.mergeWebsiteList(
-                roomWebsites = roomDto.websites,
-                deviceWebsites = snapshot.websites,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
-
-            val mergedRelations = DeviceContactFieldMerge.mergeRelationList(
-                roomRelations = roomDto.relations,
-                deviceRelations = snapshot.relations,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
-
-            val mergedEvents = DeviceContactFieldMerge.mergeEventList(
-                roomEvents = roomDto.events,
-                deviceEvents = snapshot.events,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
-
-            val mergedDepartment = DeviceContactFieldMerge.mergeStringField(
-                roomValue = roomDto.department,
-                deviceValue = snapshot.department,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
-
-            val mergedPhoneticGivenName = DeviceContactFieldMerge.mergeStringField(
-                roomValue = roomDto.phoneticGivenName,
-                deviceValue = snapshot.phoneticGivenName,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
-
-            val mergedPhoneticFamilyName = DeviceContactFieldMerge.mergeStringField(
-                roomValue = roomDto.phoneticFamilyName,
-                deviceValue = snapshot.phoneticFamilyName,
-                roomUpdatedAtEpochMs = roomUpdatedAtEpochMs,
-                deviceUpdatedAtEpochMs = deviceUpdatedAtEpochMs,
-            )
+            val mergedFn = merge({ it.fn }, snapshot.fn, DeviceContactFieldMerge::mergeStringField)
+            val mergedOrg = merge({ it.org }, snapshot.org, DeviceContactFieldMerge::mergeStringField)
+            val mergedNotes = merge({ it.notes }, snapshot.notes, DeviceContactFieldMerge::mergeStringField)
+            val mergedBirthday = merge({ it.birthday }, snapshot.birthday, DeviceContactFieldMerge::mergeStringField)
+            val mergedEmails = merge({ it.emails }, snapshot.emails, DeviceContactFieldMerge::mergeEmailList)
+            val mergedPhones = merge({ it.phones }, snapshot.phones, DeviceContactFieldMerge::mergePhoneList)
+            val mergedAddresses = merge({ it.addresses }, snapshot.addresses, DeviceContactFieldMerge::mergeAddressList)
+            val mergedIms = merge({ it.ims }, snapshot.ims, DeviceContactFieldMerge::mergeImList)
+            val mergedWebsites = merge({ it.websites }, snapshot.websites, DeviceContactFieldMerge::mergeWebsiteList)
+            val mergedRelations = merge({ it.relations }, snapshot.relations, DeviceContactFieldMerge::mergeRelationList)
+            val mergedEvents = merge({ it.events }, snapshot.events, DeviceContactFieldMerge::mergeEventList)
+            val mergedDepartment = merge({ it.department }, snapshot.department, DeviceContactFieldMerge::mergeStringField)
+            val mergedPhoneticGivenName =
+                merge({ it.phoneticGivenName }, snapshot.phoneticGivenName, DeviceContactFieldMerge::mergeStringField)
+            val mergedPhoneticFamilyName =
+                merge({ it.phoneticFamilyName }, snapshot.phoneticFamilyName, DeviceContactFieldMerge::mergeStringField)
 
             val changed = mergedFn != roomDto.fn || mergedOrg != roomDto.org ||
                 mergedNotes != roomDto.notes || mergedBirthday != roomDto.birthday ||
@@ -244,32 +175,32 @@ class DeviceContactRepository(
                 mergedPhoneticGivenName != roomDto.phoneticGivenName ||
                 mergedPhoneticFamilyName != roomDto.phoneticFamilyName
 
+            val mergedDto = roomDto.copy(
+                fn = mergedFn ?: "",
+                org = mergedOrg,
+                notes = mergedNotes,
+                birthday = mergedBirthday,
+                emails = mergedEmails,
+                phones = mergedPhones,
+                addresses = mergedAddresses,
+                ims = mergedIms,
+                websites = mergedWebsites,
+                relations = mergedRelations,
+                events = mergedEvents,
+                department = mergedDepartment,
+                phoneticGivenName = mergedPhoneticGivenName,
+                phoneticFamilyName = mergedPhoneticFamilyName,
+            )
             if (changed) {
-                val mergedDto = roomDto.copy(
-                    fn = mergedFn ?: "",
-                    org = mergedOrg,
-                    notes = mergedNotes,
-                    birthday = mergedBirthday,
-                    emails = mergedEmails,
-                    phones = mergedPhones,
-                    addresses = mergedAddresses,
-                    ims = mergedIms,
-                    websites = mergedWebsites,
-                    relations = mergedRelations,
-                    events = mergedEvents,
-                    department = mergedDepartment,
-                    phoneticGivenName = mergedPhoneticGivenName,
-                    phoneticFamilyName = mergedPhoneticFamilyName,
-                )
                 // Any device-side change to a keyed contact changes who that key is displayed
                 // beside, and the carried-over key hides it from toEntity's rotation check.
                 syncRepository.queueUpdate(mergedDto, identityChanged = changed)
             }
 
             clearDirtyFlag(rawContactId)
-            db.deviceContactLinkDao().upsert(
-                link.copy(deviceUpdatedAtEpochMs = System.currentTimeMillis()),
-            )
+            // The base stays put: the phone still holds its own values until the push writes the
+            // merge back, and a base advanced now reads that pending write as a device change.
+            db.deviceContactLinkDao().upsert(link.copy(deviceUpdatedAtEpochMs = System.currentTimeMillis()))
         }
     }
 
@@ -322,7 +253,17 @@ class DeviceContactRepository(
 
     private suspend fun importNewDeviceContacts() = withContext(Dispatchers.IO) {
         val settings = DeviceContactSyncSettings(context)
+        // Importing uploads to the server: only from accounts the user picked for this pairing,
+        // and none by default.
+        val destination = syncRepository.destination() ?: return@withContext
+        // The session this scan belongs to; a pairing replacement or wipe ends it.
+        val session = org.kysecurity.mail.ProcessState.generation()
+        val revision = settings.consentRevision()
+        val consented = settings.importAccounts(destination)
+        if (consented.isEmpty()) return@withContext
         val watermarkMs = settings.lastForeignScanAtEpochMs()
+        // Taken before the query: a contact edited while the scan runs is newer, and read next time.
+        val scanStartedAtMs = System.currentTimeMillis()
 
         val projection = arrayOf(
             ContactsContract.RawContacts._ID,
@@ -331,8 +272,7 @@ class DeviceContactRepository(
             ContactsContract.RawContacts.ACCOUNT_NAME,
         )
 
-        val selection =
-            "(${ContactsContract.RawContacts.ACCOUNT_TYPE} IS NULL OR ${ContactsContract.RawContacts.ACCOUNT_TYPE} != ?)"
+        val selection = FOREIGN_LIVE_ROWS
         val selectionArgs = arrayOf(DeviceContactAccount.ACCOUNT_TYPE)
 
         val rawContactCandidates = mutableListOf<Long>()
@@ -346,6 +286,11 @@ class DeviceContactRepository(
             while (cursor.moveToNext()) {
                 val rawContactId = cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts._ID))
                 val contactId = cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.CONTACT_ID))
+                val account = DeviceAccount(
+                    cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_TYPE)),
+                    cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_NAME)),
+                )
+                if (account.key !in consented) continue
 
                 val lastUpdated = queryContactLastUpdated(contactId)
                 if (lastUpdated > watermarkMs) {
@@ -393,12 +338,39 @@ class DeviceContactRepository(
                 }
                 if (!alreadyImported) {
                     val newDto = candidate.toContactDto(UUID.randomUUID().toString(), 0)
-                    syncRepository.queueCreate(newDto)
+                    beforeImport()
+                    // Consent read now, not at scan start: it may have been withdrawn since.
+                    val account = DeviceAccount(candidate.accountType, candidate.accountName).key
+                    val current = settings.whileConsented(destination, account) {
+                        // Checked under the consent lock the purge also takes, so the session and
+                        // the pairing cannot change between this check and the write.
+                        val stillCurrent = org.kysecurity.mail.ProcessState.isCurrent(session) &&
+                            syncRepository.destination() == destination
+                        if (stillCurrent) syncRepository.queueCreate(newDto)
+                        stillCurrent
+                    }
+                    // The pairing this scan started under is gone: nothing more may be queued.
+                    if (current == false) return@withContext
                 }
             }
         }
 
-        settings.setLastForeignScanAtEpochMs(System.currentTimeMillis())
+        settings.advanceScanWatermark(revision, scanStartedAtMs)
+    }
+
+    /** Accounts other than ours holding live contacts, for the import consent screen. */
+    suspend fun foreignContactAccounts(): List<DeviceAccount> = withContext(Dispatchers.IO) {
+        val found = linkedSetOf<DeviceAccount>()
+        contentResolver.query(
+            ContactsContract.RawContacts.CONTENT_URI,
+            arrayOf(ContactsContract.RawContacts.ACCOUNT_TYPE, ContactsContract.RawContacts.ACCOUNT_NAME),
+            FOREIGN_LIVE_ROWS,
+            arrayOf(DeviceContactAccount.ACCOUNT_TYPE),
+            null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) found += DeviceAccount(cursor.getString(0), cursor.getString(1))
+        }
+        found.toList()
     }
 
     /** True when [existingContact] and the candidate share any email or phone, normalized the same
@@ -424,13 +396,19 @@ class DeviceContactRepository(
         val currentRoomContacts = db.contactDao().observeAll().first()
         // One read of the link table for the whole loop rather than a getByUid per contact.
         val linksByUid = db.deviceContactLinkDao().getAll().associateBy { it.uid }
+        val rowsByUid = ownRawContactsBySourceId(linksByUid.values)
 
         for (entity in currentRoomContacts) {
             // Policy can change mid-loop: protection can be enabled while this is still running.
             if (!syncPermitted()) return@withContext
 
             val dto = entity.toDto()
-            val existingLink = linksByUid[dto.uid]
+            // adoptLostLinks already ran; this catches a row it missed, as a failed stage, so a
+            // lost link never becomes a duplicate.
+            val existingLink = linksByUid[dto.uid] ?: rowsByUid[dto.uid]?.let { rawContactId ->
+                org.kysecurity.mail.data.DeviceContactLinkEntity(dto.uid, rawContactId, 0L)
+                    .also { db.deviceContactLinkDao().upsert(it) }
+            }
 
             if (existingLink == null) {
                 createRawContactForDto(dto)
@@ -455,6 +433,7 @@ class DeviceContactRepository(
             android.content.ContentProviderOperation.newInsert(rawContactUriBase)
                 .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, DeviceContactAccount.ACCOUNT_TYPE)
                 .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, DeviceContactAccount.ACCOUNT_NAME)
+                .withValue(ContactsContract.RawContacts.SOURCE_ID, dto.uid)
                 .build(),
         )
 
@@ -629,6 +608,8 @@ class DeviceContactRepository(
                     uid = dto.uid,
                     rawContactId = rawContactId,
                     deviceUpdatedAtEpochMs = System.currentTimeMillis(),
+                    // A department rides on the Organization row, written only with an org.
+                    syncedJson = syncedJsonOf(dto.copy(department = dto.department.takeUnless { dto.org.isNullOrBlank() })),
                 ),
             )
         }
@@ -646,13 +627,21 @@ class DeviceContactRepository(
             return@withContext
         }
 
+        val base = baseOf(link)
         val plan = DeviceContactUpdatePlan.of(
             dto = dto,
             snapshot = currentSnapshot,
             roomUpdatedAtEpochMs = dto.updatedAt?.let { DeviceContactConflictResolver.parseIso(it) },
             deviceUpdatedAtEpochMs = link.deviceUpdatedAtEpochMs,
+            base = base,
         )
-        if (plan.isEmpty()) return@withContext
+        // Each field's base advances only once the phone holds Room's value for it; an empty plan
+        // alone may mean the merge kept a device value Room does not have.
+        val synced = plan.nextBase(dto, currentSnapshot, base)?.let(::syncedJsonOf) ?: link.syncedJson
+        if (plan.isEmpty()) {
+            if (link.syncedJson != synced) db.deviceContactLinkDao().upsert(link.copy(syncedJson = synced))
+            return@withContext
+        }
 
         val ops = arrayListOf<android.content.ContentProviderOperation>()
 
@@ -697,34 +686,35 @@ class DeviceContactRepository(
             )
         }
 
+        // A blank plan value is a clear: the rows go and nothing replaces them.
         plan.org?.let { org ->
             deleteRows(ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
-            ops.add(
-                insertRow(ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
-                    .withValue(ContactsContract.CommonDataKinds.Organization.COMPANY, org)
-                    // The row is replaced wholesale and nothing reads a device-typed title or
-                    // department into Room, so the device's own value is what keeps it. Both
-                    // fields, identically: DEPARTMENT lacked the fallback, so a department typed
-                    // in the system Contacts app vanished the first time Room's org won.
-                    .withValue(
-                        ContactsContract.CommonDataKinds.Organization.TITLE,
-                        dto.title?.takeIf { it.isNotBlank() } ?: currentSnapshot.title,
-                    )
-                    .withValue(
-                        ContactsContract.CommonDataKinds.Organization.DEPARTMENT,
-                        dto.department?.takeIf { it.isNotBlank() } ?: currentSnapshot.department,
-                    )
-                    .build(),
-            )
+            // The row is replaced wholesale and nothing reads a device-typed title or
+            // department into Room, so the device's own value is what keeps it. Both
+            // fields, identically: DEPARTMENT lacked the fallback, so a department typed
+            // in the system Contacts app vanished the first time Room's org won.
+            val title = dto.title?.takeIf { it.isNotBlank() } ?: currentSnapshot.title
+            val department = plan.departmentAfter(dto, currentSnapshot)
+            if (org.isNotBlank() || !title.isNullOrBlank() || !department.isNullOrBlank()) {
+                ops.add(
+                    insertRow(ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
+                        .withValue(ContactsContract.CommonDataKinds.Organization.COMPANY, org.ifBlank { null })
+                        .withValue(ContactsContract.CommonDataKinds.Organization.TITLE, title)
+                        .withValue(ContactsContract.CommonDataKinds.Organization.DEPARTMENT, department)
+                        .build(),
+                )
+            }
         }
 
         plan.notes?.let { notes ->
             deleteRows(ContactsContract.CommonDataKinds.Note.CONTENT_ITEM_TYPE)
-            ops.add(
-                insertRow(ContactsContract.CommonDataKinds.Note.CONTENT_ITEM_TYPE)
-                    .withValue(ContactsContract.CommonDataKinds.Note.NOTE, notes)
-                    .build(),
-            )
+            if (notes.isNotBlank()) {
+                ops.add(
+                    insertRow(ContactsContract.CommonDataKinds.Note.CONTENT_ITEM_TYPE)
+                        .withValue(ContactsContract.CommonDataKinds.Note.NOTE, notes)
+                        .build(),
+                )
+            }
         }
 
         plan.birthday?.let { birthday ->
@@ -734,15 +724,17 @@ class DeviceContactRepository(
                 " AND ${ContactsContract.CommonDataKinds.Event.TYPE} = " +
                     "${ContactsContract.CommonDataKinds.Event.TYPE_BIRTHDAY}",
             )
-            ops.add(
-                insertRow(ContactsContract.CommonDataKinds.Event.CONTENT_ITEM_TYPE)
-                    .withValue(ContactsContract.CommonDataKinds.Event.START_DATE, birthday)
-                    .withValue(
-                        ContactsContract.CommonDataKinds.Event.TYPE,
-                        ContactsContract.CommonDataKinds.Event.TYPE_BIRTHDAY,
-                    )
-                    .build(),
-            )
+            if (birthday.isNotBlank()) {
+                ops.add(
+                    insertRow(ContactsContract.CommonDataKinds.Event.CONTENT_ITEM_TYPE)
+                        .withValue(ContactsContract.CommonDataKinds.Event.START_DATE, birthday)
+                        .withValue(
+                            ContactsContract.CommonDataKinds.Event.TYPE,
+                            ContactsContract.CommonDataKinds.Event.TYPE_BIRTHDAY,
+                        )
+                        .build(),
+                )
+            }
         }
 
         plan.emails?.let { emails ->
@@ -798,10 +790,19 @@ class DeviceContactRepository(
         // batch that never landed makes the next merge believe the device is already current.
         if (applied) {
             db.deviceContactLinkDao().upsert(
-                link.copy(deviceUpdatedAtEpochMs = System.currentTimeMillis()),
+                link.copy(
+                    deviceUpdatedAtEpochMs = System.currentTimeMillis(),
+                    syncedJson = synced,
+                ),
             )
         }
     }
+
+    private fun syncedJsonOf(dto: ContactDto): String = json.encodeToString(ContactDto.serializer(), dto)
+
+    private fun baseOf(link: org.kysecurity.mail.data.DeviceContactLinkEntity): ContactDto? =
+        link.syncedJson.takeIf { it.isNotEmpty() }
+            ?.let { runCatching { json.decodeFromString(ContactDto.serializer(), it) }.getOrNull() }
 
     suspend fun deleteDeviceRawContact(uid: String) = withContext(Dispatchers.IO) {
         val link = db.deviceContactLinkDao().getByUid(uid) ?: return@withContext
@@ -823,11 +824,21 @@ class DeviceContactRepository(
                 ).build(),
         )
 
-        runCatching {
-            contentResolver.applyBatch(ContactsContract.AUTHORITY, deleteOps)
-        }
+        // On failure the link stays, so removeRowsOfDeletedContacts retries next sync.
+        runCatching { contentResolver.applyBatch(ContactsContract.AUTHORITY, deleteOps) }
+            .onSuccess { db.deviceContactLinkDao().deleteByUid(uid) }
+            .onFailure { android.util.Log.e("DeviceContactSync", "Could not delete raw contact ${link.rawContactId}", it) }
+        Unit
+    }
 
-        db.deviceContactLinkDao().deleteByUid(uid)
+    /** Room is the truth: a link whose contact is gone (server tombstone, snapshot prune, local
+     *  delete) takes its raw contact with it. */
+    private suspend fun removeRowsOfDeletedContacts() {
+        val live = db.contactDao().allUids().toHashSet()
+        for (link in db.deviceContactLinkDao().getAll()) {
+            if (!syncPermitted()) return
+            if (link.uid !in live) deleteDeviceRawContact(link.uid)
+        }
     }
 
     /** These rows sit outside the app sandbox, so neither the wipe nor in-memory Room reaches them. */
@@ -868,6 +879,63 @@ class DeviceContactRepository(
             cursor.moveToFirst() &&
                 cursor.getString(0) == DeviceContactAccount.ACCOUNT_TYPE
         } ?: false
+    }
+
+    /** Our raw contacts keyed by SOURCE_ID (the contact uid): live ones, plus tombstones with
+     *  [includeDeleted], a live row winning over a tombstone of the same uid. Linked rows written
+     *  before SOURCE_ID existed get it backfilled, so they can be adopted after a lost link too. */
+    private suspend fun ownRawContactsBySourceId(
+        links: Collection<org.kysecurity.mail.data.DeviceContactLinkEntity>,
+        includeDeleted: Boolean = false,
+    ): Map<String, Long> = withContext(Dispatchers.IO) {
+        val bySourceId = mutableMapOf<String, Long>()
+        val unstamped = mutableSetOf<Long>()
+        contentResolver.query(
+            ContactsContract.RawContacts.CONTENT_URI,
+            arrayOf(ContactsContract.RawContacts._ID, ContactsContract.RawContacts.SOURCE_ID, ContactsContract.RawContacts.DELETED),
+            "${ContactsContract.RawContacts.ACCOUNT_TYPE} = ?" +
+                if (includeDeleted) "" else " AND ${ContactsContract.RawContacts.DELETED} = 0",
+            arrayOf(DeviceContactAccount.ACCOUNT_TYPE),
+            null,
+        )?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val sourceId = cursor.getString(1)
+                val live = cursor.getInt(2) == 0
+                when {
+                    sourceId.isNullOrEmpty() -> if (live) unstamped += cursor.getLong(0)
+                    live || sourceId !in bySourceId -> bySourceId[sourceId] = cursor.getLong(0)
+                }
+            }
+        }
+        val uri = ContactsContract.RawContacts.CONTENT_URI.buildUpon()
+            .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true")
+            .build()
+        val backfill = links.filter { it.rawContactId in unstamped }.map { link ->
+            android.content.ContentProviderOperation.newUpdate(uri)
+                .withSelection("${ContactsContract.RawContacts._ID} = ?", arrayOf(link.rawContactId.toString()))
+                .withValue(ContactsContract.RawContacts.SOURCE_ID, link.uid)
+                .build()
+        }
+        if (backfill.isNotEmpty()) {
+            runCatching { contentResolver.applyBatch(ContactsContract.AUTHORITY, ArrayList(backfill)) }
+                .onFailure { android.util.Log.e("DeviceContactSync", "Could not backfill SOURCE_ID", it) }
+        }
+        bySourceId
+    }
+
+    /** Relinks every row of ours whose link was lost (death before the link write, cleared data)
+     *  before the pull: a phone edit is then merged rather than overwritten, a phone delete
+     *  (tombstone) is queued rather than replaced, and a row whose contact left Room is removed.
+     *  The pull takes the device's timestamp from the row itself; an unedited row holds what we
+     *  last wrote, so the zero timestamp lets Room win there. */
+    private suspend fun adoptLostLinks() {
+        val links = db.deviceContactLinkDao().getAll()
+        val linkedUids = links.mapTo(HashSet()) { it.uid }
+        val linkedRows = links.mapTo(HashSet()) { it.rawContactId }
+        for ((uid, rawContactId) in ownRawContactsBySourceId(links, includeDeleted = true)) {
+            if (uid in linkedUids || rawContactId in linkedRows) continue
+            db.deviceContactLinkDao().upsert(org.kysecurity.mail.data.DeviceContactLinkEntity(uid, rawContactId, 0L))
+        }
     }
 
     /** Sweeps legacy link rows pointing at another account's raw contacts, before the first sync. */
@@ -916,17 +984,20 @@ class DeviceContactRepository(
                 null,
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    Triple(
+                    RawContactRow(
                         cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts._ID)),
                         cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.CONTACT_ID)),
-                        cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_TYPE)),
+                        DeviceAccount(
+                            cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_TYPE)),
+                            cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_NAME)),
+                        ),
                     )
                 } else {
                     null
                 }
             } ?: return@withContext null
 
-            val (actualRawContactId, contactId, accountType) = rawContactData
+            val (actualRawContactId, contactId, account) = rawContactData
             val lastUpdated = queryContactLastUpdated(contactId)
 
             val dataProjection = arrayOf(
@@ -983,8 +1054,9 @@ class DeviceContactRepository(
                         ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE -> {
                             val given = data2?.takeIf { it.isNotBlank() }
                             val family = data3?.takeIf { it.isNotBlank() }
-                            val middle = data4?.takeIf { it.isNotBlank() }
-                            val prefix = data5?.takeIf { it.isNotBlank() }
+                            // StructuredName.PREFIX is DATA4 and MIDDLE_NAME is DATA5.
+                            val prefix = data4?.takeIf { it.isNotBlank() }
+                            val middle = data5?.takeIf { it.isNotBlank() }
                             val suffix = data6?.takeIf { it.isNotBlank() }
                             fn = listOfNotNull(prefix, given, middle, family, suffix).joinToString(" ")
                             if (fn.isBlank()) fn = data1
@@ -1095,8 +1167,9 @@ class DeviceContactRepository(
             return@withContext DeviceRawContactSnapshot(
                 rawContactId = actualRawContactId,
                 contactId = contactId,
-                accountType = accountType,
-                accountName = null,
+                // Both halves: import consent is per account, type and name.
+                accountType = account.type,
+                accountName = account.name,
                 lastUpdatedEpochMs = lastUpdated,
                 dirty = false,
                 fn = fn,
@@ -1117,3 +1190,10 @@ class DeviceContactRepository(
             )
         }
 }
+
+/** Live raw contacts of every account but ours, including the account-less local store. */
+private const val FOREIGN_LIVE_ROWS =
+    "(${ContactsContract.RawContacts.ACCOUNT_TYPE} IS NULL OR ${ContactsContract.RawContacts.ACCOUNT_TYPE} != ?) AND " +
+        "${ContactsContract.RawContacts.DELETED} = 0"
+
+private data class RawContactRow(val id: Long, val contactId: Long, val account: DeviceAccount)

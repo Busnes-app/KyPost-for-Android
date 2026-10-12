@@ -3,10 +3,14 @@ package org.kysecurity.mail
 object KeywordTabs {
     const val ALL = "All"
 
+    /** IMAP system flags (`\Seen`) and server keywords (`$Phishing`) are message state, not labels.
+     *  They stay on [Email.keywords]: `isFlaggedPhishing` reads `$Phishing` from there. */
+    fun isSystemKeyword(keyword: String): Boolean = keyword.startsWith('$') || keyword.startsWith('\\')
+
     fun buildTabs(emails: List<Email>): List<String> {
         val keywords = emails
             .flatMap { it.keywords }
-            .filter { it.isNotBlank() }
+            .filter { it.isNotBlank() && !isSystemKeyword(it) }
             .distinct()
             .sortedBy { it.lowercase() }
         return listOf(ALL) + keywords

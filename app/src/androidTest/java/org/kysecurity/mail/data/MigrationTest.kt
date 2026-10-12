@@ -211,6 +211,64 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate12To13_createsTheRecipientPinTable() {
+        helper.createDatabase(TEST_DB, 12).close()
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 13, true, AppDatabase.MIGRATION_12_13)
+
+        migrated.execSQL(
+            "INSERT INTO recipient_pins (address, fingerprint, publicKey, confirmed) VALUES ('a@example.invalid', 'F', 'K', 1)",
+        )
+        migrated.query("SELECT publicKey FROM recipient_pins WHERE address = 'a@example.invalid'").use { cursor ->
+            assertEquals(1, cursor.count)
+        }
+    }
+
+    @Test
+    fun migrate13To14_indexesLinksByRawContactId_keepingRows() {
+        helper.createDatabase(TEST_DB, 13).apply {
+            execSQL("INSERT INTO device_contact_links (uid, rawContactId, deviceUpdatedAtEpochMs) VALUES ('u1', 7, 0)")
+            close()
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 14, true, AppDatabase.MIGRATION_13_14)
+
+        migrated.query("SELECT uid FROM device_contact_links WHERE rawContactId = 7").use { cursor ->
+            assertEquals(1, cursor.count)
+        }
+    }
+
+    @Test
+    fun migrate14To15_marksEveryCachedRowAsWindowMail() {
+        helper.createDatabase(TEST_DB, 14).apply {
+            execSQL(insertV11Email(messageId = "42", folder = "INBOX", subject = "Cached"))
+            close()
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 15, true, AppDatabase.MIGRATION_14_15)
+
+        migrated.query("SELECT inWindow FROM emails WHERE messageId = '42'").use { cursor ->
+            assertEquals(true, cursor.moveToFirst())
+            assertEquals(1, cursor.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrate15To16_addsAnEmptyMergeBase_keepingLinks() {
+        helper.createDatabase(TEST_DB, 15).apply {
+            execSQL("INSERT INTO device_contact_links (uid, rawContactId, deviceUpdatedAtEpochMs) VALUES ('u1', 7, 0)")
+            close()
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 16, true, AppDatabase.MIGRATION_15_16)
+
+        migrated.query("SELECT syncedJson FROM device_contact_links WHERE uid = 'u1'").use { cursor ->
+            assertEquals(true, cursor.moveToFirst())
+            assertEquals("", cursor.getString(0))
+        }
+    }
+
     private fun insertV11Email(messageId: String, folder: String, subject: String) =
         "INSERT INTO emails " +
             "(messageId, folder, sender, sentTo, cc, bcc, subject, preview, bodyMode, label, " +

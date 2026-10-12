@@ -1,10 +1,12 @@
 package org.kysecurity.mail.contacts
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.widget.TextView
 import android.widget.Toast
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -21,6 +23,7 @@ import org.kysecurity.mail.applyKyPostTopBar
 import org.kysecurity.mail.applyPrimaryNavigationInsets
 import org.kysecurity.mail.applyPrimaryNavigationTheme
 import org.kysecurity.mail.applyThemeToActivity
+import org.kysecurity.mail.getStoredThemePalette
 import org.kysecurity.mail.applyTopInsetWithHeader
 import org.kysecurity.mail.contacts.device.DeviceContactsRuntime
 import org.kysecurity.mail.contacts.device.DeviceContactSyncEnabler
@@ -28,13 +31,23 @@ import org.kysecurity.mail.contacts.device.DeviceContactSyncScheduler
 import org.kysecurity.mail.data.ContactEntity
 import org.kysecurity.mail.pgp.hasPgpIdentity
 import org.kysecurity.mail.setupPrimaryNavigation
+import org.kysecurity.mail.showThemed
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import org.kysecurity.mail.security.LockedActivity
+import java.io.IOException
 
 class ContactsListActivity : LockedActivity() {
 
     private lateinit var recyclerView: RecyclerView
     private lateinit var emptyText: View
+    private lateinit var syncBanner: View
+    private lateinit var syncStatusText: TextView
+    private lateinit var syncRetry: View
     private lateinit var bottomNav: NavigationBarView
     private lateinit var adapter: ContactAdapter
     private var pickMode: Boolean = false
@@ -54,7 +67,10 @@ class ContactsListActivity : LockedActivity() {
         permissionLauncher = contactPermissionLauncher,
         onEnabled = { invalidateOptionsMenu() },
     )
-
+    // The system picker grants this one document; no storage permission.
+    private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null && !redirectedToUnlock) importVCard(uri)
+    }
 
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
         pendingScrollPosition = savedInstanceState?.getInt(STATE_SCROLL, 0) ?: 0
@@ -67,6 +83,10 @@ class ContactsListActivity : LockedActivity() {
 
             recyclerView = findViewById(R.id.recyclerViewContacts)
             emptyText = findViewById(R.id.contactsEmptyText)
+            syncBanner = findViewById(R.id.contactsSyncBanner)
+            syncStatusText = findViewById(R.id.contactsSyncStatusText)
+            syncRetry = findViewById(R.id.contactsSyncRetry)
+            syncRetry.setOnClickListener { syncAndReport() }
             bottomNav = findViewById(R.id.bottomNavigation)
             if (pickMode) {
                 bottomNav.visibility = View.GONE
@@ -117,6 +137,14 @@ class ContactsListActivity : LockedActivity() {
                         android.util.Log.e("ContactsListActivity", "Error observing contacts", e)
                         Toast.makeText(this@ContactsListActivity, "Error loading contacts", Toast.LENGTH_SHORT).show()
                     }
+                }
+            }
+        }
+        if (!pickMode) {
+            lifecycleScope.launch {
+                repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    ContactsRuntime.graph(this@ContactsListActivity).repository.observeSyncStatus()
+                        .collect(::renderSyncStatus)
                 }
             }
         }
@@ -187,7 +215,10 @@ class ContactsListActivity : LockedActivity() {
         if (pickMode) return false
         menu?.add(0, MENU_REFRESH, 0, R.string.contacts_refresh)
         menu?.add(0, MENU_DEVICE_SYNC, 0, R.string.contacts_device_sync_enable)
+        menu?.add(0, MENU_IMPORT_ACCOUNTS, 0, R.string.contacts_import_menu)
         menu?.add(0, MENU_DEDUPE, 0, R.string.contacts_dedupe)
+        menu?.add(0, MENU_EXPORT, 0, R.string.contacts_export_vcard)
+        menu?.add(0, MENU_IMPORT, 0, R.string.contacts_vcard_import_menu)
         return super.onCreateOptionsMenu(menu)
     }
 
@@ -200,6 +231,7 @@ class ContactsListActivity : LockedActivity() {
                 deviceSyncItem.title = getString(
                     if (isEnabled) R.string.contacts_device_sync_disable else R.string.contacts_device_sync_enable,
                 )
+                menu.findItem(MENU_IMPORT_ACCOUNTS)?.isVisible = isEnabled
             } catch (e: Exception) {
                 android.util.Log.e("ContactsListActivity", "Error getting device sync status", e)
                 deviceSyncItem.title = getString(R.string.contacts_device_sync_enable)
@@ -211,18 +243,7 @@ class ContactsListActivity : LockedActivity() {
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             MENU_REFRESH -> {
-                // User-triggered, so — unlike the silent foreground/post-edit auto-sync — this one
-                // reports its outcome back, matching the error table in Mobile_Contact_Sync.md.
-                lifecycleScope.launch {
-                    val message = when (val outcome = ContactsRuntime.graph(this@ContactsListActivity).repository.sync()) {
-                        ContactSyncOutcome.Success -> getString(R.string.contacts_sync_success)
-                        ContactSyncOutcome.NotPaired -> getString(R.string.connection_mode_relay_not_paired)
-                        ContactSyncOutcome.Unauthorized -> getString(R.string.contacts_sync_unauthorized)
-                        is ContactSyncOutcome.ServiceUnavailable -> outcome.message
-                        is ContactSyncOutcome.Retry -> outcome.message
-                    }
-                    Toast.makeText(this@ContactsListActivity, message, Toast.LENGTH_SHORT).show()
-                }
+                syncAndReport()
                 true
             }
             MENU_DEVICE_SYNC -> {
@@ -232,6 +253,10 @@ class ContactsListActivity : LockedActivity() {
                 } else {
                     syncEnabler.checkAndEnable()
                 }
+                true
+            }
+            MENU_IMPORT_ACCOUNTS -> {
+                showImportAccounts()
                 true
             }
             MENU_DEDUPE -> {
@@ -259,8 +284,204 @@ class ContactsListActivity : LockedActivity() {
                 }
                 true
             }
+            MENU_EXPORT -> {
+                lifecycleScope.launch {
+                    val contacts = ContactsRuntime.graph(this@ContactsListActivity).repository.observeContacts().first()
+                    shareContactsAsVCard(this@ContactsListActivity, contacts.map { it.toDto() }, getString(R.string.contacts_title))
+                }
+                true
+            }
+            MENU_IMPORT -> {
+                importLauncher.launch(VCARD_PICKER_TYPES)
+                true
+            }
             else -> super.onOptionsItemSelected(item)
         }
+    }
+
+    /** Per-account consent: importing uploads those contacts to the server, so nothing is checked
+     *  until the user checks it. */
+    /** The accounts import can choose from; replaced in tests to stand in for the provider. */
+    @androidx.annotation.VisibleForTesting
+    internal var foreignAccounts: suspend () -> List<org.kysecurity.mail.contacts.device.DeviceAccount> =
+        { DeviceContactsRuntime.graph(this).repository.foreignContactAccounts() }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun showImportAccounts() {
+        val graph = DeviceContactsRuntime.graph(this)
+        // Permission can be revoked in Android settings while sync stays on: ask again instead of
+        // querying a provider that will refuse. Enabling is idempotent once it is granted.
+        val canRead = androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CONTACTS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!canRead) {
+            syncEnabler.checkAndEnable()
+            return
+        }
+        lifecycleScope.launch {
+            // Cancellation is not a SecurityException, so it still propagates.
+            val accounts = try {
+                foreignAccounts()
+            } catch (e: SecurityException) {
+                Toast.makeText(this@ContactsListActivity, R.string.contacts_device_sync_permission_denied, Toast.LENGTH_LONG).show()
+                syncEnabler.checkAndEnable()
+                return@launch
+            }
+            if (accounts.isEmpty()) {
+                Toast.makeText(this@ContactsListActivity, R.string.contacts_import_none, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            // Consent belongs to this pairing; a different server or account starts with none.
+            val destination = ContactsRuntime.graph(this@ContactsListActivity).repository.destination()
+            if (destination == null) {
+                Toast.makeText(this@ContactsListActivity, R.string.connection_mode_relay_not_paired, Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val chosen = graph.settings.importAccounts(destination).toMutableSet()
+            importAccountsDialog(accounts, chosen) {
+                lifecycleScope.launch {
+                    graph.settings.setImportAccounts(destination, chosen)
+                    graph.coordinator.syncNowAsync()
+                }
+            }
+        }
+    }
+
+    /** One checkbox per account, ticked for those in [chosen], which tracks the ticks. Shown
+     *  through [showThemed]: the native dialog in the active palette (STYLE_GUIDE §3, §6). */
+    @androidx.annotation.VisibleForTesting
+    internal fun importAccountsDialog(
+        accounts: List<org.kysecurity.mail.contacts.device.DeviceAccount>,
+        chosen: MutableSet<String>,
+        onSave: () -> Unit,
+    ): androidx.appcompat.app.AlertDialog {
+        val accent = android.graphics.Color.parseColor(getStoredThemePalette(this).accent)
+        val padding = (16 * resources.displayMetrics.density).toInt()
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(padding, padding, padding, 0)
+            addView(android.widget.TextView(context).apply { setText(R.string.contacts_import_message) })
+            for (account in accounts) {
+                addView(
+                    android.widget.CheckBox(context).apply {
+                        text = account.name?.let { "$it (${account.type})" }
+                            ?: getString(R.string.contacts_import_local_account)
+                        buttonTintList = android.content.res.ColorStateList.valueOf(accent)
+                        isChecked = account.key in chosen
+                        setOnCheckedChangeListener { _, checked ->
+                            if (checked) chosen += account.key else chosen -= account.key
+                        }
+                    },
+                )
+            }
+        }
+        return androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.contacts_import_title)
+            .setView(android.widget.ScrollView(this).apply { addView(container) })
+            .setPositiveButton(R.string.contacts_import_save) { _, _ -> onSave() }
+            .setNegativeButton(R.string.cancel, null)
+            .showThemed()
+    }
+
+    // User-triggered, so — unlike the silent foreground/post-edit auto-sync — this one reports its
+    // outcome back, matching the error table in Mobile_Contact_Sync.md.
+    private fun syncAndReport() {
+        lifecycleScope.launch {
+            val outcome = ContactsRuntime.graph(this@ContactsListActivity).repository.sync()
+            Toast.makeText(this@ContactsListActivity, syncOutcomeText(outcome), Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun syncOutcomeText(outcome: ContactSyncOutcome): String = when (outcome) {
+        ContactSyncOutcome.Success -> getString(R.string.contacts_sync_success)
+        ContactSyncOutcome.NotPaired -> getString(R.string.connection_mode_relay_not_paired)
+        ContactSyncOutcome.Unauthorized -> getString(R.string.contacts_sync_unauthorized)
+        is ContactSyncOutcome.ServiceUnavailable -> outcome.message
+        is ContactSyncOutcome.Retry -> outcome.message
+    }
+
+    private fun renderSyncStatus(status: ContactSyncStatus) {
+        syncBanner.visibility = if (status == ContactSyncStatus.Idle) View.GONE else View.VISIBLE
+        syncRetry.visibility = if (status is ContactSyncStatus.Stuck) View.VISIBLE else View.GONE
+        syncStatusText.text = when (status) {
+            ContactSyncStatus.Idle -> ""
+            is ContactSyncStatus.Waiting ->
+                resources.getQuantityString(R.plurals.contacts_sync_waiting, status.pending, status.pending)
+            is ContactSyncStatus.Stuck -> {
+                val title = if (status.pending > 0) {
+                    resources.getQuantityString(R.plurals.contacts_sync_stuck_waiting, status.pending, status.pending)
+                } else {
+                    getString(R.string.contacts_sync_stuck)
+                }
+                // Server-supplied text: first line only, bounded.
+                val reason = status.reason?.let { syncOutcomeText(it).trim().lineSequence().first().take(200) }
+                "$title\n${reason ?: getString(R.string.contacts_sync_stuck_no_reason)}"
+            }
+        }
+    }
+
+    private fun importVCard(uri: Uri) {
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    contentResolver.openInputStream(uri)?.use(::readVCardImport)
+                } catch (_: IOException) {
+                    null
+                } catch (_: SecurityException) {
+                    null
+                }
+            }
+            when (result) {
+                null -> Toast.makeText(this@ContactsListActivity, R.string.contacts_vcard_import_unreadable, Toast.LENGTH_LONG).show()
+                is VCardImport.Refused ->
+                    Toast.makeText(this@ContactsListActivity, importRefusalText(result.reason), Toast.LENGTH_LONG).show()
+                is VCardImport.Parsed -> confirmImport(result)
+            }
+        }
+    }
+
+    private fun importRefusalText(reason: VCardImport.Refusal): String = when (reason) {
+        VCardImport.Refusal.TOO_LARGE -> getString(R.string.contacts_vcard_import_too_large, MAX_VCARD_IMPORT_BYTES / 1024)
+        VCardImport.Refusal.NOT_UTF8 -> getString(R.string.contacts_vcard_import_not_utf8)
+        VCardImport.Refusal.MALFORMED -> getString(R.string.contacts_vcard_import_malformed)
+        VCardImport.Refusal.UNSUPPORTED_VERSION -> getString(R.string.contacts_vcard_import_unsupported_version)
+        VCardImport.Refusal.TOO_MANY_CONTACTS -> getString(R.string.contacts_vcard_import_too_many_contacts, MAX_VCARD_IMPORT_CONTACTS)
+        VCardImport.Refusal.TOO_MANY_VALUES -> getString(R.string.contacts_vcard_import_too_many_values, MAX_VCARD_VALUES_PER_FIELD)
+        VCardImport.Refusal.EMPTY -> getString(R.string.contacts_vcard_import_empty)
+    }
+
+    /** Names come from the file: one line each, bounded, plain text. */
+    private fun confirmImport(result: VCardImport.Parsed) {
+        val count = result.contacts.size
+        val message = buildString {
+            append(resources.getQuantityString(R.plurals.contacts_vcard_import_message, count, count))
+            result.contacts.take(IMPORT_PREVIEW_NAMES).forEach { append("\n• ").append(it.fn.lineSequence().first().take(80)) }
+            val rest = count - IMPORT_PREVIEW_NAMES
+            if (rest > 0) append("\n").append(resources.getQuantityString(R.plurals.contacts_vcard_import_more, rest, rest))
+            if (result.skipped > 0) {
+                append("\n\n").append(resources.getQuantityString(R.plurals.contacts_vcard_import_skipped, result.skipped, result.skipped))
+            }
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.contacts_vcard_import_title)
+            .setMessage(message)
+            .setPositiveButton(R.string.contacts_vcard_import_positive) { _, _ ->
+                lifecycleScope.launch {
+                    val graph = ContactsRuntime.graph(this@ContactsListActivity)
+                    if (!graph.repository.queueImport(result.contacts)) {
+                        Toast.makeText(this@ContactsListActivity, R.string.contacts_vcard_import_outbox_busy, Toast.LENGTH_LONG).show()
+                        return@launch
+                    }
+                    graph.coordinator.syncNowAsync()
+                    DeviceContactsRuntime.graph(this@ContactsListActivity).coordinator.syncNowAsync()
+                    Toast.makeText(
+                        this@ContactsListActivity,
+                        resources.getQuantityString(R.plurals.contacts_vcard_import_done, count, count),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .showThemed()
     }
 
     private fun disableDeviceSync() {
@@ -295,6 +516,13 @@ class ContactsListActivity : LockedActivity() {
         private const val MENU_REFRESH = 0
         private const val MENU_DEVICE_SYNC = 1
         private const val MENU_DEDUPE = 2
+        private const val MENU_IMPORT_ACCOUNTS = 3
+        private const val MENU_EXPORT = 4
+        private const val MENU_IMPORT = 5
+        private const val IMPORT_PREVIEW_NAMES = 10
+
+        /** Pickers label .vcf files inconsistently. */
+        private val VCARD_PICKER_TYPES = arrayOf(VCARD_MIME_TYPE, "text/x-vcard", "text/directory")
 
         /** When true, a tap returns the uid via [EXTRA_RESULT_UID] instead of opening the editor. */
         const val EXTRA_PICK_MODE = "pick_mode"

@@ -31,10 +31,14 @@ class SearchResultReplyAllTest {
 
     /** Records and blocks the composer launch, so the test reads the intent Reply All built. */
     private class ComposeLaunches : Instrumentation.ActivityMonitor() {
+        private val internalCompose = ComposeActivity
+            .internalIntent(InstrumentationRegistry.getInstrumentation().targetContext).component?.className
+
         @Volatile var to: String? = null
         val launched = java.util.concurrent.CountDownLatch(1)
         override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
-            if (intent.component?.className != ComposeActivity::class.java.name) return null
+            // Reply All opens the in-app compose entry, the only one that reads EXTRA_TO.
+            if (intent.component?.className != internalCompose) return null
             to = intent.getStringExtra(ComposeActivity.EXTRA_TO)
             launched.countDown()
             return Instrumentation.ActivityResult(0, null)

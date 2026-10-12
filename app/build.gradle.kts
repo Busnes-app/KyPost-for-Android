@@ -603,6 +603,15 @@ dependencies {
     // to enqueue against the real scheduler, which would actually run the worker — a real network
     // call carrying this device's credential, from a test.
     androidTestImplementation(libs.androidx.work.testing)
+
+    // Lint's own classpath; same floors and reasoning as the buildscript block in ../build.gradle.kts.
+    constraints {
+        "androidLintTool"("org.bouncycastle:bcprov-jdk18on:1.86")
+        "androidLintTool"("org.bouncycastle:bcpkix-jdk18on:1.86")
+        "androidLintTool"("org.bouncycastle:bcutil-jdk18on:1.86")
+        "androidLintTool"("org.apache.commons:commons-lang3:3.18.0")
+        "androidLintTool"("org.apache.httpcomponents:httpclient:4.5.14")
+    }
 }
 
 ksp {

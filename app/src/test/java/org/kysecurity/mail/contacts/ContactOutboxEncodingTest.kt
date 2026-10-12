@@ -71,6 +71,26 @@ class ContactOutboxEncodingTest {
     }
 
     @Test
+    fun coalesce_updateAfterUnsyncedCreate_staysACreate() {
+        val create = row(ContactSyncRepository.CHANGE_CREATE, "{}")
+        val update = row(ContactSyncRepository.CHANGE_UPDATE, """{"fn":"New"}""")
+
+        val merged = coalescedChange(listOf(create), update)
+
+        assertEquals(ContactSyncRepository.CHANGE_CREATE, merged.changeType)
+        assertEquals("""{"fn":"New"}""", merged.payloadJson)
+    }
+
+    /** The create may already be on the server from a push whose reply is still in flight. */
+    @Test
+    fun coalesce_deleteAfterUnsyncedCreate_isStillSent() {
+        val create = row(ContactSyncRepository.CHANGE_CREATE, "{}")
+        val delete = row(ContactSyncRepository.CHANGE_DELETE, "")
+
+        assertEquals(ContactSyncRepository.CHANGE_DELETE, coalescedChange(listOf(create), delete).changeType)
+    }
+
+    @Test
     fun unknownChangeType_failsClosed() {
         val payload = json.encodeToString(ContactDto.serializer(), ContactDto(fn = "Jane"))
         assertNull(row("merge", payload).toWireDtoOrNull(json))

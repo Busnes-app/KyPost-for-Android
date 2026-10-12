@@ -65,7 +65,8 @@ fun setupPrimaryNavigation(
             }
             R.id.nav_compose -> {
                 if (selectedItemId != R.id.nav_compose) {
-                    startDestination(R.id.nav_compose, Intent(activity, ComposeActivity::class.java))
+                    // Same component as Reply/Forward, so REORDER_TO_FRONT finds an open one.
+                    startDestination(R.id.nav_compose, ComposeActivity.internalIntent(activity))
                     false
                 } else {
                     true

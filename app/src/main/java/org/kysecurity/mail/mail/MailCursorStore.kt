@@ -1,13 +1,19 @@
 package org.kysecurity.mail.mail
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import org.kysecurity.mail.ScopedValue
 import kotlinx.coroutines.runBlocking
 
-private val Context.mailSyncDataStore by preferencesDataStore(name = "mail_sync_state")
+internal val Context.mailSyncDataStore by preferencesDataStore(
+    name = "mail_sync_state",
+    // Metadata only: a corrupt file reads as empty instead of blocking every wipe and unpair.
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 private const val FULL_RESYNC_INTERVAL_MS = 24L * 60 * 60 * 1000
 

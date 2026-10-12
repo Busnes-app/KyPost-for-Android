@@ -1,5 +1,7 @@
 package org.kysecurity.mail.ui
 
+import android.view.View
+import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
@@ -8,6 +10,7 @@ import org.junit.runner.RunWith
 import org.kysecurity.mail.Email
 import org.kysecurity.mail.InboxActivity
 import org.kysecurity.mail.KeywordTabs
+import org.kysecurity.mail.R
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -73,6 +76,23 @@ class InboxFolderOwnershipTest {
                 )
 
                 assertEquals(listOf("7"), activity.allEmailsForTest().map { it.id })
+            }
+        }
+    }
+
+    /** Until the new folder loads, its title must not sit over the old folder's rows. */
+    @Test
+    fun aFolderSwitchClearsTheOldFoldersRowsAtOnce() {
+        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.setFolderForTest("INBOX", KeywordTabs.ALL)
+                activity.setEmailsForTest(listOf(email("42", "INBOX")))
+
+                activity.switchFolderForTest("Archive")
+
+                assertEquals(emptyList<String>(), activity.allEmailsForTest().map { it.id })
+                assertEquals(0, activity.findViewById<RecyclerView>(R.id.recyclerViewInbox).adapter!!.itemCount)
+                assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.loadingOverlay).visibility)
             }
         }
     }

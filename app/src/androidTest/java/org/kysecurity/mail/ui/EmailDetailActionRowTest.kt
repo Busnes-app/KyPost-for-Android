@@ -13,25 +13,31 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.kysecurity.mail.R
 
-/** Every message action must be fully on screen in a 320dp window, not clipped or scrolled off.
+/** Every message action must be fully on screen in a 320dp and a 360dp window, not clipped.
  *  Fixed-size buttons keep their width when they overflow, so this checks positions, not sizes. */
 @RunWith(AndroidJUnit4::class)
 class EmailDetailActionRowTest {
 
     @Test
-    fun allSevenActionsAreFullyVisibleAt320dp() {
+    fun allEightActionsAreFullyVisibleAt320dp() = assertAllActionsVisibleAt(320)
+
+    /** 360dp is the most common phone width and gets the larger size, so it is checked too. */
+    @Test
+    fun allEightActionsAreFullyVisibleAt360dp() = assertAllActionsVisibleAt(360)
+
+    private fun assertAllActionsVisibleAt(widthDp: Int) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val base = instrumentation.targetContext
         val narrow = Configuration(base.resources.configuration).apply {
-            screenWidthDp = 320
-            smallestScreenWidthDp = 320
+            screenWidthDp = widthDp
+            smallestScreenWidthDp = widthDp
         }
         val context = ContextThemeWrapper(base.createConfigurationContext(narrow), R.style.Theme_KyPost)
         val density = context.resources.displayMetrics.density
         val clipped = mutableListOf<String>()
         instrumentation.runOnMainSync {
             val root = LayoutInflater.from(context).inflate(R.layout.activity_email_detail, null) as ViewGroup
-            val width = (320 * density).toInt()
+            val width = (widthDp * density).toInt()
             val height = (640 * density).toInt()
             root.measure(
                 View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
@@ -42,6 +48,7 @@ class EmailDetailActionRowTest {
             val visible = Rect(content.paddingLeft, 0, content.width - content.paddingRight, content.height)
             listOf(
                 "reply" to R.id.actionReply, "replyAll" to R.id.actionReplyAll, "forward" to R.id.actionForward,
+                "markUnread" to R.id.actionMarkUnread,
                 "archive" to R.id.actionArchive, "move" to R.id.actionMove, "junk" to R.id.actionJunk,
                 "delete" to R.id.actionDelete,
             ).forEach { (name, id) ->

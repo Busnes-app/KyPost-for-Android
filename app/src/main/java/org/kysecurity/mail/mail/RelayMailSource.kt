@@ -81,6 +81,7 @@ class RelayMailSource(
             // since=0 window from 151.4 KiB to 571 B, a five-new-message poll from 15.9 KiB to
             // 295 B, and ~2.6 MiB off the decoded peak (see MemoryBudget).
             .addQueryParameter("bodies", "0")
+            .addQueryParameter("preview", "1")
             .build()
         val request = Request.Builder().url(url).get()
             .authed(pairing)
@@ -108,6 +109,33 @@ class RelayMailSource(
                         cursor = parsed.cursor,
                         wasFullResync = since == FULL_RESYNC_SINCE,
                     ),
+                    agedOutMessageIds = parsed.agedOut,
+                    hasMore = parsed.hasMore == true,
+                    nextBefore = parsed.nextBefore,
+                ),
+            )
+        }
+    }
+
+    override fun fetchOlder(mailbox: String, limit: Int, before: String): MailOutcome<MailPage> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        val base = baseUrl(pairing, "/api/inbox") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val url = base.newBuilder()
+            .addQueryParameter("limit", limit.toString())
+            .addQueryParameter("mailbox", mailbox)
+            .addQueryParameter("before", before)
+            // A server without before= paging answers with its window, bodies included unless told.
+            .addQueryParameter("bodies", "0")
+            .build()
+        val request = Request.Builder().url(url).get().authed(pairing).build()
+        return executeStreaming(request, RelayInboxResponseDto.serializer()) { code, parsed, errorBody ->
+            if (code != 200) return@executeStreaming mapErrorCode(code, errorBody)
+            if (parsed == null) return@executeStreaming MailOutcome.UpstreamFailure("Malformed inbox response")
+            MailOutcome.Success(
+                MailPage(
+                    messages = parsed.byTab.flatMap { (tab, emails) -> emails.map { it.toUiEmail(tab) } },
+                    hasMore = parsed.hasMore,
+                    nextBefore = parsed.nextBefore,
                 ),
             )
         }
@@ -193,8 +221,13 @@ class RelayMailSource(
         messageIds: List<String>,
         mailbox: String,
         targetMailbox: String?,
+        account: MailAccount?,
     ): MailOutcome<MailActionOutcome> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        // Same read that authenticates the request, so the check and the credentials agree.
+        if (account != null && account != pairing.mailAccount()) {
+            return MailOutcome.Unauthorized("The action belongs to a different account")
+        }
         val base = baseUrl(pairing, "/api/inbox/actions") ?: return MailOutcome.BadRequest("Server URL is not valid")
         val requestDto = RelayActionRequestDto(
             action = action.wireValue(),
@@ -419,7 +452,7 @@ class RelayMailSource(
         400 -> if (rawBody.contains(NOT_CONFIGURED_PREFIX, ignoreCase = true)) {
             MailOutcome.NotConfigured(rawBody)
         } else {
-            MailOutcome.BadRequest(rawBody.ifBlank { "Malformed request" })
+            MailOutcome.BadRequest(rawBody.trim().ifBlank { "Malformed request" })
         }
         401 -> MailOutcome.Unauthorized("Bad secret or unknown device")
         // The 403 prose names an unauthorized From, which is the one thing the user can act on.
@@ -489,6 +522,18 @@ class RelayMailSource(
         if (pairingUrlHost(pairing.serverUrl) == null) return null
         return "${pairing.serverUrl.trimEnd('/')}$path".toHttpUrlOrNull()
     }
+}
+
+/** The server sends at most 200 code points (#351), at most 400 UTF-16 units, so this never cuts a
+ *  conforming preview, or a surrogate pair in one. */
+private const val MAX_PREVIEW_CHARS = 400
+
+/** Format characters (bidi overrides, zero-width, tags) dropped: they can reorder what the row
+ *  shows. Whole code points, so neither the filter nor the bound sees half a surrogate pair. */
+internal fun previewText(raw: String?): String = buildString {
+    raw.orEmpty().codePoints()
+        .filter { Character.getType(it) != Character.FORMAT.toInt() }
+        .forEach { if (length + Character.charCount(it) <= MAX_PREVIEW_CHARS) appendCodePoint(it) }
 }
 
 /** Same order of magnitude as the outbound cap in `ComposeActivity` and the server's own
@@ -563,6 +608,7 @@ private fun MailAction.wireValue(): String = when (this) {
     MailAction.ARCHIVE -> "archive"
     MailAction.SPAM -> "spam"
     MailAction.READ -> "read"
+    MailAction.UNREAD -> "unread"
     MailAction.MOVE -> "move"
 }
 
@@ -603,7 +649,9 @@ private fun RelayEmailDto.toUiEmail(tab: String): Email {
         id = messageId,
         subject = subject,
         sender = sender,
-        preview = body.orEmpty().take(140),
+        // Never for encrypted mail: enrollment's purge of server-decrypted text clears previews only
+        // beside a cached body, and a snippet of a client-protected message is not this app's to keep.
+        preview = if (pgpEncrypted) "" else previewText(preview),
         // Union, not a replacement: the label drives KeywordTabs, the wire list carries $Phishing.
         keywords = (keywords + emailLabel).filter { it.isNotBlank() }.toSet(),
         sentTo = sentTo,

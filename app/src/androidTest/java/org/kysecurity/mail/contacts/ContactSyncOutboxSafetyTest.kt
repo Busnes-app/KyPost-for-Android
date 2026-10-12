@@ -6,6 +6,10 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.kysecurity.mail.data.AppDatabase
 import org.kysecurity.mail.data.PendingContactChangeEntity
 import org.kysecurity.mail.push.PairingData
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import okhttp3.Call
 import okhttp3.Callback
@@ -103,7 +107,7 @@ class ContactSyncOutboxSafetyTest {
     }
 
     /** Wire contract: the server commits pushed changes BEFORE computing tooOld, so the rows are
-     *  acknowledged. Only the cursor is discarded, forcing a full since=0 re-pull. */
+     *  acknowledged. Only the cursor is discarded, and a since=0 pull follows in the same sync. */
     @Test
     fun tooOld_clearsTheAcknowledgedOutboxAndResetsOnlyTheCursor() = runBlocking {
         val cursorStore = ContactCursorStore(
@@ -117,9 +121,63 @@ class ContactSyncOutboxSafetyTest {
         val outcome = repository.sync()
 
         assertTrue(outcome is ContactSyncOutcome.Success)
-        assertEquals("the push must actually have gone out", 1, factory.requests.size)
+        assertEquals(
+            "the push must go out once, then a full re-pull",
+            listOf("POST", "GET since=0"),
+            factory.requests.map { if (it.method == "GET") "GET since=${it.url.queryParameter("since")}" else it.method },
+        )
         assertEquals("acknowledged rows must not be replayed", 0, db.pendingChangeCount())
         assertEquals("cursor must be discarded for a full re-pull", 0L, cursorStore.cursor(SUB))
+    }
+
+    @Test
+    fun syncStatus_countsContactsNotRowsAndReportsTheFailure() = runBlocking {
+        enqueue(ContactSyncRepository.CHANGE_UPDATE, "{not json")
+        enqueue(ContactSyncRepository.CHANGE_UPDATE, "{not json")
+        repeat(STUCK_AFTER_FAILURES) { repository.sync() }
+
+        val status = repository.observeSyncStatus(now = { 2L }).first()
+
+        assertTrue("expected stuck, got $status", status is ContactSyncStatus.Stuck)
+        assertEquals("two rows for one contact are one waiting change", 1, (status as ContactSyncStatus.Stuck).pending)
+        assertTrue(status.reason is ContactSyncOutcome.Retry)
+    }
+
+    @Test
+    fun import_queuesEveryContactAsACreate() = runBlocking {
+        val queued = repository.queueImport(listOf(ContactDto(fn = "A"), ContactDto(fn = "B")))
+
+        assertTrue(queued)
+        val pending = db.pendingContactChangeDao().getAllPending()
+        assertEquals(listOf(ContactSyncRepository.CHANGE_CREATE, ContactSyncRepository.CHANGE_CREATE), pending.map { it.changeType })
+        assertEquals(2, db.contactDao().observeAll().first().size)
+    }
+
+    @Test
+    fun import_refusesANonEmptyOutboxAndAddsNothing() = runBlocking {
+        enqueue(ContactSyncRepository.CHANGE_UPDATE, """{"uid":"uid-1","fn":"Edit"}""")
+
+        val queued = repository.queueImport(listOf(ContactDto(fn = "A")))
+
+        assertTrue(!queued)
+        assertEquals(1, db.pendingChangeCount())
+        assertEquals(0, db.contactDao().observeAll().first().size)
+    }
+
+    /** Recorded after unlock, a waiting caller could finish and record first, so an old failure
+     *  overwrote a newer success. The Unconfined collector runs inline at each record. */
+    @Test
+    fun syncOutcome_isRecordedWhileTheSyncLockIsHeld() = runBlocking {
+        enqueue(ContactSyncRepository.CHANGE_UPDATE, "{not json")
+        val lockedAtRecord = mutableListOf<Boolean>()
+        val watcher = launch(Dispatchers.Unconfined) {
+            repository.health.failures.drop(1).collect { lockedAtRecord += repository.syncMutex.isLocked }
+        }
+
+        repository.sync()
+        watcher.cancel()
+
+        assertEquals(listOf(true), lockedAtRecord)
     }
 
     private suspend fun AppDatabase.pendingChangeCount() = pendingContactChangeDao().getAllPending().size

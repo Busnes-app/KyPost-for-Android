@@ -98,11 +98,14 @@
         <item quantity="other">%d selected</item>
     </plurals>
     <string name="move_to_title">Move to</string>
+    <string name="action_mark_unread">Mark unread</string>
+    <string name="action_mark_read">Mark read</string>
     <string name="action_delete">Delete</string>
     <string name="action_reply">Reply</string>
     <string name="action_reply_all">Reply all</string>
     <string name="action_forward">Forward</string>
     <string name="mail_action_failed">%1$s failed: %2$s</string>
+    <string name="action_retry">Retry</string>
 
     <string name="keyword_settings_title">Keyword Settings</string>
     <string name="keyword_settings_intro">Hide or show keyword headings in inbox tabs. Touch and hold a row to change its order.</string>
@@ -260,6 +263,7 @@
     <string name="compose_pgp_no_key_webmail">Continue in webmail</string>
     <!-- A broken TOFU pin, deliberately louder and never merged into the missing-key copy: this is
          what a key rotation looks like AND what an interception attempt looks like. -->
+    <string name="compose_pgp_key_revoked">The key you verified for %1$s has been revoked by its owner. Nothing was sent. Scan their QR code to verify their new key, then send again.</string>
     <string name="compose_pgp_key_changed_title">A recipient\'s key has changed</string>
     <string name="compose_pgp_key_changed_body">The PGP key for %1$s has changed since you last saved it. Nothing was sent.\n\nThat is what a key rotation looks like — and also what an interception attempt looks like. Check the new fingerprint with them another way, then update their contact.</string>
     <string name="compose_pgp_not_enrolled">This device no longer holds your PGP key. Set it up again from the PGP screen to send encrypted mail from here.</string>
@@ -308,6 +312,9 @@
     <string name="push_pairing_qr_scan_failed">QR scan was cancelled or failed.</string>
     <string name="compose_fill_all_fields">Fill in the recipient and message.</string>
     <string name="compose_empty_subject_title">Send without a subject?</string>
+    <string name="compose_send_custody_pending">Still checking this account\'s encryption settings. Try again in a moment.</string>
+    <string name="compose_custody_check_failed">Couldn\'t check this account\'s encryption settings, so Send is off.</string>
+    <string name="compose_custody_retry">Retry</string>
     <string name="compose_empty_subject_add">Add subject</string>
     <string name="compose_empty_subject_send">Send</string>
     <string name="push_pairing_status_not_paired">Not paired</string>
@@ -354,6 +361,54 @@
     <string name="contacts_refresh">Sync now</string>
     <string name="contacts_sync_success">Contacts synced</string>
     <string name="contacts_sync_unauthorized">Device pairing expired or invalid — re-pair this device in Settings</string>
+    <plurals name="contacts_sync_waiting">
+        <item quantity="one">%d change waiting to sync</item>
+        <item quantity="other">%d changes waiting to sync</item>
+    </plurals>
+    <string name="contacts_sync_stuck">Sync stuck</string>
+    <plurals name="contacts_sync_stuck_waiting">
+        <item quantity="one">Sync stuck: %d change waiting</item>
+        <item quantity="other">Sync stuck: %d changes waiting</item>
+    </plurals>
+    <string name="contacts_sync_stuck_no_reason">Not sent for over an hour.</string>
+    <string name="contacts_sync_retry">Retry</string>
+    <string name="contacts_share_vcard">Share as vCard</string>
+    <string name="contacts_export_vcard">Export all as vCard</string>
+    <string name="contacts_vcard_version_title">vCard format</string>
+    <string name="contacts_vcard_v4">vCard 4.0</string>
+    <string name="contacts_vcard_v3">vCard 3.0 (older apps)</string>
+    <string name="contacts_vcard_share_title">Share contacts</string>
+    <string name="contacts_vcard_share_failed">No app can receive contacts</string>
+    <string name="contacts_vcard_none">No contacts to export</string>
+    <string name="contacts_vcard_blocked_hostile">Contacts can\'t be shared while Hostile Location Protection is on. The receiving app could save them anywhere.</string>
+    <string name="contacts_vcard_import_menu">Import vCard…</string>
+    <string name="contacts_vcard_import_title">Import contacts?</string>
+    <plurals name="contacts_vcard_import_message">
+        <item quantity="one">%d contact from this file will be added and synced to your server:</item>
+        <item quantity="other">%d contacts from this file will be added and synced to your server:</item>
+    </plurals>
+    <plurals name="contacts_vcard_import_more">
+        <item quantity="one">…and %d more</item>
+        <item quantity="other">…and %d more</item>
+    </plurals>
+    <plurals name="contacts_vcard_import_skipped">
+        <item quantity="one">%d card has no name, email or organization and will be skipped.</item>
+        <item quantity="other">%d cards have no name, email or organization and will be skipped.</item>
+    </plurals>
+    <string name="contacts_vcard_import_positive">Import</string>
+    <plurals name="contacts_vcard_import_done">
+        <item quantity="one">%d contact imported</item>
+        <item quantity="other">%d contacts imported</item>
+    </plurals>
+    <string name="contacts_vcard_import_outbox_busy">Some changes are still waiting to sync. Sync them first, then import.</string>
+    <string name="contacts_vcard_import_unreadable">Couldn\'t read that file.</string>
+    <string name="contacts_vcard_import_too_large">That file is larger than %d KB.</string>
+    <string name="contacts_vcard_import_not_utf8">That file isn\'t UTF-8 text.</string>
+    <string name="contacts_vcard_import_malformed">That file isn\'t a valid vCard.</string>
+    <string name="contacts_vcard_import_unsupported_version">Only vCard 3.0 and 4.0 files can be imported.</string>
+    <string name="contacts_vcard_import_too_many_contacts">That file has too many contacts. The limit is %d.</string>
+    <string name="contacts_vcard_import_too_many_values">A contact in that file has too many values in one field. The limit is %d.</string>
+    <string name="contacts_vcard_import_empty">No contacts found in that file.</string>
     <string name="contacts_dedupe">Find &amp; merge duplicates</string>
     <plurals name="contacts_dedupe_result">
         <item quantity="one">Merged %d duplicate contact</item>
@@ -463,6 +518,7 @@
     <string name="no_archive_folders">No archive folders found</string>
     <string name="special_folder_missing">No %1$s folder on this account</string>
     <string name="email_not_found">Email no longer available</string>
+    <string name="load_older_mail">Load older mail</string>
 
     <string name="contacts_device_sync_enable">Enable device contact sync</string>
     <string name="contacts_device_sync_disable">Disable device contact sync</string>
@@ -471,7 +527,13 @@
     <string name="contacts_device_sync_account_failed">Could not create the KyPost contacts account, so device contact sync was not enabled</string>
     <string name="contacts_device_sync_disabled_toast">Device contact sync disabled</string>
     <string name="contact_sync_intro_title">Sync contacts with this device?</string>
-    <string name="contact_sync_intro_message">Kypost can keep your contacts in sync with this device\'s address book. This is off by default and only happens if you turn it on — you can change it anytime from the Contacts screen.</string>
+    <string name="contact_sync_intro_message">Kypost can keep your contacts in sync with this device\'s address book. This is off by default and only happens if you turn it on — you can change it anytime from the Contacts screen.\n\nContacts saved in other accounts on this phone, such as Google or the SIM, are not uploaded unless you pick those accounts under Import from other accounts.</string>
+    <string name="contacts_import_menu">Import from other accounts…</string>
+    <string name="contacts_import_title">Import from other accounts</string>
+    <string name="contacts_import_message">Contacts from the accounts you check are copied into KyPost and uploaded to your KyPost server, which syncs them to your other devices. Nothing is uploaded from an account you leave unchecked.\n\nUnchecking an account later stops new imports. Contacts already uploaded stay on your server until you delete them.</string>
+    <string name="contacts_import_none">No other accounts on this phone hold contacts.</string>
+    <string name="contacts_import_local_account">This phone (no account)</string>
+    <string name="contacts_import_save">Save</string>
     <string name="contact_sync_intro_positive">Enable</string>
     <string name="contact_sync_intro_negative">Not Now</string>
     <string name="password_pairing_open">Pair with server login</string>

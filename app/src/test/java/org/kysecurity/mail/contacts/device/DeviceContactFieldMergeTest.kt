@@ -1,6 +1,7 @@
 package org.kysecurity.mail.contacts.device
 
 import org.kysecurity.mail.contacts.ContactEventDto
+import org.kysecurity.mail.contacts.ContactFieldDto
 import org.kysecurity.mail.contacts.ContactImDto
 import org.kysecurity.mail.contacts.ContactRelationDto
 import org.kysecurity.mail.contacts.ContactUrlDto
@@ -195,5 +196,66 @@ class DeviceContactFieldMergeTest {
         val roomEvents = listOf(ContactEventDto(label = "anniversary", date = "2020-06-01"))
         val deviceEvents = listOf(ContactEventDto(label = "anniversary", date = "2021-06-01"))
         assertEquals(deviceEvents, DeviceContactFieldMerge.mergeEventList(roomEvents, deviceEvents, 100L, 200L))
+    }
+
+    private fun stringAgainstBase(room: String?, device: String?, base: String?, known: Boolean = true) =
+        DeviceContactFieldMerge.againstBase(room, device, base, known) { r, d ->
+            DeviceContactFieldMerge.mergeStringField(r, d, 200L, 100L)
+        }
+
+    @Test
+    fun againstBase_aFieldClearedOnTheDevice_staysCleared() {
+        assertNull(stringAgainstBase(room = "Old notes", device = null, base = "Old notes"))
+    }
+
+    @Test
+    fun againstBase_aFieldClearedInRoom_staysCleared() {
+        assertNull(stringAgainstBase(room = null, device = "Old notes", base = "Old notes"))
+    }
+
+    @Test
+    fun againstBase_aListClearedOnTheDevice_staysCleared() {
+        val emails = listOf(ContactFieldDto(value = "ada@example.com"))
+        val merged = DeviceContactFieldMerge.againstBase(emails, emptyList(), emails, true) { r, d ->
+            DeviceContactFieldMerge.mergeEmailList(r, d, 200L, 100L)
+        }
+        assertEquals(emptyList(), merged)
+    }
+
+    @Test
+    fun againstBase_changedOnBothSides_fallsBackToTwoWay() {
+        assertEquals("Room", stringAgainstBase(room = "Room", device = "Device", base = "Base"))
+    }
+
+    /** Rows linked before a base was kept: two-way cannot tell cleared from unset, so Room keeps it. */
+    @Test
+    fun againstBase_withoutABase_keepsTheTwoWayRule() {
+        assertEquals("Old notes", stringAgainstBase(room = "Old notes", device = null, base = null, known = false))
+    }
+
+    /** What CP2 reads back for Room's own value is not a phone edit: Room still equals the base,
+     *  so Room's value stands. */
+    private fun <T> unchangedInRoom(room: T, readBack: T): T =
+        DeviceContactFieldMerge.againstBase(room, readBack, base = room, baseKnown = true) { _, _ -> error("not a conflict") }
+
+    @Test
+    fun aRelationLabelCp2ReadsAsOther_isNotAPhoneEdit() {
+        val room = listOf(ContactRelationDto(label = "mentor", name = "Grace"))
+
+        assertEquals(room, unchangedInRoom(room, listOf(ContactRelationDto(label = "other", name = "Grace"))))
+    }
+
+    @Test
+    fun anImLabelCp2DropsForAKnownService_isNotAPhoneEdit() {
+        val room = listOf(ContactImDto(service = "signal", label = "work", value = "+15550100"))
+
+        assertEquals(room, unchangedInRoom(room, listOf(ContactImDto(service = "signal", label = null, value = "+15550100"))))
+    }
+
+    @Test
+    fun anUnsetImServiceReadBackAsOther_isNotAPhoneEdit() {
+        val room = listOf(ContactImDto(service = null, label = null, value = "probe-im"))
+
+        assertEquals(room, unchangedInRoom(room, listOf(ContactImDto(service = "", label = "Other", value = "probe-im"))))
     }
 }

@@ -50,6 +50,44 @@ class AddressTextTest {
     }
 
     @Test
+    fun replyAllDropsEveryOwnAddressCaseInsensitively() {
+        val recipients = replyAllRecipients(
+            sender = "Bob <bob@example.com>",
+            to = listOf("Me <ME@example.com>", "carol@example.com"),
+            cc = listOf("alias@example.com", "Bob <BOB@example.com>"),
+            own = listOf("me@example.com", "Alias@Example.com"),
+        )
+
+        assertEquals(listOf("bob@example.com", "carol@example.com"), recipients)
+    }
+
+    /** Reply All on one's own sent mail goes to the people it was sent to. */
+    @Test
+    fun replyAllToOwnSentMailKeepsTheOtherRecipients() {
+        val recipients = replyAllRecipients(
+            sender = "me@example.com",
+            to = listOf("carol@example.com"),
+            cc = emptyList(),
+            own = listOf("me@example.com"),
+        )
+
+        assertEquals(listOf("carol@example.com"), recipients)
+    }
+
+    /** A note to self has nobody else to reply to; an empty To would be worse than self. */
+    @Test
+    fun replyAllWithOnlyOwnAddressesKeepsThem() {
+        val recipients = replyAllRecipients(
+            sender = "me@example.com",
+            to = listOf("me@example.com"),
+            cc = emptyList(),
+            own = listOf("me@example.com"),
+        )
+
+        assertEquals(listOf("me@example.com"), recipients)
+    }
+
+    @Test
     fun valueWithNoAddressYieldsEmpty() {
         assertEquals("", addressFromHeader("Unknown sender"))
         assertEquals("", addressFromHeader(""))

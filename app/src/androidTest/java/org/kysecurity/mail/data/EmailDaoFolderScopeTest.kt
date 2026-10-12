@@ -102,6 +102,7 @@ class EmailDaoFolderScopeTest {
             upserts = listOf(row("1", "INBOX", "new")),
             removedIds = listOf("7"),
             pruneKeepIds = listOf("1"),
+            agedOutIds = emptyList(),
         )
 
         assertEquals(listOf("1"), dao.getByFolder("INBOX").map { it.messageId })
@@ -117,8 +118,64 @@ class EmailDaoFolderScopeTest {
             upserts = listOf(row("1", "INBOX", "new")),
             removedIds = emptyList(),
             pruneKeepIds = null,
+            agedOutIds = emptyList(),
         )
 
         assertEquals(setOf("1", "9"), dao.getByFolder("INBOX").map { it.messageId }.toSet())
+    }
+
+    /** A snapshot lists only the window. Rows below it, aged out or paged in, are not its to prune. */
+    @Test
+    fun snapshotPrunesOnlyWindowRowsAndAgedOutRowsLeaveTheWindow() {
+        dao.upsertAll(listOf(row("5", "INBOX", null), row("4", "INBOX", null), row("1", "INBOX", null).copy(inWindow = false)))
+
+        dao.applyFolderDelta(
+            folder = "INBOX",
+            upserts = listOf(row("6", "INBOX", null)),
+            removedIds = emptyList(),
+            pruneKeepIds = null,
+            agedOutIds = listOf("4"),
+        )
+        dao.replaceFolderSnapshot("INBOX", listOf(row("6", "INBOX", null)))
+
+        assertEquals(setOf("6", "4", "1"), dao.getByFolder("INBOX").map { it.messageId }.toSet())
+        assertEquals(false, dao.getById("4", "INBOX")?.inWindow)
+        assertEquals(setOf("6", "4", "1"), dao.getIds("INBOX").toSet())
+    }
+
+    /** Only absent rows dated before the snapshot's oldest leave the window; an undated row and a
+     *  row the snapshot lists stay in it, and another folder is untouched. */
+    @Test
+    fun markAgedOutBeforeComparesRelayTimestampsAndSkipsListedRows() {
+        dao.upsertAll(
+            listOf(
+                row("old", "INBOX", null).copy(atUtc = "2026-01-01T00:00:00Z"),
+                row("listed", "INBOX", null).copy(atUtc = "2025-01-01T00:00:00Z"),
+                row("newer", "INBOX", null).copy(atUtc = "2026-06-01T00:00:00Z"),
+                row("undated", "INBOX", null),
+                row("old", "Archive", null).copy(atUtc = "2026-01-01T00:00:00Z"),
+            ),
+        )
+
+        dao.markAgedOutBefore("INBOX", "2026-05-01T00:00:00Z", listOf("listed"))
+
+        assertEquals(false, dao.getById("old", "INBOX")?.inWindow)
+        assertEquals(true, dao.getById("listed", "INBOX")?.inWindow)
+        assertEquals(true, dao.getById("newer", "INBOX")?.inWindow)
+        assertEquals(true, dao.getById("undated", "INBOX")?.inWindow)
+        assertEquals(true, dao.getById("old", "Archive")?.inWindow)
+    }
+
+    /** The window and an overflow walk are stored through this; Room must roll both back. */
+    @Test
+    fun inTransactionRollsBackEveryWriteOnAThrow() {
+        runCatching {
+            dao.inTransaction {
+                dao.upsertAll(listOf(row("w1", "INBOX", null)))
+                throw IllegalStateException("simulated failure after the window")
+            }
+        }
+
+        assertNull(dao.getById("w1", "INBOX"))
     }
 }
