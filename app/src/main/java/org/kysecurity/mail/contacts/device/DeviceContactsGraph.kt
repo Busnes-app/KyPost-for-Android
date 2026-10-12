@@ -18,8 +18,8 @@ class DeviceContactsGraph(context: Context) {
         groupSyncRepository = ContactsRuntime.graph(appContext).groupSyncRepository,
     )
     val coordinator = DeviceContactSyncCoordinator(
-        repository = repository,
-        settings = settings,
+        syncAll = repository::syncAll,
+        enabled = settings::isEnabled,
         hostileLocationEnabled = { hostileLocationSettings.isEnabled() },
     )
     val observer = DeviceContactObserver(appContext, coordinator)
