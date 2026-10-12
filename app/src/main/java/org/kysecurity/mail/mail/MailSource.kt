@@ -240,11 +240,15 @@ interface MailSource {
     fun createFolder(parent: String, name: String): MailOutcome<Unit>
     fun renameFolder(folder: String, name: String): MailOutcome<Unit>
     fun deleteFolder(folder: String): MailOutcome<Unit>
+
+    /** A non-null [account] is checked against the pairing the request is built from; on a
+     *  mismatch nothing is sent. */
     fun performAction(
         action: MailAction,
         messageIds: List<String>,
         mailbox: String,
         targetMailbox: String? = null,
+        account: MailAccount? = null,
     ): MailOutcome<MailActionOutcome>
     fun saveDraft(draft: MailDraft): MailOutcome<Unit>
     fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit>
