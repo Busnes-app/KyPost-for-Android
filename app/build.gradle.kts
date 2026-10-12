@@ -536,6 +536,10 @@ tasks.withType<Test>().configureEach {
     inputs.files(fileTree("src/main/res") { include("layout*/*.xml") })
         .withPropertyName("layoutXml")
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    // And for KeyboardPrivacyTest's code rule: a comment-only edit leaves the bytecode unchanged.
+    inputs.files(fileTree("src/main/java") { include("**/*.kt") })
+        .withPropertyName("mainKotlinSources")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 dependencies {
