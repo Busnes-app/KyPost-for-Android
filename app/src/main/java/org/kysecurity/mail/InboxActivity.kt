@@ -1172,6 +1172,13 @@ class InboxActivity : LockedActivity() {
         selectionCallback.onActionItemClicked(mode, mode.menu.findItem(MENU_BULK_MOVE))
     }
 
+    /** Runs the selection overflow's Mark read / Mark unread handler, as tapping it would. */
+    @androidx.annotation.VisibleForTesting
+    internal fun bulkMarkForTest(read: Boolean) {
+        val mode = selectionMode ?: return
+        selectionCallback.onActionItemClicked(mode, mode.menu.findItem(if (read) MENU_BULK_MARK_READ else MENU_BULK_MARK_UNREAD))
+    }
+
     /** Null in production. Stands in for the folder picker, which answers asynchronously. */
     @androidx.annotation.VisibleForTesting
     internal var moveTargetPickerForTest: ((from: String, then: (String) -> Unit) -> Unit)? = null

@@ -6,10 +6,6 @@ import android.widget.ImageButton
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onIdle
-import androidx.test.espresso.Espresso.onView
-import androidx.test.espresso.action.ViewActions.click
-import androidx.test.espresso.matcher.RootMatchers.isPlatformPopup
-import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
@@ -31,7 +27,7 @@ import org.kysecurity.mail.mail.MailRuntime
 import java.util.concurrent.CountDownLatch
 
 /** Mark read / Mark unread against a relay the test controls: the detail button's result and
- *  recovery, the row menu, and the order a pending read and an unread reach the server in. */
+ *  recovery, the inbox selection, and the order a pending read and an unread reach the server in. */
 @RunWith(AndroidJUnit4::class)
 class MarkUnreadActionsTest {
 
@@ -61,13 +57,14 @@ class MarkUnreadActionsTest {
     private fun ActivityScenario<EmailDetailActivity>.tapMarkUnread() =
         onActivity { it.findViewById<ImageButton>(R.id.actionMarkUnread).performClick() }
 
-    private fun ActivityScenario<InboxActivity>.chooseFromRowMenu(label: String) {
+    /** Long-press selects the row; Mark unread then comes from the selection's overflow. */
+    private fun ActivityScenario<InboxActivity>.markSelectedUnread() {
         onIdle()
         onActivity { activity ->
             val list = activity.findViewById<RecyclerView>(R.id.recyclerViewInbox)
             list.findViewHolderForAdapterPosition(0)!!.itemView.performLongClick()
+            activity.bulkMarkForTest(read = false)
         }
-        onView(withText(label)).inRoot(isPlatformPopup()).perform(click())
     }
 
     @Test
@@ -124,9 +121,9 @@ class MarkUnreadActionsTest {
         assertEquals(MailAction.UNREAD, source.completed.last())
     }
 
-    /** The row menu's unread is ordered after a read the detail screen left in flight. */
+    /** The selection's unread is ordered after a read the detail screen left in flight. */
     @Test
-    fun rowMenuUnreadLandsAfterAPendingRead() {
+    fun selectionUnreadLandsAfterAPendingRead() {
         val heldRead = CountDownLatch(1)
         source.readGates.add(heldRead)
         ActivityScenario.launch<EmailDetailActivity>(detailIntent()).use { }
@@ -136,7 +133,7 @@ class MarkUnreadActionsTest {
                 activity.setFolderForTest(INBOX, KeywordTabs.ALL)
                 activity.setEmailsForTest(listOf(row(INBOX, "read")))
             }
-            scenario.chooseFromRowMenu(context.getString(R.string.action_mark_unread))
+            scenario.markSelectedUnread()
             source.awaitCompleted(MailAction.UNREAD, seconds = 3)
             heldRead.countDown()
             assertTrue(source.awaitCompleted(MailAction.UNREAD))
@@ -149,7 +146,7 @@ class MarkUnreadActionsTest {
     /** A completion for INBOX `42` must not repaint Archive's `42`, still on screen while the INBOX
      *  refresh is pending after a switch back. */
     @Test
-    fun aRowMenuCompletionRepaintsOnlyItsOwnFolder() {
+    fun aSelectionCompletionRepaintsOnlyItsOwnFolder() {
         val heldUnread = CountDownLatch(1)
         source.unreadGates.add(heldUnread)
         ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
@@ -157,7 +154,7 @@ class MarkUnreadActionsTest {
                 activity.setFolderForTest(INBOX, KeywordTabs.ALL)
                 activity.setEmailsForTest(listOf(row(INBOX, "read")))
             }
-            scenario.chooseFromRowMenu(context.getString(R.string.action_mark_unread))
+            scenario.markSelectedUnread()
             scenario.onActivity { activity ->
                 activity.setFolderForTest(ARCHIVE, KeywordTabs.ALL)
                 activity.setEmailsForTest(listOf(row(ARCHIVE, "read")))

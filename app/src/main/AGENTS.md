@@ -101,9 +101,10 @@ Owns production Android app code and resources.
      and reports nothing, so a pre-emptive local write bought no responsiveness and left the row
      lying about a state the server never reached. `markUnread` (KyPost-Server #350) follows the
      same rule, from the detail screen's Mark unread button and the inbox selection's overflow
-     (Mark read / Mark unread, one call per row; long-press stays select); neither repaints the row until the relay confirms. A server
-     without the action answers 400 "unsupported action", which is toasted as is. The open's
-     markRead, the detail button and the row menu all go through `ReadStateLane.ordered`, a
+     (Mark read / Mark unread, one call per row; long-press stays select); neither repaints the
+     row until the relay confirms. A server without the action answers 400 "unsupported
+     action", which is toasted as is. The open's
+     markRead, the detail button and the inbox selection all go through `ReadStateLane.ordered`, a
      process-wide chain: each read-state change waits for the one requested before it (30 s at
      most), across screens and reopens. The pool has two threads, so without it a read still in
      flight could land after the unread and win. The row repaint matches folder as well as id.
