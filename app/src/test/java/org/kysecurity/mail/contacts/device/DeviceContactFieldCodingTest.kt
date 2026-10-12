@@ -246,4 +246,20 @@ class DeviceContactFieldCodingTest {
         assertNull(DeviceContactFieldCoding.eventLabelFromType(Event.TYPE_OTHER))
         assertNull(DeviceContactFieldCoding.eventLabelFromType(null))
     }
+
+    /** The key a rebuilt relation is looked up by is the label the snapshot decodes from the row
+     *  Room's label is written as; null and blank read back as "other", a custom label as itself. */
+    @Test
+    fun relationReadBack_isWhatTheSnapshotDecodes() {
+        for (label in listOf(null, "", "friend", "mentor")) {
+            val written = DeviceContactFieldCoding.relationType(label) to DeviceContactFieldCoding.relationCustomLabel(label)
+            assertEquals(
+                DeviceContactFieldCoding.relationLabelFromType(written.first, written.second),
+                DeviceContactFieldCoding.relationReadBack(label),
+                "label $label",
+            )
+        }
+        assertEquals("other", DeviceContactFieldCoding.relationReadBack(null))
+        assertEquals("mentor", DeviceContactFieldCoding.relationReadBack("mentor"))
+    }
 }

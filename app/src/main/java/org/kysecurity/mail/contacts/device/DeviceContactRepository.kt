@@ -857,7 +857,8 @@ class DeviceContactRepository(
                 .withValue(REL.NAME, relation.name)
                 .withValue(REL.TYPE, DeviceContactFieldCoding.relationType(relation.label))
                 .withValue(REL.LABEL, DeviceContactFieldCoding.relationCustomLabel(relation.label))
-            k.restore(row, REL.CONTENT_ITEM_TYPE, relation.label, relation.name).build()
+            // Keyed by the readback, as the snapshot keys it: Room's null reads back as "other".
+            k.restore(row, REL.CONTENT_ITEM_TYPE, DeviceContactFieldCoding.relationReadBack(relation.label), relation.name).build()
         }
     }
 

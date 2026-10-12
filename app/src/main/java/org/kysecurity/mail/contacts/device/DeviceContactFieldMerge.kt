@@ -36,10 +36,7 @@ object DeviceContactFieldMerge {
             country = normal(v.country) as String?,
         )
         is ContactRelationDto -> ContactRelationDto(
-            label = DeviceContactFieldCoding.relationLabelFromType(
-                DeviceContactFieldCoding.relationType(v.label),
-                DeviceContactFieldCoding.relationCustomLabel(v.label),
-            ),
+            label = DeviceContactFieldCoding.relationReadBack(v.label),
             name = v.name.trim(),
         )
         is ContactImDto -> {
