@@ -34,9 +34,12 @@ class ComposePgpController(
     private val enrollmentProbe: suspend () -> Boolean = { false },
 ) {
 
-    /** Bootstrap is cached on success only; enrollment is re-probed. Couldn't-check hides all. */
-    suspend fun composeState(): PgpComposeState {
-        val bootstrap = bootstrap() ?: return pgpComposeStateOf(hasIdentity = null, protection = null)
+    /** Bootstrap is cached on success only; enrollment is re-probed. Null means couldn't-check
+     *  (unpaired or the fetch failed), which is not "no identity": custody stays unknown and
+     *  compose keeps Send blocked, because all-false flags would let a client-custody account send
+     *  in the clear. */
+    suspend fun composeState(): PgpComposeState? {
+        val bootstrap = bootstrap() ?: return null
         return pgpComposeStateOf(
             hasIdentity = bootstrap.hasIdentity,
             protection = bootstrap.protection,
@@ -55,6 +58,9 @@ class ComposePgpController(
     /** The address every client-encrypted delivery's `From` must carry. Blank when unknown, which
      *  [pgpComposeStateOf] already degrades to the webmail handoff. */
     suspend fun accountAddress(): String = bootstrap()?.accountAddress.orEmpty()
+
+    /** Every address this account sends as; empty when unknown. */
+    suspend fun accountAddresses(): List<String> = bootstrap()?.addresses.orEmpty()
 
     /** The cached bootstrap, or null when unpaired or the fetch failed. */
     private suspend fun bootstrap(): PgpBootstrapResult.Success? {

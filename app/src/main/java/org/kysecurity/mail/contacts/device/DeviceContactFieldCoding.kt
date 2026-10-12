@@ -132,6 +132,9 @@ object DeviceContactFieldCoding {
     fun relationCustomLabel(label: String?): String? =
         if (relationType(label) == Relation.TYPE_CUSTOM) label else null
 
+    /** What Room's [label] reads back as once written: the label the snapshot decodes. */
+    fun relationReadBack(label: String?): String = relationLabelFromType(relationType(label), relationCustomLabel(label))
+
     /** `label == "anniversary"` -> `Event.TYPE_ANNIVERSARY`; anything else -> `Event.TYPE_CUSTOM`.
      *  Birthday is unaffected — it stays the separate, existing `Event.TYPE_BIRTHDAY` row. */
     fun eventType(label: String?): Int = if (label == "anniversary") Event.TYPE_ANNIVERSARY else Event.TYPE_CUSTOM

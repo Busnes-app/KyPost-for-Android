@@ -1,13 +1,19 @@
 package org.kysecurity.mail.mail
 
 import android.content.Context
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import org.kysecurity.mail.ScopedValue
 import kotlinx.coroutines.runBlocking
 
-private val Context.mailSyncDataStore by preferencesDataStore(name = "mail_sync_state")
+internal val Context.mailSyncDataStore by preferencesDataStore(
+    name = "mail_sync_state",
+    // Metadata only: a corrupt file reads as empty instead of blocking every wipe and unpair.
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
+)
 
 private const val FULL_RESYNC_INTERVAL_MS = 24L * 60 * 60 * 1000
 
@@ -16,7 +22,7 @@ interface MailCursorProvider {
     fun cursor(subscriberId: String, folder: String): String?
     fun saveCursor(subscriberId: String, folder: String, cursor: String)
     /** True once a day (per subscriber+folder) or if a full resync has never been recorded —
-     *  the documented self-heal for a missed removal notification (Mobile_Mail_Relay.md Part 5). */
+     *  the documented self-heal for a missed removal notification (docs/Mobile_Mail_Relay.md Part 5). */
     fun shouldForceFullResync(subscriberId: String, folder: String): Boolean
     fun recordFullResync(subscriberId: String, folder: String)
 }

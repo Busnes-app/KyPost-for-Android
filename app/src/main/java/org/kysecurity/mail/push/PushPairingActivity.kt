@@ -130,6 +130,7 @@ class PushPairingActivity : LockedActivity() {
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch { viewModel.paired.collect { org.kysecurity.mail.security.AppLockOffer.showIfDue(this@PushPairingActivity) } }
                 viewModel.uiState.collect { state -> render(state) }
             }
         }
@@ -245,7 +246,8 @@ class PushPairingActivity : LockedActivity() {
         btnKyIdentitySignOn.isEnabled = !state.isWorking
         chipUseUnifiedPush.isChecked = isUnifiedPush
         chipUseFirebase.isChecked = !isUnifiedPush
-        chipUseUnifiedPush.isEnabled = !state.isWorking && paired && !isUnifiedPush
+        // Not gated on pairing: the fdroid build cannot pair until a distributor has an endpoint.
+        chipUseUnifiedPush.isEnabled = !state.isWorking && !isUnifiedPush
         chipUseFirebase.isEnabled = !state.isWorking && paired && isUnifiedPush
 
         val message = state.localMessage
@@ -293,7 +295,8 @@ class PushPairingActivity : LockedActivity() {
             .setNegativeButton(R.string.contact_sync_intro_negative) { _, _ -> scanQr() }
             .setOnCancelListener { scanQr() }
             .setOnDismissListener { settings.setHasShownSyncIntro(true) }
-            .show()
+            .create()
+            .showSecurely()
     }
 
     private fun scanQr() {

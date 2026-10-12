@@ -39,19 +39,22 @@ class KyPostUnifiedPushService : PushService() {
             return
         }
         val graph = PushRuntime.graph(applicationContext)
-        serviceScope.launch {
+        // Captured now: an unpair or wipe that starts after this callback ends the session it was for.
+        val generation = org.kysecurity.mail.ProcessState.generation()
+        graph.syncCoordinator.enqueueUnifiedPush {
             // WebPush (RFC 8291) keys; without them onMessage only ever sees ciphertext.
-            graph.syncCoordinator.syncProvidedToken(
+            acceptUnifiedPushEndpoint(
                 endpoint.url,
-                transport = PushTransport.UNIFIED_PUSH,
                 p256dh = endpoint.pubKeySet?.pubKey,
                 auth = endpoint.pubKeySet?.auth,
+                generation = generation,
             )
         }
     }
 
     override fun onRegistrationFailed(reason: FailedReason, instance: String) {
         val graph = PushRuntime.graph(applicationContext)
+        val generation = org.kysecurity.mail.ProcessState.generation()
         val message = unifiedPushFailureMessage(reason.toString(), ChannelPush.canReplaceUnifiedPush)
 
         if (!ChannelPush.canReplaceUnifiedPush) {
@@ -60,7 +63,8 @@ class KyPostUnifiedPushService : PushService() {
             // blip — into a state the user can only leave by re-pairing. And do not re-register:
             // there is no other transport to register on, so it would fail for a second reason
             // and overwrite the one that explains this.
-            serviceScope.launch {
+            graph.syncCoordinator.enqueueUnifiedPush {
+                if (!org.kysecurity.mail.ProcessState.isCurrent(generation)) return@enqueueUnifiedPush
                 graph.repository.updateSyncState(lastSyncAtEpochMs = null, syncError = message)
             }
             return
@@ -68,19 +72,23 @@ class KyPostUnifiedPushService : PushService() {
 
         // Clear the stale distributor and fall back to FCM so the user isn't left with no delivery.
         UnifiedPush.removeDistributor(applicationContext)
-        serviceScope.launch {
+        graph.syncCoordinator.enqueueUnifiedPush {
+            // A revocation from an ended session must not touch the new one's state.
+            if (!forgetUnifiedPushEndpoint(generation)) return@enqueueUnifiedPush
             graph.repository.updateSyncState(lastSyncAtEpochMs = null, syncError = message)
-            graph.syncCoordinator.syncCurrentPairingToken()
+            syncCurrentPairingToken()
         }
     }
 
     override fun onUnregistered(instance: String) {
         val graph = PushRuntime.graph(applicationContext)
+        val generation = org.kysecurity.mail.ProcessState.generation()
         if (!ChannelPush.canReplaceUnifiedPush) {
             // Nothing to fall back to. Say so instead of silently re-registering on a transport
             // this build does not have: that call fails, and the pairing screen would show the
             // generic "unable to obtain a token" rather than the fact the user unregistered.
-            serviceScope.launch {
+            graph.syncCoordinator.enqueueUnifiedPush {
+                if (!forgetUnifiedPushEndpoint(generation)) return@enqueueUnifiedPush
                 graph.repository.updateSyncState(
                     lastSyncAtEpochMs = null,
                     syncError = "No UnifiedPush distributor is selected, so notifications are stopped.",
@@ -90,8 +98,9 @@ class KyPostUnifiedPushService : PushService() {
         }
         // Explicit unregistration (user switched distributor away, or picked "none"):
         // fall back to FCM so delivery keeps working without user intervention.
-        serviceScope.launch {
-            graph.syncCoordinator.syncCurrentPairingToken()
+        graph.syncCoordinator.enqueueUnifiedPush {
+            if (!forgetUnifiedPushEndpoint(generation)) return@enqueueUnifiedPush
+            syncCurrentPairingToken()
         }
     }
 

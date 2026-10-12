@@ -13,6 +13,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.SwitchCompat
 import androidx.lifecycle.lifecycleScope
 import org.kysecurity.mail.R
+import org.kysecurity.mail.noPersonalizedLearning
 import org.kysecurity.mail.addViewSpaced
 import org.kysecurity.mail.applyDangerButtonTheme
 import org.kysecurity.mail.applyGhostButtonTheme
@@ -506,7 +507,8 @@ class SecuritySettingsActivity : LockedActivity() {
                 }
             }
             .setNegativeButton(android.R.string.cancel, null)
-            .show()
+            .create()
+            .showSecurely()
     }
 
     /** Same re-entrancy hazard as [revertLockSwitch], guarded the same way. */
@@ -665,10 +667,12 @@ class SecuritySettingsActivity : LockedActivity() {
     /** [onConfirmed] takes ownership of the PIN array and must zero it — [usePin] does that. */
     private fun promptEnterAndConfirmPin(onConfirmed: (CharArray) -> Unit, onCancelled: () -> Unit) {
         val pinField = android.widget.EditText(this).apply {
+            noPersonalizedLearning()
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
             hint = getString(R.string.unlock_pin_hint)
         }
         val confirmField = android.widget.EditText(this).apply {
+            noPersonalizedLearning()
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
             hint = getString(R.string.security_confirm_pin_hint)
         }
@@ -997,6 +1001,7 @@ class SecuritySettingsActivity : LockedActivity() {
     /** Single-field PIN prompt shared by the change-PIN, disable-lock and credential-gate flows. */
     private fun promptForPin(titleRes: Int, onCancelled: () -> Unit = {}, onEntered: (CharArray) -> Unit) {
         val pinField = android.widget.EditText(this).apply {
+            noPersonalizedLearning()
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
             hint = getString(R.string.unlock_pin_hint)
         }

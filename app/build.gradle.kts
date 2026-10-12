@@ -532,6 +532,14 @@ tasks.withType<Test>().configureEach {
         "src/fdroid/res/values/strings.xml",
     ).withPropertyName("pairingChooserLabelSources")
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    // Same gap for KeyboardPrivacyTest and LayoutVariantIdsTest, which read every layout XML.
+    inputs.files(fileTree("src/main/res") { include("layout*/*.xml") })
+        .withPropertyName("layoutXml")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    // And for KeyboardPrivacyTest's code rule: a comment-only edit leaves the bytecode unchanged.
+    inputs.files(fileTree("src/main/java") { include("**/*.kt") })
+        .withPropertyName("mainKotlinSources")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 dependencies {
@@ -595,6 +603,15 @@ dependencies {
     // to enqueue against the real scheduler, which would actually run the worker — a real network
     // call carrying this device's credential, from a test.
     androidTestImplementation(libs.androidx.work.testing)
+
+    // Lint's own classpath; same floors and reasoning as the buildscript block in ../build.gradle.kts.
+    constraints {
+        "androidLintTool"("org.bouncycastle:bcprov-jdk18on:1.86")
+        "androidLintTool"("org.bouncycastle:bcpkix-jdk18on:1.86")
+        "androidLintTool"("org.bouncycastle:bcutil-jdk18on:1.86")
+        "androidLintTool"("org.apache.commons:commons-lang3:3.18.0")
+        "androidLintTool"("org.apache.httpcomponents:httpclient:4.5.14")
+    }
 }
 
 ksp {

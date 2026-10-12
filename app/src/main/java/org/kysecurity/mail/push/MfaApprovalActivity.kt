@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import org.kysecurity.mail.R
+import org.kysecurity.mail.noPersonalizedLearning
 import org.kysecurity.mail.security.applyOverlayProtection
 import org.kysecurity.mail.security.applySecureFlag
 import org.kysecurity.mail.security.filterObscuredTouchesRecursively
@@ -423,6 +424,7 @@ class MfaApprovalActivity : AppCompatActivity() {
     private fun promptAppLockPin(posture: LockPosture) {
         pinDialog?.dismiss()
         val pinField = android.widget.EditText(this).apply {
+            noPersonalizedLearning()
             inputType = android.text.InputType.TYPE_CLASS_NUMBER or
                 android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD
             hint = getString(R.string.unlock_pin_hint)

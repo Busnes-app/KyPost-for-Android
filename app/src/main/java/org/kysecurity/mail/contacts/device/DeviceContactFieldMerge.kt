@@ -19,7 +19,8 @@ object DeviceContactFieldMerge {
     }
 
     /** Compares as CP2 stores: null, blank and empty are one value, since CP2 drops an empty row,
-     *  and labels ignore case, since CP2 reads Room's "home" back as TYPE_HOME, "Home". */
+     *  labels ignore case, since CP2 reads Room's "home" back as TYPE_HOME, "Home", and relations
+     *  and IMs compare as written and read back, which can drop a label. */
     fun same(a: Any?, b: Any?): Boolean = a == b || normal(a) == normal(b)
 
     private fun normal(v: Any?): Any? = when (v) {
@@ -34,6 +35,15 @@ object DeviceContactFieldMerge {
             postalCode = normal(v.postalCode) as String?,
             country = normal(v.country) as String?,
         )
+        is ContactRelationDto -> ContactRelationDto(
+            label = DeviceContactFieldCoding.relationReadBack(v.label),
+            name = v.name.trim(),
+        )
+        is ContactImDto -> {
+            val protocol = DeviceContactFieldCoding.imCustomProtocolLabel(v.service, v.label)
+            val service = DeviceContactFieldCoding.imServiceFromCustomProtocolLabel(protocol)
+            v.copy(service = service, label = protocol.takeIf { service.isEmpty() }, value = v.value.trim())
+        }
         else -> v
     }
 

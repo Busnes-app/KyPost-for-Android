@@ -2,11 +2,11 @@
   "formatVersion": 1,
   "database": {
     "version": 15,
-    "identityHash": "946b2bbd68172502282a4632df99e31c",
+    "identityHash": "e0676573e4de83972670ab20942edfd3",
     "entities": [
       {
         "tableName": "emails",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`messageId` TEXT NOT NULL, `folder` TEXT NOT NULL, `sender` TEXT NOT NULL, `sentTo` TEXT NOT NULL, `cc` TEXT NOT NULL, `bcc` TEXT NOT NULL, `subject` TEXT NOT NULL, `preview` TEXT NOT NULL, `body` TEXT, `bodyMode` TEXT NOT NULL, `label` TEXT NOT NULL, `keywordsJson` TEXT NOT NULL, `status` TEXT NOT NULL, `atUtc` TEXT, `hasAttachments` INTEGER NOT NULL, `sourceMode` TEXT NOT NULL, `pgpEncrypted` INTEGER NOT NULL, `pgpSigned` INTEGER NOT NULL, `pgpVerified` INTEGER NOT NULL, `pgpSignerFingerprint` TEXT NOT NULL, `pgpDecryptError` TEXT NOT NULL, PRIMARY KEY(`folder`, `messageId`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`messageId` TEXT NOT NULL, `folder` TEXT NOT NULL, `sender` TEXT NOT NULL, `sentTo` TEXT NOT NULL, `cc` TEXT NOT NULL, `bcc` TEXT NOT NULL, `subject` TEXT NOT NULL, `preview` TEXT NOT NULL, `body` TEXT, `bodyMode` TEXT NOT NULL, `label` TEXT NOT NULL, `keywordsJson` TEXT NOT NULL, `status` TEXT NOT NULL, `atUtc` TEXT, `hasAttachments` INTEGER NOT NULL, `sourceMode` TEXT NOT NULL, `pgpEncrypted` INTEGER NOT NULL, `pgpSigned` INTEGER NOT NULL, `pgpVerified` INTEGER NOT NULL, `pgpSignerFingerprint` TEXT NOT NULL, `pgpDecryptError` TEXT NOT NULL, `inWindow` INTEGER NOT NULL, PRIMARY KEY(`folder`, `messageId`))",
         "fields": [
           {
             "fieldPath": "messageId",
@@ -130,6 +130,12 @@
             "fieldPath": "pgpDecryptError",
             "columnName": "pgpDecryptError",
             "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "inWindow",
+            "columnName": "inWindow",
+            "affinity": "INTEGER",
             "notNull": true
           }
         ],
@@ -433,7 +439,7 @@
       },
       {
         "tableName": "device_contact_links",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`uid` TEXT NOT NULL, `rawContactId` INTEGER NOT NULL, `deviceUpdatedAtEpochMs` INTEGER NOT NULL, `syncedJson` TEXT NOT NULL, PRIMARY KEY(`uid`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`uid` TEXT NOT NULL, `rawContactId` INTEGER NOT NULL, `deviceUpdatedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`uid`))",
         "fields": [
           {
             "fieldPath": "uid",
@@ -451,12 +457,6 @@
             "fieldPath": "deviceUpdatedAtEpochMs",
             "columnName": "deviceUpdatedAtEpochMs",
             "affinity": "INTEGER",
-            "notNull": true
-          },
-          {
-            "fieldPath": "syncedJson",
-            "columnName": "syncedJson",
-            "affinity": "TEXT",
             "notNull": true
           }
         ],
@@ -596,7 +596,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '946b2bbd68172502282a4632df99e31c')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'e0676573e4de83972670ab20942edfd3')"
     ]
   }
 }

@@ -6,6 +6,8 @@ import org.kysecurity.mail.pgp.OUTER_PLACEHOLDER_SUBJECT
 import org.kysecurity.mail.push.PairingData
 import org.kysecurity.mail.testing.streamingResponse
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -534,6 +536,67 @@ class RelayMailSourceTest {
         assertEquals("secret-1", sentRequest.header(HEADER_DEVICE_SECRET))
         assertNull(sentRequest.url.queryParameter("sub"))
         assertNull(sentRequest.url.queryParameter("hash"))
+    }
+
+    @Test
+    fun searchMail_queriesOneMailboxWithThisDevicesCredentials() {
+        val callFactory = FakeCallFactory { request -> jsonResponse(request, """{"results": []}""") }
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = callFactory,
+        )
+
+        source.searchMail("invoice & co", "INBOX.Sent", 50)
+
+        val request = callFactory.requests.single()
+        assertEquals("GET", request.method)
+        assertEquals("/api/mail/search", request.url.encodedPath)
+        assertEquals("invoice & co", request.url.queryParameter("q"))
+        assertEquals("INBOX.Sent", request.url.queryParameter("mailbox"))
+        assertEquals("50", request.url.queryParameter("limit"))
+        assertEquals("device-1", request.header(HEADER_DEVICE_ID))
+        assertEquals("secret-1", request.header(HEADER_DEVICE_SECRET))
+    }
+
+    @Test
+    fun searchMail_stampsResultsWithTheSearchedMailbox() {
+        val callFactory = FakeCallFactory { request ->
+            jsonResponse(
+                request,
+                """{"results": [{"messageId": "42", "sender": "a@example.com", "subject": "Invoice",
+                    "label": "Billing", "keywords": ["${'$'}Phishing"], "status": "read",
+                    "atUtc": "2026-10-09T12:00:00Z"}]}""",
+            )
+        }
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = callFactory,
+        )
+
+        val email = (source.searchMail("invoice", "Archive", 50) as MailOutcome.Success).value.single()
+
+        assertEquals("42", email.id)
+        assertEquals("Archive", email.folder)
+        assertEquals("read", email.status)
+        assertEquals("2026-10-09T12:00:00Z", email.atUtc)
+        assertEquals(setOf("${'$'}Phishing", "Billing"), email.keywords)
+        assertNull(email.body)
+    }
+
+    @Test
+    fun searchMail_failuresAreOutcomesNotExceptions() {
+        fun searchAgainst(code: Int, body: String): MailOutcome<List<org.kysecurity.mail.Email>> =
+            RelayMailSource(
+                pairingProvider = { testPairing() },
+                cursorProvider = FakeMailCursorProvider(),
+                callFactory = FakeCallFactory { request -> jsonResponse(request, body, code) },
+            ).searchMail("x", "INBOX", 50)
+
+        assertTrue(searchAgainst(503, "search failed") is MailOutcome.ServiceUnavailable)
+        assertTrue(searchAgainst(401, "") is MailOutcome.Unauthorized)
+        assertTrue(searchAgainst(200, "<html>") is MailOutcome.UpstreamFailure)
     }
 
     @Test
@@ -1067,6 +1130,125 @@ class RelayMailSourceTest {
     }
 
     @Test
+    fun calendarReply_ridesOnSendOnly_andIsAbsentOtherwise() {
+        val callFactory = BodyRecordingCallFactory { request ->
+            jsonResponse(request, """{"ok":true,"sentSaved":true,"warning":""}""")
+        }
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = callFactory,
+        )
+        val rsvp = MailDraft(
+            to = "boss@example.com", subject = "Accepted: x", body = "b",
+            from = "alias@example.com", calendarReply = "BEGIN:VCALENDAR\r\n",
+        )
+
+        assertTrue(source.sendMail(rsvp) is MailOutcome.Success)
+        source.sendMail(rsvp.copy(calendarReply = null))
+        source.saveDraft(rsvp)
+
+        val wire = Json.parseToJsonElement(callFactory.bodies[0]).jsonObject
+        assertEquals("https://relay.example.com/api/mail/send", callFactory.urls[0])
+        assertEquals("BEGIN:VCALENDAR\r\n", wire["calendarReply"]!!.jsonObject["ics"]!!.jsonPrimitive.content)
+        assertEquals("alias@example.com", wire["from"]!!.jsonPrimitive.content)
+        // The relay refuses calendarReply beside either flag; encodeDefaults=false omits them.
+        assertNull(wire["encrypt"])
+        assertNull(wire["sign"])
+        assertFalse("calendarReply" in Json.parseToJsonElement(callFactory.bodies[1]).jsonObject)
+        assertFalse("calendarReply" in Json.parseToJsonElement(callFactory.bodies[2]).jsonObject)
+    }
+
+    @Test
+    fun calendarReplyAck_isReadOnlyAsAJsonTrue() {
+        fun send(body: String) = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body) },
+        ).sendMail(MailDraft(to = "boss@example.com", subject = "s", body = "b", calendarReply = "x"))
+
+        val acked = send("""{"ok":true,"sentSaved":true,"warning":"","calendarReply":true}""")
+        assertTrue((acked as MailOutcome.Success).value.calendarReplySent)
+        // An older relay ignores the field and still answers 200: the organizer got plain mail.
+        val ignored = send("""{"ok":true,"sentSaved":true,"warning":""}""")
+        assertFalse((ignored as MailOutcome.Success).value.calendarReplySent)
+        assertFalse(send("""{"ok":true,"calendarReply":false}""").let { (it as MailOutcome.Success).value.calendarReplySent })
+        // Not a JSON boolean: the reply is not understood, so it is not a success either.
+        assertTrue(send("""{"ok":true,"calendarReply":"yes"}""") is MailOutcome.UpstreamFailure)
+        // A quoted boolean is a string, not the ack; kotlinx would otherwise coerce it.
+        listOf("\"true\"", "\"false\"", "1", "null").forEach { value ->
+            val outcome = send("""{"ok":true,"calendarReply":$value}""")
+            assertEquals(value, MailOutcome.UpstreamFailure("Malformed send response"), outcome)
+        }
+    }
+
+    @Test
+    fun queuedRsvp_neverReachesAReplacementAccountsRelay() {
+        var pairing = testPairing()
+        val calls = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true,"calendarReply":true}""") }
+        val source = RelayMailSource(pairingProvider = { pairing }, cursorProvider = FakeMailCursorProvider(), callFactory = calls)
+        val rsvp = MailDraft(to = "boss@example.com", subject = "Accepted: x", body = "b", calendarReply = "ics")
+
+        // Queued under the first account...
+        val account = assertNotNullAccount(source.currentAccount())
+        val session = org.kysecurity.mail.ProcessState.generation()
+        // ...then the pairing is replaced before the worker runs: first the staged window, where
+        // the new pairing is saved but the purge has not yet advanced the generation.
+        pairing = testPairing().copy(subscriberId = "sub-2", serverUrl = "https://other-relay.example.org")
+        assertTrue(sendBoundRsvp(rsvp, account, session, source::sendMail) is MailOutcome.Unauthorized)
+        // ...and after the purge, when the session itself has ended.
+        org.kysecurity.mail.ProcessState.advanceGeneration()
+        assertNull(sendBoundRsvp(rsvp, account, session, source::sendMail))
+
+        assertEquals(emptyList<String>(), calls.urls)
+        // The same account in the same session still sends.
+        pairing = testPairing()
+        val now = org.kysecurity.mail.ProcessState.generation()
+        assertTrue(sendBoundRsvp(rsvp, account, now, source::sendMail) is MailOutcome.Success)
+        assertEquals(listOf("https://relay.example.com/api/mail/send"), calls.urls)
+    }
+
+    private fun assertNotNullAccount(account: MailAccount?): MailAccount {
+        assertTrue(account != null)
+        return account!!
+    }
+
+    @Test
+    fun calendarReplyRefusal_surfacesTheRelaysReason() {
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request ->
+                Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(400).message("Bad Request")
+                    .body("invalid calendar reply: calendar reply needs exactly one VEVENT".toResponseBody("text/plain".toMediaType()))
+                    .build()
+            },
+        )
+
+        val outcome = source.sendMail(MailDraft(to = "a@example.com", subject = "s", body = "b", calendarReply = "x"))
+
+        assertEquals(
+            "invalid calendar reply: calendar reply needs exactly one VEVENT",
+            (outcome as MailOutcome.BadRequest).message,
+        )
+    }
+
+    @Test
+    fun listAttachments_carriesTheCalendarMethod() {
+        val body = """{"ok":true,"attachments":[{"index":0,"name":"a.pdf","mimeType":"application/pdf","size":3},""" +
+            """{"index":1,"name":"invite.ics","mimeType":"text/calendar","size":9,"calendarMethod":"REQUEST"}]}"""
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body) },
+        )
+
+        val infos = (source.listAttachments("7", "INBOX") as MailOutcome.Success).value
+
+        assertEquals(listOf("", "REQUEST"), infos.map { it.calendarMethod })
+    }
+
+    @Test
     fun sendClientEncrypted_postsCiphertextToTheSendPgpEndpoint() {
         val callFactory = BodyRecordingCallFactory { request ->
             jsonResponse(request, """{"ok":true,"sentSaved":true,"warning":""}""")
@@ -1192,5 +1374,287 @@ class RelayMailSourceTest {
         val outcome = source.sendMail(MailDraft(to = "a@example.com", subject = "s", body = "b"))
 
         assertEquals(reason, (outcome as MailOutcome.BadRequest).message)
+    }
+
+    private fun sourceAnswering(body: String, cursor: String? = null): Pair<RelayMailSource, FakeCallFactory> {
+        val callFactory = FakeCallFactory { request -> jsonResponse(request, body) }
+        return RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(storedCursor = cursor),
+            callFactory = callFactory,
+        ) to callFactory
+    }
+
+    @Test
+    fun fetchOlder_asksForMetadataBeforeTheGivenRowWithoutACursor() {
+        val (source, calls) = sourceAnswering(
+            """{"tabs": ["Uncategorized"], "byTab": {"Uncategorized": [{"messageId": "40", "subject": "S", "status": "read"}]}, "hasMore": true, "nextBefore": "40"}""",
+            cursor = "c-9",
+        )
+
+        val page = (source.fetchOlder("Archive", 50, "41") as MailOutcome.Success).value
+
+        val url = calls.requests.single().url
+        assertEquals("/api/inbox", url.encodedPath)
+        assertEquals("41", url.queryParameter("before"))
+        assertEquals("50", url.queryParameter("limit"))
+        assertEquals("Archive", url.queryParameter("mailbox"))
+        assertEquals("0", url.queryParameter("bodies"))
+        assertNull("a page never sends or moves the cursor", url.queryParameter("since"))
+        assertEquals(listOf("40"), page.messages.map { it.id })
+        assertEquals(true, page.hasMore)
+        assertEquals("40", page.nextBefore)
+    }
+
+    /** A pre-#348 server ignores before= and answers with its window, without hasMore. */
+    @Test
+    fun fetchOlder_reportsAServerThatIgnoredBefore() {
+        val (source, _) = sourceAnswering("""{"tabs": [], "byTab": {}, "cursor": "c1", "delta": false, "removed": []}""")
+
+        val page = (source.fetchOlder("INBOX", 50, "41") as MailOutcome.Success).value
+
+        assertNull(page.hasMore)
+    }
+
+    @Test
+    fun fetchOlder_staleReferenceIsTheServersBadRequest() {
+        val callFactory = FakeCallFactory { request ->
+            jsonResponse(request, "invalid before message reference; refresh the mailbox", code = 400)
+        }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = callFactory)
+
+        val outcome = source.fetchOlder("INBOX", 50, "x")
+
+        assertEquals("invalid before message reference; refresh the mailbox", (outcome as MailOutcome.BadRequest).message)
+    }
+
+    @Test
+    fun deltaPoll_parsesAgedOutAndOverflow() {
+        val (source, _) = sourceAnswering(
+            """{"tabs": [], "byTab": {}, "cursor": "c2", "delta": true, "removed": ["r1"], "agedOut": ["a1"], "hasMore": true, "nextBefore": "77"}""",
+            cursor = "c1",
+        )
+
+        val result = (source.fetchInbox("INBOX", 50) as MailOutcome.Success).value
+
+        assertEquals(listOf("r1"), result.removedMessageIds)
+        assertEquals(listOf("a1"), result.agedOutMessageIds)
+        assertTrue(result.hasMore)
+        assertEquals("77", result.nextBefore)
+    }
+
+    /** `delta: false` answering a cursor means the window did not recognise it: a full snapshot. */
+    @Test
+    fun unrecognisedCursorAnswerIsASnapshotNotADelta() {
+        val (source, calls) = sourceAnswering(
+            """{"tabs": [], "byTab": {}, "cursor": "c-new", "delta": false, "removed": []}""",
+            cursor = "c-foreign",
+        )
+
+        val result = (source.fetchInbox("INBOX", 50) as MailOutcome.Success).value
+
+        assertEquals("c-foreign", calls.requests.single().url.queryParameter("since"))
+        assertFalse(result.isDelta)
+    }
+
+    @Test
+    fun unreadAction_postsTheUnreadWireValue() {
+        val calls = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true,"processed":1}""") }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        source.performAction(MailAction.UNREAD, listOf("42"), "INBOX")
+
+        assertTrue(calls.urls.single().endsWith("/api/inbox/actions"))
+        assertTrue(calls.bodies.single(), calls.bodies.single().contains("\"action\":\"unread\""))
+    }
+
+    /** Pre-#350 relays refuse the action with plain-text 400; that text is what the user sees. */
+    @Test
+    fun unreadAction_onAServerWithoutIt_isTheServersBadRequest() {
+        val calls = FakeCallFactory { request -> jsonResponse(request, "unsupported action\n", code = 400) }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        val outcome = source.performAction(MailAction.UNREAD, listOf("42"), "INBOX")
+
+        assertEquals("unsupported action", (outcome as MailOutcome.BadRequest).message)
+    }
+
+    // --- an action belongs to the account it was created under ------------------------------------
+
+    private fun actionSource(callFactory: FakeCallFactory) = RelayMailSource(
+        pairingProvider = { testPairing() },
+        cursorProvider = FakeMailCursorProvider(),
+        callFactory = callFactory,
+    )
+
+    @Test
+    fun anActionCreatedUnderAnotherAccountSendsNoRequest() {
+        val callFactory = FakeCallFactory { request -> jsonResponse(request, """{"processed":1,"failed":[]}""") }
+
+        val outcome = actionSource(callFactory).performAction(
+            MailAction.DELETE,
+            listOf("42"),
+            "INBOX",
+            account = MailAccount(subscriberId = "sub-0", serverUrl = "https://relay.example.com"),
+        )
+
+        assertTrue(callFactory.requests.isEmpty())
+        assertTrue(outcome is MailOutcome.Unauthorized)
+    }
+
+    @Test
+    fun anActionCreatedUnderTheCurrentAccountIsSent() {
+        val callFactory = FakeCallFactory { request -> jsonResponse(request, """{"processed":1,"failed":[]}""") }
+
+        val outcome = actionSource(callFactory).performAction(
+            MailAction.DELETE,
+            listOf("42"),
+            "INBOX",
+            account = testPairing().mailAccount(),
+        )
+
+        assertEquals(1, callFactory.requests.size)
+        assertTrue(outcome is MailOutcome.Success)
+    }
+
+    // --- Preview snippet (KyPost-Server #351) ----------------------------------------------------
+
+    @Test
+    fun inboxRequest_asksForPreviews() {
+        val (source, calls) = sourceAnswering("""{"tabs": [], "byTab": {}, "cursor": "c1", "delta": false}""")
+
+        source.fetchInbox("INBOX", 50)
+
+        assertEquals("1", calls.requests.single().url.queryParameter("preview"))
+    }
+
+    @Test
+    fun preview_isTheServersSnippetBoundedAndNeverTheBody() {
+        val long = "x".repeat(500)
+        val (source, _) = sourceAnswering(
+            """{"tabs": ["T"], "byTab": {"T": [
+                {"messageId": "1", "subject": "s", "preview": "Lunch at noon?"},
+                {"messageId": "2", "subject": "s", "preview": "$long"},
+                {"messageId": "3", "subject": "s", "body": "<b>legacy body</b>"}
+            ]}, "cursor": "c1", "delta": false}""",
+        )
+
+        val byId = (source.fetchInbox("INBOX", 50) as MailOutcome.Success).value.messages.associateBy { it.id }
+
+        assertEquals("Lunch at noon?", byId.getValue("1").preview)
+        assertEquals("bounded at the most a conforming preview can be", 400, byId.getValue("2").preview.length)
+        assertEquals("a body is not a preview", "", byId.getValue("3").preview)
+    }
+
+    /** Encrypted mail must never leave a snippet in Room, whatever the server sends. */
+    @Test
+    fun preview_isDroppedForEncryptedMail() {
+        val (source, _) = sourceAnswering(
+            """{"tabs": ["T"], "byTab": {"T": [
+                {"messageId": "1", "subject": "s", "pgpEncrypted": true, "preview": "decrypted words"}
+            ]}, "cursor": "c1", "delta": false}""",
+        )
+
+        val email = (source.fetchInbox("INBOX", 50) as MailOutcome.Success).value.messages.single()
+
+        assertEquals("", email.preview)
+    }
+
+    /** A right-to-left override in a snippet can make it display something it does not say. */
+    @Test
+    fun preview_dropsFormatCharacters() {
+        assertEquals("abc", previewText("a\u202Eb\u2066c\u200D"))
+    }
+
+    /** U+E0001 (LANGUAGE TAG) is a format character outside the BMP: classifying its two
+     *  surrogates one at a time let it through. */
+    @Test
+    fun preview_dropsSupplementaryFormatCharacters() {
+        assertEquals("ab", previewText("a\uDB40\uDC01b"))
+    }
+
+    /** The bound never cuts a code point in half. */
+    @Test
+    fun preview_boundNeverSplitsASurrogatePair() {
+        val bounded = previewText("x".repeat(399) + "\uD83D\uDE00")
+
+        assertEquals("x".repeat(399), bounded)
+    }
+
+    // --- Reply threading (KyPost-Server #352) ----------------------------------------------------
+
+    private val reply = MailDraft(
+        to = "bob@example.com", subject = "Re: hi", body = "hello",
+        replyToMessageId = "42", replyToMailbox = "Archive",
+    )
+
+    private fun sendAnswering(code: Int, body: String, draft: MailDraft = reply): MailOutcome<MailSendOutcome> {
+        val calls = FakeCallFactory { request -> jsonResponse(request, body, code) }
+        return RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls).sendMail(draft)
+    }
+
+    @Test
+    fun reply_namesTheAnsweredMessageOnSendButNeverOnADraft() {
+        val calls = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true}""") }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        source.sendMail(reply)
+        source.sendMail(reply.copy(replyToMessageId = null, replyToMailbox = null))
+        source.saveDraft(reply)
+
+        val (threaded, unthreaded, draft) = calls.bodies
+        assertTrue(threaded, threaded.contains("\"replyToMessageId\":\"42\""))
+        assertTrue(threaded, threaded.contains("\"replyToMailbox\":\"Archive\""))
+        // An older relay must see the request it always did.
+        assertFalse(unthreaded, unthreaded.contains("replyTo"))
+        assertFalse(draft, draft.contains("replyTo"))
+    }
+
+    @Test
+    fun reply_threadingRefusalsAreTheirOwnOutcome() {
+        val refusals = listOf(
+            400 to "invalid replyToMessageId; refresh the mailbox",
+            400 to "invalid replyToMailbox",
+            404 to "the message being replied to was not found; nothing was sent",
+            502 to "could not read the message being replied to; nothing was sent",
+        )
+        for ((code, body) in refusals) {
+            val outcome = sendAnswering(code, "$body\n")
+            assertEquals("$code", body, (outcome as MailOutcome.ReplyThreadingRefused).message)
+        }
+    }
+
+    /** A 502 that is not a threading refusal may have delivered something (SMTP failure, partial
+     *  pickup delivery); offering a re-send there risks a double send. */
+    @Test
+    fun reply_otherFailuresAreNeverOfferedAsSafeToResend() {
+        val afterDelivery = listOf(
+            "failed to send email: 554 rejected",
+            // The server's own post-delivery wordings.
+            "failed to send email: smtp: message was accepted but the session did not close cleanly: 421 bye",
+            "delivery could not be confirmed for 1 of 1 secure links; some may already have arrived; " +
+                "check provider evidence before retrying to avoid duplicates",
+            // SMTP text quoting a recipient whose address merely contains the words.
+            "failed to send email: 550 replyto@corp.example: the message being replied to is unknown",
+        )
+        for (body in afterDelivery) {
+            assertTrue(body, sendAnswering(502, body) is MailOutcome.UpstreamFailure)
+        }
+        assertTrue(sendAnswering(400, "invalid from address") is MailOutcome.BadRequest)
+        assertTrue(sendAnswering(404, "404 page not found") !is MailOutcome.ReplyThreadingRefused)
+        val unthreaded = reply.copy(replyToMessageId = null)
+        assertTrue(sendAnswering(404, "the message being replied to was not found; nothing was sent", unthreaded) !is MailOutcome.ReplyThreadingRefused)
+    }
+
+    /** A timeout says nothing about whether the relay sent the message. */
+    @Test
+    fun reply_aTimeoutIsNotARefusal() {
+        val source = RelayMailSource(
+            { testPairing() },
+            FakeMailCursorProvider(),
+            callFactory = ThrowingCallFactory(java.net.SocketTimeoutException("timeout")),
+        )
+
+        assertTrue(source.sendMail(reply) is MailOutcome.UpstreamFailure)
     }
 }

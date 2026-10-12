@@ -81,6 +81,7 @@ class RelayMailSource(
             // since=0 window from 151.4 KiB to 571 B, a five-new-message poll from 15.9 KiB to
             // 295 B, and ~2.6 MiB off the decoded peak (see MemoryBudget).
             .addQueryParameter("bodies", "0")
+            .addQueryParameter("preview", "1")
             .build()
         val request = Request.Builder().url(url).get()
             .authed(pairing)
@@ -93,7 +94,7 @@ class RelayMailSource(
             // The checkpoint is returned, not saved here: MailRepository commits it once the
             // messages it covers are in Room. See [MailCheckpoint].
             // changeType is the source of truth for new-vs-updated, never whether `since` was sent
-            // (Mobile_Mail_Relay.md Part 5) — read it straight off each entry, not derived state.
+            // (docs/Mobile_Mail_Relay.md Part 5) — read it straight off each entry, not derived state.
             val entries = parsed.byTab.flatMap { (tab, emails) -> emails.map { it.toUiEmail(tab) to it.changeType } }
             MailOutcome.Success(
                 MailFetchResult(
@@ -108,13 +109,40 @@ class RelayMailSource(
                         cursor = parsed.cursor,
                         wasFullResync = since == FULL_RESYNC_SINCE,
                     ),
+                    agedOutMessageIds = parsed.agedOut,
+                    hasMore = parsed.hasMore == true,
+                    nextBefore = parsed.nextBefore,
+                ),
+            )
+        }
+    }
+
+    override fun fetchOlder(mailbox: String, limit: Int, before: String): MailOutcome<MailPage> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        val base = baseUrl(pairing, "/api/inbox") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val url = base.newBuilder()
+            .addQueryParameter("limit", limit.toString())
+            .addQueryParameter("mailbox", mailbox)
+            .addQueryParameter("before", before)
+            // A server without before= paging answers with its window, bodies included unless told.
+            .addQueryParameter("bodies", "0")
+            .build()
+        val request = Request.Builder().url(url).get().authed(pairing).build()
+        return executeStreaming(request, RelayInboxResponseDto.serializer()) { code, parsed, errorBody ->
+            if (code != 200) return@executeStreaming mapErrorCode(code, errorBody)
+            if (parsed == null) return@executeStreaming MailOutcome.UpstreamFailure("Malformed inbox response")
+            MailOutcome.Success(
+                MailPage(
+                    messages = parsed.byTab.flatMap { (tab, emails) -> emails.map { it.toUiEmail(tab) } },
+                    hasMore = parsed.hasMore,
+                    nextBefore = parsed.nextBefore,
                 ),
             )
         }
     }
 
     /** since=0 when forced (explicitly, or the daily self-heal cadence is due), or no cursor is
-     *  persisted yet (fresh pairing) — otherwise the persisted cursor (Mobile_Mail_Relay.md Part 5). */
+     *  persisted yet (fresh pairing) — otherwise the persisted cursor (docs/Mobile_Mail_Relay.md Part 5). */
     private fun sinceValue(subscriberId: String, folder: String, forceFullResync: Boolean): String {
         val forced = forceFullResync || cursorProvider.shouldForceFullResync(subscriberId, folder)
         return if (forced) FULL_RESYNC_SINCE else cursorProvider.cursor(subscriberId, folder) ?: FULL_RESYNC_SINCE
@@ -135,6 +163,26 @@ class RelayMailSource(
             MailOutcome.Success(
                 FolderListResult(parent = parsed.parent, folders = parsed.folders.map { FolderInfo(it.path, it.deletable) }),
             )
+        }
+    }
+
+    override fun searchMail(query: String, mailbox: String, limit: Int): MailOutcome<List<Email>> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        val base = baseUrl(pairing, "/api/mail/search") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val url = base.newBuilder()
+            .addQueryParameter("q", query)
+            .addQueryParameter("mailbox", mailbox)
+            .addQueryParameter("limit", limit.toString())
+            .build()
+        val request = Request.Builder().url(url).get()
+            .authed(pairing)
+            .build()
+        return execute(request) { code, body ->
+            if (code != 200) return@execute mapErrorCode(code, body)
+            val parsed = runCatching { json.decodeFromString<RelaySearchResponseDto>(body) }.getOrNull()
+                ?: return@execute MailOutcome.UpstreamFailure("Malformed search response")
+            // Stamped with the searched mailbox: an id means nothing outside the folder it came from.
+            MailOutcome.Success(parsed.results.map { it.toUiEmail(it.label).copy(folder = mailbox) })
         }
     }
 
@@ -173,8 +221,13 @@ class RelayMailSource(
         messageIds: List<String>,
         mailbox: String,
         targetMailbox: String?,
+        account: MailAccount?,
     ): MailOutcome<MailActionOutcome> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        // Same read that authenticates the request, so the check and the credentials agree.
+        if (account != null && account != pairing.mailAccount()) {
+            return MailOutcome.Unauthorized("The action belongs to a different account")
+        }
         val base = baseUrl(pairing, "/api/inbox/actions") ?: return MailOutcome.BadRequest("Server URL is not valid")
         val requestDto = RelayActionRequestDto(
             action = action.wireValue(),
@@ -191,7 +244,7 @@ class RelayMailSource(
             val parsed = runCatching { json.decodeFromString<RelayActionResponseDto>(rawBody) }.getOrNull()
                 ?: return@execute MailOutcome.UpstreamFailure("Malformed action response")
             // ok:false with a non-empty failed[] is still a partial success — processed ids already
-            // took effect (Mobile_Mail_Relay.md Part 2's explicit callout).
+            // took effect (docs/Mobile_Mail_Relay.md Part 2's explicit callout).
             MailOutcome.Success(
                 MailActionOutcome(processed = parsed.processed, failed = parsed.failed.map { it.messageId to it.error }),
             )
@@ -222,18 +275,29 @@ class RelayMailSource(
         }
     }
 
-    override fun sendMail(draft: MailDraft): MailOutcome<MailSendOutcome> {
+    override fun currentAccount(): MailAccount? = pairingProvider()?.mailAccount()
+
+    override fun sendMail(draft: MailDraft, account: MailAccount?, onCall: (Call) -> Unit): MailOutcome<MailSendOutcome> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        // Same read that authenticates the request, so the check and the credentials agree.
+        if (account != null && account != pairing.mailAccount()) {
+            return MailOutcome.Unauthorized("The message belongs to a different account")
+        }
         val base = baseUrl(pairing, "/api/mail/send") ?: return MailOutcome.BadRequest("Server URL is not valid")
         val body = json.encodeToString(draft.toSendWireDto())
         val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
             .authed(pairing)
             .build()
-        return execute(request) { code, rawBody ->
+        return execute(request, onCall) { code, rawBody ->
+            if (draft.replyToMessageId != null && isReplyThreadingRefusal(code, rawBody)) {
+                return@execute MailOutcome.ReplyThreadingRefused(rawBody.trim())
+            }
             if (code != 200) return@execute mapErrorCode(code, rawBody)
             val parsed = runCatching { json.decodeFromString<RelaySendResponseDto>(rawBody) }.getOrNull()
                 ?: return@execute MailOutcome.UpstreamFailure("Malformed send response")
-            MailOutcome.Success(MailSendOutcome(sentSaved = parsed.sentSaved, warning = parsed.warning))
+            MailOutcome.Success(
+                MailSendOutcome(sentSaved = parsed.sentSaved, warning = parsed.warning, calendarReplySent = parsed.calendarReply),
+            )
         }
     }
 
@@ -325,7 +389,9 @@ class RelayMailSource(
             if (code != 200) return@execute mapErrorCode(code, body)
             val parsed = runCatching { json.decodeFromString<RelayAttachmentListResponseDto>(body) }.getOrNull()
                 ?: return@execute MailOutcome.UpstreamFailure("Malformed attachment list response")
-            MailOutcome.Success(parsed.attachments.map { AttachmentInfo(it.index, it.name, it.mimeType, it.size) })
+            MailOutcome.Success(
+                parsed.attachments.map { AttachmentInfo(it.index, it.name, it.mimeType, it.size, it.calendarMethod) },
+            )
         }
     }
 
@@ -389,7 +455,7 @@ class RelayMailSource(
         400 -> if (rawBody.contains(NOT_CONFIGURED_PREFIX, ignoreCase = true)) {
             MailOutcome.NotConfigured(rawBody)
         } else {
-            MailOutcome.BadRequest(rawBody.ifBlank { "Malformed request" })
+            MailOutcome.BadRequest(rawBody.trim().ifBlank { "Malformed request" })
         }
         401 -> MailOutcome.Unauthorized("Bad secret or unknown device")
         // The 403 prose names an unauthorized From, which is the one thing the user can act on.
@@ -440,8 +506,14 @@ class RelayMailSource(
         return onResponse(response.code, response.decoded, response.errorBody)
     }
 
-    private fun <T> execute(request: Request, onResponse: (code: Int, body: String) -> MailOutcome<T>): MailOutcome<T> {
-        val result = effectiveCallFactory().executeSync(request) { response ->
+    private fun <T> execute(
+        request: Request,
+        onCall: (Call) -> Unit = {},
+        onResponse: (code: Int, body: String) -> MailOutcome<T>,
+    ): MailOutcome<T> {
+        val factory = effectiveCallFactory()
+        val observed = Call.Factory { factory.newCall(it).also(onCall) }
+        val result = observed.executeSync(request) { response ->
             Triple(response.code, response.body?.string().orEmpty(), response.header(HEADER_RETRY_AFTER))
         }
         val exception = result.exceptionOrNull()
@@ -459,6 +531,18 @@ class RelayMailSource(
         if (pairingUrlHost(pairing.serverUrl) == null) return null
         return "${pairing.serverUrl.trimEnd('/')}$path".toHttpUrlOrNull()
     }
+}
+
+/** The server sends at most 200 code points (#351), at most 400 UTF-16 units, so this never cuts a
+ *  conforming preview, or a surrogate pair in one. */
+private const val MAX_PREVIEW_CHARS = 400
+
+/** Format characters (bidi overrides, zero-width, tags) dropped: they can reorder what the row
+ *  shows. Whole code points, so neither the filter nor the bound sees half a surrogate pair. */
+internal fun previewText(raw: String?): String = buildString {
+    raw.orEmpty().codePoints()
+        .filter { Character.getType(it) != Character.FORMAT.toInt() }
+        .forEach { if (length + Character.charCount(it) <= MAX_PREVIEW_CHARS) appendCodePoint(it) }
 }
 
 /** Same order of magnitude as the outbound cap in `ComposeActivity` and the server's own
@@ -528,11 +612,24 @@ private fun filenameFromDisposition(header: String?): String {
     return ""
 }
 
+/** The relay's threading refusals (KyPost-Server #352), sent before any delivery. Matched whole:
+ *  other 502s on this endpoint can follow a delivery and quote SMTP text, so a word match could
+ *  offer a re-send of mail that already went out. A reworded refusal only loses the offer. */
+private val REPLY_THREADING_REFUSALS = mapOf(
+    400 to setOf("invalid replyToMessageId; refresh the mailbox", "invalid replyToMailbox"),
+    404 to setOf("the message being replied to was not found; nothing was sent"),
+    502 to setOf("could not read the message being replied to; nothing was sent"),
+)
+
+internal fun isReplyThreadingRefusal(code: Int, rawBody: String): Boolean =
+    REPLY_THREADING_REFUSALS[code]?.contains(rawBody.trim()) == true
+
 private fun MailAction.wireValue(): String = when (this) {
     MailAction.DELETE -> "delete"
     MailAction.ARCHIVE -> "archive"
     MailAction.SPAM -> "spam"
     MailAction.READ -> "read"
+    MailAction.UNREAD -> "unread"
     MailAction.MOVE -> "move"
 }
 
@@ -559,7 +656,15 @@ private fun MailDraft.toWireDto(): RelayMailRequestDto =
 /** Send-only mapping. [toWireDto] stays flagless because /api/mail/draft ignores these fields —
  *  see [MailDraft.allowPickupFallback]. */
 private fun MailDraft.toSendWireDto(): RelayMailRequestDto =
-    toWireDto().copy(sign = sign, encrypt = encrypt, allowPickupFallback = allowPickupFallback)
+    toWireDto().copy(
+        sign = sign,
+        encrypt = encrypt,
+        allowPickupFallback = allowPickupFallback,
+        calendarReply = calendarReply?.let(::RelayCalendarReplyDto),
+        from = from,
+        replyToMessageId = replyToMessageId,
+        replyToMailbox = replyToMailbox,
+    )
 
 private fun RelayEmailDto.toUiEmail(tab: String): Email {
     val emailLabel = label.ifBlank { tab }
@@ -567,7 +672,9 @@ private fun RelayEmailDto.toUiEmail(tab: String): Email {
         id = messageId,
         subject = subject,
         sender = sender,
-        preview = body.orEmpty().take(140),
+        // Never for encrypted mail: enrollment's purge of server-decrypted text clears previews only
+        // beside a cached body, and a snippet of a client-protected message is not this app's to keep.
+        preview = if (pgpEncrypted) "" else previewText(preview),
         // Union, not a replacement: the label drives KeywordTabs, the wire list carries $Phishing.
         keywords = (keywords + emailLabel).filter { it.isNotBlank() }.toSet(),
         sentTo = sentTo,

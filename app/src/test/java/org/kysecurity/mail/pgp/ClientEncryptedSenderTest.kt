@@ -32,8 +32,8 @@ class ClientEncryptedSenderTest {
         accountAddress = accountAddress,
     )
 
-    private fun draft(to: String = "alice@example.invalid", cc: String = "", bcc: String = "") =
-        MailDraft(to = to, cc = cc, bcc = bcc, subject = "Subject", body = "<p>Body</p>", mode = "html")
+    private fun draft(to: String = "alice@example.invalid", cc: String = "", bcc: String = "", subject: String = "Subject") =
+        MailDraft(to = to, cc = cc, bcc = bcc, subject = subject, body = "<p>Body</p>", mode = "html")
 
     private fun pinnedFor(address: String, confirmed: Boolean) = FakePinnedKeys(
         mapOf(address to listOf(LocalSignerKey(TestPgpPrivateKey.ARMORED_PUBLIC, confirmed))),
@@ -422,6 +422,26 @@ class ClientEncryptedSenderTest {
         val parsed = requireNotNull(PgpMimeReader.read(decrypted.plaintext))
         assertEquals("Subject", parsed.protectedSubject)
         assertEquals("<p>Body</p>", parsed.html?.trim())
+    }
+
+    /** Compose can now send a confirmed blank subject. It must decrypt as blank, not as absent:
+     *  absent leaves the outer "[Encrypted]" placeholder on screen in its place. */
+    @Test
+    fun aConfirmedBlankSubjectDecryptsAsBlank() = runBlocking {
+        val transport = FakeClientEncryptedTransport()
+        sender(
+            resolver = FakeRecipientKeyResolver(
+                resolvedAll(listOf("alice@example.invalid"), TestPgpPrivateKey.ARMORED_PUBLIC),
+            ),
+            transport = transport,
+        ).send(draft(subject = ""), sign = false)
+
+        val decrypted = PgpDecryptor.decrypt(
+            TestPgpPrivateKey.ARMORED_PRIVATE.toCharArray(),
+            armorOf(transport.sent.single().deliveries[0].ciphertext),
+            emptyList(),
+        ) as DecryptResult.Ok
+        assertEquals("", requireNotNull(PgpMimeReader.read(decrypted.plaintext)).protectedSubject)
     }
 
     @Test

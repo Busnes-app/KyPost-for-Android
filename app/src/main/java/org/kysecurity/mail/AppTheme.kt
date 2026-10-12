@@ -424,6 +424,18 @@ fun applyPillChipTheme(context: Context, chip: com.google.android.material.chip.
     }
 }
 
+/** Bold or regular weight of the view's own face. `setTypeface(current, NORMAL)` keeps a face that is
+ *  already bold, so the style is derived from a base instead. The base is any face this did not set
+ *  itself: Space Grotesk is downloadable and AppCompat swaps it in after inflation. */
+fun TextView.setBold(bold: Boolean) {
+    val applied = getTag(R.id.tag_bold_applied_face)
+    val base = (getTag(R.id.tag_bold_base_face) as? Typeface)?.takeIf { typeface === applied } ?: typeface
+    val face = Typeface.create(base, if (bold) Typeface.BOLD else Typeface.NORMAL)
+    setTag(R.id.tag_bold_base_face, base)
+    setTag(R.id.tag_bold_applied_face, face)
+    typeface = face
+}
+
 /** Defaults to `accent`; pass a contrasting [color] when placing it on an accent-filled surface. */
 fun unreadDotDrawable(context: Context, sizeDp: Int = 8, color: Int? = null): GradientDrawable {
     val palette = getStoredThemePalette(context)
@@ -756,5 +768,13 @@ private fun actionBarSize(activity: Activity): Int {
         typedArray.getDimensionPixelSize(0, 0)
     } finally {
         typedArray.recycle()
+    }
+}
+
+/** [applyPanelBackground] plus a 1dp `line` stroke, for a card on a panel-coloured screen. */
+fun applyOutlinedPanelBackground(context: Context, view: View) {
+    val palette = getStoredThemePalette(context)
+    view.background = panelBackground(context, palette).apply {
+        setStroke(dpToPx(1), Color.parseColor(palette.line))
     }
 }

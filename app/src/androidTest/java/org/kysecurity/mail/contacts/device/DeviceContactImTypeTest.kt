@@ -9,7 +9,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.kysecurity.mail.contacts.ContactCursorStore
 import org.kysecurity.mail.contacts.ContactDto
+import org.kysecurity.mail.contacts.ContactEventDto
 import org.kysecurity.mail.contacts.ContactImDto
+import org.kysecurity.mail.contacts.ContactRelationDto
 import org.kysecurity.mail.contacts.ContactSyncClient
 import org.kysecurity.mail.contacts.ContactSyncRepository
 import org.kysecurity.mail.contacts.ContactUrlDto
@@ -25,8 +27,9 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** IM and website rows are rebuilt when the list changes; the phone's own Home/Work type on a
- *  kept row is not something Room carries, so the rebuild must keep it. */
+/** IM, website, relation and event rows are rebuilt when their list changes; the phone's own
+ *  type, label or protocol on a kept row is not something Room carries, so the rebuild must keep
+ *  it. */
 @Suppress("DEPRECATION") // Im has no replacement mimetype; these are the rows on device.
 @RunWith(AndroidJUnit4::class)
 class DeviceContactImTypeTest {
@@ -230,5 +233,111 @@ class DeviceContactImTypeTest {
         val types = websiteTypes(rawContactId)
         assertEquals("both websites are on the phone", setOf("https://one.example.invalid", "https://two.example.invalid"), types.keys)
         assertEquals(ContactsContract.CommonDataKinds.Website.TYPE_WORK to null, types["https://one.example.invalid"])
+    }
+
+    /** [column] of each row of [mimeType], keyed by its [keyColumn]. */
+    private fun columnByKey(rawContactId: Long, mimeType: String, keyColumn: String, column: String): Map<String, String?> =
+        context.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(keyColumn, column),
+            "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+            arrayOf(rawContactId.toString(), mimeType),
+            null,
+        )?.use { c -> buildMap { while (c.moveToNext()) put(c.getString(0), c.getString(1)) } }.orEmpty()
+
+    /** Sets [values] on the [mimeType] rows of [rawContactId] whose [keyColumn] is [key], as the
+     *  phone's own Contacts app would file them. Room's view of the row does not change. */
+    private fun setColumns(rawContactId: Long, mimeType: String, keyColumn: String, key: String, values: ContentValues) {
+        context.contentResolver.update(
+            dataAsAdapter,
+            values,
+            "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ? AND $keyColumn = ?",
+            arrayOf(rawContactId.toString(), mimeType, key),
+        )
+    }
+
+    /** Appends [change] to the contact in Room and syncs, so every row of that kind is rebuilt. */
+    private suspend fun appendInRoomAndSync(uid: String, change: (ContactDto) -> ContactDto) {
+        syncRepository.queueUpdate(change(db.contactDao().getByUid(uid)!!.toDto()), identityChanged = false)
+        repository.syncAll()
+    }
+
+    /** A built-in protocol has no custom label; Room reads it as "other", and a rebuild must not
+     *  turn it into a custom "Other". */
+    @Test
+    fun aJabberImKeepsItsProtocolWhenAnotherImIsAppended() = runBlocking {
+        val uid = syncRepository.queueCreate(ContactDto(fn = "Im Protocol Kept Probe", ims = listOf(ContactImDto(service = "", value = "probe@jabber.example.invalid"))))
+        repository.syncAll()
+        val rawContactId = db.deviceContactLinkDao().getByUid(uid)!!.rawContactId
+        val im = ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE
+        setColumns(rawContactId, im, ContactsContract.CommonDataKinds.Im.DATA, "probe@jabber.example.invalid", ContentValues().apply {
+            put(ContactsContract.CommonDataKinds.Im.PROTOCOL, ContactsContract.CommonDataKinds.Im.PROTOCOL_JABBER)
+            putNull(ContactsContract.CommonDataKinds.Im.CUSTOM_PROTOCOL)
+        })
+
+        appendInRoomAndSync(uid) { it.copy(ims = it.ims + ContactImDto(service = "matrix", value = "@second:example.org")) }
+
+        val protocols = columnByKey(rawContactId, im, ContactsContract.CommonDataKinds.Im.DATA, ContactsContract.CommonDataKinds.Im.PROTOCOL)
+        assertEquals("both IMs are on the phone", setOf("probe@jabber.example.invalid", "@second:example.org"), protocols.keys)
+        assertEquals(ContactsContract.CommonDataKinds.Im.PROTOCOL_JABBER.toString(), protocols["probe@jabber.example.invalid"])
+    }
+
+    /** Brother has no Room label of its own: it reads as "other" and must not be written back as
+     *  a custom "other". */
+    @Test
+    fun aBrotherRelationKeepsItsTypeWhenAnotherRelationIsAppended() = runBlocking {
+        val uid = syncRepository.queueCreate(ContactDto(fn = "Relation Type Kept Probe", relations = listOf(ContactRelationDto(label = "other", name = "Probe Brother"))))
+        repository.syncAll()
+        val rawContactId = db.deviceContactLinkDao().getByUid(uid)!!.rawContactId
+        val relation = ContactsContract.CommonDataKinds.Relation.CONTENT_ITEM_TYPE
+        setColumns(rawContactId, relation, ContactsContract.CommonDataKinds.Relation.NAME, "Probe Brother", ContentValues().apply {
+            put(ContactsContract.CommonDataKinds.Relation.TYPE, ContactsContract.CommonDataKinds.Relation.TYPE_BROTHER)
+            putNull(ContactsContract.CommonDataKinds.Relation.LABEL)
+        })
+
+        appendInRoomAndSync(uid) { it.copy(relations = it.relations + ContactRelationDto(label = "friend", name = "Probe Friend")) }
+
+        val types = columnByKey(rawContactId, relation, ContactsContract.CommonDataKinds.Relation.NAME, ContactsContract.CommonDataKinds.Relation.TYPE)
+        assertEquals("both relations are on the phone", setOf("Probe Brother", "Probe Friend"), types.keys)
+        assertEquals(ContactsContract.CommonDataKinds.Relation.TYPE_BROTHER.toString(), types["Probe Brother"])
+    }
+
+    /** Room holds the relation with no label; the phone files it as Brother. The kept type is
+     *  found under the same readback label Room's null reads back as, "other". */
+    @Test
+    fun anUnlabelledRelationKeepsThePhonesBrotherTypeWhenAnotherIsAppended() = runBlocking {
+        val uid = syncRepository.queueCreate(ContactDto(fn = "Unlabelled Relation Probe", relations = listOf(ContactRelationDto(label = null, name = "Probe Sibling"))))
+        repository.syncAll()
+        val rawContactId = db.deviceContactLinkDao().getByUid(uid)!!.rawContactId
+        val relation = ContactsContract.CommonDataKinds.Relation.CONTENT_ITEM_TYPE
+        setColumns(rawContactId, relation, ContactsContract.CommonDataKinds.Relation.NAME, "Probe Sibling", ContentValues().apply {
+            put(ContactsContract.CommonDataKinds.Relation.TYPE, ContactsContract.CommonDataKinds.Relation.TYPE_BROTHER)
+            putNull(ContactsContract.CommonDataKinds.Relation.LABEL)
+        })
+
+        appendInRoomAndSync(uid) { it.copy(relations = it.relations + ContactRelationDto(label = "friend", name = "Probe Friend")) }
+
+        val types = columnByKey(rawContactId, relation, ContactsContract.CommonDataKinds.Relation.NAME, ContactsContract.CommonDataKinds.Relation.TYPE)
+        assertEquals("both relations are on the phone", setOf("Probe Sibling", "Probe Friend"), types.keys)
+        assertEquals(ContactsContract.CommonDataKinds.Relation.TYPE_BROTHER.toString(), types["Probe Sibling"])
+    }
+
+    /** An unlabelled Other event reads with no label and must not be written back as custom. */
+    @Test
+    fun anOtherEventKeepsItsTypeWhenAnotherEventIsAppended() = runBlocking {
+        val uid = syncRepository.queueCreate(ContactDto(fn = "Event Type Kept Probe", events = listOf(ContactEventDto(label = null, date = "2020-01-02"))))
+        repository.syncAll()
+        val rawContactId = db.deviceContactLinkDao().getByUid(uid)!!.rawContactId
+        val event = ContactsContract.CommonDataKinds.Event.CONTENT_ITEM_TYPE
+        setColumns(rawContactId, event, ContactsContract.CommonDataKinds.Event.START_DATE, "2020-01-02", ContentValues().apply {
+            put(ContactsContract.CommonDataKinds.Event.TYPE, ContactsContract.CommonDataKinds.Event.TYPE_OTHER)
+            putNull(ContactsContract.CommonDataKinds.Event.LABEL)
+        })
+
+        appendInRoomAndSync(uid) { it.copy(events = it.events + ContactEventDto(label = "anniversary", date = "2021-03-04")) }
+
+        val types = columnByKey(rawContactId, event, ContactsContract.CommonDataKinds.Event.START_DATE, ContactsContract.CommonDataKinds.Event.TYPE)
+        assertEquals("both events are on the phone", setOf("2020-01-02", "2021-03-04"), types.keys)
+        assertEquals(ContactsContract.CommonDataKinds.Event.TYPE_OTHER.toString(), types["2020-01-02"])
     }
 }

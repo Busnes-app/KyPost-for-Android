@@ -2,6 +2,10 @@ package org.kysecurity.mail.contacts.device
 
 import android.content.Context
 import android.provider.ContactsContract
+import android.provider.ContactsContract.CommonDataKinds.Event as EVT
+import android.provider.ContactsContract.CommonDataKinds.Im as IM
+import android.provider.ContactsContract.CommonDataKinds.Relation as REL
+import android.provider.ContactsContract.CommonDataKinds.Website as WEB
 import org.kysecurity.mail.contacts.ContactAddressDto
 import org.kysecurity.mail.contacts.ContactDto
 import org.kysecurity.mail.contacts.ContactEventDto
@@ -584,10 +588,8 @@ class DeviceContactRepository(
                     uid = dto.uid,
                     rawContactId = rawContactId,
                     deviceUpdatedAtEpochMs = System.currentTimeMillis(),
-                    // Title and department ride on the Organization row, written only with an org.
-                    syncedJson = syncedJsonOf(
-                        if (dto.org.isNullOrBlank()) dto.copy(title = null, department = null) else dto,
-                    ),
+                    // A department rides on the Organization row, written only with an org.
+                    syncedJson = syncedJsonOf(dto.copy(department = dto.department.takeUnless { dto.org.isNullOrBlank() })),
                 ),
             )
         }
@@ -676,7 +678,7 @@ class DeviceContactRepository(
             deleteRows(ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
             val company = (plan.org ?: currentSnapshot.org)?.ifBlank { null }
             val title = (plan.title ?: currentSnapshot.title)?.ifBlank { null }
-            val department = (plan.department ?: currentSnapshot.department)?.ifBlank { null }
+            val department = plan.departmentAfter(currentSnapshot)
             if (company != null || title != null || department != null) {
                 ops.add(
                     insertRow(ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
@@ -764,15 +766,15 @@ class DeviceContactRepository(
 
         plan.ims?.let {
             deleteRows(ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE)
-            ops += imRows(it, ::insertRow, kept = currentSnapshot.imTypes)
+            ops += imRows(it, ::insertRow, kept = currentSnapshot.keptRows)
         }
         plan.websites?.let {
             deleteRows(ContactsContract.CommonDataKinds.Website.CONTENT_ITEM_TYPE)
-            ops += websiteRows(it, ::insertRow, kept = currentSnapshot.websiteTypes)
+            ops += websiteRows(it, ::insertRow, kept = currentSnapshot.keptRows)
         }
         plan.relations?.let {
             deleteRows(ContactsContract.CommonDataKinds.Relation.CONTENT_ITEM_TYPE)
-            ops += relationRows(it, ::insertRow)
+            ops += relationRows(it, ::insertRow, kept = currentSnapshot.keptRows)
         }
         plan.events?.let {
             // Every Event row but the birthday, which has its own plan field.
@@ -781,7 +783,7 @@ class DeviceContactRepository(
                 " AND (${ContactsContract.CommonDataKinds.Event.TYPE} IS NULL OR " +
                     "${ContactsContract.CommonDataKinds.Event.TYPE} != ${ContactsContract.CommonDataKinds.Event.TYPE_BIRTHDAY})",
             )
-            ops += eventRows(it, ::insertRow)
+            ops += eventRows(it, ::insertRow, kept = currentSnapshot.keptRows)
         }
 
         val applied = runCatching {
@@ -805,67 +807,74 @@ class DeviceContactRepository(
     // Shared by create and update so the two cannot encode a field differently. Im is deprecated
     // with no replacement mimetype, and its rows are still the ones present on device.
     @Suppress("DEPRECATION")
-    // [kept]: the TYPE/LABEL the phone gave each IM it already holds, by protocol and value, in
-    // row order for exact duplicates. Room has no slot for them, so a rebuilt row takes them back
-    // rather than losing Home/Work/custom.
+    // [kept] (DeviceRawContactSnapshot.keptRows) holds, per row the phone already has, the columns
+    // Room has no slot for. Each row is written in Room's encoding, then a row Room still names the
+    // same way takes the phone's columns back, in row order for duplicates, so a rebuild does not
+    // turn Home/Work, a built-in IM protocol, Brother or Other into a custom value.
+    private class KeptRows(kept: Map<String, List<Map<String, String?>>>) {
+        private val remaining = kept.mapValues { ArrayDeque(it.value) }
+
+        fun restore(row: android.content.ContentProviderOperation.Builder, mimeType: String, qualifier: String?, value: String) =
+            row.apply { remaining[keptRowKey(mimeType, qualifier, value)]?.removeFirstOrNull()?.forEach { (c, v) -> withValue(c, v) } }
+    }
+
     private fun imRows(
         ims: List<ContactImDto>,
         newRow: (String) -> android.content.ContentProviderOperation.Builder,
-        kept: Map<String, List<Pair<Int?, String?>>> = emptyMap(),
-    ): List<android.content.ContentProviderOperation> {
-        val remaining = kept.mapValues { ArrayDeque(it.value) }
-        return ims.map { im ->
+        kept: Map<String, List<Map<String, String?>>> = emptyMap(),
+    ): List<android.content.ContentProviderOperation> = KeptRows(kept).let { k ->
+        ims.map { im ->
             val protocol = DeviceContactFieldCoding.imCustomProtocolLabel(im.service, im.label)
-            newRow(ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE)
-                .withValue(ContactsContract.CommonDataKinds.Im.DATA, im.value)
-                .withValue(ContactsContract.CommonDataKinds.Im.PROTOCOL, ContactsContract.CommonDataKinds.Im.PROTOCOL_CUSTOM)
-                .withValue(ContactsContract.CommonDataKinds.Im.CUSTOM_PROTOCOL, protocol)
-                .apply {
-                    remaining[keptTypeKey(protocol, im.value)]?.removeFirstOrNull()?.let { (type, label) ->
-                        withValue(ContactsContract.CommonDataKinds.Im.TYPE, type)
-                        withValue(ContactsContract.CommonDataKinds.Im.LABEL, label)
-                    }
-                }
-                .build()
+            val row = newRow(IM.CONTENT_ITEM_TYPE)
+                .withValue(IM.DATA, im.value)
+                .withValue(IM.PROTOCOL, IM.PROTOCOL_CUSTOM)
+                .withValue(IM.CUSTOM_PROTOCOL, protocol)
+            k.restore(row, IM.CONTENT_ITEM_TYPE, protocol, im.value).build()
         }
     }
 
-    // [kept]: as for imRows. Room's label is the LABEL column, so only an unchanged label keeps
-    // the phone's TYPE.
     private fun websiteRows(
         websites: List<ContactUrlDto>,
         newRow: (String) -> android.content.ContentProviderOperation.Builder,
-        kept: Map<String, List<Pair<Int?, String?>>> = emptyMap(),
-    ): List<android.content.ContentProviderOperation> {
-        val remaining = kept.mapValues { ArrayDeque(it.value) }
-        return websites.map { website ->
-            val (type, label) = remaining[keptTypeKey(website.label, website.value)]?.removeFirstOrNull()
-                ?: (ContactsContract.CommonDataKinds.Website.TYPE_CUSTOM to website.label)
-            newRow(ContactsContract.CommonDataKinds.Website.CONTENT_ITEM_TYPE)
-                .withValue(ContactsContract.CommonDataKinds.Website.URL, website.value)
-                .withValue(ContactsContract.CommonDataKinds.Website.TYPE, type)
-                .withValue(ContactsContract.CommonDataKinds.Website.LABEL, label)
-                .build()
+        kept: Map<String, List<Map<String, String?>>> = emptyMap(),
+    ): List<android.content.ContentProviderOperation> = KeptRows(kept).let { k ->
+        websites.map { website ->
+            val row = newRow(WEB.CONTENT_ITEM_TYPE)
+                .withValue(WEB.URL, website.value)
+                .withValue(WEB.TYPE, WEB.TYPE_CUSTOM)
+                .withValue(WEB.LABEL, website.label)
+            k.restore(row, WEB.CONTENT_ITEM_TYPE, website.label, website.value).build()
         }
     }
 
-    private fun relationRows(relations: List<ContactRelationDto>, newRow: (String) -> android.content.ContentProviderOperation.Builder) =
+    private fun relationRows(
+        relations: List<ContactRelationDto>,
+        newRow: (String) -> android.content.ContentProviderOperation.Builder,
+        kept: Map<String, List<Map<String, String?>>> = emptyMap(),
+    ): List<android.content.ContentProviderOperation> = KeptRows(kept).let { k ->
         relations.map { relation ->
-            newRow(ContactsContract.CommonDataKinds.Relation.CONTENT_ITEM_TYPE)
-                .withValue(ContactsContract.CommonDataKinds.Relation.NAME, relation.name)
-                .withValue(ContactsContract.CommonDataKinds.Relation.TYPE, DeviceContactFieldCoding.relationType(relation.label))
-                .withValue(ContactsContract.CommonDataKinds.Relation.LABEL, DeviceContactFieldCoding.relationCustomLabel(relation.label))
-                .build()
+            val row = newRow(REL.CONTENT_ITEM_TYPE)
+                .withValue(REL.NAME, relation.name)
+                .withValue(REL.TYPE, DeviceContactFieldCoding.relationType(relation.label))
+                .withValue(REL.LABEL, DeviceContactFieldCoding.relationCustomLabel(relation.label))
+            // Keyed by the readback, as the snapshot keys it: Room's null reads back as "other".
+            k.restore(row, REL.CONTENT_ITEM_TYPE, DeviceContactFieldCoding.relationReadBack(relation.label), relation.name).build()
         }
+    }
 
-    private fun eventRows(events: List<ContactEventDto>, newRow: (String) -> android.content.ContentProviderOperation.Builder) =
+    private fun eventRows(
+        events: List<ContactEventDto>,
+        newRow: (String) -> android.content.ContentProviderOperation.Builder,
+        kept: Map<String, List<Map<String, String?>>> = emptyMap(),
+    ): List<android.content.ContentProviderOperation> = KeptRows(kept).let { k ->
         events.map { event ->
-            newRow(ContactsContract.CommonDataKinds.Event.CONTENT_ITEM_TYPE)
-                .withValue(ContactsContract.CommonDataKinds.Event.START_DATE, event.date)
-                .withValue(ContactsContract.CommonDataKinds.Event.TYPE, DeviceContactFieldCoding.eventType(event.label))
-                .withValue(ContactsContract.CommonDataKinds.Event.LABEL, DeviceContactFieldCoding.eventCustomLabel(event.label))
-                .build()
+            val row = newRow(EVT.CONTENT_ITEM_TYPE)
+                .withValue(EVT.START_DATE, event.date)
+                .withValue(EVT.TYPE, DeviceContactFieldCoding.eventType(event.label))
+                .withValue(EVT.LABEL, DeviceContactFieldCoding.eventCustomLabel(event.label))
+            k.restore(row, EVT.CONTENT_ITEM_TYPE, event.label, event.date).build()
         }
+    }
 
     private fun syncedJsonOf(dto: ContactDto): String = json.encodeToString(ContactDto.serializer(), dto)
 
@@ -1036,7 +1045,8 @@ class DeviceContactRepository(
 
     // See createRawContactForDto: reads back the same deprecated Im rows it writes.
     @Suppress("DEPRECATION")
-    private suspend fun readRawContactSnapshot(rawContactId: Long): DeviceRawContactSnapshot? =
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    internal suspend fun readRawContactSnapshot(rawContactId: Long): DeviceRawContactSnapshot? =
         withContext(Dispatchers.IO) {
             val rawContactProjection = arrayOf(
                 ContactsContract.RawContacts._ID,
@@ -1053,17 +1063,20 @@ class DeviceContactRepository(
                 null,
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    Triple(
+                    RawContactRow(
                         cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts._ID)),
                         cursor.getLong(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.CONTACT_ID)),
-                        cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_TYPE)),
+                        DeviceAccount(
+                            cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_TYPE)),
+                            cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_NAME)),
+                        ),
                     )
                 } else {
                     null
                 }
             } ?: return@withContext null
 
-            val (actualRawContactId, contactId, accountType) = rawContactData
+            val (actualRawContactId, contactId, account) = rawContactData
             val lastUpdated = queryContactLastUpdated(contactId)
 
             val dataProjection = arrayOf(
@@ -1097,8 +1110,10 @@ class DeviceContactRepository(
             val phones = mutableListOf<ContactFieldDto>()
             val addresses = mutableListOf<ContactAddressDto>()
             val ims = mutableListOf<ContactImDto>()
-            val imTypes = mutableMapOf<String, MutableList<Pair<Int?, String?>>>()
-            val websiteTypes = mutableMapOf<String, MutableList<Pair<Int?, String?>>>()
+            val keptRows = mutableMapOf<String, MutableList<Map<String, String?>>>()
+            fun keep(mimeType: String, qualifier: String?, value: String, vararg columns: Pair<String, String?>) {
+                keptRows.getOrPut(keptRowKey(mimeType, qualifier, value)) { mutableListOf() } += columns.toMap()
+            }
             val websites = mutableListOf<ContactUrlDto>()
             val relations = mutableListOf<ContactRelationDto>()
             val events = mutableListOf<ContactEventDto>()
@@ -1173,6 +1188,7 @@ class DeviceContactRepository(
                                 val label = DeviceContactFieldCoding.eventLabelFromType(typeInt)
                                     ?: data3?.takeIf { it.isNotBlank() }
                                 events.add(ContactEventDto(label = label, date = data1))
+                                keep(EVT.CONTENT_ITEM_TYPE, label, data1, EVT.TYPE to data2, EVT.LABEL to data3)
                             }
                         }
 
@@ -1184,10 +1200,9 @@ class DeviceContactRepository(
                                 val service = DeviceContactFieldCoding.imServiceFromCustomProtocolLabel(customProtocol)
                                 val label = if (service.isEmpty()) customProtocol else null
                                 ims.add(ContactImDto(service = service, label = label, value = data1))
-                                // Keyed as imRows writes it back: no protocol is "Other".
+                                // Keyed as imRows writes it back: no custom protocol is "Other".
                                 val written = DeviceContactFieldCoding.imCustomProtocolLabel(service, label)
-                                imTypes.getOrPut(keptTypeKey(written, data1)) { mutableListOf() } +=
-                                    data2?.toIntOrNull() to data3?.takeIf { it.isNotBlank() }
+                                keep(IM.CONTENT_ITEM_TYPE, written, data1, IM.TYPE to data2, IM.LABEL to data3, IM.PROTOCOL to data5, IM.CUSTOM_PROTOCOL to data6)
                             }
                         }
 
@@ -1195,20 +1210,15 @@ class DeviceContactRepository(
                             if (data1.isNotBlank()) {
                                 val label = data3?.takeIf { it.isNotBlank() }
                                 websites.add(ContactUrlDto(label = label, value = data1))
-                                websiteTypes.getOrPut(keptTypeKey(label, data1)) { mutableListOf() } +=
-                                    data2?.toIntOrNull() to label
+                                keep(WEB.CONTENT_ITEM_TYPE, label, data1, WEB.TYPE to data2, WEB.LABEL to data3)
                             }
                         }
 
                         ContactsContract.CommonDataKinds.Relation.CONTENT_ITEM_TYPE -> {
                             if (data1.isNotBlank()) {
-                                val typeInt = data2?.toIntOrNull()
-                                relations.add(
-                                    ContactRelationDto(
-                                        label = DeviceContactFieldCoding.relationLabelFromType(typeInt, data3),
-                                        name = data1,
-                                    ),
-                                )
+                                val label = DeviceContactFieldCoding.relationLabelFromType(data2?.toIntOrNull(), data3)
+                                relations.add(ContactRelationDto(label = label, name = data1))
+                                keep(REL.CONTENT_ITEM_TYPE, label, data1, REL.TYPE to data2, REL.LABEL to data3)
                             }
                         }
 
@@ -1246,8 +1256,9 @@ class DeviceContactRepository(
             return@withContext DeviceRawContactSnapshot(
                 rawContactId = actualRawContactId,
                 contactId = contactId,
-                accountType = accountType,
-                accountName = null,
+                // Both halves: import consent is per account, type and name.
+                accountType = account.type,
+                accountName = account.name,
                 lastUpdatedEpochMs = lastUpdated,
                 dirty = false,
                 fn = fn,
@@ -1265,8 +1276,7 @@ class DeviceContactRepository(
                 phoneticFamilyName = phoneticFamilyName,
                 department = department,
                 title = title,
-                imTypes = imTypes,
-                websiteTypes = websiteTypes,
+                keptRows = keptRows,
                 givenName = given,
                 familyName = family,
                 middleName = middle,
@@ -1280,3 +1290,5 @@ class DeviceContactRepository(
 private const val FOREIGN_LIVE_ROWS =
     "(${ContactsContract.RawContacts.ACCOUNT_TYPE} IS NULL OR ${ContactsContract.RawContacts.ACCOUNT_TYPE} != ?) AND " +
         "${ContactsContract.RawContacts.DELETED} = 0"
+
+private data class RawContactRow(val id: Long, val contactId: Long, val account: DeviceAccount)

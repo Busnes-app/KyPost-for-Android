@@ -10,6 +10,7 @@ import org.kysecurity.mail.push.PairingData
 import org.kysecurity.mail.signon.relayOrigin
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
@@ -43,13 +44,23 @@ class ContactSyncRepository(
     /** Guards the contacts table against the other sync writer, `DeviceContactRepository.syncAll`. */
     val syncMutex = Mutex()
 
+    val health = ContactSyncHealth()
+
     fun observeContacts(): Flow<List<ContactEntity>> = db.contactDao().observeAll()
 
-    suspend fun sync(): ContactSyncOutcome = syncMutex.withLock {
-        val pairing = pairingProvider() ?: return@withLock ContactSyncOutcome.NotPaired
+    fun observeSyncStatus(now: () -> Long = System::currentTimeMillis): Flow<ContactSyncStatus> =
+        combine(db.pendingContactChangeDao().observeSummary(), health.failures) { pending, failures ->
+            contactSyncStatusOf(pending, failures, now())
+        }
+
+    /** Recorded before unlocking, so a waiting caller cannot record ahead of this one. */
+    suspend fun sync(): ContactSyncOutcome = syncMutex.withLock { syncLocked().also(health::record) }
+
+    private suspend fun syncLocked(): ContactSyncOutcome = run {
+        val pairing = pairingProvider() ?: return@run ContactSyncOutcome.NotPaired
         val deviceId = pairing.deviceId
         val deviceSecret = pairing.deviceSecret
-        if (deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return@withLock ContactSyncOutcome.NotPaired
+        if (deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return@run ContactSyncOutcome.NotPaired
         val pendingChanges = db.pendingContactChangeDao().getAllPending()
         val startCursor = cursorStore.cursor(pairing.subscriberId)
         // Owed until a since=0 pull commits; until then a push acks its changes but leaves the
@@ -63,7 +74,7 @@ class ContactSyncRepository(
         val wireChanges = pendingChanges.map { it to it.toWireDtoOrNull(json) }
         val undecodable = wireChanges.mapNotNull { (row, dto) -> row.takeIf { dto == null } }
         if (undecodable.isNotEmpty()) {
-            return@withLock ContactSyncOutcome.Retry(
+            return@run ContactSyncOutcome.Retry(
                 "Contact sync stopped: ${undecodable.size} queued change(s) are unreadable " +
                     "(${undecodable.joinToString { it.changeType }}). Nothing was sent or discarded.",
             )
@@ -89,7 +100,7 @@ class ContactSyncRepository(
                 if (batch.size > 1) batches.addAll(0, batch.chunked((batch.size + 1) / 2)) else refused += result.message
                 continue
             }
-            val response = (result as? ContactSyncResult.Success)?.response ?: return@withLock failureOutcome(result)
+            val response = (result as? ContactSyncResult.Success)?.response ?: return@run failureOutcome(result)
             applyDelta(pairing.subscriberId, response, batch.map { it.first }, advanceCursor = !snapshotOwed)
             // Keep pushing on the stale cursor once tooOld: the server keeps answering tooOld
             // without contact lists, and one full pull below replaces them all.
@@ -102,7 +113,7 @@ class ContactSyncRepository(
         var pullFrom: Long? = if (tooOld || startCursor == 0L) 0L else cursor.takeIf { pendingChanges.isEmpty() }
         while (pullFrom != null) {
             val result = client.pull(pairing.serverUrl, deviceId, deviceSecret, pullFrom)
-            val response = (result as? ContactSyncResult.Success)?.response ?: return@withLock failureOutcome(result)
+            val response = (result as? ContactSyncResult.Success)?.response ?: return@run failureOutcome(result)
             applyDelta(pairing.subscriberId, response, emptyList(), snapshot = pullFrom == 0L)
             pullFrom = if (response.tooOld && pullFrom != 0L) 0L else null
         }
@@ -165,6 +176,14 @@ class ContactSyncRepository(
             )
         }
         return localUid
+    }
+
+    /** All or nothing, and only into an empty outbox: until the push is batched, a larger push
+     *  could pass the server's 500-change cap and wedge the outbox. False means it was not empty. */
+    suspend fun queueImport(contacts: List<ContactDto>): Boolean = db.withTransaction {
+        if (db.pendingContactChangeDao().getAllPending().isNotEmpty()) return@withTransaction false
+        contacts.forEach { queueCreate(it) }
+        true
     }
 
     /** [verifiedInPerson] is set only by the PGP QR flow, after an out-of-band comparison. It is

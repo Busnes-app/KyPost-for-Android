@@ -5,7 +5,7 @@ contact sync up to date with the extended `Contact` schema just added to
 the Llama Labels backend: multiple phones/emails/addresses (already
 supported here), plus **groups, a photo, a PGP public key, IM/social
 links, websites, relations, extra dates, phonetic names, department,
-custom fields, and pronouns**. It mirrors `Mobile_Mail_Relay.md`'s shape —
+custom fields, and pronouns**. It mirrors `docs/Mobile_Mail_Relay.md`'s shape —
 concrete JSON/Kotlin, a field-by-field mapping table, and a checklist —
 written so a fresh Claude session working in this repo can implement
 against it with no other context beyond reading the current source files

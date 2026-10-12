@@ -240,13 +240,28 @@ class MigrationTest {
     }
 
     @Test
-    fun migrate14To15_addsAnEmptyMergeBase_keepingLinks() {
+    fun migrate14To15_marksEveryCachedRowAsWindowMail() {
         helper.createDatabase(TEST_DB, 14).apply {
-            execSQL("INSERT INTO device_contact_links (uid, rawContactId, deviceUpdatedAtEpochMs) VALUES ('u1', 7, 0)")
+            execSQL(insertV11Email(messageId = "42", folder = "INBOX", subject = "Cached"))
             close()
         }
 
         val migrated = helper.runMigrationsAndValidate(TEST_DB, 15, true, AppDatabase.MIGRATION_14_15)
+
+        migrated.query("SELECT inWindow FROM emails WHERE messageId = '42'").use { cursor ->
+            assertEquals(true, cursor.moveToFirst())
+            assertEquals(1, cursor.getInt(0))
+        }
+    }
+
+    @Test
+    fun migrate15To16_addsAnEmptyMergeBase_keepingLinks() {
+        helper.createDatabase(TEST_DB, 15).apply {
+            execSQL("INSERT INTO device_contact_links (uid, rawContactId, deviceUpdatedAtEpochMs) VALUES ('u1', 7, 0)")
+            close()
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 16, true, AppDatabase.MIGRATION_15_16)
 
         migrated.query("SELECT syncedJson FROM device_contact_links WHERE uid = 'u1'").use { cursor ->
             assertEquals(true, cursor.moveToFirst())
