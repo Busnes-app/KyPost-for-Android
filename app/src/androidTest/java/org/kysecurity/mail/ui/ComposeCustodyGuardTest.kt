@@ -1,6 +1,5 @@
 package org.kysecurity.mail.ui
 
-import android.content.Intent
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -32,7 +31,8 @@ class ComposeCustodyGuardTest {
     @Test
     fun custodyResolvedWhileTheSubjectPromptIsOpenStopsTheSend() {
         val sends = AtomicInteger()
-        val intent = Intent(instrumentation.targetContext, ComposeActivity::class.java)
+        // internalIntent: only an in-app launch may prefill recipients (ComposeIntentParser).
+        val intent = ComposeActivity.internalIntent(instrumentation.targetContext)
             .putExtra(ComposeActivity.EXTRA_TO, "alice@example.com")
             .putExtra(ComposeActivity.EXTRA_BODY, "hello")
         ActivityScenario.launch<ComposeActivity>(intent).use { scenario ->
