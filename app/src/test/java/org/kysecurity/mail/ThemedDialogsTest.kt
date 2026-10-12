@@ -29,6 +29,7 @@ class ThemedDialogsTest {
             "EmailDetailActivity.kt" to "showRsvpDialog",
             "CalendarHandoff.kt" to "Activity.handOffToCalendar",
             "contacts/ContactsListActivity.kt" to "importAccountsDialog",
+            "EmailDetailActivity.kt" to "confirmOpenLink",
         )
     }
 }
