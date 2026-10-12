@@ -55,8 +55,10 @@ class DeviceContactRepository(
             stage("ensureAccountVisible") { ensureAccountContactsVisible() },
             stage("pruneForeignLinks") { pruneForeignLinks() },
             stage("refreshGroups") {
-                groupSyncRepository.sync()
+                // sync() reports failure as an outcome, not a throw; the stage must still fail.
+                val outcome = groupSyncRepository.sync()
                 reconcileGroupRenames()
+                check(outcome is org.kysecurity.mail.contacts.GroupSyncOutcome.Success) { "Group refresh: $outcome" }
             },
             stage("adoptLostLinks") { adoptLostLinks() },
             stage("pullDeviceChanges") { pullDeviceChangesForOwnAccount() },
@@ -967,7 +969,8 @@ class DeviceContactRepository(
 
     // See createRawContactForDto: reads back the same deprecated Im rows it writes.
     @Suppress("DEPRECATION")
-    private suspend fun readRawContactSnapshot(rawContactId: Long): DeviceRawContactSnapshot? =
+    @androidx.annotation.VisibleForTesting(otherwise = androidx.annotation.VisibleForTesting.PRIVATE)
+    internal suspend fun readRawContactSnapshot(rawContactId: Long): DeviceRawContactSnapshot? =
         withContext(Dispatchers.IO) {
             val rawContactProjection = arrayOf(
                 ContactsContract.RawContacts._ID,
