@@ -52,6 +52,8 @@ data class CachedDraft(
     /** Cached so a fold cannot reset Encrypt and send in the clear. Not part of [hasContent]. */
     val encrypt: Boolean = false,
     val sign: Boolean = false,
+    /** Kept so a reply restored after the app lock still threads. Not part of [hasContent]. */
+    val replyTo: ReplyRef? = null,
 ) {
     /** An untouched compose screen is not worth restoring, and caching it would silently
      *  resurrect an empty draft over a later Reply's prefilled fields. */

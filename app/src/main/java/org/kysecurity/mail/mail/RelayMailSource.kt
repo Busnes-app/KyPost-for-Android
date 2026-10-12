@@ -289,6 +289,9 @@ class RelayMailSource(
             .authed(pairing)
             .build()
         return execute(request) { code, rawBody ->
+            if (draft.replyToMessageId != null && isReplyThreadingRefusal(code, rawBody)) {
+                return@execute MailOutcome.ReplyThreadingRefused(rawBody.trim())
+            }
             if (code != 200) return@execute mapErrorCode(code, rawBody)
             val parsed = runCatching { json.decodeFromString<RelaySendResponseDto>(rawBody) }.getOrNull()
                 ?: return@execute MailOutcome.UpstreamFailure("Malformed send response")
@@ -603,6 +606,18 @@ private fun filenameFromDisposition(header: String?): String {
     return ""
 }
 
+/** The relay's threading refusals (KyPost-Server #352), sent before any delivery. Matched whole:
+ *  other 502s on this endpoint can follow a delivery and quote SMTP text, so a word match could
+ *  offer a re-send of mail that already went out. A reworded refusal only loses the offer. */
+private val REPLY_THREADING_REFUSALS = mapOf(
+    400 to setOf("invalid replyToMessageId; refresh the mailbox", "invalid replyToMailbox"),
+    404 to setOf("the message being replied to was not found; nothing was sent"),
+    502 to setOf("could not read the message being replied to; nothing was sent"),
+)
+
+internal fun isReplyThreadingRefusal(code: Int, rawBody: String): Boolean =
+    REPLY_THREADING_REFUSALS[code]?.contains(rawBody.trim()) == true
+
 private fun MailAction.wireValue(): String = when (this) {
     MailAction.DELETE -> "delete"
     MailAction.ARCHIVE -> "archive"
@@ -641,6 +656,8 @@ private fun MailDraft.toSendWireDto(): RelayMailRequestDto =
         allowPickupFallback = allowPickupFallback,
         calendarReply = calendarReply?.let(::RelayCalendarReplyDto),
         from = from,
+        replyToMessageId = replyToMessageId,
+        replyToMailbox = replyToMailbox,
     )
 
 private fun RelayEmailDto.toUiEmail(tab: String): Email {

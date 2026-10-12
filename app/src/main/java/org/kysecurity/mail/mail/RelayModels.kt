@@ -145,6 +145,9 @@ data class RelayMailRequestDto(
     val calendarReply: RelayCalendarReplyDto? = null,
     /** Send only; omitted when blank, which sends as the primary address. */
     val from: String = "",
+    /** Send only, and omitted when null, so an older relay sees the request it always did. */
+    val replyToMessageId: String? = null,
+    val replyToMailbox: String? = null,
 ) {
     /** Redacted: the body is the user's outgoing message. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "RelayMailRequestDto(redacted)"
