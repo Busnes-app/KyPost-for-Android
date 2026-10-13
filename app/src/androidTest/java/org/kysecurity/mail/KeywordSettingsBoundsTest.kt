@@ -94,7 +94,8 @@ class KeywordSettingsBoundsTest {
     }
 
     /** Under Hostile Location Protection the labels describe the user's mail and must not reach this
-     *  plaintext file at all. */
+     *  plaintext file at all. Asserted on these labels, not an empty file: enabling mints a Keystore
+     *  key, and in that window an earlier UI test's InboxActivity can still write its own. */
     @Test
     fun rememberKeywords_writesNothingUnderHostileLocationProtection() {
         org.kysecurity.mail.security.HostileLocationSettings(context).setEnabled(true)
@@ -102,7 +103,8 @@ class KeywordSettingsBoundsTest {
             val settings = KeywordSettings(context)
             settings.rememberKeywords(setOf("Payroll", "Legal"))
 
-            assertTrue(settings.getAllKeywords().isEmpty())
+            val stored = settings.getAllKeywords()
+            assertFalse("expected no label written under protection", "Payroll" in stored || "Legal" in stored)
         } finally {
             org.kysecurity.mail.security.HostileLocationSettings(context).setEnabled(false)
         }
