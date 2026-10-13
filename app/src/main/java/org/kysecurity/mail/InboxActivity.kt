@@ -1116,7 +1116,7 @@ class InboxActivity : LockedActivity() {
                     outcome.userFacingMessage()?.let { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
                     return@runOnUiThread
                 }
-                val path = resolveSpecialFolder(outcome.value.folders.map { it.path }, kind)
+                val path = specialFolderPath(outcome.value.folders, kind)
                 if (path == null) {
                     val message = getString(R.string.special_folder_missing, getString(kind.label))
                     Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
@@ -1479,18 +1479,24 @@ internal enum class SpecialFolder(
     val aliases: List<String>,
     /** The server names it itself, exactly, at the top level: anything else is the user's. */
     val exact: Boolean = false,
+    /** RFC 6154 role the relay reports in [FolderInfo.special]; the only thing a localized name keeps. */
+    val use: String? = null,
 ) {
-    SENT(R.string.nav_sent, listOf("Sent", "Sent Items", "Sent Messages", "Sent Mail")),
-    DRAFTS(R.string.nav_drafts, listOf("Drafts", "Draft")),
+    SENT(R.string.nav_sent, listOf("Sent", "Sent Items", "Sent Messages", "Sent Mail"), use = "sent"),
+    DRAFTS(R.string.nav_drafts, listOf("Drafts", "Draft"), use = "drafts"),
     /** KyPost-Server's `SnoozedFolder` (`adapters/imap/snooze.go`), created on the first snooze. */
     SNOOZED(R.string.nav_snoozed, listOf("Snoozed"), exact = true),
 }
+
+/** Paths the relay flagged by role this process, so "Gesendet" still reads as Sent once opened. */
+private val flaggedSpecialFolders = java.util.concurrent.ConcurrentHashMap<String, SpecialFolder>()
 
 internal fun mailboxLeaf(path: String): String = path.split('/', '.').last().trim()
 
 /** Only at the top level or directly under INBOX: `Archive/Sent` or `Projects/Drafts` is the
  *  user's own folder, not the account's. */
 internal fun specialFolderOf(path: String): SpecialFolder? {
+    flaggedSpecialFolders[path]?.let { return it }
     SpecialFolder.entries.firstOrNull { it.exact && path in it.aliases }?.let { return it }
     if (mailboxParent(path).let { it.isNotEmpty() && !it.equals("INBOX", ignoreCase = true) }) return null
     return SpecialFolder.entries.firstOrNull { kind ->
@@ -1504,6 +1510,13 @@ internal fun resolveSpecialFolder(paths: List<String>, kind: SpecialFolder): Str
     } else {
         kind.aliases.firstNotNullOfOrNull { alias -> paths.firstOrNull { mailboxLeaf(it).equals(alias, ignoreCase = true) } }
     }
+
+/** The server's special-use flag first, the English aliases for servers that do not send one. */
+internal fun specialFolderPath(folders: List<FolderInfo>, kind: SpecialFolder): String? {
+    val flagged = kind.use?.let { use -> folders.firstOrNull { it.special == use }?.path }
+    flagged?.let { flaggedSpecialFolders[it] = kind }
+    return flagged ?: resolveSpecialFolder(folders.map { it.path }, kind)
+}
 
 /** Rows [new] puts above the first row [old] already had. Zero on a first load. */
 internal fun newRowsAbove(old: List<Email>, new: List<Email>): Int {

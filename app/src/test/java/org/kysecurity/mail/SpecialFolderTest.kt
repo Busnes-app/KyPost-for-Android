@@ -3,6 +3,7 @@ package org.kysecurity.mail
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.kysecurity.mail.mail.FolderInfo
 
 /** Paths as `GET /api/inbox/folders` (no parent) returns them: top level, INBOX and Archive
  *  omitted, the account's own delimiter and spelling. */
@@ -16,6 +17,30 @@ class SpecialFolderTest {
 
         val exchange = listOf("Deleted Items", "Drafts", "Junk Email", "Sent Items")
         assertEquals("Sent Items", resolveSpecialFolder(exchange, SpecialFolder.SENT))
+    }
+
+    /** The server's special-use flag is the only thing a localized name keeps. */
+    @Test
+    fun theServersSpecialUseFlagFindsALocalizedFolder() {
+        val german = listOf(FolderInfo("Entwürfe", false, "drafts"), FolderInfo("Gesendet", false, "sent"))
+        assertEquals("Gesendet", specialFolderPath(german, SpecialFolder.SENT))
+        assertEquals("Entwürfe", specialFolderPath(german, SpecialFolder.DRAFTS))
+        // Once opened it reads as Sent: title, picker tick.
+        assertEquals(SpecialFolder.SENT, specialFolderOf("Gesendet"))
+    }
+
+    @Test
+    fun theFlagBeatsAnEnglishLookalike() {
+        val both = listOf(FolderInfo("Sent", true), FolderInfo("INBOX.Enviados", false, "sent"))
+        assertEquals("INBOX.Enviados", specialFolderPath(both, SpecialFolder.SENT))
+    }
+
+    @Test
+    fun withoutFlagsTheAliasesStillApply() {
+        assertEquals("Sent Items", specialFolderPath(listOf(FolderInfo("Sent Items", false)), SpecialFolder.SENT))
+        assertNull(specialFolderPath(listOf(FolderInfo("Gesendet", false)), SpecialFolder.SENT))
+        // Snoozed has no role: an unflagged folder must not match it.
+        assertNull(specialFolderPath(listOf(FolderInfo("Work", true)), SpecialFolder.SNOOZED))
     }
 
     @Test

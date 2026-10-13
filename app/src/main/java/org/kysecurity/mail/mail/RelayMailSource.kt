@@ -167,7 +167,7 @@ class RelayMailSource(
             val parsed = runCatching { json.decodeFromString<RelayFolderListResponseDto>(body) }.getOrNull()
                 ?: return@execute MailOutcome.UpstreamFailure("Malformed folder list response")
             MailOutcome.Success(
-                FolderListResult(parent = parsed.parent, folders = parsed.folders.map { FolderInfo(it.path, it.deletable) }),
+                FolderListResult(parent = parsed.parent, folders = parsed.folders.map { FolderInfo(it.path, it.deletable, it.special) }),
             )
         }
     }

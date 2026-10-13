@@ -117,7 +117,7 @@ data class MailFetchResult(
 /** One `before=` page, newest first. [hasMore] is null when the server ignored `before=` and
  *  answered with its newest window instead (pre-KyPost-Server #348). */
 data class MailPage(val messages: List<Email>, val hasMore: Boolean?, val nextBefore: String?)
-data class FolderInfo(val path: String, val deletable: Boolean)
+data class FolderInfo(val path: String, val deletable: Boolean, val special: String? = null)
 data class FolderListResult(val parent: String, val folders: List<FolderInfo>)
 
 enum class MailAction { DELETE, ARCHIVE, SPAM, READ, UNREAD, MOVE, SNOOZE }
