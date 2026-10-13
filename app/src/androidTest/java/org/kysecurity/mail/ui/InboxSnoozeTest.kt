@@ -48,9 +48,11 @@ class InboxSnoozeTest {
                 activity.setEmailsForTest(listOf(email("42", "INBOX")))
                 activity.toggleSelectedForTest(email("42", "INBOX"))
                 activity.bulkSnoozeForTest()
+                assertTrue("the snooze must wait behind Undo", source.wakeAts.isEmpty())
 
-                assertEquals(emptyList<Email>(), activity.allEmailsForTest())
+                // Held rows are only hidden until the bar lapses; then they leave the list.
                 activity.dismissUndoBarForTest(activity.undoBarForTest(), Snackbar.Callback.DISMISS_EVENT_TIMEOUT)
+                assertEquals(emptyList<Email>(), activity.allEmailsForTest())
             }
 
             assertTrue(source.awaitCompleted(MailAction.SNOOZE))
