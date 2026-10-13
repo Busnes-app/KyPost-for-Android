@@ -541,6 +541,25 @@ class RelayMailSourceTest {
     }
 
     @Test
+    fun listFolders_carriesTheSpecialUseRole() {
+        val callFactory = FakeCallFactory { request ->
+            jsonResponse(
+                request,
+                """{"parent": "", "folders": [{"path": "Gesendet", "deletable": false, "special": "sent"}, {"path": "Work"}]}""",
+            )
+        }
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = callFactory,
+        )
+
+        val folders = (source.listFolders(null) as MailOutcome.Success).value.folders
+
+        assertEquals(listOf(FolderInfo("Gesendet", false, "sent"), FolderInfo("Work", true, null)), folders)
+    }
+
+    @Test
     fun searchMail_queriesOneMailboxWithThisDevicesCredentials() {
         val callFactory = FakeCallFactory { request -> jsonResponse(request, """{"results": []}""") }
         val source = RelayMailSource(

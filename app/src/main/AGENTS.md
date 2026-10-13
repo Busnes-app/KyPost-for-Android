@@ -532,9 +532,11 @@ Owns production Android app code and resources.
   the action, so the mail stays where it was. The detail screen's actions finish the Activity and
   are not undoable. `InboxUndoTest` and `PendingRowActionsTest` cover this.
 - The folder picker's Sent and Drafts entries never guess a mailbox name. Each tap lists the
-  top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
-  the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A localized name
-  with no alias match shows "No Sent folder", because the relay exposes no special-use flag.
+  top-level folders (`GET /api/inbox/folders`, no parent) and opens the folder whose `special`
+  field carries the RFC 6154 role (`sent`, `drafts`), which is how a localized "Gesendet" is found
+  (`specialFolderPath`). Older servers send no `special`, so the fallback is the first leaf
+  matching the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A
+  flagged path is remembered for the process so `specialFolderOf` labels it once opened.
 - "All folders" in the folder picker opens `FoldersActivity`, one level per screen, which returns
   the tapped path for the inbox to open; a custom folder is titled by its leaf, and only a
   top-level or INBOX-child path counts as Sent or Drafts (`specialFolderOf`), so `Projects/Sent`

@@ -97,7 +97,12 @@ data class RelayInboxResponseDto(
 data class RelaySearchResponseDto(val results: List<RelayEmailDto> = emptyList())
 
 @Serializable
-data class RelayFolderDto(val path: String, val deletable: Boolean = true)
+data class RelayFolderDto(
+    val path: String,
+    val deletable: Boolean = true,
+    /** RFC 6154 role (`sent`, `drafts`, ...) the server's IMAP published; absent on older servers. */
+    val special: String? = null,
+)
 
 @Serializable
 data class RelayFolderListResponseDto(val parent: String = "", val folders: List<RelayFolderDto> = emptyList())
