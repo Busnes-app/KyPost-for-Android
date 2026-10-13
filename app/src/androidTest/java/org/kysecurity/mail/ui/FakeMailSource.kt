@@ -31,6 +31,12 @@ internal class FakeMailSource : MailSource {
     val sends: MutableList<MailDraft> = Collections.synchronizedList(mutableListOf())
     val sendOutcomes = ArrayBlockingQueue<MailOutcome<MailSendOutcome>>(8)
 
+    /** Folder mutations always succeed and land here with their arguments. */
+    val folderCalls: MutableList<List<String>> = Collections.synchronizedList(mutableListOf())
+
+    @Volatile
+    var folders: (String?) -> MailOutcome<FolderListResult> = { MailOutcome.UpstreamFailure("test relay") }
+
     @Volatile
     var actionOutcome: (MailAction) -> MailOutcome<MailActionOutcome> =
         { MailOutcome.Success(MailActionOutcome(processed = 1, failed = emptyList())) }
@@ -82,10 +88,13 @@ internal class FakeMailSource : MailSource {
         MailOutcome.Success(emptyList())
     override fun searchMail(query: String, mailbox: String, limit: Int): MailOutcome<List<Email>> =
         MailOutcome.UpstreamFailure("test relay")
-    override fun listFolders(parent: String?): MailOutcome<FolderListResult> = MailOutcome.UpstreamFailure("test relay")
-    override fun createFolder(parent: String, name: String): MailOutcome<Unit> = MailOutcome.UpstreamFailure("test relay")
-    override fun renameFolder(folder: String, name: String): MailOutcome<Unit> = MailOutcome.UpstreamFailure("test relay")
-    override fun deleteFolder(folder: String): MailOutcome<Unit> = MailOutcome.UpstreamFailure("test relay")
+    override fun listFolders(parent: String?): MailOutcome<FolderListResult> = folders(parent)
+    override fun createFolder(parent: String, name: String): MailOutcome<Unit> =
+        MailOutcome.Success(Unit).also { folderCalls += listOf("create", parent, name) }
+    override fun renameFolder(folder: String, name: String): MailOutcome<Unit> =
+        MailOutcome.Success(Unit).also { folderCalls += listOf("rename", folder, name) }
+    override fun deleteFolder(folder: String): MailOutcome<Unit> =
+        MailOutcome.Success(Unit).also { folderCalls += listOf("delete", folder) }
     override fun saveDraft(draft: MailDraft): MailOutcome<Unit> = MailOutcome.UpstreamFailure("test relay")
     override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> =
         MailOutcome.UpstreamFailure("test relay")

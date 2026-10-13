@@ -44,6 +44,9 @@ class SpecialFolderTest {
         // Archived copies are Archive's: the picker must not tick Sent or Drafts for them.
         assertNull(specialFolderOf("Archive/Sent"))
         assertNull(specialFolderOf("Archive.Drafts"))
+        // A user's own folder of that name, reachable from the folders screen.
+        assertNull(specialFolderOf("Projects/Sent"))
+        assertEquals(SpecialFolder.DRAFTS, specialFolderOf("INBOX/Drafts"))
         assertNull(specialFolderOf("Junk"))
     }
 }

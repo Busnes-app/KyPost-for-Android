@@ -152,6 +152,13 @@ class InboxActivity : LockedActivity() {
         }
     }
 
+    private val foldersLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val folder = result.data?.getStringExtra(FoldersActivity.EXTRA_FOLDER)
+        if (result.resultCode == RESULT_OK && folder != null) switchFolder(folder)
+    }
+
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
         savedInstanceState?.let { state ->
             currentFolder = state.getString(STATE_FOLDER, currentFolder)
@@ -209,7 +216,8 @@ class InboxActivity : LockedActivity() {
             currentFolder == "Trash" -> getString(R.string.nav_trash)
             currentFolder == ARCHIVE_PARENT_FOLDER -> getString(R.string.nav_archive)
             currentFolder.startsWith("$ARCHIVE_PARENT_FOLDER/") -> currentFolder.substringAfterLast('/')
-            else -> getString(specialFolderOf(currentFolder)?.label ?: R.string.nav_inbox)
+            currentFolder.equals("INBOX", ignoreCase = true) -> getString(R.string.nav_inbox)
+            else -> specialFolderOf(currentFolder)?.let { getString(it.label) } ?: mailboxLeaf(currentFolder)
         }
     }
 
@@ -1024,6 +1032,8 @@ class InboxActivity : LockedActivity() {
         popupMenu.menu.add(0, 5, 5, getString(SpecialFolder.DRAFTS.label)).isChecked =
             specialFolderOf(currentFolder) == SpecialFolder.DRAFTS
         popupMenu.menu.setGroupCheckable(0, true, true)
+        // Its own group: an action, not a radio choice.
+        popupMenu.menu.add(1, 6, 6, getString(R.string.nav_all_folders))
 
         popupMenu.setOnMenuItemClickListener { menuItem ->
             val folder = when (menuItem.itemId) {
@@ -1040,6 +1050,10 @@ class InboxActivity : LockedActivity() {
                 }
                 5 -> {
                     openSpecialFolder(SpecialFolder.DRAFTS)
+                    return@setOnMenuItemClickListener true
+                }
+                6 -> {
+                    foldersLauncher.launch(FoldersActivity.intentFor(this, open = currentFolder))
                     return@setOnMenuItemClickListener true
                 }
                 else -> return@setOnMenuItemClickListener false
@@ -1423,11 +1437,12 @@ internal enum class SpecialFolder(@androidx.annotation.StringRes val label: Int,
     DRAFTS(R.string.nav_drafts, listOf("Drafts", "Draft")),
 }
 
-private fun mailboxLeaf(path: String): String = path.split('/', '.').last().trim()
+internal fun mailboxLeaf(path: String): String = path.split('/', '.').last().trim()
 
-/** Null under Archive: `Archive/Sent` is an archived folder, which the Archive entry owns. */
+/** Only at the top level or directly under INBOX: `Archive/Sent` or `Projects/Drafts` is the
+ *  user's own folder, not the account's. */
 internal fun specialFolderOf(path: String): SpecialFolder? {
-    if (path.startsWith("Archive/", ignoreCase = true) || path.startsWith("Archive.", ignoreCase = true)) return null
+    if (mailboxParent(path).let { it.isNotEmpty() && !it.equals("INBOX", ignoreCase = true) }) return null
     return SpecialFolder.entries.firstOrNull { kind -> kind.aliases.any { it.equals(mailboxLeaf(path), ignoreCase = true) } }
 }
 

@@ -509,6 +509,18 @@ Owns production Android app code and resources.
   top-level folders (`GET /api/inbox/folders`, no parent) and opens the first whose leaf matches
   the server's own alias list (`SpecialFolder`, mirroring `special_folders.go`). A localized name
   with no alias match shows "No Sent folder", because the relay exposes no special-use flag.
+- "All folders" in the folder picker opens `FoldersActivity`, one level per screen, which returns
+  the tapped path for the inbox to open; a custom folder is titled by its leaf, and only a
+  top-level or INBOX-child path counts as Sent or Drafts (`specialFolderOf`), so `Projects/Sent`
+  stays the user's. The top level adds back Archive (`withArchive`), which the relay omits.
+  Rename and Delete show only on `deletable` rows, because the server refuses both for built-in
+  and top-level folders; creating at the top level says so first. The server answers several
+  refusals (subfolders present, name taken) with a plain-text 502 that reads as a mail server
+  fault, so the screen checks first: Delete lists the folder's children and refuses locally,
+  and Rename refuses a sibling's name (`folderNameProblem`, which also enforces one level and
+  keeps the dialog open). Mutations run on `MailBackgroundExecutor`. A rename or delete that
+  moves the inbox's open folder returns its new path (`movedOpenFolder`), so the inbox does not
+  keep refreshing a mailbox that is gone.
 - The inbox asks for `preview=1` (KyPost-Server #351): at most 200 characters of plain text the
   server flattened from a body it already holds, shown muted under the sender in
   `item_email.xml` as plain `TextView` text, never markup, with format characters (bidi

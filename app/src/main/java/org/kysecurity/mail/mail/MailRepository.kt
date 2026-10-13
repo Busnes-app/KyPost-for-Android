@@ -315,6 +315,13 @@ class MailRepository(
         relaySource.sendClientEncrypted(message)
 
     fun listFolders(parent: String?): MailOutcome<FolderListResult> = relaySource.listFolders(parent)
+    fun createFolder(parent: String, name: String): MailOutcome<Unit> = relaySource.createFolder(parent, name)
+    fun renameFolder(folder: String, name: String): MailOutcome<Unit> = relaySource.renameFolder(folder, name)
+
+    /** The server moves the folder's mail into its parent before deleting it. */
+    // ponytail: rename and delete leave the old path's Room rows and sync cursor behind. Unverified
+    // whether a folder recreated at that path shows them before its first full refresh.
+    fun deleteFolder(folder: String): MailOutcome<Unit> = relaySource.deleteFolder(folder)
 
     /** Not cached: results are a view of [folder], not its window, and must not prune it. */
     fun search(query: String, folder: String, limit: Int = 50): MailOutcome<List<Email>> =
