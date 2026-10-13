@@ -7,6 +7,13 @@ internal data class ComposePrefill(
     val to: String,
     val subject: String,
     val bodyHtml: String,
+    val cc: String = "",
+    val bcc: String = "",
+    /** The draft being edited, deleted once its replacement is saved or sent. In-app only: an
+     *  outside caller must never be able to make this screen delete a message. */
+    val sourceDraft: ReplyRef? = null,
+    /** How many attachments the draft had; fewer arriving means the old copy must stay. */
+    val sourceDraftAttachments: Int = 0,
 )
 
 internal fun Intent.isExternalComposeIntent(): Boolean =
@@ -41,11 +48,17 @@ internal fun parseComposeIntent(
     }
 
     if (internal) {
+        val draftId = intent.getStringExtra(ComposeActivity.EXTRA_SOURCE_DRAFT_ID)
+        val draftFolder = intent.getStringExtra(ComposeActivity.EXTRA_SOURCE_DRAFT_FOLDER)
         return ComposePrefill(
             to = intent.getStringExtra(ComposeActivity.EXTRA_TO).orEmpty(),
             subject = intent.getStringExtra(ComposeActivity.EXTRA_SUBJECT).orEmpty(),
             bodyHtml = intent.getStringExtra(ComposeActivity.EXTRA_BODY_HTML)
                 ?: plainTextToHtml(intent.getStringExtra(ComposeActivity.EXTRA_BODY).orEmpty()),
+            cc = intent.getStringExtra(ComposeActivity.EXTRA_CC).orEmpty(),
+            bcc = intent.getStringExtra(ComposeActivity.EXTRA_BCC).orEmpty(),
+            sourceDraft = if (draftId.isNullOrBlank() || draftFolder.isNullOrBlank()) null else ReplyRef(draftId, draftFolder),
+            sourceDraftAttachments = intent.getIntExtra(ComposeActivity.EXTRA_SOURCE_DRAFT_ATTACHMENTS, 0),
         )
     }
     return ComposePrefill(

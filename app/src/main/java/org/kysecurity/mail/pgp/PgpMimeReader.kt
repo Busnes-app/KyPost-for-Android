@@ -1,8 +1,10 @@
 package org.kysecurity.mail.pgp
 
+import jakarta.mail.Message
 import jakarta.mail.Part
 import jakarta.mail.Session
 import jakarta.mail.internet.ContentType
+import jakarta.mail.internet.InternetAddress
 import jakarta.mail.internet.MimeMessage
 import jakarta.mail.internet.MimeMultipart
 import java.io.ByteArrayInputStream
@@ -29,6 +31,11 @@ internal data class DecryptedBody(
     /** The real subject from the encrypted part's protected headers, when the sender used them.
      *  The outer envelope subject is a placeholder for KyPost-to-KyPost mail. */
     val protectedSubject: String?,
+    /** The protected recipients, comma-joined. A draft saved here carries all three, Bcc
+     *  included, because only its author's key can open it; delivered mail carries none. */
+    val protectedTo: String = "",
+    val protectedCc: String = "",
+    val protectedBcc: String = "",
     val attachments: List<DecryptedAttachment> = emptyList(),
     /** True when a part was dropped for size, count, or decoding failure. The screen says so; silence would show a
      *  message that appears to have fewer files than it does. */
@@ -99,6 +106,9 @@ internal object PgpMimeReader {
             for (i in 0 until content.count) {
                 val part = content.getBodyPart(i)
                 noteSignature(part)
+                // The protected headers' display copy, read from the entity itself. One marked as an
+                // attachment is a file, shown like any other, so nothing can hide behind the type.
+                if (part.isMimeType("text/rfc822-headers") && runCatching { part.disposition }.getOrNull() != Part.ATTACHMENT) continue
                 if (isAttachment(part)) { collect(part); continue }
                 val body = runCatching { part.content }.getOrNull()
                 when {
@@ -138,9 +148,17 @@ internal object PgpMimeReader {
             bodyMode = if (html != null) "html" else "plain",
             // Present-but-blank is a real (empty) subject; only an absent header means none.
             protectedSubject = message.getHeader("Subject", null)?.let { message.subject.orEmpty() },
+            protectedTo = addresses(message, Message.RecipientType.TO),
+            protectedCc = addresses(message, Message.RecipientType.CC),
+            protectedBcc = addresses(message, Message.RecipientType.BCC),
             attachments = attachments,
             attachmentsOmitted = omitted,
             hasDetachedSignature = hasDetachedSignature,
         )
     }.getOrNull()
+
+    /** Decoded and unfolded by the parser, addresses only: a display name can hold a comma. */
+    private fun addresses(message: MimeMessage, type: Message.RecipientType): String = runCatching {
+        message.getRecipients(type).orEmpty().mapNotNull { (it as? InternetAddress)?.address }.joinToString(", ")
+    }.getOrDefault("")
 }

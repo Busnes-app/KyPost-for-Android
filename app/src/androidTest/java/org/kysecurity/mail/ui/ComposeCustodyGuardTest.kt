@@ -126,16 +126,18 @@ class ComposeCustodyGuardTest {
     /** Scheduling encrypts the copy for Drafts on this device, so only an account whose key is here
      *  is offered it: never one whose key the server holds, nor one still being looked up. */
     @Test
-    fun scheduleSendIsOfferedOnlyWhereThisDeviceHoldsTheKey() {
+    fun scheduleAndSaveDraftAreOfferedOnlyWhereThisDeviceHoldsTheKey() {
         ActivityScenario.launch<ComposeActivity>(ComposeActivity.internalIntent(instrumentation.targetContext)).use { scenario ->
             scenario.onActivity { assertFalse("offered before custody is known", it.scheduleOfferedForTest()) }
             scenario.onActivity {
                 it.applyPgpComposeStateForTest(PgpComposeState(canEncrypt = true, canSign = true, handoffToWebmail = false))
                 assertFalse("offered to a server-key account", it.scheduleOfferedForTest())
+                assertFalse("Save draft offered to a server-key account", it.saveDraftOfferedForTest())
                 it.applyPgpComposeStateForTest(PgpComposeState(canEncrypt = false, canSign = false, handoffToWebmail = true))
                 assertFalse("offered to a webmail-only account", it.scheduleOfferedForTest())
                 it.applyPgpComposeStateForTest(PgpComposeState(canEncrypt = true, canSign = true, handoffToWebmail = false, clientSide = true))
                 assertTrue("not offered where the key is on this device", it.scheduleOfferedForTest())
+                assertTrue("Save draft not offered where the key is on this device", it.saveDraftOfferedForTest())
             }
         }
     }

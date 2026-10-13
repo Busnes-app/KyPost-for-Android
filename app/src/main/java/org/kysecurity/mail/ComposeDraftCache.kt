@@ -54,6 +54,8 @@ data class CachedDraft(
     val sign: Boolean = false,
     /** Kept so a reply restored after the app lock still threads. Not part of [hasContent]. */
     val replyTo: ReplyRef? = null,
+    /** The draft this edits, so its old copy is still deleted after a lock teardown. */
+    val sourceDraft: ReplyRef? = null,
 ) {
     /** An untouched compose screen is not worth restoring, and caching it would silently
      *  resurrect an empty draft over a later Reply's prefilled fields. */
