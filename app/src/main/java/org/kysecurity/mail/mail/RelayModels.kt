@@ -153,6 +153,9 @@ data class RelayMailRequestDto(
     /** Send only, and omitted when null, so an older relay sees the request it always did. */
     val replyToMessageId: String? = null,
     val replyToMailbox: String? = null,
+    /** Send only; RFC 3339, whole seconds, UTC. */
+    val sendAt: String? = null,
+    val pgpDraft: String? = null,
 ) {
     /** Redacted: the body is the user's outgoing message. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "RelayMailRequestDto(redacted)"
@@ -182,6 +185,8 @@ data class RelayClientEncryptedRequestDto(
     val sentCopyEncrypted: Boolean = false,
     /** Omitted when null: a legacy account must not see a made-up generation. */
     val materialGeneration: Long? = null,
+    val sendAt: String? = null,
+    val draftCopy: String? = null,
 )
 
 /** Outgoing attachment wire shape accepted by /api/mail/send and /api/mail/draft. */
@@ -231,7 +236,27 @@ data class RelaySendResponseDto(
     /** Present and true only when a calendarReply part was actually sent. */
     @Serializable(with = StrictBooleanSerializer::class)
     val calendarReply: Boolean = false,
+    /** A 202's: the relay holds the message until [sendAt]. */
+    @Serializable(with = StrictBooleanSerializer::class)
+    val scheduled: Boolean = false,
+    val sendAt: String = "",
 )
+
+@Serializable
+data class RelayScheduledSendDto(
+    val id: String = "",
+    val status: String = "",
+    val reason: String = "",
+    val sendAt: String = "",
+    val subject: String = "",
+    val to: List<String> = emptyList(),
+)
+
+@Serializable
+data class RelayScheduledListDto(val scheduled: List<RelayScheduledSendDto> = emptyList())
+
+@Serializable
+data class RelayScheduledCancelDto(val ok: Boolean = false, val warning: String = "")
 
 /** The 409 body /api/mail/send returns when recipients have no usable PGP key. Both PGP refusals
  *  are 409 and are told apart by which field is present, never by status or error prose — the

@@ -173,6 +173,8 @@ private class FakeMailSource(
 
     override fun currentAccount(): MailAccount? = null
     override fun listFolders(parent: String?) = unsupported()
+    override fun listScheduled() = unsupported()
+    override fun cancelScheduled(id: String) = unsupported()
     override fun searchMail(query: String, mailbox: String, limit: Int) = unsupported()
     override fun createFolder(parent: String, name: String) = unsupported()
     override fun renameFolder(folder: String, name: String) = unsupported()

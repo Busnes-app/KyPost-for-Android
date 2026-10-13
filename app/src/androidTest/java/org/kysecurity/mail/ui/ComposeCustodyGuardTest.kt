@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import okhttp3.Call
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -119,6 +120,23 @@ class ComposeCustodyGuardTest {
 
             assertEquals("a webmail-only account went on to send", 0, sends.get())
             scenario.onActivity { it.sendObserverForTest = null }
+        }
+    }
+
+    /** Scheduling encrypts the copy for Drafts on this device, so only an account whose key is here
+     *  is offered it: never one whose key the server holds, nor one still being looked up. */
+    @Test
+    fun scheduleSendIsOfferedOnlyWhereThisDeviceHoldsTheKey() {
+        ActivityScenario.launch<ComposeActivity>(ComposeActivity.internalIntent(instrumentation.targetContext)).use { scenario ->
+            scenario.onActivity { assertFalse("offered before custody is known", it.scheduleOfferedForTest()) }
+            scenario.onActivity {
+                it.applyPgpComposeStateForTest(PgpComposeState(canEncrypt = true, canSign = true, handoffToWebmail = false))
+                assertFalse("offered to a server-key account", it.scheduleOfferedForTest())
+                it.applyPgpComposeStateForTest(PgpComposeState(canEncrypt = false, canSign = false, handoffToWebmail = true))
+                assertFalse("offered to a webmail-only account", it.scheduleOfferedForTest())
+                it.applyPgpComposeStateForTest(PgpComposeState(canEncrypt = true, canSign = true, handoffToWebmail = false, clientSide = true))
+                assertTrue("not offered where the key is on this device", it.scheduleOfferedForTest())
+            }
         }
     }
 }

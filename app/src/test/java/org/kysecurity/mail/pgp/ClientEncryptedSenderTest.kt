@@ -471,4 +471,70 @@ class ClientEncryptedSenderTest {
         assertEquals("1 bcc delivery(s) failed", sent.warning)
         assertFalse(sent.sentSaved)
     }
+
+    @Test
+    fun aScheduledSendDatesEveryDeliveryAtItsSendTime() = runBlocking {
+        val transport = FakeClientEncryptedTransport()
+        val sendAt = java.time.Instant.parse("2026-10-20T08:00:00Z")
+        sender(
+            resolver = FakeRecipientKeyResolver(
+                resolvedAll(listOf("alice@example.invalid", "dave@example.invalid"), TestPgpPrivateKey.ARMORED_PUBLIC),
+            ),
+            transport = transport,
+        ).send(draft(to = "alice@example.invalid", bcc = "dave@example.invalid"), sign = false, sendAt = sendAt)
+
+        val message = transport.sent.single()
+        assertEquals(sendAt, message.sendAt)
+        // The relay refuses a delivery whose Date is more than a minute off sendAt.
+        val expected = "Date: Tue, 20 Oct 2026 08:00:00 GMT"
+        (message.deliveries.map { it.ciphertext } + message.sentCopy + requireNotNull(message.draftCopy)).forEach {
+            assertTrue(it, it.lineSequence().any { line -> line == expected })
+        }
+    }
+
+    @Test
+    fun aScheduledSendCarriesADraftCopyOnlyItsAuthorCanRead() = runBlocking {
+        val transport = FakeClientEncryptedTransport()
+        sender(
+            // Recipients resolve to the SECOND key; the vault holds the first.
+            resolver = FakeRecipientKeyResolver(
+                resolvedAll(listOf("alice@example.invalid", "dave@example.invalid"), TestPgpSecondKey.ARMORED_PUBLIC),
+            ),
+            transport = transport,
+        ).send(
+            draft(to = "alice@example.invalid", bcc = "dave@example.invalid", subject = "Quarterly"),
+            sign = false,
+            sendAt = java.time.Instant.parse("2026-10-20T08:00:00Z"),
+        )
+
+        val draftCopy = requireNotNull(transport.sent.single().draftCopy)
+        assertFalse("the Bcc must not be in the envelope", draftCopy.contains("dave@example.invalid"))
+        assertTrue(
+            "a recipient's key must not open the copy for Drafts",
+            PgpDecryptor.decrypt(TestPgpSecondKey.ARMORED_PRIVATE.toCharArray(), armorOf(draftCopy), emptyList()) is DecryptResult.Failed,
+        )
+        val decrypted = PgpDecryptor.decrypt(
+            TestPgpPrivateKey.ARMORED_PRIVATE.toCharArray(), armorOf(draftCopy), emptyList(),
+        ) as DecryptResult.Ok
+        try {
+            val text = decrypted.plaintext.toString(Charsets.UTF_8)
+            // Drafts must give back everything needed to send it again.
+            assertTrue(text.contains("Bcc: dave@example.invalid"))
+            assertTrue(text.contains("Subject: Quarterly"))
+        } finally {
+            decrypted.plaintext.fill(0)
+        }
+    }
+
+    @Test
+    fun aSendNowCarriesNoDraftCopyOrSendTime() = runBlocking {
+        val transport = FakeClientEncryptedTransport()
+        sender(
+            resolver = FakeRecipientKeyResolver(resolvedAll(listOf("alice@example.invalid"), TestPgpPrivateKey.ARMORED_PUBLIC)),
+            transport = transport,
+        ).send(draft(), sign = false)
+
+        assertNull(transport.sent.single().draftCopy)
+        assertNull(transport.sent.single().sendAt)
+    }
 }

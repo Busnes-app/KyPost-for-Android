@@ -146,6 +146,11 @@ data class MailDraft(
     /** The answered message, for server-side threading (KyPost-Server #352). Send only. */
     val replyToMessageId: String? = null,
     val replyToMailbox: String? = null,
+    /** Send only: the relay holds it until then (KyPost-Server #388). */
+    val sendAt: java.time.Instant? = null,
+    /** Send only, with [sendAt] on a client-custody account: what Drafts gets back if the send
+     *  fails, encrypted on this device to the account's own key. */
+    val pgpDraft: String? = null,
 ) {
     /** Redacted: the body is the user's outgoing message. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "MailDraft(redacted)"
@@ -186,6 +191,19 @@ data class MailSendOutcome(
     val warning: String,
     /** The relay confirmed the iTIP part went out (KyPost-Server #354). An older relay omits it. */
     val calendarReplySent: Boolean = false,
+    /** Non-null when the relay accepted it for later instead of sending it (202). */
+    val scheduledAt: java.time.Instant? = null,
+)
+
+/** One row of `GET /api/scheduled`. [status] is the server's: scheduled, sending, returning,
+ *  returned, sent, queued, uncertain or failed. */
+data class ScheduledSend(
+    val id: String,
+    val status: String,
+    val reason: String,
+    val sendAt: java.time.Instant?,
+    val subject: String,
+    val to: List<String>,
 )
 
 data class ClientEncryptedDelivery(val recipients: List<String>, val ciphertext: String)
@@ -205,6 +223,11 @@ data class ClientEncryptedMessage(
     /** The held keyring's generation; null for legacy armor. A converted account refuses a send
      *  that does not name its current generation (KyPost-Server #210). */
     val materialGeneration: Long? = null,
+    /** With [draftCopy]: send at this time, not now. Every delivery's Date must name it. */
+    val sendAt: java.time.Instant? = null,
+    /** The message encrypted to the account's own key, recipients included, for Drafts if the
+     *  scheduled send fails. */
+    val draftCopy: String? = null,
 )
 
 data class MailMessageBody(
@@ -272,6 +295,11 @@ interface MailSource {
         account: MailAccount? = null,
         onCall: (okhttp3.Call) -> Unit = {},
     ): MailOutcome<MailSendOutcome>
+
+    fun listScheduled(): MailOutcome<List<ScheduledSend>>
+
+    /** Returns the message to Drafts; the success value is the server's warning, blank if none. */
+    fun cancelScheduled(id: String): MailOutcome<String>
 
     /** Relays ciphertext this device already built; a different endpoint and failure set. */
     fun sendClientEncrypted(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome>

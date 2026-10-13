@@ -33,6 +33,12 @@ class MemoryBudgetTest {
 
     /** The ratchet is only meaningful while it is snug. If a fix lands and this fails, lower
      *  [MemoryBudget.SEND_SCENARIO_RATCHET_BYTES] to the new value in the same commit. */
+    /** Scheduling adds an encrypted copy for Drafts; its own cap keeps it inside the same ratchet. */
+    @Test
+    fun aScheduledSendStaysUnderTheSendRatchet() {
+        assertTrue(MemoryBudget.SCHEDULED_SEND_PEAK_BYTES <= MemoryBudget.SEND_SCENARIO_RATCHET_BYTES)
+    }
+
     @Test
     fun sendScenarioRatchetIsStillSnug() {
         val slack = MemoryBudget.SEND_SCENARIO_RATCHET_BYTES - MemoryBudget.SEND_SCENARIO_PEAK_BYTES

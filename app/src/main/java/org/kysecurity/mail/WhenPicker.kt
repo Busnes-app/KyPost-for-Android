@@ -109,3 +109,7 @@ private fun pickTime(
         }
     }, initial.hour, initial.minute, DateFormat.is24HourFormat(activity)).showSecurely()
 }
+
+/** A date and time the way this phone writes them, for "scheduled for" and the scheduled list. */
+internal fun formatWhen(at: Instant): String =
+    java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(Date.from(at))

@@ -33,6 +33,7 @@ class ThemedDialogsTest {
             "security/AppLockOffer.kt" to "showIfDue",
             "FoldersActivity.kt" to "promptName",
             "WhenPicker.kt" to "pickWhen",
+            "ScheduledActivity.kt" to "confirmCancel",
             "FoldersActivity.kt" to "confirmDelete",
         )
     }

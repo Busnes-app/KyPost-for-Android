@@ -16,6 +16,7 @@ import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailPage
 import org.kysecurity.mail.mail.MailSendOutcome
 import org.kysecurity.mail.mail.MailSource
+import org.kysecurity.mail.mail.ScheduledSend
 import java.util.Collections
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CountDownLatch
@@ -34,6 +35,13 @@ internal class FakeMailSource : MailSource {
 
     /** Folder mutations always succeed and land here with their arguments. */
     val folderCalls: MutableList<List<String>> = Collections.synchronizedList(mutableListOf())
+
+    @Volatile
+    var scheduled: () -> MailOutcome<List<ScheduledSend>> = { MailOutcome.UpstreamFailure("test relay") }
+
+    @Volatile
+    var cancelOutcome: (String) -> MailOutcome<String> = { MailOutcome.Success("") }
+    val cancels: MutableList<String> = Collections.synchronizedList(mutableListOf())
 
     @Volatile
     var folders: (String?) -> MailOutcome<FolderListResult> = { MailOutcome.UpstreamFailure("test relay") }
@@ -92,6 +100,8 @@ internal class FakeMailSource : MailSource {
     override fun searchMail(query: String, mailbox: String, limit: Int): MailOutcome<List<Email>> =
         MailOutcome.UpstreamFailure("test relay")
     override fun listFolders(parent: String?): MailOutcome<FolderListResult> = folders(parent)
+    override fun listScheduled(): MailOutcome<List<ScheduledSend>> = scheduled()
+    override fun cancelScheduled(id: String): MailOutcome<String> = cancelOutcome(id).also { cancels += id }
     override fun createFolder(parent: String, name: String): MailOutcome<Unit> =
         MailOutcome.Success(Unit).also { folderCalls += listOf("create", parent, name) }
     override fun renameFolder(folder: String, name: String): MailOutcome<Unit> =

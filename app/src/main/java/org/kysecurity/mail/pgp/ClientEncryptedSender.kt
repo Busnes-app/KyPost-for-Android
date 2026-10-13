@@ -14,7 +14,8 @@ private const val TIER_KEY_CHANGED = "key_changed"
 
 /** Every way a client-encrypted send can end. One per row of the compose screen's exit table. */
 internal sealed class ClientSendOutcome {
-    data class Sent(val sentSaved: Boolean, val warning: String) : ClientSendOutcome()
+    /** [scheduledAt] is set when the relay is holding it for later. */
+    data class Sent(val sentSaved: Boolean, val warning: String, val scheduledAt: java.time.Instant? = null) : ClientSendOutcome()
 
     object Cancelled : ClientSendOutcome()
     object NotEnrolled : ClientSendOutcome()
@@ -71,7 +72,9 @@ internal class ClientEncryptedSender(
     private val boundaryToken: () -> String = ::randomBoundaryToken,
 ) {
 
-    suspend fun send(draft: MailDraft, sign: Boolean): ClientSendOutcome {
+    /** A non-null [sendAt] schedules it: every delivery is dated then, as the relay requires, and a
+     *  copy for Drafts rides along in case the scheduled send fails. */
+    suspend fun send(draft: MailDraft, sign: Boolean, sendAt: java.time.Instant? = null): ClientSendOutcome {
         val from = accountAddress.trim()
         if (from.isEmpty()) return ClientSendOutcome.NoAccountAddress
 
@@ -134,7 +137,7 @@ internal class ClientEncryptedSender(
             boundaryToken = boundaryToken,
         ).toByteArray(Charsets.UTF_8)
 
-        val date = rfc5322Date(now())
+        val date = rfc5322Date(sendAt?.atOffset(ZoneOffset.UTC) ?: now())
 
         // To and CC share one ciphertext; each BCC gets their own, so no BCC recipient's key id
         // appears in a packet another recipient can read.
@@ -146,12 +149,16 @@ internal class ClientEncryptedSender(
 
         // Scoped to withSigner: the explicit active signer, never a historical member; null means the app locked meanwhile.
         val ciphertexts = EnrollmentSession.withSigner { signer ->
-            encryptAll(signer, sign, protectedContent, groups, keys, fields, from, date, boundaryToken)
+            val bundle = encryptAll(signer, sign, protectedContent, groups, keys, fields, from, date, boundaryToken)
+            if (bundle !is EncryptedBundle.Ok || sendAt == null) return@withSigner bundle
+            signer?.let { encryptDraftCopy(it, draft, fields, from, date) }?.let { bundle.copy(draftCopy = it) }
+                ?: EncryptedBundle.Failed("could not encrypt the copy for Drafts")
         } ?: return ClientSendOutcome.NotEnrolled
-        val (deliveries, sentCopyArmored) = when (ciphertexts) {
-            is EncryptedBundle.Ok -> ciphertexts.deliveries to ciphertexts.sentCopy
+        val bundle = when (ciphertexts) {
+            is EncryptedBundle.Ok -> ciphertexts
             is EncryptedBundle.Failed -> return ClientSendOutcome.EncryptFailed(ciphertexts.message)
         }
+        val (deliveries, sentCopyArmored, draftCopy) = bundle
 
         val outcome = transport.send(
             ClientEncryptedMessage(
@@ -167,10 +174,13 @@ internal class ClientEncryptedSender(
                 ),
                 mode = draft.mode.ifBlank { "html" },
                 materialGeneration = EnrollmentSession.withKeyring { it.materialGeneration },
+                sendAt = sendAt,
+                draftCopy = draftCopy,
             ),
         )
         return when (outcome) {
-            is MailOutcome.Success -> ClientSendOutcome.Sent(outcome.value.sentSaved, outcome.value.warning)
+            is MailOutcome.Success ->
+                ClientSendOutcome.Sent(outcome.value.sentSaved, outcome.value.warning, outcome.value.scheduledAt)
             else -> ClientSendOutcome.SendFailed(outcome)
         }
     }
@@ -220,7 +230,11 @@ internal class ClientEncryptedSender(
     }
 
     private sealed class EncryptedBundle {
-        data class Ok(val deliveries: List<ClientEncryptedDelivery>, val sentCopy: String) : EncryptedBundle()
+        data class Ok(
+            val deliveries: List<ClientEncryptedDelivery>,
+            val sentCopy: String,
+            val draftCopy: String? = null,
+        ) : EncryptedBundle()
         data class Failed(val message: String) : EncryptedBundle()
     }
 

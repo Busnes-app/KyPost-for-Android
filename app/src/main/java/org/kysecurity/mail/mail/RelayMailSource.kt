@@ -31,6 +31,12 @@ private const val CLIENT_SIDE_NEEDED_MARKER = "clientSideNeeded"
 /** /api/mail/send-pgp on a converted account, KyPost-Server #210. Both mean the same thing to
  *  a device: what it holds is no longer the account's current material. */
 private const val PGP_STATE_CHANGED_MARKER = "pgpStateChanged"
+private const val SCHEDULED_FULL_MARKER = "too many scheduled messages"
+internal const val SCHEDULED_GONE_MESSAGE = "That scheduled message is no longer on the server"
+internal const val SCHEDULING_UNSUPPORTED_MESSAGE = "This server can't schedule mail yet. Update KyPost Server to use it."
+internal const val SCHEDULE_IGNORED_WARNING = "Sent now: this server can't schedule mail. Update KyPost Server to schedule."
+private val SCHEDULED_ID = Regex("[A-Za-z0-9-]{1,64}")
+internal const val SCHEDULED_CLAIMED_MESSAGE = "It is already being sent, so it can no longer be canceled"
 private const val REENROLLMENT_REQUIRED_MARKER = "reenrollmentRequired"
 internal const val PGP_STATE_CHANGED_MESSAGE =
     "Your account's encryption keys changed since this device was set up. Enroll this device again in Security settings, then send again."
@@ -235,7 +241,7 @@ class RelayMailSource(
             messageIds = messageIds,
             mailbox = mailbox,
             targetMailbox = targetMailbox,
-            wakeAt = wakeAt?.truncatedTo(java.time.temporal.ChronoUnit.SECONDS)?.toString(),
+            wakeAt = wakeAt?.wireTime(),
         )
         val body = json.encodeToString(requestDto)
         val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
@@ -294,12 +300,7 @@ class RelayMailSource(
             if (draft.replyToMessageId != null && isReplyThreadingRefusal(code, rawBody)) {
                 return@execute MailOutcome.ReplyThreadingRefused(rawBody.trim())
             }
-            if (code != 200) return@execute mapErrorCode(code, rawBody)
-            val parsed = runCatching { json.decodeFromString<RelaySendResponseDto>(rawBody) }.getOrNull()
-                ?: return@execute MailOutcome.UpstreamFailure("Malformed send response")
-            MailOutcome.Success(
-                MailSendOutcome(sentSaved = parsed.sentSaved, warning = parsed.warning, calendarReplySent = parsed.calendarReply),
-            )
+            sendOutcome(code, rawBody, scheduling = draft.sendAt != null)
         }
     }
 
@@ -321,16 +322,72 @@ class RelayMailSource(
                 sentCopy = message.sentCopy,
                 sentCopyEncrypted = true,
                 materialGeneration = message.materialGeneration,
+                sendAt = message.sendAt?.wireTime(),
+                draftCopy = message.draftCopy,
             ),
         )
         val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
             .authed(pairing)
             .build()
-        return execute(request) { code, rawBody ->
-            if (code != 200) return@execute mapErrorCode(code, rawBody)
-            val parsed = runCatching { json.decodeFromString<RelaySendResponseDto>(rawBody) }.getOrNull()
-                ?: return@execute MailOutcome.UpstreamFailure("Malformed send response")
-            MailOutcome.Success(MailSendOutcome(sentSaved = parsed.sentSaved, warning = parsed.warning))
+        return execute(request) { code, rawBody -> sendOutcome(code, rawBody, scheduling = message.sendAt != null) }
+    }
+
+    /** 200 is sent, 202 is held for later, and a 202 counts only where a hold was asked for. */
+    private fun sendOutcome(code: Int, rawBody: String, scheduling: Boolean): MailOutcome<MailSendOutcome> {
+        if (code != 200 && code != 202) return mapErrorCode(code, rawBody)
+        val parsed = runCatching { json.decodeFromString<RelaySendResponseDto>(rawBody) }.getOrNull()
+            ?: return MailOutcome.UpstreamFailure("Malformed send response")
+        if (code == 200) {
+            // A relay older than KyPost-Server #388 ignores sendAt and sends at once. It went: say so.
+            val warning = if (scheduling) SCHEDULE_IGNORED_WARNING else parsed.warning
+            return MailOutcome.Success(
+                MailSendOutcome(sentSaved = parsed.sentSaved, warning = warning, calendarReplySent = parsed.calendarReply),
+            )
+        }
+        if (!scheduling) return MailOutcome.UpstreamFailure("Mail relay request failed ($code)")
+        val at = runCatching { java.time.Instant.parse(parsed.sendAt) }.getOrNull()
+        if (!parsed.scheduled || at == null) return MailOutcome.UpstreamFailure("Malformed schedule response")
+        return MailOutcome.Success(MailSendOutcome(sentSaved = false, warning = "", scheduledAt = at))
+    }
+
+    override fun listScheduled(): MailOutcome<List<ScheduledSend>> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        val base = baseUrl(pairing, "/api/scheduled") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val request = Request.Builder().url(base).get().authed(pairing).build()
+        return execute(request) { code, body ->
+            // A relay older than KyPost-Server #388 has no such route.
+            if (code == 404) return@execute MailOutcome.BadRequest(SCHEDULING_UNSUPPORTED_MESSAGE)
+            if (code != 200) return@execute mapErrorCode(code, body)
+            val parsed = runCatching { json.decodeFromString<RelayScheduledListDto>(body) }.getOrNull()
+                ?: return@execute MailOutcome.UpstreamFailure("Malformed scheduled list response")
+            MailOutcome.Success(
+                parsed.scheduled.map {
+                    ScheduledSend(
+                        it.id, it.status, it.reason,
+                        runCatching { java.time.Instant.parse(it.sendAt) }.getOrNull(), it.subject, it.to,
+                    )
+                },
+            )
+        }
+    }
+
+    override fun cancelScheduled(id: String): MailOutcome<String> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        // The server's ids are UUIDs; anything else ("..") could walk the path elsewhere.
+        if (!id.matches(SCHEDULED_ID)) return MailOutcome.BadRequest(SCHEDULED_GONE_MESSAGE)
+        val base = baseUrl(pairing, "/api/scheduled") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val url = base.newBuilder().addPathSegment(id).addPathSegment("cancel").build()
+        val request = Request.Builder().url(url).post(ByteArray(0).toRequestBody()).authed(pairing).build()
+        return execute(request) { code, body ->
+            when (code) {
+                200, 202 -> {
+                    val parsed = runCatching { json.decodeFromString<RelayScheduledCancelDto>(body) }.getOrNull()
+                    if (parsed?.ok == true) MailOutcome.Success(parsed.warning) else MailOutcome.UpstreamFailure("Malformed cancel response")
+                }
+                404 -> MailOutcome.BadRequest(SCHEDULED_GONE_MESSAGE)
+                409 -> MailOutcome.BadRequest(SCHEDULED_CLAIMED_MESSAGE)
+                else -> mapErrorCode(code, body)
+            }
         }
     }
 
@@ -472,6 +529,8 @@ class RelayMailSource(
                 MailOutcome.BadRequest(REENROLLMENT_REQUIRED_MESSAGE)
             rawBody.contains(PGP_STATE_CHANGED_MARKER, ignoreCase = true) ->
                 MailOutcome.BadRequest(PGP_STATE_CHANGED_MESSAGE)
+            // Plain text, and it says what to do: send or cancel one first.
+            rawBody.contains(SCHEDULED_FULL_MARKER, ignoreCase = true) -> MailOutcome.BadRequest(rawBody.trim())
             else -> {
                 val parsed = runCatching { json.decodeFromString<RelayPickupFallbackDto>(rawBody) }.getOrNull()
                 if (parsed != null && parsed.keylessRecipients.isNotEmpty()) {
@@ -487,6 +546,8 @@ class RelayMailSource(
         // deliver; nothing was sent" — a distinction a fixed string throws away.
         502 -> MailOutcome.UpstreamFailure(rawBody.ifBlank { "Upstream IMAP/SMTP failure" })
         503 -> MailOutcome.ServiceUnavailable(rawBody.ifBlank { "Mail relay is temporarily unavailable" })
+        // "Too large to schedule; send it now instead" is the one thing the user can act on.
+        413 -> MailOutcome.BadRequest(rawBody.trim().ifBlank { "Too large" })
         else -> MailOutcome.UpstreamFailure("Mail relay request failed ($code)")
     }
 
@@ -667,7 +728,11 @@ private fun MailDraft.toSendWireDto(): RelayMailRequestDto =
         from = from,
         replyToMessageId = replyToMessageId,
         replyToMailbox = replyToMailbox,
+        sendAt = sendAt?.wireTime(),
+        pgpDraft = pgpDraft,
     )
+
+private fun java.time.Instant.wireTime(): String = truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString()
 
 private fun RelayEmailDto.toUiEmail(tab: String): Email {
     val emailLabel = label.ifBlank { tab }
