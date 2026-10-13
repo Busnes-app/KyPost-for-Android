@@ -22,6 +22,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 const val THEME_STORAGE_KEY = "kypost-theme"
 
@@ -593,6 +594,11 @@ private fun applyThemeToViewTree(view: View, palette: ThemePalette) {
         }
         is CheckBox -> {
             applyCheckBoxTheme(view.context, view)
+        }
+        // Otherwise the FAB keeps the XML theme's static colorSecondary.
+        is FloatingActionButton -> {
+            view.backgroundTintList = ColorStateList.valueOf(accent)
+            view.imageTintList = ColorStateList.valueOf(readableOn(accent))
         }
         is TextView -> {
             // Hardcoded grayscale XML colors are template leftovers, safe to remap onto the palette.
