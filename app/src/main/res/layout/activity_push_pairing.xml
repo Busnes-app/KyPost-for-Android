@@ -6,6 +6,23 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
+    <!-- Pair buttons stay pinned below; in landscape the cards outgrow the screen and scroll
+         here instead of pushing the buttons off it. wrap_content caps at the space left. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
     <androidx.cardview.widget.CardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -182,6 +199,9 @@
         </LinearLayout>
     </androidx.cardview.widget.CardView>
 
+    </LinearLayout>
+    </ScrollView>
+
     <TextView
         android:id="@+id/pushPairingHistoryTitle"
         android:layout_width="wrap_content"
@@ -213,6 +233,8 @@
             android:visibility="gone" />
 
     </FrameLayout>
+
+    </LinearLayout>
 
     <Button
         android:id="@+id/btnKyIdentitySignOn"
