@@ -210,6 +210,15 @@ internal object MemoryBudget {
      *  the real number drops; raising it is the deliberate act this exists to make visible. */
     const val SEND_SCENARIO_RATCHET_BYTES = 159L * 1024 * 1024
 
+    /** A scheduled send also carries the message for Drafts, encrypted on this device: the plain
+     *  path's `pgpDraft` or the encrypted path's `draftCopy`. Armored, that is 4/3 of the
+     *  attachment bytes, 2x again as a `String`, held once in the DTO and once in the body being
+     *  built: 16/3 on top of the send multiplier. A lower cap keeps it under the send ratchet
+     *  rather than raising it; `ComposeActivity` enforces it when scheduling. */
+    const val SCHEDULED_ATTACHMENT_BYTES = 12L * 1024 * 1024
+    val SCHEDULED_SEND_PEAK_BYTES =
+        SCHEDULED_ATTACHMENT_BYTES * (OUTBOUND_SEND_MULTIPLIER_NUMERATOR + 16) / OUTBOUND_SEND_MULTIPLIER_DENOMINATOR
+
     /** The smallest heap this app is expected to run in. Android guarantees a process far less
      *  than the device's RAM, and `largeHeap` is deliberately not set. */
     const val ASSUMED_HEAP_BYTES = 128L * 1024 * 1024

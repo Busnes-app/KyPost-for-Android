@@ -1530,6 +1530,134 @@ class RelayMailSourceTest {
         assertFalse(calls.bodies.single(), calls.bodies.single().contains("wakeAt"))
     }
 
+    @Test
+    fun scheduledSend_carriesItsTimeAndDraft_andReadsTheHold() {
+        val calls = BodyRecordingCallFactory { request ->
+            jsonResponse(request, """{"scheduled":true,"id":"s1","sendAt":"2026-10-20T08:00:00Z"}""", code = 202)
+        }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        val outcome = source.sendMail(
+            MailDraft(
+                to = "a@example.invalid", subject = "S", body = "B",
+                sendAt = java.time.Instant.parse("2026-10-20T08:00:00.400Z"), pgpDraft = "ARMORED",
+            ),
+        )
+
+        val fields = Json.parseToJsonElement(calls.bodies.single()).jsonObject
+        assertEquals("2026-10-20T08:00:00Z", fields["sendAt"]!!.jsonPrimitive.content)
+        assertEquals("ARMORED", fields["pgpDraft"]!!.jsonPrimitive.content)
+        assertEquals(
+            java.time.Instant.parse("2026-10-20T08:00:00Z"),
+            (outcome as MailOutcome.Success).value.scheduledAt,
+        )
+    }
+
+    @Test
+    fun aHoldIsNeverReadAsSent_andAnIgnoredScheduleIsReportedAsSent() {
+        fun sendAnswering(code: Int, body: String, sendAt: java.time.Instant?) = RelayMailSource(
+            { testPairing() }, FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body, code) },
+        ).sendMail(MailDraft(to = "a@example.invalid", subject = "S", body = "B", sendAt = sendAt))
+
+        val later = java.time.Instant.parse("2026-10-20T08:00:00Z")
+        assertTrue(sendAnswering(202, """{"scheduled":true,"sendAt":"2026-10-20T08:00:00Z"}""", null) is MailOutcome.UpstreamFailure)
+        assertTrue(sendAnswering(202, """{"scheduled":false}""", later) is MailOutcome.UpstreamFailure)
+        // A relay older than #388 sends at once. It went, so it is not a failure to retry.
+        val sentNow = (sendAnswering(200, """{"ok":true,"sentSaved":true}""", later) as MailOutcome.Success).value
+        assertNull(sentNow.scheduledAt)
+        assertEquals(SCHEDULE_IGNORED_WARNING, sentNow.warning)
+        val plainSend = sendAnswering(200, """{"ok":true,"sentSaved":true}""", null)
+        assertNull((plainSend as MailOutcome.Success).value.scheduledAt)
+    }
+
+    @Test
+    fun scheduledClientEncryptedSend_carriesItsTimeAndDraftCopy() {
+        val calls = BodyRecordingCallFactory { request ->
+            jsonResponse(request, """{"scheduled":true,"id":"s1","sendAt":"2026-10-20T08:00:00Z"}""", code = 202)
+        }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        val outcome = source.sendClientEncrypted(
+            clientEncrypted().copy(sendAt = java.time.Instant.parse("2026-10-20T08:00:00Z"), draftCopy = "DRAFT"),
+        )
+
+        val fields = Json.parseToJsonElement(calls.bodies.single()).jsonObject
+        assertEquals("2026-10-20T08:00:00Z", fields["sendAt"]!!.jsonPrimitive.content)
+        assertEquals("DRAFT", fields["draftCopy"]!!.jsonPrimitive.content)
+        assertTrue(outcome is MailOutcome.Success)
+    }
+
+    @Test
+    fun aFullScheduleAndAnOversizedMessageSayWhatToDo() {
+        fun sendAnswering(code: Int, body: String) = RelayMailSource(
+            { testPairing() }, FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body, code) },
+        ).sendMail(MailDraft(to = "a@example.invalid", subject = "S", body = "B", sendAt = java.time.Instant.parse("2026-10-20T08:00:00Z")))
+
+        val full = "too many scheduled messages, or too much scheduled data; send or cancel one first"
+        assertEquals(full, (sendAnswering(409, full) as MailOutcome.BadRequest).message)
+        val large = "this message is too large to schedule; send it now instead"
+        assertEquals(large, (sendAnswering(413, large) as MailOutcome.BadRequest).message)
+    }
+
+    @Test
+    fun anIdThatIsNotTheServersIsNeverSent() {
+        val calls = FakeCallFactory { request -> jsonResponse(request, """{"ok":true}""") }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        for (id in listOf("..", "a/b", "", "a?b")) {
+            assertTrue(id, source.cancelScheduled(id) is MailOutcome.BadRequest)
+        }
+        assertTrue(calls.requests.isEmpty())
+    }
+
+    @Test
+    fun anOlderRelayWithoutSchedulingSaysSo() {
+        val source = RelayMailSource(
+            { testPairing() }, FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, "404 page not found", 404) },
+        )
+
+        assertEquals(SCHEDULING_UNSUPPORTED_MESSAGE, (source.listScheduled() as MailOutcome.BadRequest).message)
+    }
+
+    @Test
+    fun listScheduled_readsEachRow() {
+        val body = """{"scheduled":[{"id":"s1","status":"scheduled","reason":"","sendAt":"2026-10-20T08:00:00Z","subject":"Hi","to":["a@example.invalid"]},
+            {"id":"s2","status":"failed","reason":"late","sendAt":"bogus","subject":"","to":[]}]}"""
+        val source = RelayMailSource(
+            { testPairing() }, FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body) },
+        )
+
+        val rows = (source.listScheduled() as MailOutcome.Success).value
+
+        assertEquals(listOf("s1", "s2"), rows.map { it.id })
+        assertEquals(java.time.Instant.parse("2026-10-20T08:00:00Z"), rows[0].sendAt)
+        assertEquals(listOf("a@example.invalid"), rows[0].to)
+        assertNull("an unreadable time is unknown, not a crash", rows[1].sendAt)
+        assertEquals("late", rows[1].reason)
+    }
+
+    @Test
+    fun cancelScheduled_postsToItsOwnPath_andMapsEachAnswer() {
+        fun cancelAnswering(code: Int, body: String): Pair<MailOutcome<String>, String> {
+            val calls = FakeCallFactory { request -> jsonResponse(request, body, code) }
+            val outcome = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+                .cancelScheduled("a-b")
+            return outcome to calls.requests.single().url.encodedPath
+        }
+
+        val (returned, path) = cancelAnswering(200, """{"ok":true,"status":"returned"}""")
+        assertEquals("", (returned as MailOutcome.Success).value)
+        assertEquals("/api/scheduled/a-b/cancel", path)
+        val delayed = cancelAnswering(202, """{"ok":true,"status":"returning","warning":"canceled; it will be saved to Drafts shortly"}""").first
+        assertEquals("canceled; it will be saved to Drafts shortly", (delayed as MailOutcome.Success).value)
+        assertEquals(SCHEDULED_CLAIMED_MESSAGE, (cancelAnswering(409, """{"error":"x","status":"sending"}""").first as MailOutcome.BadRequest).message)
+        assertEquals(SCHEDULED_GONE_MESSAGE, (cancelAnswering(404, "scheduled message not found").first as MailOutcome.BadRequest).message)
+    }
+
     /** Pre-#350 relays refuse the action with plain-text 400; that text is what the user sees. */
     @Test
     fun unreadAction_onAServerWithoutIt_isTheServersBadRequest() {

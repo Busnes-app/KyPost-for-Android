@@ -1052,6 +1052,7 @@ class InboxActivity : LockedActivity() {
         popupMenu.menu.setGroupCheckable(0, true, true)
         // Its own group: an action, not a radio choice.
         popupMenu.menu.add(1, 6, 7, getString(R.string.nav_all_folders))
+        popupMenu.menu.add(1, 8, 8, getString(R.string.nav_scheduled))
 
         popupMenu.setOnMenuItemClickListener { menuItem ->
             val folder = when (menuItem.itemId) {
@@ -1072,6 +1073,10 @@ class InboxActivity : LockedActivity() {
                 }
                 7 -> {
                     openSpecialFolder(SpecialFolder.SNOOZED)
+                    return@setOnMenuItemClickListener true
+                }
+                8 -> {
+                    startActivity(Intent(this, ScheduledActivity::class.java))
                     return@setOnMenuItemClickListener true
                 }
                 6 -> {

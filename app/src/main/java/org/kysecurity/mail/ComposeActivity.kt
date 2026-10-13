@@ -38,6 +38,7 @@ import org.kysecurity.mail.mail.MailSendOutcome
 import org.kysecurity.mail.mail.OutgoingAttachment
 import org.kysecurity.mail.mail.userFacingMessage
 import org.kysecurity.mail.pgp.ClientEncryptedDraftSaver
+import org.kysecurity.mail.pgp.DraftEncryption
 import org.kysecurity.mail.pgp.DraftSaveOutcome
 import org.kysecurity.mail.pgp.DraftHandoffMode
 import org.kysecurity.mail.pgp.AndroidVaultOpener
@@ -62,6 +63,10 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.time.Duration
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import org.kysecurity.mail.security.LockedActivity
 import org.kysecurity.mail.security.showSecurely
 
@@ -92,6 +97,7 @@ class ComposeActivity : LockedActivity() {
     private lateinit var keylessWarning: android.widget.TextView
     private val pgpController by lazy { pgpControllerForTest ?: ComposePgpController.from(this) }
     private var sendMenuItem: MenuItem? = null
+    private var scheduleMenuItem: MenuItem? = null
 
     /** Key held only by the user and this device not enrolled: Send is withdrawn while it holds. */
     private var handoffOnlyAccount = false
@@ -142,6 +148,9 @@ class ComposeActivity : LockedActivity() {
     /** Null in production. Stands in for the editor's own report, which arrives from its page. */
     @androidx.annotation.VisibleForTesting
     internal var bodyEmptyForTest: Boolean? = null
+
+    @androidx.annotation.VisibleForTesting
+    internal fun scheduleOfferedForTest(): Boolean = scheduleMenuItem?.isVisible == true
 
     @androidx.annotation.VisibleForTesting
     internal fun applyPgpComposeStateForTest(state: PgpComposeState) = applyPgpComposeState(state)
@@ -469,6 +478,8 @@ class ComposeActivity : LockedActivity() {
         item.setIcon(R.drawable.ic_send)
         item.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS)
         sendMenuItem = item
+        scheduleMenuItem = menu.add(0, MENU_SCHEDULE, 1, R.string.compose_schedule)
+            .setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_NEVER)
         applySendMenuItemTheme()
         // The menu is created after the bootstrap may already have answered, so the availability
         // decision has to be re-applied here as well as when the state arrives.
@@ -480,6 +491,9 @@ class ComposeActivity : LockedActivity() {
     private fun applySendAvailability() {
         sendMenuItem?.isVisible = !handoffOnlyAccount
         sendMenuItem?.isEnabled = custodyKnown && !handoffOnlyAccount && !handoffBusy && sending == null
+        // Only where this device holds the key: the fallback copy for Drafts is encrypted here.
+        scheduleMenuItem?.isVisible = clientSideAccount && !handoffOnlyAccount
+        scheduleMenuItem?.isEnabled = sendMenuItem?.isEnabled == true
     }
 
     /** The one custody gate. Every path to the relay asks it, at the moment it would send, because
@@ -498,6 +512,10 @@ class ComposeActivity : LockedActivity() {
         return when (item.itemId) {
             MENU_SEND -> {
                 sendEmail()
+                true
+            }
+            MENU_SCHEDULE -> {
+                askWhenToSend()
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -763,9 +781,34 @@ class ComposeActivity : LockedActivity() {
         }
     }
 
-    private fun sendEmail(allowEmptySubject: Boolean = false) {
-        if (handoffBusy || sending != null) return
+    /** Asks the relay first: one older than KyPost-Server #388 ignores sendAt and sends at once. */
+    private fun askWhenToSend() {
+        if (sendJob?.isActive == true || sending != null) return
+        lifecycleScope.launch {
+            val supported = withContext(Dispatchers.IO) { MailRuntime.graph(this@ComposeActivity).repository.listScheduled() }
+            if (isFinishing || isDestroyed) return@launch
+            if (supported !is MailOutcome.Success) {
+                supported.userFacingMessage()?.let { Toast.makeText(this@ComposeActivity, it, Toast.LENGTH_LONG).show() }
+                return@launch
+            }
+            // Five minutes' margin: the server needs one, and the unlock prompt comes first.
+            pickWhen(this@ComposeActivity, R.string.compose_schedule_title, Duration.ofMinutes(5), Duration.ofDays(365)) {
+                sendEmail(sendAt = it)
+            }
+        }
+    }
+
+    private fun sendEmail(allowEmptySubject: Boolean = false, sendAt: Instant? = null) {
+        if (handoffBusy || sending != null || sendJob?.isActive == true) return
         if (!custodyPermitsSend()) return
+        if (sendAt != null) {
+            // Server-held keys get no scheduling: the copy for Drafts must be encrypted here.
+            if (!clientSideAccount) return
+            if (attachments.sumOf { it.size.toLong() } > MemoryBudget.SCHEDULED_ATTACHMENT_BYTES) {
+                Toast.makeText(this, R.string.compose_schedule_too_large, Toast.LENGTH_LONG).show()
+                return
+            }
+        }
         val to = toInput.commaJoinedRecipients()
         val cc = ccInput.commaJoinedRecipients()
         val bcc = bccInput.commaJoinedRecipients()
@@ -779,7 +822,7 @@ class ComposeActivity : LockedActivity() {
                 return
             }
             SendReadiness.CONFIRM_EMPTY_SUBJECT -> {
-                confirmEmptySubject()
+                confirmEmptySubject(sendAt)
                 return
             }
         }
@@ -804,24 +847,25 @@ class ComposeActivity : LockedActivity() {
                 allowPickupFallback = false,
                 replyToMessageId = replyTo?.messageId,
                 replyToMailbox = replyTo?.mailbox,
+                sendAt = sendAt,
             )
             sentDraft = draft
             sentSession = session
             // A client-custody account encrypts here, not on the relay; both chips unchecked is deliberate.
-            if (clientSideAccount && (draft.sign || draft.encrypt)) {
-                dispatchClientSend(draft)
-            } else {
-                dispatchSend(draft, session)
+            when {
+                clientSideAccount && (draft.sign || draft.encrypt) -> dispatchClientSend(draft)
+                sendAt != null -> dispatchScheduledPlainSend(draft, session)
+                else -> dispatchSend(draft, session)
             }
         }
     }
 
     /** Mail without a subject is legal and sometimes meant; ask rather than refuse. */
-    private fun confirmEmptySubject() {
+    private fun confirmEmptySubject(sendAt: Instant?) {
         AlertDialog.Builder(this)
             .setTitle(R.string.compose_empty_subject_title)
             .setNegativeButton(R.string.compose_empty_subject_add) { _, _ -> subjectField.requestFocus() }
-            .setPositiveButton(R.string.compose_empty_subject_send) { _, _ -> sendEmail(allowEmptySubject = true) }
+            .setPositiveButton(R.string.compose_empty_subject_send) { _, _ -> sendEmail(allowEmptySubject = true, sendAt = sendAt) }
             .showThemed()
     }
 
@@ -835,7 +879,7 @@ class ComposeActivity : LockedActivity() {
             val outcome = if (sender == null) {
                 null
             } else {
-                withContext(Dispatchers.Default) { sender.send(draft, sign = draft.sign) }
+                withContext(Dispatchers.Default) { sender.send(draft, sign = draft.sign, sendAt = draft.sendAt) }
             }
             // The unlock and the crypto can outlive the Activity: LockedActivity.onStart finishes
             // this screen outright if the app lock engages mid-send. Same guard dispatchSend uses.
@@ -853,7 +897,8 @@ class ComposeActivity : LockedActivity() {
     private fun renderClientSendOutcome(outcome: ClientSendOutcome) {
         when (outcome) {
             is ClientSendOutcome.Sent -> {
-                val message = outcome.warning.ifBlank { getString(R.string.compose_send_success) }
+                val message = outcome.scheduledAt?.let(::scheduledMessage)
+                    ?: outcome.warning.ifBlank { getString(R.string.compose_send_success) }
                 val length = if (outcome.warning.isBlank()) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
                 Toast.makeText(this, message, length).show()
                 sendSucceeded = true
@@ -949,6 +994,40 @@ class ComposeActivity : LockedActivity() {
         )
     }
 
+    /** A plain scheduled send from a client-custody account: the relay sends the plaintext, as it
+     *  would now, but the copy it returns to Drafts on failure is encrypted here first. */
+    private fun dispatchScheduledPlainSend(draft: MailDraft, session: Long) {
+        if (sendJob?.isActive == true) return
+        sendMenuItem?.isEnabled = false
+        sendJob = lifecycleScope.launch {
+            val saver = ClientEncryptedDraftSaver(handoffOpener, pgpController.accountAddress()) {
+                MailRuntime.graph(this@ComposeActivity).repository.saveClientEncryptedDraft(it)
+            }
+            val result = saver.encrypt(draft, OffsetDateTime.now(ZoneOffset.UTC))
+            if (isFinishing || isDestroyed) return@launch
+            when (result) {
+                is DraftEncryption.Ok -> dispatchSend(draft.copy(pgpDraft = result.draft.pgpDraft), session)
+                is DraftEncryption.Refused -> {
+                    applySendAvailability()
+                    draftRefusalMessage(result.outcome)?.let { Toast.makeText(this@ComposeActivity, it, Toast.LENGTH_LONG).show() }
+                }
+            }
+        }
+    }
+
+    /** Null for the user's own cancel, which needs no message. */
+    private fun draftRefusalMessage(outcome: DraftSaveOutcome): String? = when (outcome) {
+        DraftSaveOutcome.Cancelled -> null
+        DraftSaveOutcome.NotEnrolled -> getString(R.string.compose_pgp_not_enrolled)
+        DraftSaveOutcome.NoSecureLockScreen -> getString(R.string.compose_pgp_no_lock_screen)
+        DraftSaveOutcome.NoAccountAddress -> getString(R.string.compose_pgp_no_account_address)
+        DraftSaveOutcome.NoRecipient -> getString(R.string.compose_fill_all_fields)
+        DraftSaveOutcome.UnsealFailed -> getString(R.string.compose_pgp_unseal_failed, "")
+        else -> getString(R.string.compose_pgp_encrypt_failed, "")
+    }
+
+    private fun scheduledMessage(at: Instant): String = getString(R.string.compose_scheduled_for, formatWhen(at))
+
     /** Renders [sending], whether this screen started it or the one a rotation replaced did. */
     private fun awaitSend(sending: ComposeSend.InFlight) {
         this.sending = sending
@@ -975,7 +1054,8 @@ class ComposeActivity : LockedActivity() {
             is MailOutcome.Success -> {
                 val warning = outcome.value.warning
                 // The send already succeeded: surface the warning as a notice, never as a failure or a retry.
-                val message = warning.ifBlank { getString(R.string.compose_send_success) }
+                val message = outcome.value.scheduledAt?.let(::scheduledMessage)
+                    ?: warning.ifBlank { getString(R.string.compose_send_success) }
                 val length = if (warning.isBlank()) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
                 Toast.makeText(this, message, length).show()
                 sendSucceeded = true
@@ -1275,6 +1355,7 @@ class ComposeActivity : LockedActivity() {
          *  see `SEND_SCENARIO_PEAK_BYTES`. */
         private const val MAX_ATTACHMENT_BYTES = MemoryBudget.OUTBOUND_ATTACHMENT_BYTES
         private const val MENU_SEND = 1
+        private const val MENU_SCHEDULE = 2
     }
 }
 

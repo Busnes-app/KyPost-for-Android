@@ -177,6 +177,17 @@ Owns production Android app code and resources.
   unsnooze, Move the message out. Snoozed is never a Move target, because mail moved there has
   no wake time. Snoozed is a picker entry (`SpecialFolder.SNOOZED`), matched only by the server's exact
   top-level name, so a user's own `INBOX/Snoozed` stays theirs.
+- Scheduled send (KyPost-Server #388) is offered only where this device holds the key
+  (`clientSideAccount`): its fallback copy for Drafts is encrypted here, to the account's own key,
+  and server-held keys get no new features. Compose's overflow "Schedule send" asks `pickWhen`
+  (5 minutes to 365 days, the margin covering the unlock prompt) and passes `sendAt` through
+  `sendEmail`. With Sign or Encrypt it goes to `/api/mail/send-pgp`: `ClientEncryptedSender` dates
+  every delivery and the Sent copy at `sendAt` (the relay refuses a Date more than a minute off)
+  and adds `draftCopy` from `encryptDraftCopy`, the builder `ClientEncryptedDraftSaver` uses.
+  Without them it goes to `/api/mail/send` with a `pgpDraft` from `ClientEncryptedDraftSaver.encrypt`.
+  `sendOutcome` reads 200 as sent and 202 as held, each only where it was asked for, so a hold is
+  never shown as sent. `ScheduledActivity` (folder picker, "Scheduled") lists `GET /api/scheduled`
+  and cancels only a waiting row, after a confirm; the id is one escaped path segment.
 - PGP state on relay inbox rows: `pgpEncrypted`, `pgpSigned`, `pgpVerified`, `pgpSignerFingerprint`,
   `pgpDecryptError`. All are `omitempty` server-side, so the Kotlin defaults (false/"") are the
   contract for a message with no OpenPGP content, not an unknown state. `pgp.PgpMessageState` is the
