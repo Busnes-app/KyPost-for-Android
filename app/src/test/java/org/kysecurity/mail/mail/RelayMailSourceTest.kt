@@ -1505,6 +1505,31 @@ class RelayMailSourceTest {
         assertTrue(calls.bodies.single(), calls.bodies.single().contains("\"action\":\"unread\""))
     }
 
+    @Test
+    fun snoozeAction_carriesAWholeSecondUtcWakeTime() {
+        val calls = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true,"processed":1}""") }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        source.performAction(
+            MailAction.SNOOZE, listOf("42"), "INBOX",
+            wakeAt = java.time.Instant.parse("2026-10-14T12:00:00.750Z"),
+        )
+
+        val fields = Json.parseToJsonElement(calls.bodies.single()).jsonObject
+        assertEquals("snooze", fields["action"]!!.jsonPrimitive.content)
+        assertEquals("2026-10-14T12:00:00Z", fields["wakeAt"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun otherActions_sendNoWakeTime() {
+        val calls = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true,"processed":1}""") }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        source.performAction(MailAction.ARCHIVE, listOf("42"), "INBOX")
+
+        assertFalse(calls.bodies.single(), calls.bodies.single().contains("wakeAt"))
+    }
+
     /** Pre-#350 relays refuse the action with plain-text 400; that text is what the user sees. */
     @Test
     fun unreadAction_onAServerWithoutIt_isTheServersBadRequest() {

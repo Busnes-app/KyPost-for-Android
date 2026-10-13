@@ -114,6 +114,8 @@ data class RelayActionRequestDto(
     val messageIds: List<String>,
     val mailbox: String,
     val targetMailbox: String? = null,
+    /** RFC 3339, whole seconds, UTC. */
+    val wakeAt: String? = null,
 )
 
 @Serializable

@@ -120,7 +120,7 @@ data class MailPage(val messages: List<Email>, val hasMore: Boolean?, val nextBe
 data class FolderInfo(val path: String, val deletable: Boolean)
 data class FolderListResult(val parent: String, val folders: List<FolderInfo>)
 
-enum class MailAction { DELETE, ARCHIVE, SPAM, READ, UNREAD, MOVE }
+enum class MailAction { DELETE, ARCHIVE, SPAM, READ, UNREAD, MOVE, SNOOZE }
 
 data class MailActionOutcome(val processed: Int, val failed: List<Pair<String, String>>)
 
@@ -250,13 +250,14 @@ interface MailSource {
     fun deleteFolder(folder: String): MailOutcome<Unit>
 
     /** A non-null [account] is checked against the pairing the request is built from; on a
-     *  mismatch nothing is sent. */
+     *  mismatch nothing is sent. [wakeAt] is SNOOZE's, and only SNOOZE's. */
     fun performAction(
         action: MailAction,
         messageIds: List<String>,
         mailbox: String,
         targetMailbox: String? = null,
         account: MailAccount? = null,
+        wakeAt: java.time.Instant? = null,
     ): MailOutcome<MailActionOutcome>
     fun saveDraft(draft: MailDraft): MailOutcome<Unit>
     fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit>

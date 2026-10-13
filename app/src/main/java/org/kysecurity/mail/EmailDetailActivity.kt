@@ -168,8 +168,8 @@ class EmailDetailActivity : LockedActivity() {
         val root = findViewById<android.view.View>(R.id.emailDetailRoot)
         applyTopInsetWithHeader(this, root)
 
-        val emailId = intent.getStringExtra("email_id").orEmpty()
-        val emailFolder = intent.getStringExtra("email_folder") ?: "INBOX"
+        val emailId = emailId()
+        val emailFolder = emailFolder()
         val emailSubject = intent.getStringExtra("email_subject") ?: "No subject"
         val emailSender = intent.getStringExtra("email_sender") ?: "Unknown sender"
         // The inbox no longer sends one: a row preview is a 200-character summary, and quoting
@@ -984,10 +984,22 @@ class EmailDetailActivity : LockedActivity() {
         if (redirectedToUnlock) return false
         menu.add(0, MENU_CREATE_EVENT, 0, R.string.calendar_create_event)
             .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        // Snoozing again from Snoozed only moves the wake time, so it is not offered there.
+        if (specialFolderOf(emailFolder()) != SpecialFolder.SNOOZED) {
+            menu.add(0, MENU_SNOOZE, 1, R.string.action_snooze).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        }
         return super.onCreateOptionsMenu(menu)
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == MENU_SNOOZE) {
+            pickSnoozeTime(this) { wakeAt ->
+                runMailActionAndFinish(getString(R.string.action_snooze), emailId(), emailFolder()) { repo, claim ->
+                    repo.snooze(claim, wakeAt)
+                }
+            }
+            return true
+        }
         if (item.itemId != MENU_CREATE_EVENT) return super.onOptionsItemSelected(item)
         // The body is read once its fetch has settled, not when tapped.
         bodyFetch.whenSettled {
@@ -1266,6 +1278,9 @@ class EmailDetailActivity : LockedActivity() {
         finish()
     }
 
+    private fun emailId(): String = intent.getStringExtra("email_id").orEmpty()
+    private fun emailFolder(): String = intent.getStringExtra("email_folder") ?: "INBOX"
+
     private fun runMailActionAndFinish(
         actionLabel: String,
         emailId: String,
@@ -1411,6 +1426,7 @@ class EmailDetailActivity : LockedActivity() {
         private const val STATE_MARK_READ_SUBMITTED = "mark_read_submitted"
         private const val STATE_MARK_READ_COUNT = "mark_read_count"
         private const val MENU_CREATE_EVENT = 1
+        private const val MENU_SNOOZE = 2
 
         /** `intent:`, `file:`, `content:` and any app's custom scheme are refused. */
         private val SAFE_LINK_SCHEMES = setOf("http", "https", "mailto", "tel")

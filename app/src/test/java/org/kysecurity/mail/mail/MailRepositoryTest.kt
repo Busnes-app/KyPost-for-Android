@@ -136,6 +136,7 @@ private class FakeMailSource(
     var actionOutcome: MailOutcome<MailActionOutcome> = MailOutcome.Success(MailActionOutcome(1, emptyList())),
 ) : MailSource {
     val actions = mutableListOf<Triple<MailAction, List<String>, String>>()
+    var lastWakeAt: java.time.Instant? = null
     val limits = mutableListOf<Int>()
 
     /** Answers `before=` requests in order; the befores asked for are recorded. */
@@ -162,8 +163,10 @@ private class FakeMailSource(
         mailbox: String,
         targetMailbox: String?,
         account: MailAccount?,
+        wakeAt: java.time.Instant?,
     ): MailOutcome<MailActionOutcome> {
         actions += Triple(action, messageIds, mailbox)
+        lastWakeAt = wakeAt
         duringAction?.invoke()
         return actionOutcome
     }
@@ -840,6 +843,52 @@ class MailRepositoryTest {
         assertTrue(outcome is MailOutcome.ActionRejected)
         assertEquals(MailAction.MOVE, source.actions.single().first)
         assertEquals(setOf("INBOX" to "42"), dao.rows.keys)
+    }
+
+    @Test
+    fun snoozeForwardsTheWakeTimeAndDropsTheRowOnceConfirmed() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource()
+        val repo = repository(dao, source)
+        val wake = java.time.Instant.parse("2026-10-14T12:00:00Z")
+
+        val outcome = repo.snooze(repo.beginRemoval("42", "INBOX"), wake)
+
+        assertTrue(outcome is MailOutcome.Success)
+        assertEquals(MailAction.SNOOZE, source.actions.single().first)
+        assertEquals(wake, source.lastWakeAt)
+        assertEquals(emptySet<Pair<String, String>>(), dao.rows.keys)
+    }
+
+    @Test
+    fun aRefusedSnoozeKeepsTheRow() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource(
+            actionOutcome = MailOutcome.Success(MailActionOutcome(processed = 0, failed = listOf("42" to "message not found"))),
+        )
+        val repo = repository(dao, source)
+
+        val outcome = repo.snooze(repo.beginRemoval("42", "INBOX"), java.time.Instant.parse("2026-10-14T12:00:00Z"))
+
+        assertTrue(outcome is MailOutcome.ActionRejected)
+        assertEquals(setOf("INBOX" to "42"), dao.rows.keys)
+    }
+
+    @Test
+    fun aBulkSnoozeForwardsTheWakeTime() {
+        val dao = FakeEmailDao()
+        dao.put(row("1", "INBOX"))
+        dao.put(row("2", "INBOX"))
+        val source = FakeMailSource(actionOutcome = MailOutcome.Success(MailActionOutcome(2, emptyList())))
+        val repo = repository(dao, source)
+        val wake = java.time.Instant.parse("2026-10-14T12:00:00Z")
+
+        repo.mutateAll(MailAction.SNOOZE, repo.beginRemovals(listOf("1", "2"), "INBOX"), wakeAt = wake)
+
+        assertEquals(wake, source.lastWakeAt)
+        assertEquals(emptySet<Pair<String, String>>(), dao.rows.keys)
     }
 
     /** A search result never reaches Room; the caller's copy of its recipients must survive. */

@@ -9,11 +9,12 @@ import org.kysecurity.mail.mail.userFacingMessage
 import java.util.concurrent.Executor
 
 /** INBOX, every top-level folder and every Archive subfolder, minus the one the mail is in. The
- *  relay's top-level list omits INBOX and Archive, so both are added back here. */
+ *  relay's top-level list omits INBOX and Archive, so both are added back here. Never Snoozed:
+ *  mail moved there has no wake time, so it would never come back. */
 internal fun moveTargets(current: String, topLevel: List<String>, archiveChildren: List<String>): List<String> =
     (listOf("INBOX") + topLevel + archiveChildren)
         .distinctBy { it.lowercase() }
-        .filterNot { it.equals(current, ignoreCase = true) }
+        .filterNot { it.equals(current, ignoreCase = true) || specialFolderOf(it) == SpecialFolder.SNOOZED }
 
 /** Lists folders on [executor], asks which one, and calls [onPicked] on the main thread. */
 internal fun pickMoveTarget(

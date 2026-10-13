@@ -907,6 +907,10 @@ class InboxActivity : LockedActivity() {
             add(MENU_BULK_MOVE, R.string.action_move, R.drawable.ic_move)
             add(MENU_BULK_JUNK, R.string.action_junk, R.drawable.ic_spam)
             add(MENU_BULK_DELETE, R.string.action_delete, R.drawable.ic_delete)
+            // Snoozing again from Snoozed only moves the wake time; the row would wrongly vanish.
+            if (specialFolderOf(currentFolder) != SpecialFolder.SNOOZED) {
+                add(MENU_BULK_SNOOZE, R.string.action_snooze, R.drawable.ic_snooze)
+            }
             // Overflow: no undo bar, they are server first like the detail screen's button.
             menu.add(0, MENU_BULK_MARK_READ, MENU_BULK_MARK_READ, R.string.action_mark_read)
             menu.add(0, MENU_BULK_MARK_UNREAD, MENU_BULK_MARK_UNREAD, R.string.action_mark_unread)
@@ -926,6 +930,12 @@ class InboxActivity : LockedActivity() {
                 MENU_BULK_DELETE -> submitRowsAction(chosen, getString(R.string.action_delete), MailAction.DELETE)
                 MENU_BULK_MARK_READ -> chosen.filter { it.status == "unread" }.forEach { setReadState(it, read = true) }
                 MENU_BULK_MARK_UNREAD -> chosen.filter { it.status != "unread" }.forEach { setReadState(it, read = false) }
+                MENU_BULK_SNOOZE -> {
+                    val pick = snoozePickerForTest ?: { then -> pickSnoozeTime(this@InboxActivity, then) }
+                    pick { wakeAt ->
+                        submitRowsAction(chosen, getString(R.string.action_snooze), MailAction.SNOOZE, wakeAt = wakeAt)
+                    }
+                }
                 MENU_BULK_MOVE -> {
                     val pick = moveTargetPickerForTest
                         ?: { from, then -> pickMoveTarget(this@InboxActivity, mailRepository, ioExecutor, from, then) }
@@ -947,7 +957,13 @@ class InboxActivity : LockedActivity() {
     }
 
     /** [submitRowAction] for several rows: one relay call per source folder. */
-    private fun submitRowsAction(emails: List<Email>, label: String, action: MailAction, target: String? = null) {
+    private fun submitRowsAction(
+        emails: List<Email>,
+        label: String,
+        action: MailAction,
+        target: String? = null,
+        wakeAt: java.time.Instant? = null,
+    ) {
         if (emails.isEmpty()) return
         // Grouped now, not when the timer fires: by then the screen may show another folder.
         val byFolder = emails.groupBy { it.sourceFolder() }
@@ -960,7 +976,7 @@ class InboxActivity : LockedActivity() {
                 val dropped = { claims.forEach(mailRepository::abandon) }
                 MailBackgroundExecutor.submitReporting(this, label, onDropped = dropped) {
                     // Whatever the outcome: a partial failure can still have applied some rows.
-                    mailRepository.mutateAll(action, claims, target, account).also { runOnUiThread { recountUnread() } }
+                    mailRepository.mutateAll(action, claims, target, account, wakeAt).also { runOnUiThread { recountUnread() } }
                 }
             }
         }
@@ -1031,9 +1047,11 @@ class InboxActivity : LockedActivity() {
             specialFolderOf(currentFolder) == SpecialFolder.SENT
         popupMenu.menu.add(0, 5, 5, getString(SpecialFolder.DRAFTS.label)).isChecked =
             specialFolderOf(currentFolder) == SpecialFolder.DRAFTS
+        popupMenu.menu.add(0, 7, 6, getString(SpecialFolder.SNOOZED.label)).isChecked =
+            specialFolderOf(currentFolder) == SpecialFolder.SNOOZED
         popupMenu.menu.setGroupCheckable(0, true, true)
         // Its own group: an action, not a radio choice.
-        popupMenu.menu.add(1, 6, 6, getString(R.string.nav_all_folders))
+        popupMenu.menu.add(1, 6, 7, getString(R.string.nav_all_folders))
 
         popupMenu.setOnMenuItemClickListener { menuItem ->
             val folder = when (menuItem.itemId) {
@@ -1050,6 +1068,10 @@ class InboxActivity : LockedActivity() {
                 }
                 5 -> {
                     openSpecialFolder(SpecialFolder.DRAFTS)
+                    return@setOnMenuItemClickListener true
+                }
+                7 -> {
+                    openSpecialFolder(SpecialFolder.SNOOZED)
                     return@setOnMenuItemClickListener true
                 }
                 6 -> {
@@ -1372,6 +1394,20 @@ class InboxActivity : LockedActivity() {
         selectionCallback.onActionItemClicked(mode, mode.menu.findItem(if (read) MENU_BULK_MARK_READ else MENU_BULK_MARK_UNREAD))
     }
 
+    /** Runs the selection bar's own Snooze handler, as tapping it would. */
+    @androidx.annotation.VisibleForTesting
+    internal fun bulkSnoozeForTest() {
+        val mode = selectionMode ?: return
+        selectionCallback.onActionItemClicked(mode, mode.menu.findItem(MENU_BULK_SNOOZE))
+    }
+
+    @androidx.annotation.VisibleForTesting
+    internal fun hasBulkSnoozeForTest(): Boolean = selectionMode?.menu?.findItem(MENU_BULK_SNOOZE) != null
+
+    /** Null in production. Stands in for the snooze time picker. */
+    @androidx.annotation.VisibleForTesting
+    internal var snoozePickerForTest: ((then: (java.time.Instant) -> Unit) -> Unit)? = null
+
     /** Null in production. Stands in for the folder picker, which answers asynchronously. */
     @androidx.annotation.VisibleForTesting
     internal var moveTargetPickerForTest: ((from: String, then: (String) -> Unit) -> Unit)? = null
@@ -1419,6 +1455,7 @@ class InboxActivity : LockedActivity() {
         private const val MENU_BULK_DELETE = 13
         private const val MENU_BULK_MARK_READ = 14
         private const val MENU_BULK_MARK_UNREAD = 15
+        private const val MENU_BULK_SNOOZE = 16
         const val STATE_FOLDER = "inbox_folder"
         const val STATE_TAB = "inbox_tab"
         const val STATE_SCROLL = "inbox_scroll"
@@ -1432,9 +1469,16 @@ internal fun inboxEmptyVisible(shown: Int, loadedFolder: String?, currentFolder:
 
 /** Leaf names the server itself falls back on (`special_folders.go` `folderNameAliases`), in
  *  its preference order. */
-internal enum class SpecialFolder(@androidx.annotation.StringRes val label: Int, val aliases: List<String>) {
+internal enum class SpecialFolder(
+    @androidx.annotation.StringRes val label: Int,
+    val aliases: List<String>,
+    /** The server names it itself, exactly, at the top level: anything else is the user's. */
+    val exact: Boolean = false,
+) {
     SENT(R.string.nav_sent, listOf("Sent", "Sent Items", "Sent Messages", "Sent Mail")),
     DRAFTS(R.string.nav_drafts, listOf("Drafts", "Draft")),
+    /** KyPost-Server's `SnoozedFolder` (`adapters/imap/snooze.go`), created on the first snooze. */
+    SNOOZED(R.string.nav_snoozed, listOf("Snoozed"), exact = true),
 }
 
 internal fun mailboxLeaf(path: String): String = path.split('/', '.').last().trim()
@@ -1442,12 +1486,19 @@ internal fun mailboxLeaf(path: String): String = path.split('/', '.').last().tri
 /** Only at the top level or directly under INBOX: `Archive/Sent` or `Projects/Drafts` is the
  *  user's own folder, not the account's. */
 internal fun specialFolderOf(path: String): SpecialFolder? {
+    SpecialFolder.entries.firstOrNull { it.exact && path in it.aliases }?.let { return it }
     if (mailboxParent(path).let { it.isNotEmpty() && !it.equals("INBOX", ignoreCase = true) }) return null
-    return SpecialFolder.entries.firstOrNull { kind -> kind.aliases.any { it.equals(mailboxLeaf(path), ignoreCase = true) } }
+    return SpecialFolder.entries.firstOrNull { kind ->
+        !kind.exact && kind.aliases.any { it.equals(mailboxLeaf(path), ignoreCase = true) }
+    }
 }
 
 internal fun resolveSpecialFolder(paths: List<String>, kind: SpecialFolder): String? =
-    kind.aliases.firstNotNullOfOrNull { alias -> paths.firstOrNull { mailboxLeaf(it).equals(alias, ignoreCase = true) } }
+    if (kind.exact) {
+        kind.aliases.firstOrNull { it in paths }
+    } else {
+        kind.aliases.firstNotNullOfOrNull { alias -> paths.firstOrNull { mailboxLeaf(it).equals(alias, ignoreCase = true) } }
+    }
 
 /** Rows [new] puts above the first row [old] already had. Zero on a first load. */
 internal fun newRowsAbove(old: List<Email>, new: List<Email>): Int {

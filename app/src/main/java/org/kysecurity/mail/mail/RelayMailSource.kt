@@ -222,6 +222,7 @@ class RelayMailSource(
         mailbox: String,
         targetMailbox: String?,
         account: MailAccount?,
+        wakeAt: java.time.Instant?,
     ): MailOutcome<MailActionOutcome> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
         // Same read that authenticates the request, so the check and the credentials agree.
@@ -234,6 +235,7 @@ class RelayMailSource(
             messageIds = messageIds,
             mailbox = mailbox,
             targetMailbox = targetMailbox,
+            wakeAt = wakeAt?.truncatedTo(java.time.temporal.ChronoUnit.SECONDS)?.toString(),
         )
         val body = json.encodeToString(requestDto)
         val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
@@ -626,6 +628,7 @@ internal fun isReplyThreadingRefusal(code: Int, rawBody: String): Boolean =
 
 private fun MailAction.wireValue(): String = when (this) {
     MailAction.DELETE -> "delete"
+    MailAction.SNOOZE -> "snooze"
     MailAction.ARCHIVE -> "archive"
     MailAction.SPAM -> "spam"
     MailAction.READ -> "read"

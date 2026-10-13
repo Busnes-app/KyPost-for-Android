@@ -197,6 +197,10 @@ class MailRepository(
     fun move(claim: PendingMail, targetFolder: String): MailOutcome<Unit> =
         mutate(MailAction.MOVE, claim, targetFolder)
 
+    /** The server moves it to its Snoozed folder and back to INBOX at [wakeAt]. */
+    fun snooze(claim: PendingMail, wakeAt: java.time.Instant): MailOutcome<Unit> =
+        mutate(MailAction.SNOOZE, claim, wakeAt = wakeAt)
+
     @androidx.annotation.VisibleForTesting
     internal fun archive(id: String, folder: String): MailOutcome<Unit> = archive(beginRemoval(id, folder))
 
@@ -217,7 +221,8 @@ class MailRepository(
         claim: PendingMail,
         targetFolder: String? = null,
         account: MailAccount? = null,
-    ): MailOutcome<Unit> = perform(claim, action, targetFolder, account) {
+        wakeAt: java.time.Instant? = null,
+    ): MailOutcome<Unit> = perform(claim, action, targetFolder, account, wakeAt) {
         removed.add(claim.folder to claim.id)
         emailDao.deleteById(claim.id, claim.folder)
     }
@@ -230,12 +235,13 @@ class MailRepository(
         action: MailAction,
         targetFolder: String? = null,
         account: MailAccount? = null,
+        wakeAt: java.time.Instant? = null,
         onSuccess: () -> Unit,
     ): MailOutcome<Unit> {
         var outcome: MailOutcome<Unit> = MailOutcome.Unauthorized(SESSION_ENDED)
         try {
             if (!ProcessState.isCurrent(claim.session)) return outcome
-            outcome = relaySource.performAction(action, listOf(claim.id), claim.folder, targetFolder, account)
+            outcome = relaySource.performAction(action, listOf(claim.id), claim.folder, targetFolder, account, wakeAt)
                 .appliedTo(claim.id)
             if (outcome is MailOutcome.Success) pending.applyIfCurrent(claim.session, onSuccess)
             return outcome
@@ -260,6 +266,7 @@ class MailRepository(
         claims: List<PendingMail>,
         targetFolder: String? = null,
         account: MailAccount? = null,
+        wakeAt: java.time.Instant? = null,
     ): MailOutcome<Unit> {
         val first = claims.firstOrNull() ?: return MailOutcome.Success(Unit)
         require(claims.all { it.folder == first.folder && it.session == first.session && !it.read })
@@ -270,7 +277,7 @@ class MailRepository(
             if (!ProcessState.isCurrent(first.session)) {
                 return MailOutcome.Unauthorized(SESSION_ENDED)
             }
-            val outcome = relaySource.performAction(action, ids, folder, targetFolder, account)
+            val outcome = relaySource.performAction(action, ids, folder, targetFolder, account, wakeAt)
             if (outcome !is MailOutcome.Success) return outcome.toUnitOutcome()
             val failed = outcome.value.failed
             val confirmed = ids.filter { id -> failed.none { it.first == id } }
