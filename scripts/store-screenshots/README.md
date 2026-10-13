@@ -1,8 +1,8 @@
 # Store screenshot harness
 
 Throwaway relay + demo IMAP stack and an emulator recipe for the Play listing shots.
-Secrets, TLS keys and raw shots go to `$SHOTS_WORK` (default `/tmp/$SHOTS_PROJECT`), never here.
-Run every script with `bash` explicitly.
+Secrets, TLS keys and raw shots go to `$SHOTS_WORK` (default `$XDG_RUNTIME_DIR/$SHOTS_PROJECT`; refused if it is a symlink or not yours), never here.
+Run every script with `bash` explicitly. `bash test-env.sh` checks the work-dir guard.
 
 ## Settings (env, see `env.sh`)
 
