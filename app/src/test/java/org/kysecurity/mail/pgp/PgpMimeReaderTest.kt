@@ -289,6 +289,57 @@ class PgpMimeReaderTest {
         assertEquals("The real subject", body?.protectedSubject)
     }
 
+    /** What the draft saver writes: recipients and subject as protected headers, and the same
+     *  headers again as a text/rfc822-headers display part. */
+    @Test
+    fun aDraftGivesBackItsRecipientsAndNoHeadersAttachment() {
+        val body = requireNotNull(
+            PgpMimeReader.read(
+                buildProtectedContent(
+                    contentType = "text/html; charset=utf-8", body = "<p>Hi</p>", subject = "Plans",
+                    to = listOf("a@example.invalid", "b@example.invalid"),
+                    cc = listOf("c@example.invalid"), bcc = listOf("hidden@example.invalid"),
+                ).toByteArray(Charsets.UTF_8),
+            ),
+        )
+
+        assertEquals("a@example.invalid, b@example.invalid", body.protectedTo)
+        assertEquals("c@example.invalid", body.protectedCc)
+        assertEquals("hidden@example.invalid", body.protectedBcc)
+        assertEquals("Plans", body.protectedSubject)
+        assertEquals("<p>Hi</p>", body.html?.trim())
+        assertTrue("the display copy of the headers is not a file", body.attachments.isEmpty())
+    }
+
+    @Test
+    fun encodedAndNamedRecipientsComeBackAsPlainAddresses() {
+        val mime = "Content-Type: text/plain; charset=utf-8\r\n" +
+            "To: =?UTF-8?Q?Ren=C3=A9e?= <renee@example.invalid>, \"Smith, Jo\" <jo@example.invalid>\r\n" +
+            "Bcc: hidden@example.invalid\r\n\r\nhi"
+        val body = requireNotNull(read(mime))
+        assertEquals("renee@example.invalid, jo@example.invalid", body.protectedTo)
+        assertEquals("hidden@example.invalid", body.protectedBcc)
+    }
+
+    /** Only the display copy is skipped: a file sent under that type is still shown. */
+    @Test
+    fun aHeadersPartMarkedAsAnAttachmentIsStillShown() {
+        val mime = "Content-Type: multipart/mixed; boundary=b\r\n\r\n" +
+            "--b\r\nContent-Type: text/plain\r\n\r\nbody\r\n" +
+            "--b\r\nContent-Type: text/rfc822-headers\r\nContent-Disposition: attachment; filename=h.txt\r\n\r\nTo: x@example.invalid\r\n" +
+            "--b--\r\n"
+        assertEquals(listOf("h.txt"), requireNotNull(read(mime)).attachments.map { it.name })
+    }
+
+    @Test
+    fun deliveredMailCarriesNoProtectedRecipients() {
+        val body = requireNotNull(
+            PgpMimeReader.read(buildProtectedContent("text/plain; charset=utf-8", "hi", "S").toByteArray(Charsets.UTF_8)),
+        )
+        assertEquals("", body.protectedTo)
+        assertEquals("", body.protectedBcc)
+    }
+
     @Test
     fun returnsNullForBytesThatAreNotMime() {
         // Fails closed: the caller shows "could not decrypt" rather than rendering garbage

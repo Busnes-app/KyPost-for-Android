@@ -98,6 +98,7 @@ class ComposeActivity : LockedActivity() {
     private val pgpController by lazy { pgpControllerForTest ?: ComposePgpController.from(this) }
     private var sendMenuItem: MenuItem? = null
     private var scheduleMenuItem: MenuItem? = null
+    private var saveDraftMenuItem: MenuItem? = null
 
     /** Key held only by the user and this device not enrolled: Send is withdrawn while it holds. */
     private var handoffOnlyAccount = false
@@ -153,6 +154,12 @@ class ComposeActivity : LockedActivity() {
     internal fun scheduleOfferedForTest(): Boolean = scheduleMenuItem?.isVisible == true
 
     @androidx.annotation.VisibleForTesting
+    internal fun saveDraftOfferedForTest(): Boolean = saveDraftMenuItem?.isVisible == true
+
+    @androidx.annotation.VisibleForTesting
+    internal fun sourceDraftForTest(): ReplyRef? = sourceDraft
+
+    @androidx.annotation.VisibleForTesting
     internal fun applyPgpComposeStateForTest(state: PgpComposeState) = applyPgpComposeState(state)
 
     @androidx.annotation.VisibleForTesting
@@ -202,6 +209,8 @@ class ComposeActivity : LockedActivity() {
     /** The message this composition answers; null for a new message or once the user chose to
      *  send it unthreaded. */
     private var replyTo: ReplyRef? = null
+    /** The draft this screen is editing; see [deleteSourceDraft]. */
+    private var sourceDraft: ReplyRef? = null
 
     /** The session [sentDraft] was composed in; its pickup re-send must come from the same one. */
     private var sentSession = 0L
@@ -324,6 +333,7 @@ class ComposeActivity : LockedActivity() {
         // Taken either way, so a token cannot linger for a later composition.
         val handedOff = ReplyThreadHandoff.take(intent.getStringExtra(EXTRA_REPLY_TOKEN))
         replyTo = if (restored != null) restored.replyTo else handedOff.takeUnless { intent.isExternalComposeIntent() }
+        sourceDraft = restored?.sourceDraft
         restoredDraftForTest = restored
         if (restored != null) {
             subjectField.setText(restored.subject)
@@ -345,15 +355,19 @@ class ComposeActivity : LockedActivity() {
             Toast.makeText(this, R.string.compose_draft_restored, Toast.LENGTH_SHORT).show()
         } else {
             val internal = intent.component?.className == INTERNAL_COMPOSE
-            val (to, subject, prefilledHtml) = parseComposeIntent(intent, internal, ::plainTextToHtml)
-            // Not above text another app asked to send: that is the message, not a quote.
-            val bodyHtml = if (intent.isExternalComposeIntent() && prefilledHtml.isNotBlank()) {
+            val prefill = parseComposeIntent(intent, internal, ::plainTextToHtml)
+            val prefilledHtml = prefill.bodyHtml
+            sourceDraft = prefill.sourceDraft
+            // Not above text another app asked to send, nor again on a draft that already has one.
+            val bodyHtml = if ((intent.isExternalComposeIntent() && prefilledHtml.isNotBlank()) || sourceDraft != null) {
                 prefilledHtml
             } else {
                 withSignature(prefilledHtml, plainTextToHtml(MailSignature.read(this)))
             }
-            subjectField.setText(subject)
-            toInput.setInitialRecipients(to)
+            subjectField.setText(prefill.subject)
+            toInput.setInitialRecipients(prefill.to)
+            ccInput.setInitialRecipients(prefill.cc)
+            bccInput.setInitialRecipients(prefill.bcc)
             mirroredBodyHtml = bodyHtml
             bodyEditor.setHtml(bodyHtml)
 
@@ -380,6 +394,12 @@ class ComposeActivity : LockedActivity() {
                 }
                 attachments.addAll(accepted)
                 renderAttachmentChips()
+            }
+            // A draft whose files did not all arrive (the cap above, or a process restart that
+            // emptied the handoff) is not replaced: deleting it would lose them.
+            if (sourceDraft != null && attachments.size < prefill.sourceDraftAttachments) {
+                sourceDraft = null
+                Toast.makeText(this, R.string.edit_draft_kept, Toast.LENGTH_LONG).show()
             }
 
             // Handle attachments from sharing intents
@@ -480,6 +500,8 @@ class ComposeActivity : LockedActivity() {
         sendMenuItem = item
         scheduleMenuItem = menu.add(0, MENU_SCHEDULE, 1, R.string.compose_schedule)
             .setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_NEVER)
+        saveDraftMenuItem = menu.add(0, MENU_SAVE_DRAFT, 2, R.string.compose_save_draft)
+            .setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_NEVER)
         applySendMenuItemTheme()
         // The menu is created after the bootstrap may already have answered, so the availability
         // decision has to be re-applied here as well as when the state arrives.
@@ -494,6 +516,9 @@ class ComposeActivity : LockedActivity() {
         // Only where this device holds the key: the fallback copy for Drafts is encrypted here.
         scheduleMenuItem?.isVisible = clientSideAccount && !handoffOnlyAccount
         scheduleMenuItem?.isEnabled = sendMenuItem?.isEnabled == true
+        // Drafts are encrypted here, so a server-held key gets no Save draft.
+        saveDraftMenuItem?.isVisible = clientSideAccount && !handoffOnlyAccount
+        saveDraftMenuItem?.isEnabled = sendMenuItem?.isEnabled == true
     }
 
     /** The one custody gate. Every path to the relay asks it, at the moment it would send, because
@@ -516,6 +541,10 @@ class ComposeActivity : LockedActivity() {
             }
             MENU_SCHEDULE -> {
                 askWhenToSend()
+                true
+            }
+            MENU_SAVE_DRAFT -> {
+                saveDraft()
                 true
             }
             else -> super.onOptionsItemSelected(item)
@@ -783,7 +812,7 @@ class ComposeActivity : LockedActivity() {
 
     /** Asks the relay first: one older than KyPost-Server #388 ignores sendAt and sends at once. */
     private fun askWhenToSend() {
-        if (sendJob?.isActive == true || sending != null) return
+        if (sendJob?.isActive == true || sending != null || sendMenuItem?.isEnabled != true) return
         lifecycleScope.launch {
             val supported = withContext(Dispatchers.IO) { MailRuntime.graph(this@ComposeActivity).repository.listScheduled() }
             if (isFinishing || isDestroyed) return@launch
@@ -897,6 +926,7 @@ class ComposeActivity : LockedActivity() {
     private fun renderClientSendOutcome(outcome: ClientSendOutcome) {
         when (outcome) {
             is ClientSendOutcome.Sent -> {
+                deleteSourceDraft()
                 val message = outcome.scheduledAt?.let(::scheduledMessage)
                     ?: outcome.warning.ifBlank { getString(R.string.compose_send_success) }
                 val length = if (outcome.warning.isBlank()) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
@@ -907,7 +937,7 @@ class ComposeActivity : LockedActivity() {
             }
             // The user dismissed their own prompt. Not an error, and nothing to say — the screen
             // simply goes back to offering Send.
-            is ClientSendOutcome.Cancelled -> sendMenuItem?.isEnabled = true
+            is ClientSendOutcome.Cancelled -> applySendAvailability()
             is ClientSendOutcome.KeyChanged -> {
                 sendMenuItem?.isEnabled = true
                 warnKeyChanged(outcome.addresses)
@@ -1021,9 +1051,60 @@ class ComposeActivity : LockedActivity() {
         DraftSaveOutcome.NotEnrolled -> getString(R.string.compose_pgp_not_enrolled)
         DraftSaveOutcome.NoSecureLockScreen -> getString(R.string.compose_pgp_no_lock_screen)
         DraftSaveOutcome.NoAccountAddress -> getString(R.string.compose_pgp_no_account_address)
-        DraftSaveOutcome.NoRecipient -> getString(R.string.compose_fill_all_fields)
+        DraftSaveOutcome.NoRecipient -> getString(R.string.compose_handoff_needs_recipient)
         DraftSaveOutcome.UnsealFailed -> getString(R.string.compose_pgp_unseal_failed, "")
+        is DraftSaveOutcome.SaveFailed -> outcome.outcome.userFacingMessage()
         else -> getString(R.string.compose_pgp_encrypt_failed, "")
+    }
+
+    /** Saves to Drafts, encrypted here to the account's own key, and leaves the screen. */
+    private fun saveDraft() {
+        // Send disables its item before its own export, while sendJob is not yet set.
+        if (handoffBusy || sending != null || sendJob?.isActive == true || sendMenuItem?.isEnabled != true) return
+        if (!custodyPermitsSend() || !clientSideAccount) return
+        // Until the save lands or fails; a second tap would otherwise start a second export.
+        listOf(sendMenuItem, scheduleMenuItem, saveDraftMenuItem).forEach { it?.isEnabled = false }
+        bodyEditor.exportHtml { html ->
+            if (isFinishing || isDestroyed) return@exportHtml
+            // Asked again, as sendEmail does: custody can resolve between the tap and this callback.
+            if (!custodyPermitsSend() || !clientSideAccount) return@exportHtml
+            val draft = MailDraft(
+                to = toInput.commaJoinedRecipients(), cc = ccInput.commaJoinedRecipients(),
+                bcc = bccInput.commaJoinedRecipients(), subject = subjectField.text.toString().trim(),
+                body = html, mode = "html", attachments = attachments.toList(),
+            )
+            sendJob = lifecycleScope.launch {
+                val saver = ClientEncryptedDraftSaver(handoffOpener, pgpController.accountAddress()) {
+                    MailRuntime.graph(this@ComposeActivity).repository.saveClientEncryptedDraft(it)
+                }
+                val outcome = saver.save(draft)
+                if (isFinishing || isDestroyed) return@launch
+                if (outcome == DraftSaveOutcome.Saved) {
+                    deleteSourceDraft()
+                    sendSucceeded = true
+                    ComposeDraftCache.clear()
+                    Toast.makeText(this@ComposeActivity, R.string.compose_draft_saved, Toast.LENGTH_SHORT).show()
+                    finish()
+                } else {
+                    applySendAvailability()
+                    draftRefusalMessage(outcome)?.let { Toast.makeText(this@ComposeActivity, it, Toast.LENGTH_LONG).show() }
+                }
+            }
+        }
+    }
+
+    /** Only once the replacement is saved, sent or scheduled. The relay cannot replace a draft, so
+     *  this is the second half of an edit; if it fails the user has two copies, never none. */
+    private fun deleteSourceDraft() {
+        val source = sourceDraft ?: return
+        sourceDraft = null
+        val app = applicationContext
+        // The session the replacement went out in: a reset before the task runs refuses it.
+        val session = ProcessState.generation()
+        MailBackgroundExecutor.submitReporting(this, getString(R.string.compose_old_draft_delete)) {
+            val repository = MailRuntime.graph(app).repository
+            repository.delete(repository.beginRemoval(source.messageId, source.mailbox, session))
+        }
     }
 
     private fun scheduledMessage(at: Instant): String = getString(R.string.compose_scheduled_for, formatWhen(at))
@@ -1054,6 +1135,7 @@ class ComposeActivity : LockedActivity() {
             is MailOutcome.Success -> {
                 val warning = outcome.value.warning
                 // The send already succeeded: surface the warning as a notice, never as a failure or a retry.
+                deleteSourceDraft()
                 val message = outcome.value.scheduledAt?.let(::scheduledMessage)
                     ?: warning.ifBlank { getString(R.string.compose_send_success) }
                 val length = if (warning.isBlank()) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
@@ -1262,6 +1344,7 @@ class ComposeActivity : LockedActivity() {
         encrypt = encryptChip.isChecked,
         sign = signChip.isChecked,
         replyTo = replyTo,
+        sourceDraft = sourceDraft,
     )
 
     /** Back on a finishing Activity drops the draft in [onStop]; typed mail must not go in silence.
@@ -1341,6 +1424,11 @@ class ComposeActivity : LockedActivity() {
 
         /** A [ReplyThreadHandoff] token, never the message id itself. */
         const val EXTRA_REPLY_TOKEN = "compose_reply_token"
+        const val EXTRA_CC = "compose_cc"
+        const val EXTRA_BCC = "compose_bcc"
+        const val EXTRA_SOURCE_DRAFT_ID = "compose_source_draft_id"
+        const val EXTRA_SOURCE_DRAFT_FOLDER = "compose_source_draft_folder"
+        const val EXTRA_SOURCE_DRAFT_ATTACHMENTS = "compose_source_draft_attachments"
 
         private const val TAG = "ComposeActivity"
 
@@ -1356,6 +1444,7 @@ class ComposeActivity : LockedActivity() {
         private const val MAX_ATTACHMENT_BYTES = MemoryBudget.OUTBOUND_ATTACHMENT_BYTES
         private const val MENU_SEND = 1
         private const val MENU_SCHEDULE = 2
+        private const val MENU_SAVE_DRAFT = 3
     }
 }
 

@@ -188,6 +188,12 @@ Owns production Android app code and resources.
   `sendOutcome` reads 200 as sent and 202 as held, each only where it was asked for, so a hold is
   never shown as sent. `ScheduledActivity` (folder picker, "Scheduled") lists `GET /api/scheduled`
   and cancels only a waiting row, after a confirm; the id is one escaped path segment.
+- Drafts are saved and edited only where this device holds the key; a server-held key gets
+  neither. "Edit draft" (detail overflow) exists only for a draft this device decrypted
+  (`decryptedDraft`, zeroed with `decryptedAttachments`) and refuses one it cannot carry whole.
+  The relay cannot replace a draft, so `deleteSourceDraft` deletes the old copy only after the new
+  one is saved, sent or scheduled, and never when fewer attachments arrived than it had: two
+  copies, never none. The source ref is honoured only on an in-app launch.
 - PGP state on relay inbox rows: `pgpEncrypted`, `pgpSigned`, `pgpVerified`, `pgpSignerFingerprint`,
   `pgpDecryptError`. All are `omitempty` server-side, so the Kotlin defaults (false/"") are the
   contract for a message with no OpenPGP content, not an unknown state. `pgp.PgpMessageState` is the

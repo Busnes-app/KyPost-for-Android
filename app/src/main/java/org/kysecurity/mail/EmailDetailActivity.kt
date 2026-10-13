@@ -119,10 +119,18 @@ class EmailDetailActivity : LockedActivity() {
     private var decryptedAttachments: List<org.kysecurity.mail.pgp.DecryptedAttachment> = emptyList()
     private val decryptedAttachmentSave = org.kysecurity.mail.security.OwnedAttachmentSave()
 
+    /** A draft this device decrypted, held so Edit can hand it to Compose. Its attachments are
+     *  [decryptedAttachments], zeroed with them. */
+    private var decryptedDraft: org.kysecurity.mail.pgp.DecryptedBody? = null
+
     private fun dropDecryptedAttachments() {
         decryptedAttachmentSave.stopAccepting()
         decryptedAttachments.forEach { java.util.Arrays.fill(it.bytes, 0) }
         decryptedAttachments = emptyList()
+        if (decryptedDraft != null) {
+            decryptedDraft = null
+            invalidateOptionsMenu()
+        }
     }
 
     /** This message's attachment listing, once loaded — what Forward has to fetch. */
@@ -745,6 +753,10 @@ class EmailDetailActivity : LockedActivity() {
                 btnOpenInWebmail.visibility = View.GONE
                 dropDecryptedAttachments()
                 decryptedAttachments = outcome.body.attachments
+                if (specialFolderOf(emailFolder()) == SpecialFolder.DRAFTS) {
+                    decryptedDraft = outcome.body
+                    invalidateOptionsMenu()
+                }
                 decryptedAttachmentSave.allow()
                 renderDecryptedAttachments()
             }
@@ -988,10 +1000,19 @@ class EmailDetailActivity : LockedActivity() {
         if (specialFolderOf(emailFolder()) != SpecialFolder.SNOOZED) {
             menu.add(0, MENU_SNOOZE, 1, R.string.action_snooze).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         }
+        // ponytail: only a draft this device decrypted; a plaintext draft from another mail app
+        // would need its attachments downloaded first, the way Forward does.
+        if (decryptedDraft != null) {
+            menu.add(0, MENU_EDIT_DRAFT, 2, R.string.action_edit_draft).setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        }
         return super.onCreateOptionsMenu(menu)
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == MENU_EDIT_DRAFT) {
+            editDraft()
+            return true
+        }
         if (item.itemId == MENU_SNOOZE) {
             pickSnoozeTime(this) { wakeAt ->
                 runMailActionAndFinish(getString(R.string.action_snooze), emailId(), emailFolder()) { repo, claim ->
@@ -1306,11 +1327,21 @@ class EmailDetailActivity : LockedActivity() {
         bodyHtml: String,
         attachments: List<org.kysecurity.mail.mail.OutgoingAttachment> = emptyList(),
         replyTo: ReplyRef? = null,
+        cc: String = "",
+        bcc: String = "",
+        sourceDraft: ReplyRef? = null,
     ) {
         val intent = ComposeActivity.internalIntent(this)
         intent.putExtra(ComposeActivity.EXTRA_TO, to)
         intent.putExtra(ComposeActivity.EXTRA_SUBJECT, subject)
         intent.putExtra(ComposeActivity.EXTRA_BODY_HTML, bodyHtml)
+        intent.putExtra(ComposeActivity.EXTRA_CC, cc)
+        intent.putExtra(ComposeActivity.EXTRA_BCC, bcc)
+        sourceDraft?.let {
+            intent.putExtra(ComposeActivity.EXTRA_SOURCE_DRAFT_ID, it.messageId)
+            intent.putExtra(ComposeActivity.EXTRA_SOURCE_DRAFT_FOLDER, it.mailbox)
+            intent.putExtra(ComposeActivity.EXTRA_SOURCE_DRAFT_ATTACHMENTS, attachments.size)
+        }
         replyTo?.let { intent.putExtra(ComposeActivity.EXTRA_REPLY_TOKEN, ReplyThreadHandoff.put(it)) }
         // Process-scoped handoff, not an Intent extra: 25 MB is far past Binder's ~1 MB limit.
         if (attachments.isNotEmpty()) ForwardAttachmentHandoff.put(attachments)
@@ -1377,6 +1408,39 @@ class EmailDetailActivity : LockedActivity() {
         }
     }
 
+    /** Opens the decrypted draft in Compose, which deletes this copy once its replacement is saved
+     *  or sent. The body goes through the same sanitizer a quote does: a draft is still HTML. */
+    private fun editDraft() {
+        val draft = decryptedDraft ?: return
+        // Saving the edit deletes this copy, so anything Compose could not carry would be lost.
+        if (draft.attachmentsOmitted || (draft.html?.length ?: 0) > QUOTE_SANITIZE_MAX_LENGTH) {
+            Toast.makeText(this, R.string.edit_draft_too_large, Toast.LENGTH_LONG).show()
+            return
+        }
+        val source = ReplyRef(emailId(), emailFolder())
+        ioExecutor.execute {
+            val body = draft.html?.let { html -> runCatching { QuotedHtmlSanitizer.sanitize(html) }.getOrNull() }
+                ?: TextUtils.htmlEncode(draft.plain.orEmpty()).replace("\n", "<br>").takeIf { draft.html == null }
+            runOnUiThread {
+                if (isFinishing || isDestroyed || decryptedDraft !== draft) return@runOnUiThread
+                if (body == null) {
+                    Toast.makeText(this, R.string.edit_draft_too_large, Toast.LENGTH_LONG).show()
+                    return@runOnUiThread
+                }
+                // Copies, made only now: the originals are zeroed when this screen locks or closes.
+                val attachments = draft.attachments.map {
+                    org.kysecurity.mail.mail.OutgoingAttachment(it.name, it.mimeType, it.bytes.copyOf())
+                }
+                openCompose(
+                    to = draft.protectedTo, subject = draft.protectedSubject.orEmpty(), bodyHtml = body,
+                    attachments = attachments, cc = draft.protectedCc, bcc = draft.protectedBcc,
+                    sourceDraft = source,
+                )
+                finish()
+            }
+        }
+    }
+
     private fun quoteForReply(sender: String, quoted: String): String =
         "<br><br><div>${TextUtils.htmlEncode(sender)} wrote:</div>" +
             "<blockquote style=\"margin:0 0 0 0.8ex;border-left:1px solid #ccc;padding-left:1ex\">" +
@@ -1427,6 +1491,7 @@ class EmailDetailActivity : LockedActivity() {
         private const val STATE_MARK_READ_COUNT = "mark_read_count"
         private const val MENU_CREATE_EVENT = 1
         private const val MENU_SNOOZE = 2
+        private const val MENU_EDIT_DRAFT = 3
 
         /** `intent:`, `file:`, `content:` and any app's custom scheme are refused. */
         private val SAFE_LINK_SCHEMES = setOf("http", "https", "mailto", "tel")

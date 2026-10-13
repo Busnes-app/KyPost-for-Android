@@ -288,6 +288,9 @@
     <string name="compose_pgp_not_paired">This device isn\'t paired with a KyPost server.</string>
     <string name="compose_send_success">Email sent successfully</string>
     <string name="compose_schedule">Schedule send</string>
+    <string name="compose_save_draft">Save draft</string>
+    <string name="compose_draft_saved">Saved to Drafts</string>
+    <string name="compose_old_draft_delete">Remove the old copy from Drafts</string>
     <string name="nav_scheduled">Scheduled</string>
     <string name="scheduled_title">Scheduled</string>
     <string name="scheduled_loading">Loading scheduled mail…</string>
@@ -554,6 +557,9 @@
     <string name="special_folder_missing">No %1$s folder on this account</string>
     <string name="nav_all_folders">All folders</string>
     <string name="action_snooze">Snooze</string>
+    <string name="action_edit_draft">Edit draft</string>
+    <string name="edit_draft_too_large">This draft is too large to edit here without losing part of it. Edit it in webmail.</string>
+    <string name="edit_draft_kept">The draft\'s attachments did not all arrive, so the old copy stays in Drafts.</string>
     <string name="snooze_title">Snooze until</string>
     <string name="when_later_today">Later today, %1$s</string>
     <string name="when_this_evening">This evening, %1$s</string>
