@@ -168,6 +168,15 @@ Owns production Android app code and resources.
   returned to INBOX. `EmailDao.getByFolder` orders by `COALESCE(wokenAt, atUtc)`, the row shows
   `atUtc` plus a "Snoozed" badge. An "updated" delta row replaces it, so one without `wokenAt`
   clears the pin. Older-mail pages (`reconcileOlderMail`) keep a held row's value.
+- Snoozing (`MailAction.SNOOZE`, KyPost-Server #386) is a removal like Move: the selection bar holds
+  it behind Undo, the detail screen's overflow runs it and finishes, and the row leaves Room only
+  once the relay confirms. `wakeAt` goes out as whole-second UTC RFC 3339 and only on SNOOZE.
+  Times come from `pickWhen` (`WhenPicker.kt`): presets plus a date and time picker, bounded to a
+  minute ahead and 365 days (the server allows any future moment up to 366). Not offered inside
+  Snoozed, where the server only moves the wake time and the row would wrongly vanish; to
+  unsnooze, Move the message out. Snoozed is never a Move target, because mail moved there has
+  no wake time. Snoozed is a picker entry (`SpecialFolder.SNOOZED`), matched only by the server's exact
+  top-level name, so a user's own `INBOX/Snoozed` stays theirs.
 - PGP state on relay inbox rows: `pgpEncrypted`, `pgpSigned`, `pgpVerified`, `pgpSignerFingerprint`,
   `pgpDecryptError`. All are `omitempty` server-side, so the Kotlin defaults (false/"") are the
   contract for a message with no OpenPGP content, not an unknown state. `pgp.PgpMessageState` is the
@@ -480,7 +489,7 @@ Owns production Android app code and resources.
   and the Archive subfolders, minus the message's own folder (`moveTargets`), and runs
   `MailRepository.move`, so the local row goes only once the relay confirms the id.
 - Long-pressing an inbox row starts selection mode (an AppCompat `ActionMode`: Archive, Move,
-  Junk, Delete). Taps toggle rows, swipes are off, and a folder switch or search ends it. Bulk
+  Junk, Delete, Snooze). Taps toggle rows, swipes are off, and a folder switch or search ends it. Bulk
   actions go through `MailRepository.mutateAll`, one relay call per source folder, with the same
   claim-before-queue guard as a single action (`beginRemovals`; session and account captured at
   the tap). That method

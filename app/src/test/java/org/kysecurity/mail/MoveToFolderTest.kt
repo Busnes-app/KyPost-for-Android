@@ -14,6 +14,11 @@ class MoveToFolderTest {
     }
 
     @Test
+    fun neverOffersSnoozedWhereMailWouldHaveNoWakeTime() {
+        assertEquals(listOf("INBOX", "Junk"), moveTargets("Trash", listOf("Junk", "Snoozed"), emptyList()))
+    }
+
+    @Test
     fun neverOffersTheFolderTheMailIsIn() {
         assertEquals(listOf("Junk"), moveTargets("INBOX", listOf("Junk"), emptyList()))
         assertEquals(listOf("INBOX"), moveTargets("archive/2025", emptyList(), listOf("Archive/2025")))

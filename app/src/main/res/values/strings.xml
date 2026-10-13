@@ -32,6 +32,7 @@
     <string name="nav_archive">Archive</string>
     <string name="nav_sent">Sent</string>
     <string name="nav_drafts">Drafts</string>
+    <string name="nav_snoozed">Snoozed</string>
     <string name="settings_title">Settings</string>
     <string name="settings_subtitle">Settings</string>
     <string name="settings_security_body">App lock, notifications, and encrypted mail</string>
@@ -529,6 +530,14 @@
     <string name="no_archive_folders">No archive folders found</string>
     <string name="special_folder_missing">No %1$s folder on this account</string>
     <string name="nav_all_folders">All folders</string>
+    <string name="action_snooze">Snooze</string>
+    <string name="snooze_title">Snooze until</string>
+    <string name="when_later_today">Later today, %1$s</string>
+    <string name="when_this_evening">This evening, %1$s</string>
+    <string name="when_tomorrow">Tomorrow, %1$s</string>
+    <string name="when_next_week">Next week, %1$s</string>
+    <string name="when_custom">Pick date and time…</string>
+    <string name="when_out_of_range">That time is in the past or too far ahead</string>
     <string name="folders_title">Folders</string>
     <string name="folders_loading">Loading folders…</string>
     <string name="folders_empty">No folders here</string>

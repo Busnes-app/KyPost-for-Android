@@ -46,6 +46,11 @@ class SpecialFolderTest {
         assertNull(specialFolderOf("Archive.Drafts"))
         // A user's own folder of that name, reachable from the folders screen.
         assertNull(specialFolderOf("Projects/Sent"))
+        assertEquals(SpecialFolder.SNOOZED, specialFolderOf("Snoozed"))
+        // The server's name is exact: a user's own lookalike keeps Snooze and stays a Move target.
+        assertNull(specialFolderOf("INBOX/Snoozed"))
+        assertNull(specialFolderOf("snoozed"))
+        assertEquals("Snoozed", resolveSpecialFolder(listOf("snoozed", "Snoozed"), SpecialFolder.SNOOZED))
         assertEquals(SpecialFolder.DRAFTS, specialFolderOf("INBOX/Drafts"))
         assertNull(specialFolderOf("Junk"))
     }

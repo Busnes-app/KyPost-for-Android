@@ -29,6 +29,7 @@ internal class FakeMailSource : MailSource {
     val unreadGates = ArrayBlockingQueue<CountDownLatch>(8)
     val completed: MutableList<MailAction> = Collections.synchronizedList(mutableListOf())
     val sends: MutableList<MailDraft> = Collections.synchronizedList(mutableListOf())
+    val wakeAts: MutableList<java.time.Instant> = Collections.synchronizedList(mutableListOf())
     val sendOutcomes = ArrayBlockingQueue<MailOutcome<MailSendOutcome>>(8)
 
     /** Folder mutations always succeed and land here with their arguments. */
@@ -57,7 +58,9 @@ internal class FakeMailSource : MailSource {
         mailbox: String,
         targetMailbox: String?,
         account: MailAccount?,
+        wakeAt: java.time.Instant?,
     ): MailOutcome<MailActionOutcome> {
+        if (wakeAt != null) wakeAts += wakeAt
         val gate = when (action) {
             MailAction.READ -> readGates.poll()
             MailAction.UNREAD -> unreadGates.poll()

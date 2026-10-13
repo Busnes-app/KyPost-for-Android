@@ -32,6 +32,7 @@ class ThemedDialogsTest {
             "EmailDetailActivity.kt" to "confirmOpenLink",
             "security/AppLockOffer.kt" to "showIfDue",
             "FoldersActivity.kt" to "promptName",
+            "WhenPicker.kt" to "pickWhen",
             "FoldersActivity.kt" to "confirmDelete",
         )
     }
