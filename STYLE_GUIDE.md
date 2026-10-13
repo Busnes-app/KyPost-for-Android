@@ -117,6 +117,9 @@ the equivalent iOS (`Presentation/Components/`) and Linux (`app/qml/components/`
   **Done** (`applyGhostButtonTheme`).
 - **Danger button** — 1dp stroke + 12% fill of the fixed danger red from §1, not
   theme-accent. **Done** (`applyDangerButtonTheme`).
+- **Floating action button** — `accent` fill, icon tinted `readableOn(accent)`. **Done**,
+  for every FAB in a themed view tree (`applyThemeToViewTree`); pinned by
+  `ContactsFabThemeTest`.
 - **Pill filter tabs / segmented toggle** — stadium chips; inactive = opaque `panel` fill
   (not literal transparent — see the code comment on `applyPillChipTheme` for why) + `line`
   stroke, active = `accent` fill + `readableOn(accent)` text. **Done**, via Material
