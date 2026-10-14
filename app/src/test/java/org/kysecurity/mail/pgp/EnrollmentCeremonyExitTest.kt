@@ -18,7 +18,7 @@ class EnrollmentCeremonyExitTest {
     ): FakePorts {
         val probe = FakeEnrollmentKeys()
         val envelope = sealEnvelope(probe, sealFor, aadFingerprint)
-        return FakePorts(fetchResults = mutableListOf(EnrollmentCallResult.Envelope(envelope)))
+        return FakePorts(fetchResults = mutableListOf(EnrollmentCallResult.Envelope(envelope, legacyDelivery())))
     }
 
     @Test
@@ -56,7 +56,7 @@ class EnrollmentCeremonyExitTest {
     fun aFailedReportStillMeansEnrolledAndEnqueuesTheWorker() = runBlocking {
         val probe = FakeEnrollmentKeys()
         val ports = FakePorts(
-            fetchResults = mutableListOf(EnrollmentCallResult.Envelope(sealEnvelope(probe))),
+            fetchResults = mutableListOf(EnrollmentCallResult.Envelope(sealEnvelope(probe), legacyDelivery())),
             reportResult = EnrollmentCallResult.Failed("offline"),
         )
 
@@ -111,7 +111,7 @@ class EnrollmentCeremonyExitTest {
     @Test
     fun aMalformedEnvelopeIsItsOwnReasonAndDestroysTheKeypair() = runBlocking {
         val ports = FakePorts(
-            fetchResults = mutableListOf(EnrollmentCallResult.Envelope("""{"v":"1"}""")),
+            fetchResults = mutableListOf(EnrollmentCallResult.Envelope("""{"v":"1"}""", legacyDelivery())),
         )
 
         ports.ceremony().run()
@@ -265,18 +265,18 @@ class EnrollmentCeremonyExitTest {
             "poll timeout" to FakePorts(),
             "poll 401" to FakePorts(fetchResults = mutableListOf(EnrollmentCallResult.Unauthorized)),
             "malformed envelope" to FakePorts(
-                fetchResults = mutableListOf(EnrollmentCallResult.Envelope("nonsense")),
+                fetchResults = mutableListOf(EnrollmentCallResult.Envelope("nonsense", legacyDelivery())),
             ),
             "could not open" to FakePorts(
                 fetchResults = mutableListOf(
-                    EnrollmentCallResult.Envelope(sealEnvelope(probe, deviceId = "elsewhere")),
+                    EnrollmentCallResult.Envelope(sealEnvelope(probe, deviceId = "elsewhere"), legacyDelivery()),
                 ),
             ),
             "success" to FakePorts(
-                fetchResults = mutableListOf(EnrollmentCallResult.Envelope(sealEnvelope(probe))),
+                fetchResults = mutableListOf(EnrollmentCallResult.Envelope(sealEnvelope(probe), legacyDelivery())),
             ),
             "report failed" to FakePorts(
-                fetchResults = mutableListOf(EnrollmentCallResult.Envelope(sealEnvelope(probe))),
+                fetchResults = mutableListOf(EnrollmentCallResult.Envelope(sealEnvelope(probe), legacyDelivery())),
                 reportResult = EnrollmentCallResult.Unauthorized,
             ),
         )
@@ -313,7 +313,7 @@ class EnrollmentCeremonyExitTest {
     fun thePlaintextIsDroppedEvenWhenTheServerCannotBeTold() = runBlocking {
         val probe = FakeEnrollmentKeys()
         val ports = FakePorts(
-            fetchResults = mutableListOf(EnrollmentCallResult.Envelope(sealEnvelope(probe))),
+            fetchResults = mutableListOf(EnrollmentCallResult.Envelope(sealEnvelope(probe), legacyDelivery())),
             reportResult = EnrollmentCallResult.Failed("offline"),
         )
 
@@ -417,6 +417,6 @@ class EnrollmentCeremonyExitTest {
     }
 
     private companion object {
-        const val PLAINTEXT = FAKE_PLAINTEXT
+        val PLAINTEXT = FAKE_PLAINTEXT
     }
 }

@@ -2,10 +2,14 @@ package org.kysecurity.mail.pgp
 
 /** `internal`, not `private`: top-level private classes collide across files in one package. */
 /** The fingerprint the fake identity reports, and so the one a valid envelope's AAD must bind. */
-internal const val FAKE_FINGERPRINT = "164D5B834E7FE927"
+internal const val FAKE_FINGERPRINT = "B30ACD64E04B8E1B0379A3201D6BDF093FAD1D11"
 
-internal const val FAKE_PLAINTEXT =
-    "-----BEGIN PGP PRIVATE KEY BLOCK-----\nnot a real key\n-----END-----"
+/** [FAKE_FINGERPRINT]'s private key: a v2 plaintext must be the identity's own key. */
+internal val FAKE_PLAINTEXT = TestPgpPrivateKey.ARMORED_PRIVATE
+
+/** The record a current server returns beside a v2 envelope. */
+internal fun legacyDelivery(fingerprint: String = FAKE_FINGERPRINT) =
+    DeliveryMetadata(ENVELOPE_VERSION_LEGACY, fingerprint, null, null, null)
 
 /** Seals a real envelope the fake ports can open; the ECDH is covered by `EnrollmentKeyStoreTest`. */
 internal fun sealEnvelope(
@@ -217,7 +221,7 @@ internal class FakeEnrollmentClock(
 
 /** Every port, a recorded transcript of the states the ceremony emitted, and a factory. */
 internal class FakePorts(
-    identityResult: IdentityCheck = IdentityCheck.ClientProtected("164D5B834E7FE927"),
+    identityResult: IdentityCheck = IdentityCheck.ClientProtected(FAKE_FINGERPRINT),
     deviceIdValue: String? = "dev-1",
     private val hostileLocation: Boolean = false,
     private val secureLockScreen: Boolean = true,
