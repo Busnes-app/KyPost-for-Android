@@ -125,4 +125,43 @@ class DeviceContactSourceIdTest {
         assertEquals("New Name", deviceDisplayName(rawContactId))
         assertEquals("no duplicate row", 1, ownRowsFor(uid))
     }
+
+    /** A contact created under the KyPost account by another Contacts app is uploaded and linked,
+     *  once, rather than left unsynced for a teardown to delete. */
+    @Test
+    fun aContactCreatedInOurAccountElsewhere_isUploadedOnce() = runBlocking {
+        val results = context.contentResolver.applyBatch(
+            ContactsContract.AUTHORITY,
+            arrayListOf(
+                android.content.ContentProviderOperation.newInsert(ContactsContract.RawContacts.CONTENT_URI)
+                    .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, DeviceContactAccount.ACCOUNT_TYPE)
+                    .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, DeviceContactAccount.ACCOUNT_NAME)
+                    .build(),
+                android.content.ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                    .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                    .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE)
+                    .withValue(ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME, CREATED_ELSEWHERE)
+                    .build(),
+            ),
+        )
+        val rawContactId = results[0].uri!!.lastPathSegment!!.toLong()
+
+        repository.syncAll()
+        repository.syncAll()
+
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val created = db.pendingContactChangeDao().getAllPending()
+            .filter { it.changeType == ContactSyncRepository.CHANGE_CREATE }
+            .map { json.decodeFromString(ContactDto.serializer(), it.payloadJson) }
+            .filter { it.fn == CREATED_ELSEWHERE }
+        assertEquals("queued once", 1, created.size)
+        val uid = created.single().uid
+        assertEquals("linked to the row", rawContactId, db.deviceContactLinkDao().getByUid(uid)?.rawContactId)
+        assertEquals("the row carries the uid, and no copy was written", 1, ownRowsFor(uid))
+        assertEquals(1, ownRowCount())
+    }
+
+    private companion object {
+        const val CREATED_ELSEWHERE = "Created Elsewhere Probe"
+    }
 }

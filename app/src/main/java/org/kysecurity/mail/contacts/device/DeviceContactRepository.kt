@@ -18,6 +18,7 @@ import org.kysecurity.mail.contacts.GroupSyncRepository
 import org.kysecurity.mail.contacts.device.DeviceContactMappers.toContactDto
 import org.kysecurity.mail.contacts.device.DeviceContactMappers.toDto
 import org.kysecurity.mail.data.AppDatabase
+import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.withLock
@@ -67,6 +68,7 @@ class DeviceContactRepository(
                 check(refreshed) { "Group refresh: $outcome" }
             },
             stage("adoptLostLinks") { adoptLostLinks() },
+            stage("queueRowsCreatedElsewhere") { queueRowsCreatedElsewhere() },
             stage("pullDeviceChanges") { pullDeviceChangesForOwnAccount() },
             stage("removeDeletedContacts") { removeRowsOfDeletedContacts() },
             stage("importNewDeviceContacts") { importNewDeviceContacts() },
@@ -1014,6 +1016,37 @@ class DeviceContactRepository(
             if (uid in linkedUids || rawContactId in linkedRows) continue
             db.deviceContactLinkDao().upsert(org.kysecurity.mail.data.DeviceContactLinkEntity(uid, rawContactId, 0L))
         }
+    }
+
+    /** A row of ours with no SOURCE_ID and no link was created by another Contacts app: it is a
+     *  create, or teardown deletes it unsynced. The link lands with the queued create, so a death
+     *  before the SOURCE_ID backfill leaves a linked row to stamp, never a second create. */
+    private suspend fun queueRowsCreatedElsewhere() {
+        val linkedRows = db.deviceContactLinkDao().getAll().mapTo(HashSet()) { it.rawContactId }
+        val unlinked = withContext(Dispatchers.IO) {
+            contentResolver.query(
+                ContactsContract.RawContacts.CONTENT_URI,
+                arrayOf(ContactsContract.RawContacts._ID),
+                "${ContactsContract.RawContacts.ACCOUNT_TYPE} = ? AND ${ContactsContract.RawContacts.DELETED} = 0 AND " +
+                    "(${ContactsContract.RawContacts.SOURCE_ID} IS NULL OR ${ContactsContract.RawContacts.SOURCE_ID} = '')",
+                arrayOf(DeviceContactAccount.ACCOUNT_TYPE),
+                null,
+            )?.use { c -> buildList { while (c.moveToNext()) add(c.getLong(0)) } }.orEmpty()
+        }.filterNot { it in linkedRows }
+        if (unlinked.isEmpty()) return
+        for (rawContactId in unlinked) {
+            val snapshot = readRawContactSnapshot(rawContactId) ?: continue
+            val dto = snapshot.toContactDto("", 0)
+            db.withTransaction {
+                val uid = syncRepository.queueCreate(dto)
+                db.deviceContactLinkDao().upsert(
+                    org.kysecurity.mail.data.DeviceContactLinkEntity(
+                        uid, rawContactId, snapshot.lastUpdatedEpochMs, syncedJsonOf(dto.copy(uid = uid)),
+                    ),
+                )
+            }
+        }
+        ownRawContactsBySourceId(db.deviceContactLinkDao().getAll())
     }
 
     /** Sweeps legacy link rows pointing at another account's raw contacts, before the first sync. */

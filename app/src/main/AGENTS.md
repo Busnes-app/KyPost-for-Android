@@ -822,6 +822,10 @@ Owns production Android app code and resources.
   was gone is then pulled, not overwritten; a phone delete is queued and purged, not replaced; a
   row whose contact left Room is removed (`DeviceContactDeleteTest`). The push repeats the
   live-row lookup before any create. Linked rows from before SOURCE_ID are backfilled.
+  A live row of our account with neither SOURCE_ID nor link was created there by another
+  Contacts app: `queueRowsCreatedElsewhere` queues it as a create and writes its link in one
+  transaction, and the backfill then stamps SOURCE_ID. Without it the row never reached the
+  server, and turning sync off, unpairing or Hostile Location Protection deleted it.
   `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_13_14` indexes the link table's
   `rawContactId`.
 - **The periodic `DeviceContactSyncWorker` is the only background path to the server**, so it runs
