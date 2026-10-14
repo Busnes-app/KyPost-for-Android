@@ -75,7 +75,8 @@ internal class EnrollmentCeremony(
         deviceId = id
 
         when (val check = identity.check()) {
-            is IdentityCheck.ClientProtected -> fingerprint = check.fingerprint
+            // Bootstrap's form is spaced; the server records and the AAD binds bare uppercase hex.
+            is IdentityCheck.ClientProtected -> fingerprint = check.fingerprint.uppercase().filterNot { it.isWhitespace() }
             IdentityCheck.ServerHeld -> {
                 emit(EnrollmentUiState.Unavailable(UnavailableReason.SERVER_HELD_KEY))
                 return
@@ -198,13 +199,15 @@ internal class EnrollmentCeremony(
         emit(EnrollmentUiState.Opening)
 
         val fields = parseDeviceEnvelope(envelopeJson, setOf(ENVELOPE_VERSION_LEGACY, ENVELOPE_VERSION_KEYRING))
-        if (fields == null) {
+        // Every envelope is validated against the delivery the server recorded (KyPost-Server #210):
+        // this version, for this identity. Without that record it is not opened at all.
+        if (fields == null || delivery == null || delivery.version != fields.version ||
+            !delivery.fingerprint.equals(requireNotNull(fingerprint), ignoreCase = true)
+        ) {
             failAndDestroy(FailureReason.ENVELOPE_MALFORMED)
             return
         }
 
-        // A v3 envelope is validated against the delivery the server recorded (KyPost-Server #210).
-        // Without that record there is nothing to validate against, so it is not opened at all.
         val expected = if (fields.version == ENVELOPE_VERSION_KEYRING) {
             keyringDelivery(delivery) ?: run { failAndDestroy(FailureReason.ENVELOPE_MALFORMED); return }
         } else {
@@ -248,13 +251,23 @@ internal class EnrollmentCeremony(
         }
 
         try {
-            if (expected != null) importAndReport(plaintext, expected) else sealAndReport(plaintext)
+            when {
+                expected != null -> importAndReport(plaintext, expected)
+                legacyKeyMatches(plaintext) -> sealAndReport(plaintext)
+                else -> failAndDestroy(FailureReason.KEYRING_REJECTED)
+            }
         } finally {
             // The armored private key, zeroed in place on every path out — including the throw the
             // sealer is not supposed to produce. It never enters EnrollmentSession: that holder has
             // no reader until the deferred decryption work lands.
             plaintext.fill(0)
         }
+    }
+
+    /** A v2 plaintext is the account's one private key, and its primary must be the recorded identity. */
+    private fun legacyKeyMatches(plaintext: ByteArray): Boolean {
+        val ring = orderedSecretKeyRings(plaintext.inputStream())?.singleOrNull() ?: return false
+        return ring.publicKey.fingerprint.joinToString("") { "%02X".format(it) } == fingerprint
     }
 
     private suspend fun sealAndReport(plaintext: ByteArray) {
@@ -330,12 +343,10 @@ internal class EnrollmentCeremony(
     /** The values a keyring delivery must carry; null is a record this client cannot validate against. */
     private class KeyringDelivery(val generation: Long, val members: Set<String>, val inventory: Set<String>)
 
-    private fun keyringDelivery(delivery: DeliveryMetadata?): KeyringDelivery? {
-        if (delivery == null || delivery.version != ENVELOPE_VERSION_KEYRING) return null
+    private fun keyringDelivery(delivery: DeliveryMetadata): KeyringDelivery? {
         val generation = delivery.materialGeneration ?: return null
         val members = delivery.primaryFingerprints ?: return null
         val inventory = delivery.keyFingerprints ?: return null
-        if (!delivery.fingerprint.equals(requireNotNull(fingerprint), ignoreCase = true)) return null
         return KeyringDelivery(generation, members.map { it.uppercase() }.toSet(), inventory.map { it.uppercase() }.toSet())
     }
 

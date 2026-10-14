@@ -4,10 +4,13 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
+import androidx.annotation.StringRes
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import org.kysecurity.mail.R
+import org.kysecurity.mail.showThemed
 import kotlinx.coroutines.launch
 
 class DeviceContactSyncEnabler(
@@ -20,8 +23,23 @@ class DeviceContactSyncEnabler(
     /** A setup screen whose request a newer one displaced must not act on it. */
     private fun displaced(): Boolean = setupToken()?.let { !PendingAccountSetup.isCurrent(it) } == true
 
+    /** The disclosure every path shows before contacts access is requested. Continue enables,
+     *  asking for the permission if needed, and passes [onContinue] whether it asked; Not now or
+     *  Back asks for nothing. [lead] says why the dialog appeared, when the user did not ask. */
+    fun askToEnable(
+        @StringRes lead: Int? = null,
+        onDecline: () -> Unit = {},
+        onContinue: (requestedPermission: Boolean) -> Unit = {},
+    ): AlertDialog = AlertDialog.Builder(activity)
+        .setTitle(R.string.contact_sync_intro_title)
+        .setMessage(listOfNotNull(lead, R.string.contacts_access_disclosure).joinToString("\n\n") { activity.getString(it) })
+        .setPositiveButton(R.string.contact_sync_intro_positive) { _, _ -> onContinue(checkAndEnable()) }
+        .setNegativeButton(R.string.contact_sync_intro_negative) { _, _ -> onDecline() }
+        .setOnCancelListener { onDecline() }
+        .showThemed()
+
     /** True when permissions had to be requested; the caller must wait for the launcher callback. */
-    fun checkAndEnable(): Boolean {
+    private fun checkAndEnable(): Boolean {
         if (displaced()) {
             activity.finish()
             return false

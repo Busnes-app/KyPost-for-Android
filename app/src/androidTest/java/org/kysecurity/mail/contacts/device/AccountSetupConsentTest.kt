@@ -77,7 +77,7 @@ class AccountSetupConsentTest {
             assertEquals(0, ownRawContacts())
 
             scenario.onActivity { activity ->
-                val dialog = activity.setupDialog
+                val dialog = activity.consentDialog
                 assertNotNull("setup must ask before enabling", dialog)
                 dialog!!.getButton(DialogInterface.BUTTON_POSITIVE).performClick()
             }
@@ -99,7 +99,7 @@ class AccountSetupConsentTest {
 
         ActivityScenario.launch<ContactsListActivity>(intent).use { scenario ->
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()
-            scenario.onActivity { activity -> activity.setupDialog?.getButton(DialogInterface.BUTTON_POSITIVE)?.performClick() }
+            scenario.onActivity { activity -> activity.consentDialog?.getButton(DialogInterface.BUTTON_POSITIVE)?.performClick() }
 
             assertTrue(added.await(15, TimeUnit.SECONDS))
             assertEquals(true, existedWhenAnswered)
@@ -119,7 +119,7 @@ class AccountSetupConsentTest {
             assertTrue("the request is still waiting", PendingAccountSetup.pendingToken != null)
 
             scenario.onActivity { activity ->
-                val dialog = activity.setupDialog
+                val dialog = activity.consentDialog
                 assertNotNull("the recreated screen asks again", dialog)
                 dialog!!.getButton(DialogInterface.BUTTON_POSITIVE).performClick()
             }
@@ -136,12 +136,47 @@ class AccountSetupConsentTest {
         ActivityScenario.launch<ContactsListActivity>(intent).use { scenario ->
             InstrumentationRegistry.getInstrumentation().waitForIdleSync()
             scenario.onActivity { activity ->
-                activity.setupDialog!!.getButton(DialogInterface.BUTTON_NEGATIVE).performClick()
+                activity.consentDialog!!.getButton(DialogInterface.BUTTON_NEGATIVE).performClick()
             }
 
             assertTrue(cancelled.await(10, TimeUnit.SECONDS))
             assertFalse(settings.isEnabled())
             assertFalse(accounts.accountExists())
+        }
+    }
+
+    /** The menu toggle shows the disclosure first; Not now enables nothing, Continue enables. */
+    @Test
+    fun theMenuToggle_disclosesTheUploadBeforeEnabling() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        ActivityScenario.launch(ContactsListActivity::class.java).use { scenario ->
+            instrumentation.waitForIdleSync()
+            // The screen's own menu, selected as a tap would; the custom top bar has no panel to drive.
+            fun toggle(activity: ContactsListActivity) {
+                val menu = android.widget.PopupMenu(activity, activity.window.decorView).menu
+                activity.onCreateOptionsMenu(menu)
+                activity.onPrepareOptionsMenu(menu)
+                activity.onOptionsItemSelected(menu.findItem(ContactsListActivity.MENU_DEVICE_SYNC))
+            }
+
+            scenario.onActivity {
+                toggle(it)
+                val dialog = it.consentDialog
+                assertNotNull("the toggle must disclose before enabling", dialog)
+                val message = dialog!!.findViewById<android.widget.TextView>(android.R.id.message)!!.text.toString()
+                assertTrue(message, "uploaded to your KyPost server" in message && "synced to your other devices" in message)
+                dialog.getButton(DialogInterface.BUTTON_NEGATIVE).performClick()
+            }
+            instrumentation.waitForIdleSync()
+            assertFalse("Not now enables nothing", settings.isEnabled())
+
+            scenario.onActivity {
+                toggle(it)
+                it.consentDialog!!.getButton(DialogInterface.BUTTON_POSITIVE).performClick()
+            }
+            val deadline = System.currentTimeMillis() + 15_000
+            while (!settings.isEnabled() && System.currentTimeMillis() < deadline) android.os.SystemClock.sleep(50)
+            assertTrue("Continue enables", settings.isEnabled())
         }
     }
 
@@ -199,7 +234,7 @@ class AccountSetupConsentTest {
         ActivityScenario.launch<ContactsListActivity>(secondIntent).use { scenario ->
             instrumentation.waitForIdleSync()
             scenario.onActivity { activity ->
-                val dialog = activity.setupDialog
+                val dialog = activity.consentDialog
                 assertNotNull("the newer request is still waiting", dialog)
                 dialog!!.getButton(DialogInterface.BUTTON_POSITIVE).performClick()
             }
@@ -223,7 +258,7 @@ class AccountSetupConsentTest {
             instrumentation.waitForIdleSync()
             requestSetup(authenticator, second)
             scenario.onActivity { activity ->
-                val dialog = activity.setupDialog
+                val dialog = activity.consentDialog
                 assertNotNull("A's confirmation is still on screen", dialog)
                 dialog!!.getButton(DialogInterface.BUTTON_POSITIVE).performClick()
             }

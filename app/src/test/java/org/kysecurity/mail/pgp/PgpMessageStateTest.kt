@@ -8,33 +8,32 @@ class PgpMessageStateTest {
 
     @Test
     fun noPgpContent_isNone() {
-        assertEquals(PgpMessageState.NONE, pgpMessageStateOf(false, "", "<p>hi</p>"))
-        assertEquals(PgpMessageState.NONE, pgpMessageStateOf(false, "", null))
+        assertEquals(PgpMessageState.NONE, pgpMessageStateOf(false, "", hasBody = true))
+        assertEquals(PgpMessageState.NONE, pgpMessageStateOf(false, "", hasBody = false))
     }
 
     /** The client-protected shape: the server sets the flag, decrypts nothing, and reports no
      *  error because nothing went wrong — it simply has no key. */
     @Test
     fun encryptedWithNoErrorAndNoBody_isClientProtected() {
-        assertEquals(PgpMessageState.CLIENT_PROTECTED, pgpMessageStateOf(true, "", null))
-        assertEquals(PgpMessageState.CLIENT_PROTECTED, pgpMessageStateOf(true, "", ""))
-        assertEquals(PgpMessageState.CLIENT_PROTECTED, pgpMessageStateOf(true, "   ", "  "))
+        assertEquals(PgpMessageState.CLIENT_PROTECTED, pgpMessageStateOf(true, "", hasBody = false))
+        assertEquals(PgpMessageState.CLIENT_PROTECTED, pgpMessageStateOf(true, "   ", hasBody = false))
     }
 
     @Test
     fun encryptedWithError_isDecryptFailed() {
-        assertEquals(PgpMessageState.DECRYPT_FAILED, pgpMessageStateOf(true, "no pgp identity configured", null))
+        assertEquals(PgpMessageState.DECRYPT_FAILED, pgpMessageStateOf(true, "no pgp identity configured", hasBody = false))
     }
 
     /** Both conditions hold at once for a failed decrypt; the error must win. */
     @Test
     fun errorTakesPrecedenceOverMissingBody() {
-        assertEquals(PgpMessageState.DECRYPT_FAILED, pgpMessageStateOf(true, "bad key", ""))
+        assertEquals(PgpMessageState.DECRYPT_FAILED, pgpMessageStateOf(true, "bad key", hasBody = false))
     }
 
     @Test
     fun encryptedWithBody_isDecryptedByServer() {
-        assertEquals(PgpMessageState.DECRYPTED_BY_SERVER, pgpMessageStateOf(true, "", "<p>plaintext</p>"))
+        assertEquals(PgpMessageState.DECRYPTED_BY_SERVER, pgpMessageStateOf(true, "", hasBody = true))
     }
 
     /** Only the states that yield nothing readable get a row marker — a server-mode mailbox would
@@ -48,12 +47,11 @@ class PgpMessageStateTest {
     }
 
     @Test
-    fun serverVerifiedNeverClaimsTheUserConfirmedTheKey() {
-        // The relay's two booleans cannot tell a fingerprint-confirmed key from an
-        // Autocrypt-harvested one, so the mapping takes the weaker claim. Promoting this to
-        // VERIFIED_CONFIRMED would reintroduce the exact over-claim Part 0.2 removed.
+    fun serverVerifiedClaimsNoKeyThisDeviceHolds() {
+        // The relay checked against a key this device never pinned, so neither identity nor
+        // continuity is ours to claim.
         assertEquals(
-            PgpSignatureState.VERIFIED_SEEN_BEFORE,
+            PgpSignatureState.SIGNER_UNKNOWN,
             pgpSignatureStateOf(pgpSigned = true, pgpVerified = true),
         )
     }

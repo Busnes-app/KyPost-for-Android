@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.kysecurity.mail.contacts.toEntity
 import org.kysecurity.mail.data.ContactEntity
 
 /** Both feed [signatureStateFor]'s local branch, the only source of VERIFIED_CONFIRMED. */
@@ -72,26 +73,32 @@ class LocalSignerKeyMappingTest {
     }
 
     @Test
-    fun aCleanRowIsConfirmed() {
-        assertEquals(LocalSignerKey(TestPgpKey.ARMORED, confirmed = true), contact().toLocalSignerKey())
-    }
-
-    @Test
-    fun anOutstandingKeyAlarmOffersTheKeyButNotConfirmation() {
+    fun aContactKeyIsNeverConfirmed_alarmsOrNot() {
         // Still offered, deliberately: signatureStateFor treats a locally-held key as authoritative
-        // about WHICH key the sender uses regardless of confirmation, and that is what makes a
-        // signature by some other key report KEY_CHANGED instead of falling through to the relay.
-        val mapped = contact(needsReverification = true).toLocalSignerKey()
-        assertEquals(LocalSignerKey(TestPgpKey.ARMORED, confirmed = false), mapped)
+        // about WHICH key the sender uses, and that is what makes a signature by some other key
+        // report KEY_CHANGED instead of falling through to the relay.
+        for (row in listOf(contact(), contact(needsReverification = true), contact(identityNeedsReview = true))) {
+            assertEquals(LocalSignerKey(TestPgpKey.ARMORED, confirmed = false), row.toLocalSignerKey())
+        }
     }
 
+    /** No earlier row means no alarm can be raised, so a synced first copy must not confirm. */
     @Test
-    fun anOutstandingIdentityAlarmAlsoBlocksConfirmation() {
-        // The QR ceremony deliberately cannot clear this one — a fingerprint comparison attests to
-        // the key and says nothing about which addresses it is displayed beside — so it has to gate
-        // the badge that ceremony grants.
-        val mapped = contact(identityNeedsReview = true).toLocalSignerKey()
-        assertEquals(LocalSignerKey(TestPgpKey.ARMORED, confirmed = false), mapped)
+    fun aContactFirstCreatedBySync_signsAsSeenBeforeNotConfirmed() {
+        val synced = org.kysecurity.mail.contacts.ContactDto(
+            uid = "1",
+            fn = "Bob",
+            emails = listOf(org.kysecurity.mail.contacts.ContactFieldDto(value = "bob@example.com")),
+            pgpKey = TestPgpKey.ARMORED,
+        ).toEntity(previous = null)
+
+        val state = signatureStateFor(
+            RawSignature.Checked(signerKeyIdsOf(TestPgpKey.ARMORED).single(), verified = true),
+            serverKeys = emptyList(),
+            localKeys = listOfNotNull(synced.toLocalSignerKey()),
+        )
+
+        assertEquals(PgpSignatureState.VERIFIED_SEEN_BEFORE, state)
     }
 
     /** A key verified on this device decides alone; the contact's synced key is not added. */

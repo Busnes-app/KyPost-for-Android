@@ -49,10 +49,17 @@ internal fun interface RecipientKeyResolver {
     suspend fun resolve(addresses: List<String>): ResolveResult
 }
 
-/** The relay hop. Blocking, matching the rest of `MailSource`. */
+/** The relay hop. Suspends so Compose can hand it to the app-scoped `ComposeSend`. */
 internal fun interface ClientEncryptedTransport {
-    fun send(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome>
+    suspend fun send(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome>
 }
+
+/** The relay's answer to a client-encrypted send, for the sender and for a Compose that adopted it. */
+internal fun clientSendOutcome(outcome: MailOutcome<*>): ClientSendOutcome =
+    when (val sent = (outcome as? MailOutcome.Success)?.value) {
+        is MailSendOutcome -> ClientSendOutcome.Sent(sent.sentSaved, sent.warning, sent.scheduledAt)
+        else -> ClientSendOutcome.SendFailed(outcome)
+    }
 
 /** Encrypts and signs one message on-device, then relays it. No Android imports, by contract. */
 internal class ClientEncryptedSender(
@@ -178,11 +185,7 @@ internal class ClientEncryptedSender(
                 draftCopy = draftCopy,
             ),
         )
-        return when (outcome) {
-            is MailOutcome.Success ->
-                ClientSendOutcome.Sent(outcome.value.sentSaved, outcome.value.warning, outcome.value.scheduledAt)
-            else -> ClientSendOutcome.SendFailed(outcome)
-        }
+        return clientSendOutcome(outcome)
     }
 
     /** Relay keys with pinned material substituted in, and the addresses whose pin disagreed. */

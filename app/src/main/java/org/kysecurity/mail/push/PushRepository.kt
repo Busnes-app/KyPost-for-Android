@@ -1,6 +1,7 @@
 package org.kysecurity.mail.push
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
@@ -14,11 +15,17 @@ import org.kysecurity.mail.contacts.contactsDataStore
 import org.kysecurity.mail.mail.mailSyncDataStore
 import org.kysecurity.mail.security.AppLockStore
 import org.kysecurity.mail.security.SecurityRuntime
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.IOException
@@ -32,15 +39,11 @@ internal val Context.pushDataStore by preferencesDataStore(
 private val KEY_LAST_SYNC_AT = longPreferencesKey("sync_last_at")
 private val KEY_LAST_PUSH_AT = longPreferencesKey("push_last_received_at")
 private val KEY_SYNC_ERROR = stringPreferencesKey("sync_error")
-private val KEY_HISTORY_JSON = stringPreferencesKey("history_json")
 private val KEY_DELIVERY_MODE = stringPreferencesKey("delivery_mode")
 private val KEY_PULL_ENDPOINT = stringPreferencesKey("pull_endpoint")
 private val KEY_PULL_CURSOR = longPreferencesKey("pull_cursor")
 private val KEY_PULL_CURSOR_SUB = stringPreferencesKey("pull_cursor_sub")
 private val KEY_TRANSPORT = stringPreferencesKey("transport")
-private val KEY_UNIFIEDPUSH_ENDPOINT = stringPreferencesKey("unifiedpush_endpoint")
-private val KEY_UNIFIEDPUSH_P256DH = stringPreferencesKey("unifiedpush_p256dh")
-private val KEY_UNIFIEDPUSH_AUTH = stringPreferencesKey("unifiedpush_auth")
 
 private const val HISTORY_LIMIT = 30
 
@@ -50,6 +53,7 @@ class PushRepository(
     private val context: Context,
     // Injected: PushGraph owns the single instance that holds the pairing StateFlow.
     private val securePairingStore: SecurePairingStore = SecurePairingStore(context),
+    private val securePushState: SecurePushState = SecurePushState(context),
 ) : PushStore {
     private val json = Json { ignoreUnknownKeys = true }
     private val hostileLocationSettings = SecurityRuntime.graph(context).hostileLocationSettings
@@ -66,13 +70,49 @@ class PushRepository(
     /** Push history while Hostile Location Protection is on: nothing may touch disk. */
     private val inMemoryHistory = MutableStateFlow<List<PushPayload>>(emptyList())
 
+    private val migration = Mutex()
+
+    @Volatile
+    private var migrationDone = false
+
+    /** Every `push_state` write and every [securePushState] access waits for this, so nothing
+     *  lands in either store while [migratePlaintextPushState] is moving keys between them. */
+    private suspend fun migrated(): SecurePushState {
+        if (!migrationDone) {
+            migration.withLock {
+                if (!migrationDone) {
+                    withContext(Dispatchers.IO) {
+                        val dropHistory = hostileLocationSettings.isEnabled()
+                        if (migratePlaintextPushState(context.pushDataStore, securePushState, dropHistory)) {
+                            org.kysecurity.mail.clearAndDelete(context, "push_state", context.pushDataStore)
+                        }
+                    }
+                    migrationDone = true
+                }
+            }
+        }
+        return securePushState
+    }
+
+    private suspend fun editPlain(block: suspend (MutablePreferences) -> Unit) {
+        migrated()
+        context.pushDataStore.edit(block)
+    }
+
+    /** Blocking file and Keystore I/O, off the caller's thread. */
+    private suspend fun editSecure(block: (Map<String, String>, SharedPreferences.Editor) -> Unit) =
+        withContext(Dispatchers.IO) { migrated().edit(block) }
+
     override val state: Flow<PushState> = combine(
         context.pushDataStore.data.catch { ex ->
             if (ex is IOException) emit(emptyPreferences()) else throw ex
         },
+        flow { emitAll(migrated().values) }.catch { ex ->
+            if (ex is IOException) emit(emptyMap()) else throw ex
+        },
         securePairingStore.pairing,
         inMemoryHistory,
-    ) { prefs, pairing, volatileHistory -> toState(prefs, pairing, volatileHistory) }
+    ) { prefs, secure, pairing, volatileHistory -> toState(prefs, secure, pairing, volatileHistory) }
 
     /** Whether a pairing exists right now, read straight from the store — for cold-path callers. */
     fun isPairedNow(): Boolean = securePairingStore.pairing.value != null
@@ -163,7 +203,7 @@ class PushRepository(
             is PairingCredentialState.NotGated ->
                 securePairingStore.savePairing(pairing, gateEnabled = false)
         }
-        context.pushDataStore.edit { prefs ->
+        editPlain { prefs ->
             prefs.remove(KEY_SYNC_ERROR)
         }
     }
@@ -283,7 +323,7 @@ class PushRepository(
      *  contact changes — none of which carries a subscriber column. */
     suspend fun resetPairingCredential() {
         securePairingStore.clearPairing(rememberForReconnect = true)
-        context.pushDataStore.edit { prefs ->
+        editPlain { prefs ->
             prefs.remove(KEY_SYNC_ERROR)
             prefs.remove(KEY_LAST_SYNC_AT)
             prefs.remove(KEY_LAST_PUSH_AT)
@@ -308,20 +348,17 @@ class PushRepository(
         val residue = purgeAccountScopedData()
         securePairingStore.clearPairing()
         inMemoryHistory.value = emptyList()
-        context.pushDataStore.edit { prefs ->
+        editPlain { prefs ->
             prefs.remove(KEY_LAST_SYNC_AT)
             prefs.remove(KEY_LAST_PUSH_AT)
             prefs.remove(KEY_SYNC_ERROR)
-            prefs.remove(KEY_HISTORY_JSON)
             prefs.remove(KEY_DELIVERY_MODE)
             prefs.remove(KEY_PULL_ENDPOINT)
             prefs.remove(KEY_PULL_CURSOR)
             prefs.remove(KEY_PULL_CURSOR_SUB)
             prefs.remove(KEY_TRANSPORT)
-            prefs.remove(KEY_UNIFIEDPUSH_ENDPOINT)
-            prefs.remove(KEY_UNIFIEDPUSH_P256DH)
-            prefs.remove(KEY_UNIFIEDPUSH_AUTH)
         }
+        editSecure { _, editor -> SECURE_PUSH_KEYS.forEach { editor.remove(it) } }
         return residue
     }
 
@@ -366,7 +403,7 @@ class PushRepository(
 
     /** Persist the authoritative delivery mode and (derived or server-provided) pull endpoint. */
     override suspend fun updateDelivery(mode: DeliveryMode, pullEndpoint: String?) {
-        context.pushDataStore.edit { prefs ->
+        editPlain { prefs ->
             prefs[KEY_DELIVERY_MODE] = mode.wire
             if (pullEndpoint.isNullOrBlank()) prefs.remove(KEY_PULL_ENDPOINT) else prefs[KEY_PULL_ENDPOINT] = pullEndpoint
         }
@@ -374,20 +411,20 @@ class PushRepository(
 
     /** Persist the transport the server confirmed for the last successful registration. */
     override suspend fun updateTransport(transport: PushTransport?) {
-        context.pushDataStore.edit { prefs ->
+        editPlain { prefs ->
             if (transport == null) prefs.remove(KEY_TRANSPORT) else prefs[KEY_TRANSPORT] = transport.wire
         }
     }
 
     /** Persisted so pairing and resyncs can send them; they only ever arrive via onNewEndpoint. Null clears. */
     override suspend fun updateUnifiedPushRegistration(endpoint: String?, p256dh: String?, auth: String?) {
-        context.pushDataStore.edit { it.putUnifiedPush(endpoint, p256dh, auth) }
+        editSecure { _, editor -> editor.putUnifiedPush(endpoint, p256dh, auth) }
     }
 
-    private fun MutablePreferences.putUnifiedPush(endpoint: String?, p256dh: String?, auth: String?) {
-        if (endpoint.isNullOrBlank()) remove(KEY_UNIFIEDPUSH_ENDPOINT) else this[KEY_UNIFIEDPUSH_ENDPOINT] = endpoint
-        if (p256dh.isNullOrBlank()) remove(KEY_UNIFIEDPUSH_P256DH) else this[KEY_UNIFIEDPUSH_P256DH] = p256dh
-        if (auth.isNullOrBlank()) remove(KEY_UNIFIEDPUSH_AUTH) else this[KEY_UNIFIEDPUSH_AUTH] = auth
+    private fun SharedPreferences.Editor.putUnifiedPush(endpoint: String?, p256dh: String?, auth: String?) {
+        if (endpoint.isNullOrBlank()) remove(KEY_UNIFIEDPUSH_ENDPOINT) else putString(KEY_UNIFIEDPUSH_ENDPOINT, endpoint)
+        if (p256dh.isNullOrBlank()) remove(KEY_UNIFIEDPUSH_P256DH) else putString(KEY_UNIFIEDPUSH_P256DH, p256dh)
+        if (auth.isNullOrBlank()) remove(KEY_UNIFIEDPUSH_AUTH) else putString(KEY_UNIFIEDPUSH_AUTH, auth)
     }
 
     override suspend fun storeUnifiedPushEndpoint(
@@ -399,9 +436,9 @@ class PushRepository(
         var stored = false
         // Checked inside the write: a purge or wipe advances the generation before its own
         // clear, so this either lands before that clear or sees the session already over.
-        context.pushDataStore.edit { prefs ->
+        editSecure { _, editor ->
             if (org.kysecurity.mail.ProcessState.isCurrent(generation)) {
-                prefs.putUnifiedPush(endpoint, p256dh, auth)
+                editor.putUnifiedPush(endpoint, p256dh, auth)
                 stored = true
             }
         }
@@ -409,22 +446,26 @@ class PushRepository(
     }
 
     /** The durable pull cursor for [subscriberId], scoped so a new subscriber starts clean. */
-    override suspend fun pullCursor(subscriberId: String): Long = pullCursorValue.get(subscriberId) ?: 0L
+    override suspend fun pullCursor(subscriberId: String): Long {
+        migrated()
+        return pullCursorValue.get(subscriberId) ?: 0L
+    }
 
     /** Advance the cursor to max(existing, [cursor]); resets when the subscriber changes. */
     override suspend fun advancePullCursor(subscriberId: String, cursor: Long) {
+        migrated()
         pullCursorValue.update(subscriberId) { current -> maxOf(current ?: 0L, cursor) }
     }
 
     override suspend fun updateSyncState(lastSyncAtEpochMs: Long?, syncError: String?) {
-        context.pushDataStore.edit { prefs ->
+        editPlain { prefs ->
             if (lastSyncAtEpochMs == null) prefs.remove(KEY_LAST_SYNC_AT) else prefs[KEY_LAST_SYNC_AT] = lastSyncAtEpochMs
             if (syncError.isNullOrBlank()) prefs.remove(KEY_SYNC_ERROR) else prefs[KEY_SYNC_ERROR] = syncError
         }
     }
 
     override suspend fun markPushReceived(nowEpochMs: Long) {
-        context.pushDataStore.edit { prefs -> prefs[KEY_LAST_PUSH_AT] = nowEpochMs }
+        editPlain { prefs -> prefs[KEY_LAST_PUSH_AT] = nowEpochMs }
     }
 
     override suspend fun appendPayload(payload: PushPayload): Boolean {
@@ -437,19 +478,29 @@ class PushRepository(
             return isNew
         }
         var isNew = false
-        context.pushDataStore.edit { prefs ->
-            val current = decodeHistory(prefs[KEY_HISTORY_JSON])
+        editSecure { values, editor ->
+            val current = decodeHistory(values[KEY_HISTORY_JSON])
             isNew = current.none { it.messageId == payload.messageId }
             val updated = (listOf(payload) + current)
                 .distinctBy { it.messageId }
                 .take(HISTORY_LIMIT)
-            prefs[KEY_HISTORY_JSON] = json.encodeToString(updated)
+            editor.putString(KEY_HISTORY_JSON, json.encodeToString(updated))
         }
         return isNew
     }
 
-    private fun toState(prefs: Preferences, pairing: PairingData?, volatileHistory: List<PushPayload>): PushState {
-        val history = if (hostileLocationSettings.isEnabled()) volatileHistory else decodeHistory(prefs[KEY_HISTORY_JSON])
+    /** Drops the stored history; for turning Hostile Location Protection on. */
+    suspend fun clearStoredHistory() {
+        editSecure { _, editor -> editor.remove(KEY_HISTORY_JSON) }
+    }
+
+    private fun toState(
+        prefs: Preferences,
+        secure: Map<String, String>,
+        pairing: PairingData?,
+        volatileHistory: List<PushPayload>,
+    ): PushState {
+        val history = if (hostileLocationSettings.isEnabled()) volatileHistory else decodeHistory(secure[KEY_HISTORY_JSON])
         val pullEndpoint = prefs[KEY_PULL_ENDPOINT]
             ?: pairing?.serverUrl?.let { resolvePullEndpoint(it, null) }
         return PushState(
@@ -462,9 +513,9 @@ class PushRepository(
             deliveryMode = DeliveryMode.fromWire(prefs[KEY_DELIVERY_MODE]),
             pullEndpoint = pullEndpoint,
             transport = PushTransport.fromWire(prefs[KEY_TRANSPORT]),
-            unifiedPushEndpoint = prefs[KEY_UNIFIEDPUSH_ENDPOINT],
-            unifiedPushP256dh = prefs[KEY_UNIFIEDPUSH_P256DH],
-            unifiedPushAuth = prefs[KEY_UNIFIEDPUSH_AUTH],
+            unifiedPushEndpoint = secure[KEY_UNIFIEDPUSH_ENDPOINT],
+            unifiedPushP256dh = secure[KEY_UNIFIEDPUSH_P256DH],
+            unifiedPushAuth = secure[KEY_UNIFIEDPUSH_AUTH],
         )
     }
 

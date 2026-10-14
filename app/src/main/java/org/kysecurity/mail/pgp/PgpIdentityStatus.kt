@@ -29,3 +29,17 @@ internal fun ownFingerprintFromBootstrap(result: PgpBootstrapResult): String? = 
         ?.let { PgpFingerprint.compute(it) }
     is PgpBootstrapResult.Failed -> null
 }
+
+internal sealed class OwnFingerprint {
+    /** From this device's own private key: the only fingerprint the QR may carry. */
+    data class Local(val fingerprint: String) : OwnFingerprint()
+
+    /** The server's report, hashed locally but not tied to any key this device holds. */
+    data class ServerReported(val fingerprint: String?) : OwnFingerprint()
+}
+
+/** The open vault's signer when there is one; the server is asked only when there is not. */
+internal suspend fun ownFingerprint(serverReport: suspend () -> PgpBootstrapResult): OwnFingerprint =
+    EnrollmentSession.withSigner { signer -> signer?.let { PgpFingerprint.of(it.publicKey) } }
+        ?.let { OwnFingerprint.Local(it) }
+        ?: OwnFingerprint.ServerReported(ownFingerprintFromBootstrap(serverReport()))
