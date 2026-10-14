@@ -79,7 +79,9 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   a submission whose generation has ended, or that arrives while a reset is still tearing down,
   without calling the transport, and zeroes its attachments. A Compose that restores the
   draft adopts a send still in flight and keeps Send disabled instead of sending it again. The
-  client-encrypted send still lives in `lifecycleScope`: its unlock prompt is bound to the Activity.
+  client-encrypted send and the encrypted Save draft unlock and encrypt in `lifecycleScope` (the
+  unlock prompt is bound to the Activity), then hand only the relay call to `ComposeSend`
+  (`Kind.CLIENT_SEND`, `Kind.DRAFT_SAVE`), so a rotation adopts it like a send.
 - MFA approval (`push/MfaApprovalActivity`) must show the sign-in's context (IP, location, user
   agent, time) and, whenever the server supplies `matchDigits`, require a number match instead of
   a bare Approve button. A contentless approval prompt is what MFA-fatigue attacks harvest. All

@@ -537,4 +537,16 @@ class ClientEncryptedSenderTest {
         assertNull(transport.sent.single().draftCopy)
         assertNull(transport.sent.single().sendAt)
     }
+
+    /** The same mapping renders a send this screen started and one it adopted after a rotation. */
+    @Test
+    fun theRelaysAnswerMapsToSentOrSendFailed() {
+        val at = java.time.Instant.parse("2030-01-01T00:00:00Z")
+        assertEquals(
+            ClientSendOutcome.Sent(sentSaved = true, warning = "w", scheduledAt = at),
+            clientSendOutcome(MailOutcome.Success(MailSendOutcome(sentSaved = true, warning = "w", scheduledAt = at))),
+        )
+        val failed = MailOutcome.UpstreamFailure("down")
+        assertEquals(ClientSendOutcome.SendFailed(failed), clientSendOutcome(failed))
+    }
 }

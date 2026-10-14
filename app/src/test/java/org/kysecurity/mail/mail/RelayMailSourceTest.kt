@@ -1866,4 +1866,20 @@ class RelayMailSourceTest {
 
         assertTrue(source.sendMail(reply) is MailOutcome.UpstreamFailure)
     }
+
+    /** What lets a session reset cancel an encrypted send or draft save mid-request. */
+    @Test
+    fun theEncryptedSendAndDraftSaveHandOverTheirCall() {
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true,"sentSaved":true,"warning":""}""") },
+        )
+        val handed = mutableListOf<String>()
+
+        source.sendClientEncrypted(clientEncrypted()) { handed += it.request().url.encodedPath }
+        source.saveClientEncryptedDraft(ClientEncryptedDraft("a@example.com", "MIME")) { handed += it.request().url.encodedPath }
+
+        assertEquals(listOf("/api/mail/send-pgp", "/api/mail/draft"), handed)
+    }
 }
