@@ -33,7 +33,8 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   recovery; `clearPairing` remains the destructive one. See `app/src/main/AGENTS.md`.
 - Pairing proof material lives in a Keystore-backed `EncryptedSharedPreferences` file
   (`SecurePairingStore`), not plaintext DataStore — see `app/src/main/AGENTS.md` for the exact
-  storage split. Push delivery state and history are plaintext DataStore; the contact-sync cursor
+  storage split. Push history and UnifiedPush keys are in `push_state_secure`, the same kind of
+  file; delivery flags stay in plaintext DataStore. The contact-sync cursor
   lives in Room with the contact outbox so acknowledgement is atomic.
 - Deep-link contract for pairing is `kypost://native-pair` with required `sub`, `srv`, and
   `pt` params (`reg` optional). `hash` is no longer part of the contract — the per-device secret

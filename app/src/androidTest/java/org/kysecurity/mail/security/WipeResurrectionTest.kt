@@ -35,6 +35,7 @@ class WipeResurrectionTest {
 
     private fun dbFile() = context.getDatabasePath("kypost_mail.db")
     private fun pushStateFile() = File(context.filesDir, "datastore/push_state.preferences_pb")
+    private fun securePushStateFile() = File(File(context.dataDir, "shared_prefs"), "push_state_secure.xml")
     private fun hostilePrefsFile() =
         File(File(context.dataDir, "shared_prefs"), "org.kysecurity.mail.hostile_location_settings.xml")
     private fun ledgerFile() =
@@ -109,7 +110,7 @@ class WipeResurrectionTest {
     fun wipe_dropsAUnifiedPushEndpointStoredBeforePairing(): Unit = runBlocking {
         PushRuntime.graph(context).repository
             .updateUnifiedPushRegistration("https://ntfy.example/up-topic", "p256dh", "auth")
-        assertTrue("precondition: push_state written", pushStateFile().exists())
+        assertTrue("precondition: push_state_secure written", securePushStateFile().exists())
 
         SecurityWipe.wipeAndResetApp(context)
 
@@ -164,6 +165,23 @@ class WipeResurrectionTest {
         SecurityWipe.deletePlaintextMetadataStores(context)
 
         stores.forEach { assertEquals(emptyMap<Any, Any>(), it.data.first().asMap()) }
+    }
+
+    /** History is no longer in any of those three, so turning protection on drops it separately. */
+    @Test
+    fun deletePlaintextMetadataStores_dropsStoredPushHistory(): Unit = runBlocking {
+        val repo = PushRuntime.graph(context).repository
+        repo.appendPayload(
+            org.kysecurity.mail.push.PushPayload(
+                messageId = "m1", senderName = "Sender X", emailSubject = "Subject Y",
+                keywords = emptyList(), receivedAtEpochMs = 1L,
+            ),
+        )
+        assertEquals("precondition", 1, repo.state.first().history.size)
+
+        SecurityWipe.deletePlaintextMetadataStores(context)
+
+        assertTrue(repo.state.first().history.isEmpty())
     }
 
     /** The other half of that ordering: work submitted WHILE the wipe runs.
@@ -476,9 +494,9 @@ class WipeResurrectionTest {
         assertTrue("and the wipe must not have reported a failure, got $result", result is WipeResult.Complete)
     }
 
-    /** The datastore holding the last 30 sender/subject pairs must actually be gone. */
+    /** The store holding the last 30 sender/subject pairs must actually be gone. */
     @Test
-    fun wipe_deletesThePushHistoryDatastore(): Unit = runBlocking {
+    fun wipe_deletesThePushHistoryStore(): Unit = runBlocking {
         val repo = PushRuntime.graph(context).repository
         repo.savePairing(pairing)
         repo.appendPayload(
@@ -487,10 +505,11 @@ class WipeResurrectionTest {
                 keywords = listOf("legal"), receivedAtEpochMs = 1L,
             ),
         )
-        assertTrue("precondition: push_state written", pushStateFile().exists())
+        assertTrue("precondition: push_state_secure written", securePushStateFile().exists())
 
         SecurityWipe.wipeAndResetApp(context)
 
+        assertFalse("push_state_secure must not survive a wipe", securePushStateFile().exists())
         assertFalse("push_state must not survive a wipe", pushStateFile().exists())
     }
 

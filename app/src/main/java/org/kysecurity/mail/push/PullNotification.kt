@@ -57,7 +57,7 @@ data class PullNotificationsResponse(
  *
  *  Pull is a second delivery path for the same relay strings, and the relay picks which path a
  *  device is on, so it goes through [PushPayloadParser.sanitize] exactly like the push path —
- *  otherwise the bounds on `push_state` are only as good as the relay's choice. */
+ *  otherwise the bounds on `push_state_secure` are only as good as the relay's choice. */
 fun PullNotification.toPushPayload(nowEpochMs: Long = System.currentTimeMillis()): PushPayload {
     val fields = data ?: emptyMap()
     val messageId = fields["messageId"]?.takeIf { it.isNotBlank() } ?: "pull-$seq"

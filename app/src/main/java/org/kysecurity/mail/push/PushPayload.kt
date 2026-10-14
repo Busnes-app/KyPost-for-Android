@@ -15,7 +15,7 @@ object PushPayloadParser {
 
     /** Bounded for the same reasons [MfaChallengePayloadParser] bounds its own fields, on the same
      *  delivery channel: these strings are rendered into a notification AND serialised into the
-     *  `push_state` DataStore, [HISTORY_LIMIT] of them at a time. Unbounded, a hostile relay turns
+     *  `push_state_secure` store, [HISTORY_LIMIT] of them at a time. Unbounded, a hostile relay turns
      *  that file into something the app OOMs on before any code that could delete it runs. */
     internal const val MAX_MESSAGE_ID_LENGTH = 256
     internal const val MAX_HEADER_LENGTH = 512
