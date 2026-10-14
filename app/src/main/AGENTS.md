@@ -804,16 +804,23 @@ Owns production Android app code and resources.
   mirrors. `KyPostContactAuthenticator.addAccount` answers with the existing account, or holds the
   caller's response in `PendingAccountSetup` and opens the Contacts screen in account-setup mode.
   Any app can make that request, so setup never enables on its own: it asks first
-  (`contacts_account_setup_message`), even with contacts permission already granted; Enable runs
-  the normal enable flow and answers with the account once it exists, while declining or leaving
-  answers with a cancel. Setup progress (confirmed, permission request outstanding) is saved state
-  of its own, so a recreate re-asks or resumes. The app-lock redirect keeps the request
+  (`contacts_account_setup_message` above the disclosure), even with contacts permission already
+  granted; Continue runs the normal enable flow and answers with the account once it exists, while
+  declining or leaving answers with a cancel. An outstanding permission request is saved state of
+  its own, so a recreate resumes it or asks again. The app-lock redirect keeps the request
   (MainActivity resumes the flow after unlock). Each request's token rides in the setup intent
   (`ContactsListActivity.setupIntent`), and a screen acts on and cancels only its own request, so
   closing a screen whose request a newer one displaced leaves the newer one waiting.
   `AccountSetupConsentTest`. `editProperties` answers
   an empty bundle. `ContactSyncAdapterDeclarationTest`, `ContactAccountFlowsTest`. Unverified on
   hardware: how stock Contacts apps render and edit these contacts with the schema.
+- **Contacts access is requested only behind Google Play's prominent disclosure.**
+  `DeviceContactSyncEnabler.askToEnable` is the one way in: it shows `contacts_access_disclosure`
+  (contacts are uploaded to the user's KyPost server and synced to their other devices) with
+  Continue / Not now, and only Continue reaches the runtime prompt; `checkAndEnable` is private.
+  The pairing intro, the menu toggle, import's re-ask and account setup all call it.
+  `SourceRulesTest.contactsPermissionIsRequestedOnlyBehindTheDisclosure`,
+  `AccountSetupConsentTest.theMenuToggle_disclosesTheUploadBeforeEnabling`.
 - **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
   `applyBatch` as the insert. `device_contact_links` is a cache of that: `adoptLostLinks` runs
   before the pull and relinks every row of our account by SOURCE_ID, tombstones included and

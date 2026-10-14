@@ -94,7 +94,7 @@ class ContactAccountFlowsTest {
             assertNotNull("the setup screen was not opened", setup)
             instrumentation.waitForIdleSync()
             instrumentation.runOnMainSync {
-                setup!!.setupDialog!!.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick()
+                setup!!.consentDialog!!.getButton(android.content.DialogInterface.BUTTON_POSITIVE).performClick()
             }
             val result = future.getResult(30, TimeUnit.SECONDS)
 
