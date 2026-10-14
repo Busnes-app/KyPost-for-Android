@@ -32,6 +32,10 @@ internal class FakeMailSource : MailSource {
     val sends: MutableList<MailDraft> = Collections.synchronizedList(mutableListOf())
     val wakeAts: MutableList<java.time.Instant> = Collections.synchronizedList(mutableListOf())
     val sendOutcomes = ArrayBlockingQueue<MailOutcome<MailSendOutcome>>(8)
+    val draftSaves: MutableList<ClientEncryptedDraft> = Collections.synchronizedList(mutableListOf())
+
+    /** Each encrypted draft save waits up to 10 s for its outcome here. */
+    val draftSaveOutcomes = ArrayBlockingQueue<MailOutcome<Unit>>(8)
 
     /** Folder mutations always succeed and land here with their arguments. */
     val folderCalls: MutableList<List<String>> = Collections.synchronizedList(mutableListOf())
@@ -109,8 +113,10 @@ internal class FakeMailSource : MailSource {
     override fun deleteFolder(folder: String): MailOutcome<Unit> =
         MailOutcome.Success(Unit).also { folderCalls += listOf("delete", folder) }
     override fun saveDraft(draft: MailDraft): MailOutcome<Unit> = MailOutcome.UpstreamFailure("test relay")
-    override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> =
-        MailOutcome.UpstreamFailure("test relay")
+    override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> {
+        draftSaves += draft
+        return draftSaveOutcomes.poll(10, TimeUnit.SECONDS) ?: MailOutcome.UpstreamFailure("test relay")
+    }
     override fun sendClientEncrypted(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome> =
         MailOutcome.UpstreamFailure("test relay")
     override fun downloadAttachment(messageId: String, folder: String, index: Int): MailOutcome<DownloadedAttachment> =

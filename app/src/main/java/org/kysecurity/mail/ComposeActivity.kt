@@ -171,6 +171,9 @@ class ComposeActivity : LockedActivity() {
     @androidx.annotation.VisibleForTesting
     internal fun sendEnabledForTest(): Boolean? = sendMenuItem?.isEnabled
 
+    @androidx.annotation.VisibleForTesting
+    internal fun saveDraftForTest() = saveDraft()
+
     /** True once a custody lookup has finished, either way. */
     @androidx.annotation.VisibleForTesting
     internal fun custodySettledForTest(): Boolean = custodyJob?.isCompleted == true
