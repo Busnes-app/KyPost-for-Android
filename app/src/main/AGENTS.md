@@ -303,6 +303,8 @@ Owns production Android app code and resources.
   `withKeyring`. There is no raw accessor, so a keyring can never reach the armor parser.
   `PgpDecryptor` tries every encryption-capable key for a hidden (zero) recipient key id;
   `PgpEncryptor` signs only with the given ring's own unrevoked, unexpired signing key.
+  Its signature names every recipient primary key in hashed, non-critical RFC 9580 Intended Recipient
+  Fingerprint subpackets (`IntendedRecipientTest`).
   `importKeyring` is the local v3 import, pure and transport-free: validate the whole ring against
   the AAD's active fingerprint, then open the previous vault to establish replacement safety,
   then seal the original bytes as a KEYRING record, then install the session from those committed
@@ -363,7 +365,7 @@ Owns production Android app code and resources.
   A failed signature or a CHANGED signer key (`PgpSignatureState.KEY_CHANGED`) outranks both with
   ⚠. `SIGNER_UNKNOWN` deliberately does not mark: it is the ordinary state for a correspondent not
   yet in the address book, and a glyph on most rows carries nothing actionable.
-- `PgpSignatureState` has eight values, not a verified/unverified pair: `NONE` (no opinion expressed),
+- `PgpSignatureState` has nine values, not a verified/unverified pair: `NONE` (no opinion expressed),
   `UNSIGNED` (local decryption found neither a packet signature nor a declared PGP/MIME signature
   wrapper; it gets an informational detail notice but no inbox warning, even when the relay resolved
   no sender), `VERIFIED_CONFIRMED`
@@ -374,8 +376,10 @@ Owns production Android app code and resources.
   relay-supplied key or the relay's `pgpVerified` flag alone yields `SIGNER_UNKNOWN`), `SIGNER_UNKNOWN` (no key bound to this sender
   at all — an ordinary correspondent not yet in the address book, a key that rotated before harvest,
   and a forged `From` are locally indistinguishable, so this is not an accusation), `KEY_CHANGED` (a
-  key IS bound to this sender and no longer matches its TOFU pin — the one alarm worth raising), and
-  `INVALID` (signed, but it does not verify against the bound key). **The client parses no address out
+  key IS bound to this sender and no longer matches its TOFU pin — the one alarm worth raising),
+  `INVALID` (signed, but it does not verify against the bound key), and `FOR_ANOTHER_RECIPIENT` (a good
+  signature whose hashed RFC 9580 Intended Recipient Fingerprints name none of the keys this device
+  decrypted with: signed for someone else and re-encrypted to us; "Signed for someone else"). **The client parses no address out
   of the `From` header at all.** `senderAddrSpec` and its helpers were deleted after a differential
   harness found 27 divergences from the server's parser across 111 adversarial headers — worst, an
   RFC 5322 comment like `Bob (Eve <eve@evil>) <bob@x>`, where the client bound `eve@evil` and the

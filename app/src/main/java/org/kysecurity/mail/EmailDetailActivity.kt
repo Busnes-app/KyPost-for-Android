@@ -654,6 +654,7 @@ class EmailDetailActivity : LockedActivity() {
         PgpSignatureState.SIGNER_UNKNOWN -> "⬜ " + getString(R.string.email_pgp_signature_signer_unknown)
         PgpSignatureState.INVALID -> "⚠️ " + getString(R.string.email_pgp_signature_invalid)
         PgpSignatureState.KEY_CHANGED -> "⚠️ " + getString(R.string.email_pgp_signature_key_changed)
+        PgpSignatureState.FOR_ANOTHER_RECIPIENT -> "⚠️ " + getString(R.string.email_pgp_signature_for_another_recipient)
         PgpSignatureState.NONE -> null
     }
 
