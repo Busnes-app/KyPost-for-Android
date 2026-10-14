@@ -26,6 +26,9 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.kysecurity.mail.R
+import org.kysecurity.mail.contacts.ContactsRuntime
+import org.kysecurity.mail.contacts.device.DeviceContactsRuntime
+import org.kysecurity.mail.mail.MailRuntime
 
 /** Each weakening change raises the PIN prompt, and cancelling it leaves the setting as it was.
  *  No test enters a wrong PIN, so the class never advances the wipe counter. */
@@ -61,6 +64,10 @@ class SecuritySettingsPinConfirmTest {
             graph.biometricUnlockVault.destroy()
         } finally {
             if (::snapshot.isInitialized) snapshot.restore()
+            // Graphs the screen built hold the open database; a later wipe test closes it.
+            MailRuntime.invalidate()
+            ContactsRuntime.invalidate()
+            DeviceContactsRuntime.invalidate()
             SecurityRuntime.invalidate()
         }
     }
