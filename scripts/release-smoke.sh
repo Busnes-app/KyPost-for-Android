@@ -39,7 +39,8 @@ expect() {
 
 failed=0
 
-adb shell am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p "$pkg"
+# By component: `am start` resolves only CATEGORY_DEFAULT activities, and the launcher entry has none.
+adb shell am start -W -n "$pkg/org.kysecurity.mail.MainActivity"
 expect 'id/btnScanQr' 'the launcher opens pairing on a fresh install' || failed=1
 
 # Parses the link, reads the pairing store and shows the confirmation naming the parsed host.
