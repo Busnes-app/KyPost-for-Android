@@ -1699,6 +1699,10 @@ internal fun blockExternalResources(
     // images" clears blockNetworkLoads. A frame with no src and no srcdoc renders nothing anyway,
     // so there is nothing to preserve — the composer's Safelist drops the tag for the same reason.
     document.select("iframe").remove()
+    // A reader submits nothing. Form wrappers and labelled controls unwrap so their text still
+    // reads; inputs and selects carry no reading text and go whole.
+    document.select("input, select").remove()
+    document.select("form, button, textarea").unwrap()
     // Text naming one address over an href to another is the oldest phish in mail. Advisory: the
     // tap still goes through the confirm dialog, which shows the real host either way.
     document.select("a[href]").forEach { anchor ->

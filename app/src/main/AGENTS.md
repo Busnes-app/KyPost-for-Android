@@ -625,7 +625,8 @@ Owns production Android app code and resources.
 - `renderableBody`/`blockExternalResources` strip remote resources from **both** reader variants
   before anything reaches the WebView; "Show images" restores `<img src>` and nothing else. An
   `<iframe>` is dropped whole, because `srcdoc` carries an inline document no attribute strip
-  reaches. `EmailDetailActivityTest` is the contract for that.
+  reaches. Form controls are removed too: `input`/`select` whole, `form`/`button`/`textarea`
+  unwrapped to their text. `EmailDetailActivityTest` is the contract for that.
 - A tapped http(s) link in a message never opens directly. `mail/LinkTarget.kt` parses it once with
   OkHttp's `HttpUrl`, which parses like a browser: userinfo is not the host, a backslash ends the
   authority, and IDNs come out as `xn--` punycode. The confirm dialog shows that host, and the
