@@ -161,6 +161,21 @@ class SourceRulesTest {
         )
     }
 
+    /** The user's biometric setting is checked in one place, so every biometric unlock must
+     *  read the sealed keys through it. */
+    @Test
+    fun biometricUnlocksGoThroughTheSettingGate() {
+        val offenders = mainSources()
+            .filterNot { it.relativePath.substringAfterLast('/') in PREPARE_UNLOCK_OWNERS }
+            .flatMap { file ->
+                file.readText().lineSequence().withIndex()
+                    .filter { (_, line) -> PREPARE_UNLOCK.containsMatchIn(line) }
+                    .map { (index, line) -> "${file.path}:${index + 1}: ${line.trim().take(80)}" }
+                    .toList()
+            }
+        assertEquals(emptyList(), offenders, "Use AppLockManager.biometricUnlockOnOffer().")
+    }
+
     /** A dialog is its own window, so it needs [org.kysecurity.mail.security.showSecurely]. */
     @Test
     fun alertDialogBuildersAreShownSecurely() {
@@ -294,6 +309,9 @@ class SourceRulesTest {
 
         /** `deriveKeysOrNull(` does not match: `OrNull` sits where the paren must be. */
         val RAW_DERIVE_KEYS = Regex("""CredentialCipher\s*\.\s*deriveKeys\s*\(""")
+
+        val PREPARE_UNLOCK_OWNERS = setOf("AppLockManager.kt", "BiometricUnlockVault.kt", "CredentialEnvelope.kt")
+        val PREPARE_UNLOCK = Regex("""\.\s*prepareUnlock\s*\(""")
 
         const val MAIN_ROOT = "src/main/java"
         const val TEST_ROOT = "src/test/java"
