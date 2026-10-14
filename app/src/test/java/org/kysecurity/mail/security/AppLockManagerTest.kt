@@ -382,12 +382,12 @@ class AppLockManagerTest {
     }
 
     @Test
-    fun setBiometricEnabled_off_removesTheSealedKeysAndTheyStayGone() = runBlocking {
+    fun disableBiometric_removesTheSealedKeysAndTheyStayGone() = runBlocking {
         state.setBiometricEnabled(true)
         manager.attemptPin("482913".toCharArray())
         assertNotNull("precondition: an enabled unlock seals", sealer.sealed)
 
-        manager.setBiometricEnabled(false)
+        manager.disableBiometric()
         assertNull(sealer.sealed)
 
         manager.lockNow()
@@ -398,13 +398,20 @@ class AppLockManagerTest {
     }
 
     @Test
-    fun setBiometricEnabled_on_sealsAtTheNextPinUnlock() = runBlocking {
-        manager.setBiometricEnabled(true)
-        assertNull(sealer.sealed)
+    fun enableBiometric_withTheRightPin_turnsItOnAndSeals() = runBlocking {
+        assertEquals(UnlockAttemptResult.Success, manager.enableBiometric("482913".toCharArray()))
 
-        manager.attemptPin("482913".toCharArray())
-
+        assertTrue(state.isBiometricEnabled())
         assertNotNull(sealer.sealed)
+    }
+
+    @Test
+    fun enableBiometric_withAWrongPin_changesNothingAndCountsTheAttempt() = runBlocking {
+        assertTrue(manager.enableBiometric("000001".toCharArray()) is UnlockAttemptResult.Rejected)
+
+        assertFalse(state.isBiometricEnabled())
+        assertNull(sealer.sealed)
+        assertEquals(1, state.failedAttempts)
     }
 
     @Test

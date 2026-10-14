@@ -24,5 +24,8 @@ class AppLockSettings(context: Context) {
         const val MAX_GRACE_MILLIS = 300_000L
 
         val OPTIONS_MILLIS = longArrayOf(0L, 30_000L, 60_000L, 300_000L)
+
+        /** A longer window leaves the app open longer in someone else's hand. */
+        fun weakensGrace(from: Long, to: Long): Boolean = to > from
     }
 }

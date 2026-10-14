@@ -26,6 +26,10 @@ object LockoutPolicy {
     fun shouldWipe(attemptCount: Int, wipeAfterAttempts: Int?): Boolean =
         wipeAfterAttempts != null && attemptCount >= wipeAfterAttempts
 
+    /** More attempts before the wipe, or none at all, is the weaker setting. */
+    fun weakensWipe(from: Int?, to: Int?): Boolean =
+        from != null && (to == null || to > from)
+
     fun timeToWipeMillis(wipeAfterAttempts: Int): Long =
         (1..wipeAfterAttempts).sumOf { delayMillisFor(it) }
 }
