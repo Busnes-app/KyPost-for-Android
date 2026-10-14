@@ -11,6 +11,10 @@ class EncryptedMessageReaderTest {
 
     @After fun cleanup() = EnrollmentSession.clear()
 
+    /** Only a key this device holds earns VERIFIED_SEEN_BEFORE; tests of the check itself use one. */
+    private val bobHeldLocally =
+        mapOf("bob@example.com" to listOf(LocalSignerKey(TestPgpPrivateKey.ARMORED_PUBLIC, confirmed = false)))
+
     private fun reader(
         opener: FakeVaultOpener = FakeVaultOpener(),
         payloads: FakePayloadSource = FakePayloadSource(successPayload()),
@@ -111,9 +115,10 @@ class EncryptedMessageReaderTest {
         val encrypted = PgpEncryptor.encrypt(
             mime.toByteArray(Charsets.UTF_8), listOf(TestPgpPrivateKey.ARMORED_PUBLIC), signingKey,
         ) as EncryptResult.Ok
-        val (r, _) = reader(payloads = FakePayloadSource(successPayload(
-            encrypted = encrypted.armored, signerKeys = listOf(boundKey()),
-        )))
+        val (r, _) = reader(
+            payloads = FakePayloadSource(successPayload(encrypted = encrypted.armored, signerKeys = listOf(boundKey()))),
+            localKeys = bobHeldLocally,
+        )
         val outcome = read(r) as ReadOutcome.Decrypted
         assertEquals(expected, outcome.signature)
         assertEquals("Signed MIME body.", outcome.body.plain)
@@ -140,7 +145,7 @@ class EncryptedMessageReaderTest {
         org.bouncycastle.bcpg.ArmoredOutputStream(buffer).use { generator.generate().encode(it) }
         val signature = signatureOverride ?: buffer.toString("UTF-8").also {
             val checked = PgpDecryptor.verifyDetached(
-                TestPgpPrivateKey.ARMORED_PUBLIC, signedPart.toByteArray(Charsets.UTF_8), it,
+                TestPgpPrivateKey.ARMORED_PUBLIC, signedPart.toByteArray(Charsets.UTF_8), it, heldKeys = emptyList(),
             ) as RawSignature.Checked
             assertTrue("fixture signature must verify over the exact MIME part", checked.verified)
         }
@@ -248,7 +253,13 @@ class EncryptedMessageReaderTest {
 
         val outcome = read(r, unlockIfNeeded = false) as ReadOutcome.Decrypted
 
-        assertEquals(PgpSignatureState.VERIFIED_SEEN_BEFORE, outcome.signature)
+        // A relay key alone claims nothing; a key this device holds earns SEEN_BEFORE.
+        assertEquals(PgpSignatureState.SIGNER_UNKNOWN, outcome.signature)
+        val (local, _) = reader(
+            payloads = FakePayloadSource(successPayload(signerKeys = listOf(bound))),
+            localKeys = bobHeldLocally,
+        )
+        assertEquals(PgpSignatureState.VERIFIED_SEEN_BEFORE, (read(local, unlockIfNeeded = false) as ReadOutcome.Decrypted).signature)
     }
 
     @Test
@@ -317,6 +328,7 @@ class EncryptedMessageReaderTest {
         )
         val (r, _) = reader(
             payloads = FakePayloadSource(detachedSignedPayload(signerKeys = listOf(bound))),
+            localKeys = bobHeldLocally,
         )
 
         val outcome = read(r, unlockIfNeeded = false) as ReadOutcome.Decrypted
@@ -343,12 +355,67 @@ class EncryptedMessageReaderTest {
         assertEquals(PgpSignatureState.KEY_CHANGED, outcome.signature)
     }
 
+    /** A detached signature made for someone else's encrypted copy, then sent on unencrypted. */
+    @Test
+    fun aDetachedSignatureNamingOnlyAnotherRecipientIsNeverVerified() {
+        assertEquals(PgpSignatureState.FOR_ANOTHER_RECIPIENT, detachedVerdictNaming(TestPgpSecondKey.ARMORED_PUBLIC))
+    }
+
+    @Test
+    fun aDetachedSignatureNamingThisDeviceStaysVerified() {
+        assertEquals(PgpSignatureState.VERIFIED_CONFIRMED, detachedVerdictNaming(TestPgpPrivateKey.ARMORED_PUBLIC))
+    }
+
+    private fun detachedVerdictNaming(recipientPublicKey: String): PgpSignatureState {
+        EnrollmentSession.put(TestPgpPrivateKey.ARMORED_PRIVATE.toCharArray())
+        val signedPart = TestPgpPrivateKey.DETACHED_SIGNATURE_BODY.toByteArray(Charsets.UTF_8)
+        val secret = orderedSecretKeyRings(TestPgpPrivateKey.ARMORED_PRIVATE.byteInputStream())!!
+            .first().secretKeys.asSequence().first { it.isSigningKey }
+        val recipient = org.bouncycastle.openpgp.PGPPublicKeyRing(
+            org.bouncycastle.openpgp.PGPUtil.getDecoderStream(recipientPublicKey.byteInputStream()),
+            org.bouncycastle.openpgp.operator.bc.BcKeyFingerprintCalculator(),
+        ).publicKey
+        val generator = org.bouncycastle.openpgp.PGPSignatureGenerator(
+            org.bouncycastle.openpgp.operator.bc.BcPGPContentSignerBuilder(
+                secret.publicKey.algorithm, org.bouncycastle.bcpg.HashAlgorithmTags.SHA256,
+            ), secret.publicKey,
+        ).apply {
+            init(
+                org.bouncycastle.openpgp.PGPSignature.BINARY_DOCUMENT,
+                secret.extractPrivateKey(
+                    org.bouncycastle.openpgp.operator.bc.BcPBESecretKeyDecryptorBuilder(
+                        org.bouncycastle.openpgp.operator.bc.BcPGPDigestCalculatorProvider(),
+                    ).build(CharArray(0)),
+                ),
+            )
+            setHashedSubpackets(
+                org.bouncycastle.openpgp.PGPSignatureSubpacketGenerator()
+                    .apply { addIntendedRecipientFingerprint(false, recipient) }.generate(),
+            )
+            update(signedPart)
+        }
+        val armored = java.io.ByteArrayOutputStream()
+        org.bouncycastle.bcpg.ArmoredOutputStream(armored).use { generator.generate().encode(it) }
+        val (r, _) = reader(
+            payloads = FakePayloadSource(
+                detachedSignedPayload(signaturePayload = armored.toString("UTF-8"), signerKeys = listOf(boundKey())),
+            ),
+            localKeys = mapOf(
+                "bob@example.com" to listOf(LocalSignerKey(TestPgpPrivateKey.ARMORED_PUBLIC, confirmed = true, pinned = true)),
+            ),
+        )
+        return (read(r, unlockIfNeeded = false) as ReadOutcome.Decrypted).signature
+    }
+
     /** The regression. The server empties `body` whenever it sends `signedPartBase64`, so a client
      *  that reads `body` renders nothing at all — which is how signed-only mail went blank. */
     @Test
     fun aSignedOnlyMessageRendersTheBytesItVerified() {
         EnrollmentSession.put(TestPgpPrivateKey.ARMORED_PRIVATE.toCharArray())
-        val (r, _) = reader(payloads = FakePayloadSource(detachedSignedPayload(signerKeys = listOf(boundKey()))))
+        val (r, _) = reader(
+            payloads = FakePayloadSource(detachedSignedPayload(signerKeys = listOf(boundKey()))),
+            localKeys = bobHeldLocally,
+        )
 
         val outcome = read(r, unlockIfNeeded = false) as ReadOutcome.Decrypted
 
@@ -383,6 +450,7 @@ class EncryptedMessageReaderTest {
             payloads = FakePayloadSource(
                 detachedSignedPayload(body = "a different message entirely", signerKeys = listOf(boundKey())),
             ),
+            localKeys = bobHeldLocally,
         )
 
         val outcome = read(r, unlockIfNeeded = false) as ReadOutcome.Decrypted
@@ -532,8 +600,8 @@ class EncryptedMessageReaderTest {
 
         assertTrue("expected Decrypted, got $outcome", outcome is ReadOutcome.Decrypted)
         assertEquals(
-            "a server-supplied verified flag must be capped at continuity, never identity",
-            PgpSignatureState.VERIFIED_SEEN_BEFORE,
+            "a server-supplied verified flag claims nothing without a local key",
+            PgpSignatureState.SIGNER_UNKNOWN,
             (outcome as ReadOutcome.Decrypted).signature,
         )
     }

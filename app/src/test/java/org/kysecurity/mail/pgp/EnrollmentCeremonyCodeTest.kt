@@ -91,7 +91,7 @@ class EnrollmentCeremonyCodeTest {
         // Same bucket the window closed in: the clock is not advanced here on purpose.
         val probe = FakeEnrollmentKeys()
         ports.transport.fetchWhenExhausted =
-            EnrollmentCallResult.Envelope(sealEnvelope(probe))
+            EnrollmentCallResult.Envelope(sealEnvelope(probe), legacyDelivery())
         val afterTimeout = ports.states.size
 
         ceremony.checkAgain()
@@ -138,7 +138,7 @@ class EnrollmentCeremonyCodeTest {
             fetchResults = mutableListOf(
                 EnrollmentCallResult.NotFound,
                 EnrollmentCallResult.NotFound,
-                EnrollmentCallResult.Envelope("{}"),
+                EnrollmentCallResult.Envelope("{}", legacyDelivery()),
             ),
         )
 
@@ -154,7 +154,7 @@ class EnrollmentCeremonyCodeTest {
             fetchResults = mutableListOf(
                 EnrollmentCallResult.Failed("connection reset"),
                 EnrollmentCallResult.RateLimited(5L),
-                EnrollmentCallResult.Envelope("{}"),
+                EnrollmentCallResult.Envelope("{}", legacyDelivery()),
             ),
         )
 

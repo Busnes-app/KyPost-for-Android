@@ -13,6 +13,8 @@ data class Email(
     val body: String? = null,
     /** MIME mode of [body], supplied by the relay when known: `html` or `plain`. */
     val bodyMode: String = "",
+    /** Set from the cache on list rows, which leave [body] null. */
+    val hasBody: Boolean = !body.isNullOrBlank(),
     val label: String = "",
     val status: String = "unread",
     val atUtc: String? = null,

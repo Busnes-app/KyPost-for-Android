@@ -1,5 +1,7 @@
 package org.kysecurity.mail.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -70,6 +72,40 @@ class ComposeSendRotationTest {
         }
         assertEquals(1, sends.get())
         assertNull(ComposeSend.current())
+        assertNull(ComposeDraftCache.take())
+    }
+
+    /** A rotation recreates the screen from the same share/mailto Intent; that is not a new request. */
+    @Test
+    fun aRecreatedShareComposeKeepsItsDraftAndAdoptsTheSendInFlight() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:recipient@example.com?subject=Shared%20notes"))
+            .setClass(context, ComposeActivity::class.java)
+        val release = CountDownLatch(1)
+        val sends = AtomicInteger()
+
+        ActivityScenario.launch<ComposeActivity>(intent).use { scenario ->
+            val inFlight = ComposeSend.start(
+                CoroutineScope(Dispatchers.IO),
+                MailDraft(to = "recipient@example.com", subject = "Shared notes", body = "b"),
+                org.kysecurity.mail.ProcessState.generation(),
+            ) { _, _ ->
+                sends.incrementAndGet()
+                release.await(10, TimeUnit.SECONDS)
+                MailOutcome.Success(MailSendOutcome(sentSaved = true, warning = ""))
+            }
+
+            scenario.recreate()
+            scenario.onActivity {
+                assertEquals("Shared notes", it.restoredDraftForTest?.subject)
+                assertTrue("Send was offered again mid-send", it.isSendingForTest())
+            }
+
+            release.countDown()
+            runBlocking { inFlight.outcome.await() }
+            assertEquals(Lifecycle.State.DESTROYED, awaitDestroyed(scenario))
+        }
+        assertEquals(1, sends.get())
         assertNull(ComposeDraftCache.take())
     }
 

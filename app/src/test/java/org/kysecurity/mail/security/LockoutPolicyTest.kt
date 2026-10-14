@@ -59,4 +59,21 @@ class LockoutPolicyTest {
             assertTrue("threshold $threshold reached in ${hours}h", hours > 3.0)
         }
     }
+
+    @Test
+    fun moreAttemptsOrNoWipeAtAllIsWeaker() {
+        assertTrue(LockoutPolicy.weakensWipe(from = 10, to = 20))
+        assertTrue(LockoutPolicy.weakensWipe(from = 30, to = null))
+        assertFalse(LockoutPolicy.weakensWipe(from = 30, to = 10))
+        assertFalse(LockoutPolicy.weakensWipe(from = null, to = 30))
+        assertFalse(LockoutPolicy.weakensWipe(from = 20, to = 20))
+        assertFalse(LockoutPolicy.weakensWipe(from = null, to = null))
+    }
+
+    @Test
+    fun aLongerGraceWindowIsWeaker() {
+        assertTrue(AppLockSettings.weakensGrace(from = 0L, to = 30_000L))
+        assertFalse(AppLockSettings.weakensGrace(from = 300_000L, to = 0L))
+        assertFalse(AppLockSettings.weakensGrace(from = 30_000L, to = 30_000L))
+    }
 }

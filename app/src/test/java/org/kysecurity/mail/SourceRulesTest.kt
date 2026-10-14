@@ -161,6 +161,48 @@ class SourceRulesTest {
         )
     }
 
+    /** The user's biometric setting is checked in one place, so every biometric unlock must
+     *  read the sealed keys through it. */
+    @Test
+    fun biometricUnlocksGoThroughTheSettingGate() {
+        val offenders = mainSources()
+            .filterNot { it.relativePath.substringAfterLast('/') in PREPARE_UNLOCK_OWNERS }
+            .flatMap { file ->
+                file.readText().lineSequence().withIndex()
+                    .filter { (_, line) -> PREPARE_UNLOCK.containsMatchIn(line) }
+                    .map { (index, line) -> "${file.path}:${index + 1}: ${line.trim().take(80)}" }
+                    .toList()
+            }
+        assertEquals(emptyList(), offenders, "Use AppLockManager.biometricUnlockOnOffer().")
+    }
+
+    /** Google Play's prominent disclosure: the contacts prompt follows only the dialog saying the
+     *  contacts are uploaded, so no screen may reach the request around it. */
+    @Test
+    fun contactsPermissionIsRequestedOnlyBehindTheDisclosure() {
+        val offenders = mainSources()
+            .filterNot { it.relativePath.endsWith(CONTACTS_ENABLER) }
+            .filter { CONTACTS_REQUEST.containsMatchIn(it.readText()) }
+            .map { it.path }
+        assertEquals(emptyList(), offenders, "Ask through DeviceContactSyncEnabler.askToEnable.")
+
+        val enabler = mainSources().single { it.relativePath.endsWith(CONTACTS_ENABLER) }.readText()
+        assertTrue("private fun checkAndEnable(" in enabler, "the request must stay private to the enabler")
+        val calls = Regex("""(?<!fun )checkAndEnable\(\)""").findAll(enabler).map { it.range.first }.toList()
+        val continueButton = enabler.indexOf(".setPositiveButton(R.string.contact_sync_intro_positive)")
+        assertTrue(
+            continueButton >= 0 && calls.size == 1 && calls.single() - continueButton in 0..120,
+            "only the disclosure's Continue button may request the permission",
+        )
+        assertTrue("R.string.contacts_access_disclosure" in enabler, "every path shows the disclosure text")
+
+        val strings = listOf(File("src/main/res/values/strings.xml"), File("app/src/main/res/values/strings.xml"))
+            .first { it.isFile }.readText()
+        val disclosure = Regex("""<string name="contacts_access_disclosure">(.*)</string>""").find(strings)?.groupValues?.get(1)
+        assertNotNull(disclosure)
+        assertTrue("uploaded to your KyPost server" in disclosure && "synced to your other devices" in disclosure, disclosure)
+    }
+
     /** A dialog is its own window, so it needs [org.kysecurity.mail.security.showSecurely]. */
     @Test
     fun alertDialogBuildersAreShownSecurely() {
@@ -295,6 +337,9 @@ class SourceRulesTest {
         /** `deriveKeysOrNull(` does not match: `OrNull` sits where the paren must be. */
         val RAW_DERIVE_KEYS = Regex("""CredentialCipher\s*\.\s*deriveKeys\s*\(""")
 
+        val PREPARE_UNLOCK_OWNERS = setOf("AppLockManager.kt", "BiometricUnlockVault.kt", "CredentialEnvelope.kt")
+        val PREPARE_UNLOCK = Regex("""\.\s*prepareUnlock\s*\(""")
+
         const val MAIN_ROOT = "src/main/java"
         const val TEST_ROOT = "src/test/java"
 
@@ -313,6 +358,11 @@ class SourceRulesTest {
         val ASYNC_PREFS_WRITE = Regex("""\.edit\(\)[^\n]*\.apply\(\)|^\s*\.apply\(\)\s*$""")
 
         val ALERT_DIALOG_BUILDER = Regex("""\bAlertDialog\.Builder\(""")
+
+        const val CONTACTS_ENABLER = "contacts/device/DeviceContactSyncEnabler.kt"
+
+        /** The enabler's request, or a permission array naming a contacts permission. */
+        val CONTACTS_REQUEST = Regex("""checkAndEnable\(|arrayOf\([^)]*_CONTACTS""")
 
         val DATA_CLASS_HEADER = Regex("""\bdata class\s+(\w+)\s*\(""")
         val PROPERTY_DECL = Regex("""\bval\s+(\w+)\s*:""")

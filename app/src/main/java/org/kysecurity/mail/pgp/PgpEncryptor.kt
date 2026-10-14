@@ -14,6 +14,7 @@ import org.bouncycastle.openpgp.PGPPublicKeyRingCollection
 import org.bouncycastle.openpgp.PGPSecretKeyRing
 import org.bouncycastle.openpgp.PGPSignature
 import org.bouncycastle.openpgp.PGPSignatureGenerator
+import org.bouncycastle.openpgp.PGPSignatureSubpacketGenerator
 import org.bouncycastle.openpgp.PGPUtil
 import org.bouncycastle.openpgp.operator.bc.BcKeyFingerprintCalculator
 import org.bouncycastle.openpgp.operator.bc.BcPBESecretKeyDecryptorBuilder
@@ -78,10 +79,11 @@ internal object PgpEncryptor {
                 .setWithIntegrityPacket(true)
                 .setSecureRandom(SecureRandom()),
         )
-        encryptionKeys.forEach { generator.addMethod(BcPublicKeyKeyEncryptionMethodGenerator(it)) }
+        encryptionKeys.forEach { generator.addMethod(BcPublicKeyKeyEncryptionMethodGenerator(it.second)) }
 
-        val signer = signingRing?.let {
-            signatureGeneratorFor(it) ?: return EncryptResult.Failed("the signing key is unusable")
+        val signer = signingRing?.let { ring ->
+            signatureGeneratorFor(ring, intendedRecipients = encryptionKeys.map { it.first })
+                ?: return EncryptResult.Failed("the signing key is unusable")
         }
 
         val out = ByteArrayOutputStream()
@@ -129,17 +131,18 @@ internal object PgpEncryptor {
         out.toString(Charsets.UTF_8.name())
     }.getOrNull()
 
-    /** Only the subkey encrypts, and the relay-supplied blob is validated locally before use. */
-    private fun encryptionKeyOf(armoredPublicKey: String): PGPPublicKey? = runCatching {
+    /** (primary, encryption key): only the subkey encrypts, and the relay-supplied blob is
+     *  validated locally before use. */
+    private fun encryptionKeyOf(armoredPublicKey: String): Pair<PGPPublicKey, PGPPublicKey>? = runCatching {
         if (PgpFingerprint.compute(armoredPublicKey) == null) return@runCatching null
         PGPPublicKeyRingCollection(
             PGPUtil.getDecoderStream(armoredPublicKey.byteInputStream(Charsets.UTF_8)),
             BcKeyFingerprintCalculator(),
         ).keyRings.asSequence()
-            .flatMap { ring -> ring.publicKeys.asSequence() }
-            .filter { it.isEncryptionKey && !it.hasRevocation() && !it.hasExpired() }
+            .flatMap { ring -> ring.publicKeys.asSequence().map { ring.publicKey to it } }
+            .filter { (_, key) -> key.isEncryptionKey && !key.hasRevocation() && !key.hasExpired() }
             // Newest, not "last in the serialisation": a ring may carry a rotated-away subkey.
-            .maxByOrNull { it.creationTime.time }
+            .maxByOrNull { it.second.creationTime.time }
     }.getOrNull()
 
     /** `validSeconds == 0` means no expiry; [PGPPublicKey.isEncryptionKey] ignores expiry. */
@@ -150,8 +153,12 @@ internal object PgpEncryptor {
     }
 
     /** Empty passphrase: the key came out of the device envelope already unwrapped. A revoked or
-     *  expired signing key is unusable, not a reason to look elsewhere. */
-    private fun signatureGeneratorFor(ring: PGPSecretKeyRing): PGPSignatureGenerator? = runCatching {
+     *  expired signing key is unusable, not a reason to look elsewhere. [intendedRecipients] are
+     *  primary keys, named in hashed RFC 9580 Intended Recipient Fingerprint subpackets. */
+    private fun signatureGeneratorFor(
+        ring: PGPSecretKeyRing,
+        intendedRecipients: List<PGPPublicKey>,
+    ): PGPSignatureGenerator? = runCatching {
         val secretKey = ring.secretKeys.asSequence()
             .firstOrNull { it.isSigningKey && !it.publicKey.hasRevocation() && !it.publicKey.hasExpired() }
             ?: return null
@@ -162,7 +169,15 @@ internal object PgpEncryptor {
         PGPSignatureGenerator(
             BcPGPContentSignerBuilder(secretKey.publicKey.algorithm, HashAlgorithmTags.SHA256),
             secretKey.publicKey,
-        ).apply { init(PGPSignature.BINARY_DOCUMENT, privateKey) }
+        ).apply {
+            init(PGPSignature.BINARY_DOCUMENT, privateKey)
+            // Non-critical, so a verifier that does not know the subpacket still accepts it.
+            setHashedSubpackets(
+                PGPSignatureSubpacketGenerator().apply {
+                    intendedRecipients.distinctBy { it.keyID }.forEach { addIntendedRecipientFingerprint(false, it) }
+                }.generate(),
+            )
+        }
     }.getOrNull()
 
     private const val BUFFER_BYTES = 1 shl 16

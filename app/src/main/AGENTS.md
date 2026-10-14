@@ -16,11 +16,13 @@ Owns production Android app code and resources.
 - A pinned client pins exactly the host it was built for; `CertificatePinner` passes every other host vacuously. So `PinnedCallFactoryProvider` hands back the `TlsPin` TOGETHER with the client, re-reading the pin INSIDE its lock, and `PinnedOrFallbackCallFactory` refuses any request whose host is not the pinned one. Every URL this app builds is same-origin with the pinned relay (`sameOrigin`, `resolvePullEndpoint`), so a mismatch means a re-pair landed under an in-flight call — refusing is the only answer that does not put device credentials on plain system trust. Never return a bare `Call.Factory` from the provider: it is the pairing of pin and client that makes the check possible.
 - Recovering a credential is NOT unpairing. `PushRepository.resetPairingCredential` drops the pairing proof and TLS pin while keeping mail, contacts and keys; `clearPairing`/`unpairDevice` stay the destructive pair, for a deliberate unpair and for `attemptPairing`'s account-replacement branch. A rotated certificate or a stranded device secret must route to the former — "Reconnect to server" on the pairing screen — never the latter. Because it keeps the data, it must also record whose: `SecurePairingStore.clearPairing(rememberForReconnect = true)` writes a `ReconnectExpectation` in the SAME commit that removes the pairing. `savePairing` spends it, the destructive clear drops it, and a second reconnect with no pairing left to name leaves the first one standing.
 - Registration and pull are each serialized by a coordinator-owned `Mutex` (`PushSyncCoordinator.registrationGate`, `PullSyncCoordinator.pullGate`), and the current pairing is read INSIDE the lock. Both are entered from several places at once — Firebase token rotation, UnifiedPush endpoint changes, foreground resync, the pairing screen, `PullWorker` — and both have read-then-write state that overlapping runs corrupt: every registration invalidates the previous `deviceSecret`, so a late reply persisting over a newer one strands the install; the pull cursor is read at the start and advanced at the end, so two runs notify the same batch twice. `NonCancellable` does not help with either — it guards a persist against cancellation, not against a competitor.
-- A UnifiedPush endpoint and its WebPush keys (`push_state`) mean "the distributor gave us this", not "the server has it" — `transport` says what is registered. `onNewEndpoint` stores them on arrival, paired or not, AFTER the abandoned-wipe guard. It captures `ProcessState.generation()` in the callback, and `PushRepository.storeUnifiedPushEndpoint` checks it INSIDE the DataStore write, so a callback released after an unpair or wipe stores nothing. Revocations (`onUnregistered`, the gms `onRegistrationFailed`) capture it the same way and clear through the same checked write (`forgetUnifiedPushEndpoint(generation)`); a stale one clears nothing and skips its error update and FCM fallback, because the coordinator's queue outlives a graph invalidation. Every UnifiedPush callback goes through `PushSyncCoordinator.enqueueUnifiedPush`, one FIFO queue fed synchronously from the callback, so a revocation can never be overtaken by the endpoint it revokes. The store-on-arrival exists because the fdroid build has no other credential, and the distributor usually answers before pairing, so the pairing screen offers the UnifiedPush choice before a device is paired. `attemptPairing` and `resyncActiveTransport` prefer a stored endpoint on every flavor, choosing inside `registrationGate`. It is dropped by a successful non-UnifiedPush registration, by `onUnregistered` and the gms `onRegistrationFailed` (`forgetUnifiedPushEndpoint`, under the gate), by `clearPairing`, and by the wipe (see the DataStore rule below). `resetPairingCredential` keeps it: the distributor is still registered and re-pairing needs it. `UnifiedPushEndpointTest` pins this.
+- A UnifiedPush endpoint and its WebPush keys (`push_state_secure`) mean "the distributor gave us this", not "the server has it" — `transport` says what is registered. `onNewEndpoint` stores them on arrival, paired or not, AFTER the abandoned-wipe guard. It captures `ProcessState.generation()` in the callback, and `PushRepository.storeUnifiedPushEndpoint` checks it INSIDE the store's synchronized edit, so a callback released after an unpair or wipe stores nothing. Revocations (`onUnregistered`, the gms `onRegistrationFailed`) capture it the same way and clear through the same checked write (`forgetUnifiedPushEndpoint(generation)`); a stale one clears nothing and skips its error update and FCM fallback, because the coordinator's queue outlives a graph invalidation. Every UnifiedPush callback goes through `PushSyncCoordinator.enqueueUnifiedPush`, one FIFO queue fed synchronously from the callback, so a revocation can never be overtaken by the endpoint it revokes. The store-on-arrival exists because the fdroid build has no other credential, and the distributor usually answers before pairing, so the pairing screen offers the UnifiedPush choice before a device is paired. `attemptPairing` and `resyncActiveTransport` prefer a stored endpoint on every flavor, choosing inside `registrationGate`. It is dropped by a successful non-UnifiedPush registration, by `onUnregistered` and the gms `onRegistrationFailed` (`forgetUnifiedPushEndpoint`, under the gate), by `clearPairing`, and by the wipe (see the DataStore rule below). `resetPairingCredential` keeps it: the distributor is still registered and re-pairing needs it. `UnifiedPushEndpointTest` pins this.
 - A preferences DataStore is never removed by deleting its file alone. DataStore 1.1 keeps serving its in-memory cache for a file deleted underneath it, and a later edit re-reads the empty file, sees no change, and never refreshes that cache. The wipe relaunches in-process (`AppRestart`), so the old values stayed readable. Every deletion goes through `clearAndDelete` (`DataStoreFiles.kt`), which clears through DataStore and then deletes the file. Every store therefore has a `ReplaceFileCorruptionHandler`: without one, a malformed file throws on the clear and is never deleted, so the wipe fails on every retry. The wipe clears each store independently. That covers the wipe's `datastores` step (all three stores), the unpair purge (`mail_sync_state`, `contacts_state`) and `deletePlaintextMetadataStores`. A new DataStore must be added to `SecurityWipe`'s `dataStores`. `WipeResurrectionTest` and `AccountPurgeDataStoreTest` pin this.
 - Whether a pairing is an account replacement is `isAccountReplacement(incoming, currentPairing, reconnectExpectation)`, never "is there a pairing right now". A reconnect leaves account-scoped data with no pairing, so the pairing alone under-reports; the marker is the second input. `attemptPairing` purges on it and `PushPairingActivity` picks the replace-warning dialog from the same answer (`PushRepository.replacesAnotherAccount`), so the warning cannot disagree with what happens. No pairing and no marker is a first-ever pairing: it must purge nothing.
 - Account replacement is staged: `attemptPairing` registers FIRST and only then purges the account being replaced. Nothing may be destroyed before the replacement is proven, or an offline scan of a valid QR silently unpairs a working account. `clearPairing` returns the stores that survived the purge; a non-empty result during replacement refuses the new account and escalates to `SecurityWipe.wipeAndResetApp`, because no table carries a subscriber column and survivors are readable by whoever pairs next. Never let a purge failure become a log line.
 - A PIN change is staged, not swapped in place. The verifier (`app_lock_secure`) and the wrapped device secret (`push_pairing_secure`) are different preference files, so no single `commit()` covers both. `SecuritySettingsActivity.changePin` writes the new wrapping via `SecurePairingStore.stagePendingSecret` **before** `setPin`, `resolveDeviceSecret` tries the live wrapping then the staged one, and the following `savePairing` promotes and clears the staged copy. Without staging, a process death between the two files sealed the secret under a key no surviving PIN derived, `needsCredentialRewrap()` could not see it (it answers a scheme-version question only — `deviceSecretIsStranded` is the one that detects this), and the relay's eventual 409 read to the user as "re-pair this device". Both of its key derivations go through `CredentialCipher.deriveKeysOrNull` and abort the change on null: an unreadable Keystore pepper is not a wrong PIN, and letting `PepperUnavailableException` out killed the process mid-protocol. Both abort points sit ahead of `setPin`, so there is nothing staged to roll back. `SourceRulesTest.credentialDerivationsHandleAnUnavailableKeystore` keeps raw `deriveKeys` out of every caller but `AppLockManager`.
+- The biometric unlock blob exists only while the user's biometric setting is on. `AppLockManager` seals on PIN entry only then, and a PIN unlock with it off destroys any blob (older builds sealed unconditionally). Switching it off goes through `AppLockManager.disableBiometric`, which destroys under the PIN gate so a racing unlock cannot re-seal; switching it on goes through `enableBiometric`, a throttled PIN check that seals with that PIN. Every biometric unlock, `UnlockActivity` and `MfaApprovalActivity` alike, reads the blob through `AppLockManager.biometricUnlockOnOffer`, which answers null while the setting is off; never call `BiometricUnlockVault.prepareUnlock` directly.
+- A Security setting that weakens protection applies only after the same throttled PIN check that disabling the lock uses: a longer grace window, more wrong PINs before the wipe or no wipe, Hostile Location Protection off, biometric unlock on (`SecuritySettingsActivity.confirmWithPinIf`, `AppLockManager.enableBiometric`). A strengthening change applies at once. `SecuritySettingsPinConfirmTest` covers each path.
 - `PinPolicy` alone decides PIN length. A field that caps input sets
   `InputFilter.LengthFilter(PinPolicy.MAX_LENGTH)` in code; layouts never set `maxLength` on a
   `numberPassword` field (`PinLayoutLengthTest`).
@@ -31,11 +33,11 @@ Owns production Android app code and resources.
 - FCM token sync goes through the backend's native registration endpoint (`reg` from the pairing QR, or derived as `{srv}/api/notifications/native/register`) — there is no user-editable Server URL setting; `srv` is a required QR field and is always sourced from the QR.
 - A device is marked paired only after the native register call returns success (`ok:true`/`synced:true`); a QR scan alone does not pair the device. `503` from the registration endpoint means the backend is missing `PAIRING_SECRET` (a persistent misconfiguration) and is not retried.
 - Incoming FCM payload parser contract keys are `messageId`, `senderName`, `emailSubject`, and `keywords`/`Keywords` (either casing is accepted — the server sends the capitalised one, everything else is camelCase).
-- Both delivery paths bound relay-supplied strings in ONE place, `PushPayloadParser.sanitize` (messageId 256, sender/subject 512, 32 keywords): `parse` for push, `PullNotification.toPushPayload` for pull. The relay picks a device's `deliveryMode`, so a pull path that skipped those bounds made them optional — and `push_state` re-serialises its whole history on every append, so oversized strings there are an OOM the app hits before it can delete them. A new delivery path must call `sanitize`; `PullNotificationTest` asserts the two paths agree.
+- Both delivery paths bound relay-supplied strings in ONE place, `PushPayloadParser.sanitize` (messageId 256, sender/subject 512, 32 keywords): `parse` for push, `PullNotification.toPushPayload` for pull. The relay picks a device's `deliveryMode`, so a pull path that skipped those bounds made them optional — and `push_state_secure` re-serialises its whole history on every append, so oversized strings there are an OOM the app hits before it can delete them. A new delivery path must call `sanitize`; `PullNotificationTest` asserts the two paths agree.
 - Pull is also the push-mode heartbeat (`PullSyncCoordinator`, server issue #137 option 1). The server queues every notification in both delivery modes and never flips the mode itself, so a device on a dead relay recovers only by polling. `PullWorker` is armed whenever the device is paired (15-minute floor, both modes) and `pullOnce()` decides: PULL mode always polls; PUSH mode polls only once no push has arrived for `PUSH_QUIET_THRESHOLD_MS` (3 h, a constant), counted from `lastPushReceivedAtEpochMs`, which both messaging services stamp on every delivered message, or from the last registration when no push has ever arrived. A PUSH answer from the pull endpoint is NOT "stop polling". Pulled entries take the same MFA-first decision as pushed ones (`IncomingPushRouter.route(PullNotification, now)`), and a pulled mail is only alerted when `appendPayload` reports it new, so a message push already delivered is not shown twice. A heartbeat's cursor can be months stale and history holds 30 rows, so a heartbeat drops entries older than twice the threshold while still advancing the cursor past them. `PullHeartbeatTest` pins all of this.
 - MFA push 2FA: an incoming FCM data payload with `type: "mfa_challenge"` and `challengeId` is parsed by `MfaChallengePayloadParser` (distinct from the mail payload parser) and shown via a separate high-importance notification channel (`PushNotificationDispatcher.showMfaChallenge`). The notification carries **no Approve/Deny actions and no challenge detail** — it is tap-to-open only. Notification actions fire from the lock screen with no authentication, which let anyone holding the powered-on device approve a sign-in and bypassed the PIN/biometric/lockout/wipe apparatus entirely; the `MfaResponseReceiver` that backed them has been deleted. The decision happens only in `MfaApprovalActivity`, which re-authenticates via `BiometricPrompt` (`BIOMETRIC_STRONG or DEVICE_CREDENTIAL`) and re-checks `MfaChallengeTracker.isPending` before either button does anything. `MfaResponder.respond` POSTs to `{serverUrl}/api/mfa/push/respond` via `MfaResponseClient` using the same device-id/secret pairing credential as native register/pull. `MfaChallengeTracker` is SharedPreferences-backed, not in-memory: FCM delivers to short-lived processes, so an in-memory record was usually gone before the user tapped. Each challenge gets its own notification id — coalescing distinct challenges onto one id meant answering either cancelled both.
-- Push notifications are shown via Android notification channel and copied into in-app history preview. While `AppLockManager.locked` is true, title/text are replaced with a generic string and visibility is `VISIBILITY_SECRET`; while Hostile Location Protection is on, history is held in memory only and never written to the `push_state` DataStore.
-- Every screen except `UnlockActivity` and `MfaApprovalActivity` extends `security.LockedActivity`, which redirects to the unlock screen in `onStart` (and `finish()`es, so nothing is left underneath to reveal with Back) and applies `FLAG_SECURE`. Do not extend `AppCompatActivity` directly for a new screen. Both exceptions gate on `SecurityWipe.startupVerdict` themselves, and a gate that returns from `onCreate` without `finish()` still starts and resumes the activity — so each carries a stand-down flag (`redirectedToUnlock`, `awaitingStartupVerdict`) that every other lifecycle callback touching a `lateinit` view must honour.
+- Push notifications are shown via Android notification channel and copied into in-app history preview. While `AppLockManager.locked` is true, title/text are replaced with a generic string and visibility is `VISIBILITY_SECRET`; while Hostile Location Protection is on, history is held in memory only and never written to disk.
+- Every screen except `UnlockActivity` and `MfaApprovalActivity` extends `security.LockedActivity`, which redirects to the unlock screen in `onStart` (and `finish()`es, so nothing is left underneath to reveal with Back) and applies `FLAG_SECURE`. Do not extend `AppCompatActivity` directly for a new screen. Both exceptions gate on `SecurityWipe.startupVerdict` themselves, and a gate that returns from `onCreate` without `finish()` still starts and resumes the activity — so each carries a stand-down flag (`redirectedToUnlock`, `awaitingStartupVerdict`) that every other lifecycle callback touching a `lateinit` view must honour. `MfaApprovalActivity` reads the app-lock store through `readUnlessLockStoreUnavailable`: a store that will not open (`EncryptedStoreUnavailableException`) gets `LockedActivity`'s blocking dialog and no approval, never a crash.
 - A dialog is a separate window and does not inherit the Activity's `FLAG_SECURE`. Show every
   `AlertDialog` with `.create().showSecurely()`; `SourceRulesTest.alertDialogBuildersAreShownSecurely`
   refuses a builder chain ending in `.show()`.
@@ -164,6 +166,11 @@ Owns production Android app code and resources.
   removal in one folder deleted the other. Every per-message DAO statement takes the folder.
   Still not UIDVALIDITY-aware — the relay does not expose it and a client cannot invent one; the
   daily full resync rewrites the window, so id reuse self-heals within a day. See `EmailEntity`.
+- `EmailDao.getByFolder` returns `EmailListRow`: every column but `body`, plus a computed
+  `hasBody`. The list repaints often and a cached body can be megabytes; the reader reads the body
+  by id (`MailRepository.fetchBody`). Never `SELECT *` emails for a list. Inbox work on the IO
+  executor goes through `executeGuarded`: a throw there would kill the process, so it keeps the
+  rows, marks the folder stale and toasts instead.
 - Woken snooze pin (KyPost-Server #386): an inbox row's optional `wokenAt` is when a snoozed message
   returned to INBOX. `EmailDao.getByFolder` orders by `COALESCE(wokenAt, atUtc)`, the row shows
   `atUtc` plus a "Snoozed" badge. An "updated" delta row replaces it, so one without `wokenAt`
@@ -298,6 +305,8 @@ Owns production Android app code and resources.
   `withKeyring`. There is no raw accessor, so a keyring can never reach the armor parser.
   `PgpDecryptor` tries every encryption-capable key for a hidden (zero) recipient key id;
   `PgpEncryptor` signs only with the given ring's own unrevoked, unexpired signing key.
+  Its signature names every recipient primary key in hashed, non-critical RFC 9580 Intended Recipient
+  Fingerprint subpackets (`IntendedRecipientTest`).
   `importKeyring` is the local v3 import, pure and transport-free: validate the whole ring against
   the AAD's active fingerprint, then open the previous vault to establish replacement safety,
   then seal the original bytes as a KEYRING record, then install the session from those committed
@@ -317,10 +326,11 @@ Owns production Android app code and resources.
   `envelopeVersions: [2, 3]`; omitting the list resets the server's claim to `[2]` and the browser
   then refuses to seal v3, so never drop it. The envelope fetch carries `DeliveryMetadata`
   (`version`, `fingerprint`, `materialGeneration`, the keyring's `primaryFingerprints` and
-  `keyFingerprints`), absent only from a server older than #210. The ceremony opens a v3 envelope
-  only with a v3 delivery record whose fingerprint is the checked identity, and `importKeyring`'s
-  `validate` rejects a ring whose generation, member set or inventory differs from that record
-  (`KEYRING_REJECTED`, nothing sealed). Every acknowledgement is an `EnrollmentReport`:
+  `keyFingerprints`), absent only from a server older than #210. The ceremony opens any envelope
+  only with a delivery record of the same version whose fingerprint is the checked identity
+  (`ENVELOPE_MALFORMED` otherwise). A v2 plaintext must be exactly one secret key ring whose
+  primary is that identity, and `importKeyring`'s `validate` rejects a ring whose generation,
+  member set or inventory differs from the record (both `KEYRING_REJECTED`, nothing sealed). Every acknowledgement is an `EnrollmentReport`:
   `NotEnrolled` (which also makes the server forget its delivery record), `Legacy` (the bare
   boolean; a converted account refuses it with 409), or `Keyring(materialGeneration, fingerprint)`
   sent with `envelopeVersion: 3`. The server matches a keyring acknowledgement against the
@@ -357,18 +367,21 @@ Owns production Android app code and resources.
   A failed signature or a CHANGED signer key (`PgpSignatureState.KEY_CHANGED`) outranks both with
   ⚠. `SIGNER_UNKNOWN` deliberately does not mark: it is the ordinary state for a correspondent not
   yet in the address book, and a glyph on most rows carries nothing actionable.
-- `PgpSignatureState` has eight values, not a verified/unverified pair: `NONE` (no opinion expressed),
+- `PgpSignatureState` has nine values, not a verified/unverified pair: `NONE` (no opinion expressed),
   `UNSIGNED` (local decryption found neither a packet signature nor a declared PGP/MIME signature
   wrapper; it gets an informational detail notice but no inbox warning, even when the relay resolved
   no sender), `VERIFIED_CONFIRMED`
   (a key bound to the sender that the user
   confirmed out of band — the only state that claims identity), `VERIFIED_SEEN_BEFORE` (a bound key still matching its TOFU
   pin, but never confirmed — most keys arrive by Autocrypt harvest, so this claims only continuity,
-  "same key as last time", not who they say they are), `SIGNER_UNKNOWN` (no key bound to this sender
+  "same key as last time", not who they say they are; only a key this device holds earns it — a
+  relay-supplied key or the relay's `pgpVerified` flag alone yields `SIGNER_UNKNOWN`), `SIGNER_UNKNOWN` (no key bound to this sender
   at all — an ordinary correspondent not yet in the address book, a key that rotated before harvest,
   and a forged `From` are locally indistinguishable, so this is not an accusation), `KEY_CHANGED` (a
-  key IS bound to this sender and no longer matches its TOFU pin — the one alarm worth raising), and
-  `INVALID` (signed, but it does not verify against the bound key). **The client parses no address out
+  key IS bound to this sender and no longer matches its TOFU pin — the one alarm worth raising),
+  `INVALID` (signed, but it does not verify against the bound key), and `FOR_ANOTHER_RECIPIENT` (a good
+  signature whose hashed RFC 9580 Intended Recipient Fingerprints name none of the keys this device
+  decrypted with: signed for someone else and re-encrypted to us; "Signed for someone else"). **The client parses no address out
   of the `From` header at all.** `senderAddrSpec` and its helpers were deleted after a differential
   harness found 27 divergences from the server's parser across 111 adversarial headers — worst, an
   RFC 5322 comment like `Bob (Eve <eve@evil>) <bob@x>`, where the client bound `eve@evil` and the
@@ -388,13 +401,23 @@ Owns production Android app code and resources.
   attached to a contact by hand or by the QR scan; the account's real identity lives server-side.
   Two helpers exist because of this and are the only correct readers: `contactHasLinkedPgpKey`
   (badge: self also counts as linked when `pgp.hasPgpIdentity` says so) and
-  `pgp.ownFingerprintFromBootstrap` (the fingerprint `PgpKeyActivity` shows beside the user's own
-  QR, from `GET /api/pgp/bootstrap`'s `publicKey`, hashed locally by `PgpFingerprint`). Reading
+  `pgp.ownFingerprintFromBootstrap` (the server-reported fallback `pgp.ownFingerprint` gives
+  `PgpKeyActivity` when the vault holds no signer, from `GET /api/pgp/bootstrap`'s `publicKey`,
+  hashed locally by `PgpFingerprint`). Reading
   `contactDao().getSelf()?.pgpKey` for either is the bug both replaced — it is empty for
   essentially every user. Do not source that fingerprint from the QR token instead: `/api/pgp/qr/key`
   is single-use server-side, so fetching our own key with it burns the code being displayed.
   Never render the server's own `fingerprint` field for either side of the exchange; it is a claim
   beside the key with no cryptographic tie to it.
+- **The QR key check compares two devices, not the server with itself.** The code is
+  `{server}/api/pgp/qr/key?t=<token>#fp=<40 uppercase hex>`; the fragment never reaches the server.
+  `fp` and the fingerprint shown beside the code come from this device's own signer
+  (`EnrollmentSession.withSigner`, the vault opened once per screen). With no signer the screen
+  shows the bootstrap fingerprint labelled as the server's report and the code carries no `fp`.
+  The scanner fingerprints the fetched key itself (`checkScannedKey`): equal `fp` pins it
+  confirmed; a different or malformed `fp`, or any other fragment, saves nothing; no fragment
+  saves it as a plain contact key (`verifiedInPerson = false`), never a pin. `PgpKeyActivityTest`,
+  `PgpIdentityStatusTest`.
 - Client-protected messages offer "Open in webmail" via `pgp.webmailMessageUrl`, which builds
   `{serverUrl}/read?mailbox=&message=` — the same route a web push click uses, so no server change
   backs it. INBOX is sent as an absent `mailbox` param, matching the links the web app builds for
@@ -625,7 +648,8 @@ Owns production Android app code and resources.
 - `renderableBody`/`blockExternalResources` strip remote resources from **both** reader variants
   before anything reaches the WebView; "Show images" restores `<img src>` and nothing else. An
   `<iframe>` is dropped whole, because `srcdoc` carries an inline document no attribute strip
-  reaches. `EmailDetailActivityTest` is the contract for that.
+  reaches. Form controls are removed too: `input`/`select` whole, `form`/`button`/`textarea`
+  unwrapped to their text. `EmailDetailActivityTest` is the contract for that.
 - A tapped http(s) link in a message never opens directly. `mail/LinkTarget.kt` parses it once with
   OkHttp's `HttpUrl`, which parses like a browser: userinfo is not the host, a backslash ends the
   authority, and IDNs come out as `xn--` punycode. The confirm dialog shows that host, and the
@@ -804,16 +828,23 @@ Owns production Android app code and resources.
   mirrors. `KyPostContactAuthenticator.addAccount` answers with the existing account, or holds the
   caller's response in `PendingAccountSetup` and opens the Contacts screen in account-setup mode.
   Any app can make that request, so setup never enables on its own: it asks first
-  (`contacts_account_setup_message`), even with contacts permission already granted; Enable runs
-  the normal enable flow and answers with the account once it exists, while declining or leaving
-  answers with a cancel. Setup progress (confirmed, permission request outstanding) is saved state
-  of its own, so a recreate re-asks or resumes. The app-lock redirect keeps the request
+  (`contacts_account_setup_message` above the disclosure), even with contacts permission already
+  granted; Continue runs the normal enable flow and answers with the account once it exists, while
+  declining or leaving answers with a cancel. An outstanding permission request is saved state of
+  its own, so a recreate resumes it or asks again. The app-lock redirect keeps the request
   (MainActivity resumes the flow after unlock). Each request's token rides in the setup intent
   (`ContactsListActivity.setupIntent`), and a screen acts on and cancels only its own request, so
   closing a screen whose request a newer one displaced leaves the newer one waiting.
   `AccountSetupConsentTest`. `editProperties` answers
   an empty bundle. `ContactSyncAdapterDeclarationTest`, `ContactAccountFlowsTest`. Unverified on
   hardware: how stock Contacts apps render and edit these contacts with the schema.
+- **Contacts access is requested only behind Google Play's prominent disclosure.**
+  `DeviceContactSyncEnabler.askToEnable` is the one way in: it shows `contacts_access_disclosure`
+  (contacts are uploaded to the user's KyPost server and synced to their other devices) with
+  Continue / Not now, and only Continue reaches the runtime prompt; `checkAndEnable` is private.
+  The pairing intro, the menu toggle, import's re-ask and account setup all call it.
+  `SourceRulesTest.contactsPermissionIsRequestedOnlyBehindTheDisclosure`,
+  `AccountSetupConsentTest.theMenuToggle_disclosesTheUploadBeforeEnabling`.
 - **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
   `applyBatch` as the insert. `device_contact_links` is a cache of that: `adoptLostLinks` runs
   before the pull and relinks every row of our account by SOURCE_ID, tombstones included and
@@ -822,6 +853,12 @@ Owns production Android app code and resources.
   was gone is then pulled, not overwritten; a phone delete is queued and purged, not replaced; a
   row whose contact left Room is removed (`DeviceContactDeleteTest`). The push repeats the
   live-row lookup before any create. Linked rows from before SOURCE_ID are backfilled.
+  A live row of our account with neither SOURCE_ID nor link was created there by another
+  Contacts app: `queueRowsCreatedElsewhere` queues it as a create and writes its link in one
+  transaction, and the backfill then stamps SOURCE_ID. Like an import, each write holds the purge's
+  lock (`withPurgeLock`) and needs the pass's session, its pairing, and sync still on — the
+  purge's database step turns sync off under that lock, before the session ends. Without it the row never reached the
+  server, and turning sync off, unpairing or Hostile Location Protection deleted it.
   `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_13_14` indexes the link table's
   `rawContactId`.
 - **The periodic `DeviceContactSyncWorker` is the only background path to the server**, so it runs
@@ -872,7 +909,7 @@ Owns production Android app code and resources.
   scan already running. Inside that lock the scan also checks that its session
   (`ProcessState.generation()`, captured at scan start) and its pairing destination are still
   current, and abandons the scan if not. The account purge's database step runs under the same
-  lock and clears consent (`clearConsentDuring`): the purge advances the generation only at its
+  lock and clears consent and turns device sync off (`clearConsentDuring`): the purge advances the generation only at its
   end, so this is what stops an import from landing in the outbox the next pairing inherits. Adding an account rewinds the scan watermark so its existing contacts
   are seen; a scan moves the watermark to its own start time only if `consentRevision` is
   unchanged since it began, so a rewind made mid-scan survives it. Each create a scan queues joins its match index, so the
