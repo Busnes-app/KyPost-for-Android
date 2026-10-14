@@ -7,6 +7,7 @@ import org.bouncycastle.openpgp.PGPOnePassSignatureList
 import org.bouncycastle.openpgp.PGPPublicKeyEncryptedData
 import org.bouncycastle.openpgp.PGPPublicKeyRingCollection
 import org.bouncycastle.openpgp.PGPSecretKeyRingCollection
+import org.bouncycastle.openpgp.PGPSignature
 import org.bouncycastle.openpgp.PGPSignatureList
 import org.bouncycastle.openpgp.PGPUtil
 import org.bouncycastle.openpgp.operator.bc.BcKeyFingerprintCalculator
@@ -32,7 +33,7 @@ internal sealed class RawSignature {
     data class NoSuchKey(val keyId: Long) : RawSignature()
 
     /** [forAnotherRecipient]: the signature names its intended recipients (RFC 9580 subpacket 35)
-     *  and none is the key this device decrypted with. */
+     *  and none is the key this device decrypted with (detached: any key it holds). */
     data class Checked(val keyId: Long, val verified: Boolean, val forAnotherRecipient: Boolean = false) : RawSignature()
 
     val present: Boolean get() = this !is Absent
@@ -155,11 +156,13 @@ internal object PgpDecryptor {
         DecryptResult.Ok(plaintext, signature)
     }.getOrElse { DecryptResult.Failed(it.message ?: "could not decrypt this message") }
 
-    /** A signature that fails to parse is ABSENT; one that fails to verify is INVALID. */
+    /** A signature that fails to parse is ABSENT; one that fails to verify is INVALID.
+     *  [heldKeys]: fingerprints of every key this device holds, see [heldKeyFingerprints]. */
     fun verifyDetached(
         armoredPublicKey: String,
         body: ByteArray,
         armoredSignature: String,
+        heldKeys: List<ByteArray>,
     ): RawSignature {
         val absent = RawSignature.Absent
 
@@ -187,7 +190,18 @@ internal object PgpDecryptor {
             signature.verify()
         }.getOrDefault(false)
 
-        return RawSignature.Checked(signature.keyID, valid)
+        return RawSignature.Checked(signature.keyID, valid, forAnotherRecipient = namesOnlyOthers(signature, heldKeys))
+    }
+
+    /** Every key, primary and subkey, of every ring this device holds. */
+    fun heldKeyFingerprints(secretKeys: PGPSecretKeyRingCollection): List<ByteArray> =
+        secretKeys.keyRings.asSequence().flatMap { it.publicKeys.asSequence() }.map { it.fingerprint }.toList()
+
+    /** True when the signature names its intended recipients (RFC 9580 subpacket 35) and none is
+     *  in [ours]. Hashed only: an unhashed subpacket is not covered by the signature. */
+    private fun namesOnlyOthers(signature: PGPSignature, ours: List<ByteArray>): Boolean {
+        val intended = signature.hashedSubPackets?.intendedRecipientFingerprints.orEmpty()
+        return intended.isNotEmpty() && intended.none { named -> ours.any { it.contentEquals(named.fingerprint) } }
     }
 
     private fun readLiteral(
@@ -290,10 +304,6 @@ internal object PgpDecryptor {
             onePass.verify(tail[0])
         }.getOrDefault(false)
 
-        // Hashed only: an unhashed subpacket is not covered by the signature.
-        val intended = tail[0].hashedSubPackets?.intendedRecipientFingerprints.orEmpty()
-        val forAnother = intended.isNotEmpty() &&
-            intended.none { named -> decryptedWith.any { it.contentEquals(named.fingerprint) } }
-        return RawSignature.Checked(onePass.keyID, valid, forAnotherRecipient = forAnother)
+        return RawSignature.Checked(onePass.keyID, valid, forAnotherRecipient = namesOnlyOthers(tail[0], decryptedWith))
     }
 }
