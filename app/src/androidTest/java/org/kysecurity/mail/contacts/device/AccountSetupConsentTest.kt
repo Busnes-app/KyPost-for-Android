@@ -151,11 +151,16 @@ class AccountSetupConsentTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         ActivityScenario.launch(ContactsListActivity::class.java).use { scenario ->
             instrumentation.waitForIdleSync()
-            lateinit var activity: ContactsListActivity
-            scenario.onActivity { activity = it }
+            // The screen's own menu, selected as a tap would; the custom top bar has no panel to drive.
+            fun toggle(activity: ContactsListActivity) {
+                val menu = android.widget.PopupMenu(activity, activity.window.decorView).menu
+                activity.onCreateOptionsMenu(menu)
+                activity.onPrepareOptionsMenu(menu)
+                activity.onOptionsItemSelected(menu.findItem(ContactsListActivity.MENU_DEVICE_SYNC))
+            }
 
-            assertTrue(instrumentation.invokeMenuActionSync(activity, ContactsListActivity.MENU_DEVICE_SYNC, 0))
             scenario.onActivity {
+                toggle(it)
                 val dialog = it.consentDialog
                 assertNotNull("the toggle must disclose before enabling", dialog)
                 val message = dialog!!.findViewById<android.widget.TextView>(android.R.id.message)!!.text.toString()
@@ -165,8 +170,10 @@ class AccountSetupConsentTest {
             instrumentation.waitForIdleSync()
             assertFalse("Not now enables nothing", settings.isEnabled())
 
-            assertTrue(instrumentation.invokeMenuActionSync(activity, ContactsListActivity.MENU_DEVICE_SYNC, 0))
-            scenario.onActivity { it.consentDialog!!.getButton(DialogInterface.BUTTON_POSITIVE).performClick() }
+            scenario.onActivity {
+                toggle(it)
+                it.consentDialog!!.getButton(DialogInterface.BUTTON_POSITIVE).performClick()
+            }
             val deadline = System.currentTimeMillis() + 15_000
             while (!settings.isEnabled() && System.currentTimeMillis() < deadline) android.os.SystemClock.sleep(50)
             assertTrue("Continue enables", settings.isEnabled())
