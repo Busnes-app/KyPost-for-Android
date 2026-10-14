@@ -113,11 +113,11 @@ internal class FakeMailSource : MailSource {
     override fun deleteFolder(folder: String): MailOutcome<Unit> =
         MailOutcome.Success(Unit).also { folderCalls += listOf("delete", folder) }
     override fun saveDraft(draft: MailDraft): MailOutcome<Unit> = MailOutcome.UpstreamFailure("test relay")
-    override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> {
+    override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft, onCall: (okhttp3.Call) -> Unit): MailOutcome<Unit> {
         draftSaves += draft
         return draftSaveOutcomes.poll(10, TimeUnit.SECONDS) ?: MailOutcome.UpstreamFailure("test relay")
     }
-    override fun sendClientEncrypted(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome> =
+    override fun sendClientEncrypted(message: ClientEncryptedMessage, onCall: (okhttp3.Call) -> Unit): MailOutcome<MailSendOutcome> =
         MailOutcome.UpstreamFailure("test relay")
     override fun downloadAttachment(messageId: String, folder: String, index: Int): MailOutcome<DownloadedAttachment> =
         MailOutcome.UpstreamFailure("test relay")

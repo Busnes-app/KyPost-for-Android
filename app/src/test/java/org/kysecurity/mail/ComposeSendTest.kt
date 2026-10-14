@@ -175,4 +175,30 @@ class ComposeSendTest {
         assertTrue(sending.outcome.await() is MailOutcome.Success)
         assertArrayEquals(byteArrayOf(7), sending.draft.attachments.single().bytes)
     }
+
+    /** A client-encrypted send and an encrypted draft save are adopted and stopped like a send. */
+    @Test
+    fun everyKindIsAdoptableAndStoppedByAReset() {
+        ComposeSend.Kind.entries.forEach { kind ->
+            val call = BlockingCall()
+            val entered = CountDownLatch(1)
+            val sending = ComposeSend.start(CoroutineScope(Dispatchers.IO), draft(byteArrayOf(1)), ProcessState.generation(), kind) { _, onCall ->
+                onCall(call)
+                entered.countDown()
+                try {
+                    call.execute()
+                    MailOutcome.Success(Unit)
+                } catch (e: IOException) {
+                    MailOutcome.UpstreamFailure("canceled")
+                }
+            }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertEquals(kind, ComposeSend.current()?.kind)
+
+            ComposeSend.resetForNewSession()
+
+            assertTrue(call.isCanceled())
+            assertTrue(sending.outcome.isCancelled)
+        }
+    }
 }
