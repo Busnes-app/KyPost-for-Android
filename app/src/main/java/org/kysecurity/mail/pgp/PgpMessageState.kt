@@ -77,8 +77,8 @@ fun pgpSignatureStateOf(
     pgpSignerFingerprint: String = "",
 ): PgpSignatureState = when {
     !pgpSigned -> PgpSignatureState.NONE
-    pgpVerified -> PgpSignatureState.VERIFIED_SEEN_BEFORE
-    pgpSignerFingerprint.isBlank() -> PgpSignatureState.SIGNER_UNKNOWN
+    // The relay's check, against a key this device never pinned: no continuity to claim.
+    pgpVerified || pgpSignerFingerprint.isBlank() -> PgpSignatureState.SIGNER_UNKNOWN
     else -> PgpSignatureState.INVALID
 }
 

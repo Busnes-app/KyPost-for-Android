@@ -86,7 +86,8 @@ internal fun interface LocalSignerKeyLookup {
     suspend fun keysFor(address: String): List<LocalSignerKey>
 }
 
-/** Local keys win; the relay fallback is capped at VERIFIED_SEEN_BEFORE and `verified` ignored. */
+/** Local keys win. With none, a relay key can show a signature is bad, never that the sender is
+ *  known: no VERIFIED_* state without a key this device holds, and `verified` is ignored. */
 internal fun signatureStateFor(
     signature: RawSignature,
     serverKeys: List<SignerKey>,
@@ -102,17 +103,12 @@ internal fun signatureStateFor(
         return verdictFor(signature, confirmed = signedBy.any { it.confirmed })
     }
 
-    if (serverKeys.isEmpty()) return PgpSignatureState.SIGNER_UNKNOWN
-
     // A conflict outranks a good key: two entries for one address means one of them changed.
     if (serverKeys.any { it.conflict }) return PgpSignatureState.KEY_CHANGED
 
-    val signedBy = serverKeys.filter { signature.signerKeyId in signerKeyIdsOf(it.publicKey) }
-    if (signedBy.isEmpty()) return PgpSignatureState.SIGNER_UNKNOWN
-
-    // Capped. `SignerKey.verified` is read nowhere in this branch, deliberately — see the KDoc, and
-    // note that `confirmed = false` is passed unconditionally rather than read from anything.
-    return verdictFor(signature, confirmed = false)
+    val signedByRelayKey = serverKeys.any { signature.signerKeyId in signerKeyIdsOf(it.publicKey) }
+    val bad = signature is RawSignature.Checked && !signature.verified
+    return if (signedByRelayKey && bad) PgpSignatureState.INVALID else PgpSignatureState.SIGNER_UNKNOWN
 }
 
 /** [RawSignature.NoSuchKey] must never reach INVALID: nothing was checked, nothing is accused. */
