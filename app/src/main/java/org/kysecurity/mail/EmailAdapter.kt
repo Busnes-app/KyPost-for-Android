@@ -56,7 +56,7 @@ class EmailAdapter(
         fun bind(email: Email, palette: ThemePalette, selected: Boolean) {
             // A message this app can't render is worth knowing before tapping it — otherwise the
             // only signal is opening it and finding nothing there.
-            val pgpState = pgpMessageStateOf(email.pgpEncrypted, email.pgpDecryptError, email.body)
+            val pgpState = pgpMessageStateOf(email.pgpEncrypted, email.pgpDecryptError, email.hasBody)
             val signatureState =
                 pgpSignatureStateOf(email.pgpSigned, email.pgpVerified, email.pgpSignerFingerprint)
             val markers = listOfNotNull(

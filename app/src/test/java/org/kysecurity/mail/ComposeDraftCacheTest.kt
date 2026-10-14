@@ -2,6 +2,7 @@ package org.kysecurity.mail
 
 import org.junit.After
 import org.junit.Before
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -81,6 +82,24 @@ class ComposeDraftCacheTest {
         ComposeDraftCache.resetForNewSession()
 
         assertNull(ComposeDraftCache.take())
+    }
+
+    @Test
+    fun aRecreatedScreenTakesItsOwnDraftBackWhateverItsIntent() {
+        ComposeDraftCache.save(draft(subject = "Shared notes"))
+
+        assertEquals("Shared notes", ComposeDraftCache.takeOnOpen(newExternalRequest = false)?.subject)
+    }
+
+    @Test
+    fun aNewExternalRequestDropsAndZeroesTheCachedDraftButStaysUnsealed() {
+        val bytes = byteArrayOf(1, 2, 3)
+        ComposeDraftCache.save(draft(attachments = listOf(OutgoingAttachment("a.bin", "application/octet-stream", bytes))))
+
+        assertNull(ComposeDraftCache.takeOnOpen(newExternalRequest = true))
+        assertArrayEquals(ByteArray(3), bytes)
+        ComposeDraftCache.save(draft(subject = "New"))
+        assertEquals("New", ComposeDraftCache.take()?.subject)
     }
 
     private fun draft(

@@ -83,12 +83,11 @@ class ContactsListActivity : LockedActivity() {
     // 0 is never issued, so a screen opened without a token answers no request.
     private val setupToken: Long by lazy { intent.getLongExtra(EXTRA_SETUP_TOKEN, 0L) }
 
-    /** The account-setup confirmation, while shown. */
+    /** The contacts-access disclosure, while shown. */
     @androidx.annotation.VisibleForTesting
-    internal var setupDialog: androidx.appcompat.app.AlertDialog? = null
+    internal var consentDialog: androidx.appcompat.app.AlertDialog? = null
 
-    /** Account setup: the user confirmed, and whether the permission request is still out. */
-    private var setupConfirmed = false
+    /** Account setup: the user confirmed and the permission request is still out. */
     private var setupPermissionRequested = false
 
 
@@ -173,7 +172,6 @@ class ContactsListActivity : LockedActivity() {
         // and only the user can do that. Progress is saved on its own, so a recreated screen picks
         // up where it was rather than starting over or forgetting the request.
         if (accountSetup && PendingAccountSetup.isCurrent(setupToken)) {
-            setupConfirmed = savedInstanceState?.getBoolean(STATE_SETUP_CONFIRMED) == true
             setupPermissionRequested = savedInstanceState?.getBoolean(STATE_SETUP_PERMISSION) == true
             val graph = DeviceContactsRuntime.graph(this)
             when {
@@ -182,10 +180,8 @@ class ContactsListActivity : LockedActivity() {
                     PendingAccountSetup.complete(setupToken, DeviceContactAccount.ACCOUNT_NAME)
                     finish()
                 }
-                !setupConfirmed -> askToEnableForSetup()
-                // Confirmed: the permission request still outstanding answers itself; anything else
-                // was cut short by the recreate and runs again (enabling is idempotent).
-                !setupPermissionRequested -> setupPermissionRequested = syncEnabler.checkAndEnable()
+                // A permission request still outstanding answers itself; anything else asks again.
+                !setupPermissionRequested -> askToEnableForSetup()
             }
         }
     }
@@ -193,31 +189,29 @@ class ContactsListActivity : LockedActivity() {
     /** Explicit consent for an add-account request, which any app can make through AccountManager:
      *  until the user confirms, nothing is enabled and nothing reaches the contacts provider. */
     private fun askToEnableForSetup() {
-        setupDialog = androidx.appcompat.app.AlertDialog.Builder(this)
-            .setTitle(R.string.contact_sync_intro_title)
-            .setMessage(R.string.contacts_account_setup_message)
-            .setPositiveButton(R.string.contact_sync_intro_positive) { _, _ ->
-                setupDialog = null
-                setupConfirmed = true
-                setupPermissionRequested = syncEnabler.checkAndEnable()
-            }
-            .setNegativeButton(R.string.contact_sync_intro_negative) { _, _ ->
-                setupDialog = null
+        consentDialog = syncEnabler.askToEnable(
+            lead = R.string.contacts_account_setup_message,
+            onDecline = {
+                consentDialog = null
                 finish()
-            }
-            .setOnCancelListener {
-                setupDialog = null
-                finish()
-            }
-            .showThemed()
+            },
+            onContinue = { requested ->
+                consentDialog = null
+                setupPermissionRequested = requested
+            },
+        )
+    }
+
+    private fun askToEnable() {
+        consentDialog = syncEnabler.askToEnable(onDecline = { consentDialog = null }, onContinue = { consentDialog = null })
     }
 
     /** Leaving the add-account flow without turning sync on answers the waiting caller with a
      *  cancel. Not on a recreate, nor on the lock redirect, which keeps the request for after
      *  unlock (see MainActivity). */
     override fun onDestroy() {
-        setupDialog?.dismiss()
-        setupDialog = null
+        consentDialog?.dismiss()
+        consentDialog = null
         super.onDestroy()
         if (accountSetup && isFinishing && !redirectedToUnlock) PendingAccountSetup.cancel(setupToken)
         // The lock redirect closed this screen: MainActivity resumes this request, once, after unlock.
@@ -274,7 +268,6 @@ class ContactsListActivity : LockedActivity() {
         val layoutManager = recyclerView.layoutManager as? LinearLayoutManager
         val visible = layoutManager?.findFirstVisibleItemPosition() ?: 0
         outState.putInt(STATE_SCROLL, if (pendingScrollPosition > 0) pendingScrollPosition else visible)
-        outState.putBoolean(STATE_SETUP_CONFIRMED, setupConfirmed)
         outState.putBoolean(STATE_SETUP_PERMISSION, setupPermissionRequested)
     }
 
@@ -327,7 +320,7 @@ class ContactsListActivity : LockedActivity() {
                 if (graph.settings.isEnabled()) {
                     disableDeviceSync()
                 } else {
-                    syncEnabler.checkAndEnable()
+                    askToEnable()
                 }
                 true
             }
@@ -390,7 +383,7 @@ class ContactsListActivity : LockedActivity() {
         val canRead = androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CONTACTS) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
         if (!canRead) {
-            syncEnabler.checkAndEnable()
+            askToEnable()
             return
         }
         lifecycleScope.launch {
@@ -399,7 +392,7 @@ class ContactsListActivity : LockedActivity() {
                 foreignAccounts()
             } catch (e: SecurityException) {
                 Toast.makeText(this@ContactsListActivity, R.string.contacts_device_sync_permission_denied, Toast.LENGTH_LONG).show()
-                syncEnabler.checkAndEnable()
+                askToEnable()
                 return@launch
             }
             if (accounts.isEmpty()) {
@@ -590,7 +583,8 @@ class ContactsListActivity : LockedActivity() {
 
     companion object {
         private const val MENU_REFRESH = 0
-        private const val MENU_DEVICE_SYNC = 1
+        @androidx.annotation.VisibleForTesting
+        internal const val MENU_DEVICE_SYNC = 1
         private const val MENU_DEDUPE = 2
         private const val MENU_IMPORT_ACCOUNTS = 3
         private const val MENU_EXPORT = 4
@@ -615,7 +609,6 @@ class ContactsListActivity : LockedActivity() {
         const val EXTRA_RESULT_UID = "result_uid"
 
         private const val STATE_SCROLL = "contacts_scroll"
-        private const val STATE_SETUP_CONFIRMED = "account_setup_confirmed"
         private const val STATE_SETUP_PERMISSION = "account_setup_permission_requested"
     }
 }

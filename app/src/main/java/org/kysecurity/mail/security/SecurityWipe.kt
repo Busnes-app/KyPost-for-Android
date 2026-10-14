@@ -172,7 +172,7 @@ object SecurityWipe {
         }
         step("database") { closeAndDeleteDatabase(appContext) }
         step("datastores") {
-            // Checked, like every other step: `push_state` holds 30 sender/subject pairs.
+            // Checked, like every other step.
             // Through DataStore, not just the file: the process survives the relaunch.
             // Per store: one that fails must not stop the others from being cleared.
             val undeleted = dataStores(appContext).filterNot { (name, store) ->
@@ -518,6 +518,9 @@ object SecurityWipe {
             runCatching { org.kysecurity.mail.clearAndDelete(appContext, name, store) }
                 .onFailure { android.util.Log.e(TAG, "Failed to delete datastore $name", it) }
         }
+        // History is in the encrypted push store now, which this would otherwise keep.
+        runCatching { PushRuntime.graph(appContext).repository.clearStoredHistory() }
+            .onFailure { android.util.Log.e(TAG, "Failed to clear push history", it) }
         METADATA_PREFS_NAMES.forEach { name ->
             runCatching { appContext.deleteSharedPreferences(name) }
                 .onFailure { android.util.Log.e(TAG, "Failed to delete prefs $name", it) }

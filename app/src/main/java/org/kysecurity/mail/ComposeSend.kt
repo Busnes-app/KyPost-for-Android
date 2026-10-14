@@ -7,23 +7,27 @@ import kotlinx.coroutines.async
 import okhttp3.Call
 import org.kysecurity.mail.mail.MailDraft
 import org.kysecurity.mail.mail.MailOutcome
-import org.kysecurity.mail.mail.MailSendOutcome
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
-/** The relay send outlives the Compose instance that started it. A rotation destroys that
- *  instance mid-send; the replacement adopts this send instead of offering Send again.
+/** The relay call outlives the Compose instance that started it: a send, a client-encrypted send
+ *  or an encrypted draft save. A rotation destroys that instance mid-call; the replacement adopts
+ *  the call instead of offering it again.
  *
  *  It does not outlive the session: [resetForNewSession] cancels every send still running, the
  *  coroutine and its HTTP call, waits for them to finish and zeroes their attachments. */
 internal object ComposeSend : ProcessScopedState {
 
-    class InFlight internal constructor(
+    /** Which call it is, so the screen that adopts it renders the outcome the right way. */
+    enum class Kind { SEND, CLIENT_SEND, DRAFT_SAVE }
+
+    class InFlight<T> internal constructor(
         val draft: MailDraft,
         /** The session it was submitted in; a follow-up send of the same draft reuses it. */
         val session: Long,
-        val outcome: Deferred<MailOutcome<MailSendOutcome>>,
+        val kind: Kind,
+        val outcome: Deferred<MailOutcome<T>>,
         private val call: CallHandle,
     ) {
         internal fun cancel() {
@@ -53,10 +57,10 @@ internal object ComposeSend : ProcessScopedState {
     private val lock = Any()
 
     /** The send a recreated Compose may adopt. */
-    private var inFlight: InFlight? = null
+    private var inFlight: InFlight<*>? = null
 
     /** Every send until it completes, adopted or not: what a reset has to stop. */
-    private val running = mutableSetOf<InFlight>()
+    private val running = mutableSetOf<InFlight<*>>()
 
     init {
         ProcessState.register(this)
@@ -69,24 +73,25 @@ internal object ComposeSend : ProcessScopedState {
      *  its HTTP call to the callback so a reset can cancel it. [session] is the generation the
      *  composer captured before its asynchronous work; a submission from an ended session, or
      *  one arriving during teardown, never reaches [send] and has its attachments zeroed. */
-    fun start(
+    fun <T> start(
         scope: CoroutineScope,
         draft: MailDraft,
         session: Long,
-        send: (MailDraft, onCall: (Call) -> Unit) -> MailOutcome<MailSendOutcome>,
-    ): InFlight {
+        kind: Kind = Kind.SEND,
+        send: (MailDraft, onCall: (Call) -> Unit) -> MailOutcome<T>,
+    ): InFlight<T> {
         val call = CallHandle()
         // Checked, launched and registered under the lock, so a reset either sees it or refuses it.
         val sending = synchronized(lock) {
             if (tearingDown || !ProcessState.isCurrent(session)) {
                 draft.attachments.forEach { it.wipe() }
-                return InFlight(draft, session, CompletableDeferred<MailOutcome<MailSendOutcome>>().apply { cancel() }, call)
+                return InFlight(draft, session, kind, CompletableDeferred<MailOutcome<T>>().apply { cancel() }, call)
             }
             val outcome = scope.async {
                 runCatching { send(draft, call::attach) }
                     .getOrElse { MailOutcome.UpstreamFailure(it.message ?: "Unexpected error") }
             }
-            InFlight(draft, session, outcome, call).also {
+            InFlight(draft, session, kind, outcome, call).also {
                 running += it
                 inFlight = it
             }
@@ -95,10 +100,10 @@ internal object ComposeSend : ProcessScopedState {
         return sending
     }
 
-    fun current(): InFlight? = synchronized(lock) { inFlight }
+    fun current(): InFlight<*>? = synchronized(lock) { inFlight }
 
     /** Only [sent] itself: a later send must not be dropped by an older one's late completion. */
-    fun clear(sent: InFlight) = synchronized(lock) {
+    fun clear(sent: InFlight<*>) = synchronized(lock) {
         if (inFlight === sent) inFlight = null
     }
 

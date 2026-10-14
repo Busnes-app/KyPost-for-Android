@@ -306,8 +306,8 @@ class MailRepository(
         targetFolder: String? = null,
     ): MailOutcome<Unit> = mutateAll(action, beginRemovals(ids, folder), targetFolder)
 
-    fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> =
-        relaySource.saveClientEncryptedDraft(draft)
+    fun saveClientEncryptedDraft(draft: ClientEncryptedDraft, onCall: (okhttp3.Call) -> Unit = {}): MailOutcome<Unit> =
+        relaySource.saveClientEncryptedDraft(draft, onCall)
 
     fun send(
         draft: MailDraft,
@@ -318,8 +318,8 @@ class MailRepository(
     fun currentAccount(): MailAccount? = relaySource.currentAccount()
 
     /** The client-custody send: this device already encrypted and signed, the relay only forwards. */
-    fun sendClientEncrypted(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome> =
-        relaySource.sendClientEncrypted(message)
+    fun sendClientEncrypted(message: ClientEncryptedMessage, onCall: (okhttp3.Call) -> Unit = {}): MailOutcome<MailSendOutcome> =
+        relaySource.sendClientEncrypted(message, onCall)
 
     fun listFolders(parent: String?): MailOutcome<FolderListResult> = relaySource.listFolders(parent)
     fun listScheduled(): MailOutcome<List<ScheduledSend>> = relaySource.listScheduled()

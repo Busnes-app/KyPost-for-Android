@@ -1,0 +1,23 @@
+name: ci-play-release
+
+# Launches the minified Play release build on an emulator. See release-smoke.yml.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  play:
+    name: ci-play-release
+    uses: ./.github/workflows/release-smoke.yml
+    with:
+      flavor: play
+      package: org.kysecurity.mail

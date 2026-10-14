@@ -6,6 +6,7 @@ import org.kysecurity.mail.data.DataRuntime
 import org.kysecurity.mail.push.PairingData
 import org.kysecurity.mail.push.PushPayload
 import org.kysecurity.mail.push.PushRuntime
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -118,9 +119,9 @@ class SecurityWipeTest {
             "only destruction still owed may outlive a wipe, but shared_prefs held $survivors",
             mayOutliveAWipe.containsAll(survivors),
         )
-        // Named explicitly as well as covered by the subset above: these four are the encrypted
+        // Named explicitly as well as covered by the subset above: these are the encrypted
         // stores, and a new one added without being swept is the regression that matters.
-        listOf("push_pairing_secure", "app_lock_secure", "db_key_secure", "device_envelope_secure")
+        listOf("push_pairing_secure", "push_state_secure", "app_lock_secure", "db_key_secure", "device_envelope_secure")
             .forEach { assertFalse("$it must not survive a wipe", it in survivors) }
     }
 
@@ -129,7 +130,7 @@ class SecurityWipeTest {
             .apply { load(null) }
             .containsAlias(alias)
 
-    /** push_state holds sender names and subjects in the clear; a wipe cannot leave it behind. */
+    /** Push history holds sender names and subjects; a wipe cannot leave either store behind. */
     @Test
     fun wipeAndResetApp_removesPushHistoryFromDisk() = runBlocking {
         val repository = PushRuntime.graph(context).repository
@@ -144,16 +145,18 @@ class SecurityWipeTest {
             ),
         )
 
-        val historyFile = File(context.filesDir, "datastore/push_state.preferences_pb")
-        assertTrue("push_state should exist before the wipe", historyFile.exists())
-        assertTrue(
-            "the subject should be readable on disk before the wipe",
-            historyFile.readBytes().toString(Charsets.ISO_8859_1).contains("Confidential Subject"),
-        )
+        val historyFile = File(File(context.dataDir, "shared_prefs"), "push_state_secure.xml")
+        assertTrue("push_state_secure should exist before the wipe", historyFile.exists())
 
         SecurityWipe.wipeAndResetApp(context)
 
-        assertFalse("push_state must not survive a wipe", historyFile.exists())
+        assertFalse("push_state_secure must not survive a wipe", historyFile.exists())
+        assertFalse(
+            "push_state must not survive a wipe",
+            File(context.filesDir, "datastore/push_state.preferences_pb").exists(),
+        )
+        PushRuntime.invalidate()
+        assertTrue(PushRuntime.graph(context).repository.state.first().history.isEmpty())
     }
 
     @Test

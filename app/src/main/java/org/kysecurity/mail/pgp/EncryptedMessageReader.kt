@@ -116,17 +116,25 @@ internal class EncryptedMessageReader(
                 )
             }
 
+            // Nothing was decrypted, so a named recipient must be some key this device holds. An
+            // unreadable holder names none, so any named recipient counts as someone else.
+            val heldKeys = EnrollmentSession.withDecryptionKeys {
+                runCatching { PgpDecryptor.heldKeyFingerprints(it()) }.getOrDefault(emptyList())
+            } ?: return ReadOutcome.NeedsUnlock
+
             val raw = offeredKeys.firstNotNullOfOrNull { armored ->
                 PgpDecryptor.verifyDetached(
                     armoredPublicKey = armored,
                     body = signedPart,
                     armoredSignature = payload.signaturePayload,
+                    heldKeys = heldKeys,
                 ).takeIf { it.valid }
             } ?: PgpDecryptor.verifyDetached(
                 // Not the binding decision: this only yields a non-null RawSignature so the verdict can run.
                 armoredPublicKey = offeredKeys.firstOrNull().orEmpty(),
                 body = signedPart,
                 armoredSignature = payload.signaturePayload,
+                heldKeys = heldKeys,
             )
             // Rendered from the SAME bytes that were verified. Rendering `body` beside a verdict
             // computed from `signedPart` would show one message and vouch for another.
