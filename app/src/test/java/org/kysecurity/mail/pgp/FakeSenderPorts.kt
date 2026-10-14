@@ -27,7 +27,7 @@ internal class FakeClientEncryptedTransport(
 ) : ClientEncryptedTransport {
     val sent = mutableListOf<ClientEncryptedMessage>()
 
-    override fun send(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome> {
+    override suspend fun send(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome> {
         sent += message
         return outcome
     }

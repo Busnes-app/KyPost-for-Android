@@ -33,7 +33,8 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   recovery; `clearPairing` remains the destructive one. See `app/src/main/AGENTS.md`.
 - Pairing proof material lives in a Keystore-backed `EncryptedSharedPreferences` file
   (`SecurePairingStore`), not plaintext DataStore — see `app/src/main/AGENTS.md` for the exact
-  storage split. Push delivery state and history are plaintext DataStore; the contact-sync cursor
+  storage split. Push history and UnifiedPush keys are in `push_state_secure`, the same kind of
+  file; delivery flags stay in plaintext DataStore. The contact-sync cursor
   lives in Room with the contact outbox so acknowledgement is atomic.
 - Deep-link contract for pairing is `kypost://native-pair` with required `sub`, `srv`, and
   `pt` params (`reg` optional). `hash` is no longer part of the contract — the per-device secret
@@ -78,7 +79,9 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   a submission whose generation has ended, or that arrives while a reset is still tearing down,
   without calling the transport, and zeroes its attachments. A Compose that restores the
   draft adopts a send still in flight and keeps Send disabled instead of sending it again. The
-  client-encrypted send still lives in `lifecycleScope`: its unlock prompt is bound to the Activity.
+  client-encrypted send and the encrypted Save draft unlock and encrypt in `lifecycleScope` (the
+  unlock prompt is bound to the Activity), then hand only the relay call to `ComposeSend`
+  (`Kind.CLIENT_SEND`, `Kind.DRAFT_SAVE`), so a rotation adopts it like a send.
 - MFA approval (`push/MfaApprovalActivity`) must show the sign-in's context (IP, location, user
   agent, time) and, whenever the server supplies `matchDigits`, require a number match instead of
   a bare Approve button. A contentless approval prompt is what MFA-fatigue attacks harvest. All
@@ -148,6 +151,11 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
 - CI reinstalls the debug APK after instrumentation cleanup, then measures the median of three
   cold launcher starts on the API 34 Play emulator through `scripts/check-startup-time.sh`; keep
   it a coarse regression ceiling, not a device benchmark.
+- `ci-play-release` and `ci-fdroid-release` (`.github/workflows/release-smoke.yml`) install the
+  minified release build on an API 34 emulator and drive it with `scripts/release-smoke.sh`
+  (launcher, pairing link, mailto compose, no crash). Signed with a per-run throwaway key; no
+  secrets. Deliberately not an instrumented test APK: it would share the app's R8-shrunk androidx
+  and Kotlin classes and crash in the test runner before reaching the app.
 
 # Child DOX Index
 

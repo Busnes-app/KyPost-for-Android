@@ -119,4 +119,16 @@ class DeviceContactMatcherTest {
         }
         assertNull(index.findMatch(listOf("nobody@example.com"), listOf("555-999-9999")))
     }
+
+    /** A contact added mid-scan is found by the rest of the scan, behind every earlier owner. */
+    @Test
+    fun anAddedContactIsMatched_behindEarlierOwners() {
+        val first = ContactDto(uid = "first", fn = "First", emails = listOf(ContactFieldDto(value = "shared@example.com")))
+        val index = DeviceContactMatcher.Index.of(listOf(first))
+
+        index.add(ContactDto(uid = "added", fn = "Added", phones = listOf(ContactFieldDto(value = "+1 555 123 4567")), emails = first.emails))
+
+        assertEquals("added", index.findMatch(emptyList(), listOf("555-123-4567")))
+        assertEquals("first", index.findMatch(listOf("SHARED@example.com"), listOf("555-123-4567")))
+    }
 }

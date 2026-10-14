@@ -269,13 +269,13 @@ class RelayMailSource(
         return execute(request) { code, rawBody -> mutationOutcome(code, rawBody) }
     }
 
-    override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit> {
+    override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft, onCall: (Call) -> Unit): MailOutcome<Unit> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
         val base = baseUrl(pairing, "/api/mail/draft") ?: return MailOutcome.BadRequest("Server URL is not valid")
         val body = json.encodeToString(RelayClientEncryptedDraftDto(draft.to, draft.pgpDraft))
         val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
             .authed(pairing).build()
-        return execute(request) { code, rawBody ->
+        return execute(request, onCall) { code, rawBody ->
             if (code != 200) return@execute mapErrorCode(code, rawBody)
             val reply = runCatching { json.parseToJsonElement(rawBody) as? JsonObject }.getOrNull()
             if (reply?.get("ok") == JsonPrimitive(true)) MailOutcome.Success(Unit)
@@ -304,7 +304,7 @@ class RelayMailSource(
         }
     }
 
-    override fun sendClientEncrypted(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome> {
+    override fun sendClientEncrypted(message: ClientEncryptedMessage, onCall: (Call) -> Unit): MailOutcome<MailSendOutcome> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
         val base = baseUrl(pairing, "/api/mail/send-pgp")
             ?: return MailOutcome.BadRequest("Server URL is not valid")
@@ -329,7 +329,7 @@ class RelayMailSource(
         val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
             .authed(pairing)
             .build()
-        return execute(request) { code, rawBody -> sendOutcome(code, rawBody, scheduling = message.sendAt != null) }
+        return execute(request, onCall) { code, rawBody -> sendOutcome(code, rawBody, scheduling = message.sendAt != null) }
     }
 
     /** 200 is sent, 202 is held for later, and a 202 counts only where a hold was asked for. */

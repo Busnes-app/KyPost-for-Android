@@ -22,6 +22,7 @@ import org.kysecurity.mail.security.filterObscuredTouchesRecursively
 import org.kysecurity.mail.security.AppLockStore
 import org.kysecurity.mail.security.AuthGateKey
 import org.kysecurity.mail.security.CredentialEnvelope
+import org.kysecurity.mail.security.EncryptedStoreUnavailableException
 import org.kysecurity.mail.security.consumePin
 import org.kysecurity.mail.security.usePin
 import org.kysecurity.mail.security.SecurityRuntime
@@ -53,6 +54,9 @@ class MfaApprovalActivity : AppCompatActivity() {
     /** The app-lock PIN dialog while it is showing. Held so [onStop] can dismiss it — see
      *  [promptAppLockPin]. */
     private var pinDialog: android.app.AlertDialog? = null
+
+    /** [refuseUnreadableLockStore]'s dialog, dismissed in [onStop] so [onStart] cannot stack two. */
+    private var storeDialog: android.app.AlertDialog? = null
 
     /** Set by [burnChallenge]: this challenge is finished on this device regardless of what the
      *  network says, so [resolve] must not re-offer it. */
@@ -265,13 +269,16 @@ class MfaApprovalActivity : AppCompatActivity() {
     private fun requireAuthentication() {
         authInFlight = true
         lifecycleScope.launch {
-            // Keystore and disk, so never on Main. Null unlock means nothing is sealed on this device.
-            val (unlock, posture) = withContext(Dispatchers.IO) {
-                val graph = SecurityRuntime.graph(this@MfaApprovalActivity)
-                graph.biometricUnlockVault.prepareUnlock() to LockPosture(
-                    lockEnabled = graph.appLockStore.isLockEnabled(),
-                    credentialGateEnabled = graph.appLockStore.isCredentialPinGateEnabled(),
-                )
+            // Keystore and disk, so never on Main. Null unlock means biometric unlock is off or
+            // nothing is sealed; either way the PIN or device-credential path below decides.
+            val read = withContext(Dispatchers.IO) {
+                readUnlessLockStoreUnavailable {
+                    val graph = SecurityRuntime.graph(this@MfaApprovalActivity)
+                    graph.appLockManager.biometricUnlockOnOffer() to LockPosture(
+                        lockEnabled = graph.appLockStore.isLockEnabled(),
+                        credentialGateEnabled = graph.appLockStore.isCredentialPinGateEnabled(),
+                    )
+                }
             }
             // The user left while the vault was being read: leave the decision unmade and let
             // [onStart] start over on the way back.
@@ -279,6 +286,11 @@ class MfaApprovalActivity : AppCompatActivity() {
                 authInFlight = false
                 return@launch
             }
+            if (read == null) {
+                refuseUnreadableLockStore()
+                return@launch
+            }
+            val (unlock, posture) = read
             if (unlock != null) {
                 authenticateWithSealedKeys(unlock, posture)
             } else {
@@ -405,6 +417,21 @@ class MfaApprovalActivity : AppCompatActivity() {
     private fun canRaisePrompt(): Boolean =
         lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) && !supportFragmentManager.isStateSaved
 
+    /** As [org.kysecurity.mail.security.LockedActivity] does: without the store neither posture
+     *  is knowable, so nothing is approvable. The buttons stay disabled until the screen closes. */
+    private fun refuseUnreadableLockStore() {
+        authInFlight = false
+        android.util.Log.e("MfaApproval", "The app-lock store is unreadable; refusing the challenge")
+        storeDialog?.dismiss()
+        storeDialog = android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.security_tripwire_unreadable_title)
+            .setMessage(R.string.security_tripwire_unreadable_message)
+            .setPositiveButton(R.string.security_wipe_blocked_close) { _, _ -> finish() }
+            .setCancelable(false)
+            .create()
+            .showSecurely()
+    }
+
     /** Ends the screen with the decision unmade. */
     private fun abandonDecision() {
         authInFlight = false
@@ -483,6 +510,8 @@ class MfaApprovalActivity : AppCompatActivity() {
         // `authInFlight` is what let [onStart] stack a second one on top of it.
         pinDialog?.dismiss()
         pinDialog = null
+        storeDialog?.dismiss()
+        storeDialog = null
         setButtonsEnabled(false)
     }
 
@@ -519,6 +548,14 @@ class MfaApprovalActivity : AppCompatActivity() {
         const val STATE_MATCH_OPTIONS = "matchOptions"
     }
 }
+
+/** Null when the app-lock store will not open, a Keystore fault that must not crash the screen. */
+internal fun <T> readUnlessLockStoreUnavailable(read: () -> T): T? =
+    try {
+        read()
+    } catch (e: EncryptedStoreUnavailableException) {
+        null
+    }
 
 /** True only for genuinely terminal statuses; HW_UNAVAILABLE/UNKNOWN/SECURITY_UPDATE are not. */
 internal fun mfaHasNoAuthenticator(canAuthenticateStatus: Int): Boolean = when (canAuthenticateStatus) {

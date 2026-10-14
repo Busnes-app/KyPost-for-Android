@@ -145,7 +145,7 @@ class EncryptedMessageReaderTest {
         org.bouncycastle.bcpg.ArmoredOutputStream(buffer).use { generator.generate().encode(it) }
         val signature = signatureOverride ?: buffer.toString("UTF-8").also {
             val checked = PgpDecryptor.verifyDetached(
-                TestPgpPrivateKey.ARMORED_PUBLIC, signedPart.toByteArray(Charsets.UTF_8), it,
+                TestPgpPrivateKey.ARMORED_PUBLIC, signedPart.toByteArray(Charsets.UTF_8), it, heldKeys = emptyList(),
             ) as RawSignature.Checked
             assertTrue("fixture signature must verify over the exact MIME part", checked.verified)
         }
@@ -353,6 +353,58 @@ class EncryptedMessageReaderTest {
         val outcome = read(r, unlockIfNeeded = false) as ReadOutcome.Decrypted
 
         assertEquals(PgpSignatureState.KEY_CHANGED, outcome.signature)
+    }
+
+    /** A detached signature made for someone else's encrypted copy, then sent on unencrypted. */
+    @Test
+    fun aDetachedSignatureNamingOnlyAnotherRecipientIsNeverVerified() {
+        assertEquals(PgpSignatureState.FOR_ANOTHER_RECIPIENT, detachedVerdictNaming(TestPgpSecondKey.ARMORED_PUBLIC))
+    }
+
+    @Test
+    fun aDetachedSignatureNamingThisDeviceStaysVerified() {
+        assertEquals(PgpSignatureState.VERIFIED_CONFIRMED, detachedVerdictNaming(TestPgpPrivateKey.ARMORED_PUBLIC))
+    }
+
+    private fun detachedVerdictNaming(recipientPublicKey: String): PgpSignatureState {
+        EnrollmentSession.put(TestPgpPrivateKey.ARMORED_PRIVATE.toCharArray())
+        val signedPart = TestPgpPrivateKey.DETACHED_SIGNATURE_BODY.toByteArray(Charsets.UTF_8)
+        val secret = orderedSecretKeyRings(TestPgpPrivateKey.ARMORED_PRIVATE.byteInputStream())!!
+            .first().secretKeys.asSequence().first { it.isSigningKey }
+        val recipient = org.bouncycastle.openpgp.PGPPublicKeyRing(
+            org.bouncycastle.openpgp.PGPUtil.getDecoderStream(recipientPublicKey.byteInputStream()),
+            org.bouncycastle.openpgp.operator.bc.BcKeyFingerprintCalculator(),
+        ).publicKey
+        val generator = org.bouncycastle.openpgp.PGPSignatureGenerator(
+            org.bouncycastle.openpgp.operator.bc.BcPGPContentSignerBuilder(
+                secret.publicKey.algorithm, org.bouncycastle.bcpg.HashAlgorithmTags.SHA256,
+            ), secret.publicKey,
+        ).apply {
+            init(
+                org.bouncycastle.openpgp.PGPSignature.BINARY_DOCUMENT,
+                secret.extractPrivateKey(
+                    org.bouncycastle.openpgp.operator.bc.BcPBESecretKeyDecryptorBuilder(
+                        org.bouncycastle.openpgp.operator.bc.BcPGPDigestCalculatorProvider(),
+                    ).build(CharArray(0)),
+                ),
+            )
+            setHashedSubpackets(
+                org.bouncycastle.openpgp.PGPSignatureSubpacketGenerator()
+                    .apply { addIntendedRecipientFingerprint(false, recipient) }.generate(),
+            )
+            update(signedPart)
+        }
+        val armored = java.io.ByteArrayOutputStream()
+        org.bouncycastle.bcpg.ArmoredOutputStream(armored).use { generator.generate().encode(it) }
+        val (r, _) = reader(
+            payloads = FakePayloadSource(
+                detachedSignedPayload(signaturePayload = armored.toString("UTF-8"), signerKeys = listOf(boundKey())),
+            ),
+            localKeys = mapOf(
+                "bob@example.com" to listOf(LocalSignerKey(TestPgpPrivateKey.ARMORED_PUBLIC, confirmed = true, pinned = true)),
+            ),
+        )
+        return (read(r, unlockIfNeeded = false) as ReadOutcome.Decrypted).signature
     }
 
     /** The regression. The server empties `body` whenever it sends `signedPartBase64`, so a client

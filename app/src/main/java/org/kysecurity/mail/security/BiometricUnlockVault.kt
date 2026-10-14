@@ -25,7 +25,7 @@ class BiometricUnlockVault(context: Context) : BiometricKeySealer {
         appContext.getSharedPreferences(PREFS_FILE, Context.MODE_PRIVATE)
     }
 
-    /** Re-sealing on every PIN unlock is the automatic recovery from an invalidated key. */
+    /** Re-sealing on every PIN unlock (while biometric unlock is on) recovers an invalidated key. */
     override fun seal(keys: CredentialKeys) {
         val publicKey = ensureKey()
         if (publicKey == null) {
@@ -42,7 +42,7 @@ class BiometricUnlockVault(context: Context) : BiometricKeySealer {
     }
 
     /** Null when biometric unlock is not on offer; drops an invalidated key. Blocking: Keystore. */
-    fun prepareUnlock(): BiometricUnlock? {
+    override fun prepareUnlock(): BiometricUnlock? {
         val sealed = storedBlob() ?: return null
         val privateKey = runCatching {
             keyStore().getKey(ALIAS, null) as? java.security.PrivateKey
@@ -62,7 +62,7 @@ class BiometricUnlockVault(context: Context) : BiometricKeySealer {
 
     /** Removes the key and the sealed blob, naming what it could not remove so
      *  [SecurityWipe] can report an incomplete wipe rather than a clean one. */
-    fun destroy(): List<String> {
+    override fun destroy(): List<String> {
         val failed = mutableListOf<String>()
         runCatching { prefs.edit().clear().commit() }
             .onFailure { failed += "clearSealedKeys" }

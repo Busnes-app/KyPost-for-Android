@@ -68,6 +68,10 @@ enum class PgpSignatureState {
 
     /** Signed, and it does **not** verify against the key bound to the sender. */
     INVALID,
+
+    /** A good signature that names its intended recipients, none of them this device's key: a
+     *  message signed for someone else, re-encrypted to us. Never positive. */
+    FOR_ANOTHER_RECIPIENT,
 }
 
 /** A blank `pgpSignerFingerprint` means nothing was checked — never an accusation. */

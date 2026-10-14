@@ -56,11 +56,13 @@ class DeviceContactSyncSettings(context: Context) {
         Unit
     }
 
-    /** Clears import consent and runs [block] under the consent lock, for the account purge: an
-     *  import is either queued before [block] (which then removes it) or finds no consent after. */
+    /** Clears import consent, turns device sync off and runs [block] under the consent lock, for
+     *  the account purge: an import or create is either queued before [block] (which then removes
+     *  it) or finds no consent and sync off after. */
     suspend fun <T> clearConsentDuring(block: suspend () -> T): T = consentLock.withLock {
         prefs.edit().remove(KEY_IMPORT_ACCOUNTS).remove(KEY_IMPORT_DESTINATION)
-            .putLong(KEY_CONSENT_REVISION, consentRevision() + 1).commit()
+            .putLong(KEY_CONSENT_REVISION, consentRevision() + 1)
+            .putBoolean(KEY_ENABLED, false).commit()
         block()
     }
 
@@ -68,6 +70,9 @@ class DeviceContactSyncSettings(context: Context) {
      *  lock so a change cannot land between the check and the write. Null when not consented. */
     suspend fun <T> whileConsented(destination: String, accountKey: String, block: suspend () -> T): T? =
         consentLock.withLock { if (accountKey in importAccounts(destination)) block() else null }
+
+    /** Runs [block] under the lock the account purge holds through [clearConsentDuring]. */
+    suspend fun <T> withPurgeLock(block: suspend () -> T): T = consentLock.withLock { block() }
 
     fun hasShownSyncIntro(): Boolean = prefs.getBoolean(KEY_SHOWN_INTRO, false)
 

@@ -163,7 +163,7 @@ class UnlockActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val unlock = withContext(Dispatchers.IO) {
-                SecurityRuntime.graph(this@UnlockActivity).biometricUnlockVault.prepareUnlock()
+                SecurityRuntime.graph(this@UnlockActivity).appLockManager.biometricUnlockOnOffer()
             } ?: return@launch
 
             // A prompt requested after the FragmentManager has saved its state is silently dropped

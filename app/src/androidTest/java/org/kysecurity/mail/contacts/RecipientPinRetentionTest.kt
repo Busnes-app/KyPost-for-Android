@@ -182,7 +182,7 @@ class RecipientPinRetentionTest {
         assertEquals(PgpSignatureState.VERIFIED_CONFIRMED, verdictFor(KEY_A))
     }
 
-    private companion object {
+    internal companion object {
         const val ALICE = "alice@example.invalid"
         val KEY_A: String by lazy { armored(ring("A <alice@example.invalid>").generatePublicKeyRing().encoded) }
         val KEY_B: String by lazy { armored(ring("B <alice@example.invalid>").generatePublicKeyRing().encoded) }

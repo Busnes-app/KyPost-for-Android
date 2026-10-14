@@ -29,7 +29,7 @@ class AppLockManager(
     // AndroidKeyStore. See [CredentialPepper].
     private val pepper: CredentialPepper = KeystoreCredentialPepper,
     // Likewise: [BiometricUnlockVault] is the real one, wired in by [SecurityRuntime].
-    private val sealer: BiometricKeySealer = BiometricKeySealer {},
+    private val sealer: BiometricKeySealer = NoBiometricSealer,
     private val onWipe: suspend () -> WipeResult,
 ) {
     private val _locked = MutableStateFlow(state.isLockEnabled())
@@ -167,11 +167,37 @@ class AppLockManager(
             // Error, not info: silently, this is "biometric unlock stopped working and nobody was
             // told". The unseal path can recover on the next PIN unlock, but only if someone knows
             // to look, and INFO on a failing security feature is not telling anyone.
-            runCatching { sealer.seal(deriveUsingPersistedSalt(pin)) }
-                .onFailure { android.util.Log.e("AppLockManager", "Could not re-seal after a PIN change", it) }
+            if (state.isBiometricEnabled()) {
+                runCatching { sealer.seal(deriveUsingPersistedSalt(pin)) }
+                    .onFailure { android.util.Log.e("AppLockManager", "Could not re-seal after a PIN change", it) }
+            }
         }
         Unit
     }
+
+    /** Turning biometric unlock on is a PIN check like any other, and seals with that PIN. */
+    suspend fun enableBiometric(pin: CharArray): UnlockAttemptResult = withContext(Dispatchers.Default) {
+        pinGate.withLock {
+            verifyLocked(pin) {
+                state.setBiometricEnabled(true)
+                runCatching { sealer.seal(deriveUsingPersistedSalt(pin)) }
+                    .onFailure { android.util.Log.i("AppLockManager", "Could not seal keys for biometric unlock", it) }
+            }
+        }
+    }
+
+    /** Under [pinGate], so a PIN unlock already running cannot seal again after the switch-off.
+     *  Returns what could not be removed. */
+    suspend fun disableBiometric(): List<String> = withContext(Dispatchers.Default) {
+        pinGate.withLock {
+            state.setBiometricEnabled(false)
+            sealer.destroy()
+        }
+    }
+
+    /** The one gate on a biometric unlock: null while the user has it switched off. Blocking. */
+    fun biometricUnlockOnOffer(): BiometricUnlock? =
+        if (state.isBiometricEnabled()) sealer.prepareUnlock() else null
 
     /** Needed when the credential gate is switched off, or a later pairing re-wraps behind it. */
     fun dropCredentialKeys() {
@@ -244,13 +270,18 @@ class AppLockManager(
 
     /** Derives unconditionally and is best-effort: a failure must not fail the unlock. */
     private fun deriveSealAndCache(pin: CharArray) {
+        val biometric = state.isBiometricEnabled()
+        // Off means nothing sealed, including a blob an earlier build sealed regardless.
+        if (!biometric) sealer.destroy()
         val keys = runCatching { deriveUsingPersistedSalt(pin) }
             .onFailure { android.util.Log.e("AppLockManager", "Could not derive credential keys on unlock", it) }
             .getOrNull() ?: return
         // Never fails the unlock: a device with no biometric enrolled has nowhere to seal to, which
         // is not an error, it is that user's normal.
-        runCatching { sealer.seal(keys) }
-            .onFailure { android.util.Log.i("AppLockManager", "Could not seal keys for biometric unlock", it) }
+        if (biometric) {
+            runCatching { sealer.seal(keys) }
+                .onFailure { android.util.Log.i("AppLockManager", "Could not seal keys for biometric unlock", it) }
+        }
         if (state.isCredentialPinGateEnabled()) credentialKeys = keys
     }
 
