@@ -48,12 +48,10 @@ internal fun ContactEntity.hasEmail(address: String): Boolean =
     runCatching { toDto().emails.any { it.value.trim().equals(address, ignoreCase = true) } }
         .getOrDefault(false)
 
-/** Alarms clear `confirmed` but still return the key, so a foreign signature reads KEY_CHANGED. */
+/** Never confirmed: sync can create the row, and only a pin records an in-person check. Still
+ *  returned, alarms or not, so a foreign signature reads KEY_CHANGED. */
 internal fun ContactEntity.toLocalSignerKey(): LocalSignerKey? {
     val key = pgpKey?.takeIf { it.isNotBlank() } ?: return null
     if (pgpKeyFingerprint.isNullOrBlank()) return null
-    return LocalSignerKey(
-        publicKey = key,
-        confirmed = !pgpKeyNeedsReverification && !identityNeedsReview,
-    )
+    return LocalSignerKey(publicKey = key, confirmed = false)
 }

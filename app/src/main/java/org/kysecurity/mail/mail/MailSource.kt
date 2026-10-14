@@ -283,7 +283,8 @@ interface MailSource {
         wakeAt: java.time.Instant? = null,
     ): MailOutcome<MailActionOutcome>
     fun saveDraft(draft: MailDraft): MailOutcome<Unit>
-    fun saveClientEncryptedDraft(draft: ClientEncryptedDraft): MailOutcome<Unit>
+    /** [onCall] as for [sendMail]. */
+    fun saveClientEncryptedDraft(draft: ClientEncryptedDraft, onCall: (okhttp3.Call) -> Unit = {}): MailOutcome<Unit>
     /** Null when unpaired. */
     fun currentAccount(): MailAccount?
 
@@ -301,8 +302,9 @@ interface MailSource {
     /** Returns the message to Drafts; the success value is the server's warning, blank if none. */
     fun cancelScheduled(id: String): MailOutcome<String>
 
-    /** Relays ciphertext this device already built; a different endpoint and failure set. */
-    fun sendClientEncrypted(message: ClientEncryptedMessage): MailOutcome<MailSendOutcome>
+    /** Relays ciphertext this device already built; a different endpoint and failure set. [onCall]
+     *  as for [sendMail]. */
+    fun sendClientEncrypted(message: ClientEncryptedMessage, onCall: (okhttp3.Call) -> Unit = {}): MailOutcome<MailSendOutcome>
     fun fetchMessageBody(messageId: String, folder: String): MailOutcome<MailMessageBody>
     fun listAttachments(messageId: String, folder: String): MailOutcome<List<AttachmentInfo>>
     fun downloadAttachment(messageId: String, folder: String, index: Int): MailOutcome<DownloadedAttachment>

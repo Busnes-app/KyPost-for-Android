@@ -333,6 +333,26 @@ class EmailDetailActivityTest {
         assertFalse(rendered.withImages.contains("iframe", ignoreCase = true))
     }
 
+    /** The reader shows mail; it does not submit it. Form controls go, their readable text stays. */
+    @Test
+    fun blockExternalResources_dropsFormControlsAndKeepsTheirText() {
+        val body = "<form action=\"https://collect.example/x\" method=\"post\"><p>Hi</p>" +
+            "<input name=\"a\" value=\"v\"><textarea name=\"b\">Notes</textarea>" +
+            "<select name=\"c\"><option>One</option></select><button formaction=\"https://collect.example/y\">Go</button></form>"
+
+        for (keepImages in listOf(false, true)) {
+            for (keepInlineDataImages in listOf(false, true)) {
+                val blocked = blockExternalResources(body, keepImages = keepImages, keepInlineDataImages = keepInlineDataImages)
+
+                assertFalse(blocked, blocked.contains("collect.example"))
+                assertFalse(blocked, Regex("<(form|input|textarea|select|option|button)\\b", RegexOption.IGNORE_CASE).containsMatchIn(blocked))
+                assertTrue(blocked, blocked.contains("<p>Hi</p>"))
+                assertTrue(blocked, blocked.contains("Notes"))
+                assertTrue(blocked, blocked.contains("Go"))
+            }
+        }
+    }
+
     /** `[^)]*` stops at the FIRST `)`, which in a quoted CSS url is not the closing one: the old
      *  regex replaced `url("http://x/a)` and left `b")` — the tail of the URL it meant to remove. */
     @Test

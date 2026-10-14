@@ -21,14 +21,14 @@ enum class PgpMessageState {
 fun pgpMessageStateOf(
     pgpEncrypted: Boolean,
     pgpDecryptError: String,
-    body: String?,
+    hasBody: Boolean,
     /** True when the body could not be read at all (no cached row), as opposed to the server
      *  having delivered the message with no body. See [PgpMessageState.BODY_UNAVAILABLE]. */
     bodyUnavailable: Boolean = false,
 ): PgpMessageState = when {
     !pgpEncrypted -> PgpMessageState.NONE
     pgpDecryptError.isNotBlank() -> PgpMessageState.DECRYPT_FAILED
-    !body.isNullOrBlank() -> PgpMessageState.DECRYPTED_BY_SERVER
+    hasBody -> PgpMessageState.DECRYPTED_BY_SERVER
     bodyUnavailable -> PgpMessageState.BODY_UNAVAILABLE
     else -> PgpMessageState.CLIENT_PROTECTED
 }
@@ -68,6 +68,10 @@ enum class PgpSignatureState {
 
     /** Signed, and it does **not** verify against the key bound to the sender. */
     INVALID,
+
+    /** A good signature that names its intended recipients, none of them this device's key: a
+     *  message signed for someone else, re-encrypted to us. Never positive. */
+    FOR_ANOTHER_RECIPIENT,
 }
 
 /** A blank `pgpSignerFingerprint` means nothing was checked — never an accusation. */
@@ -77,8 +81,8 @@ fun pgpSignatureStateOf(
     pgpSignerFingerprint: String = "",
 ): PgpSignatureState = when {
     !pgpSigned -> PgpSignatureState.NONE
-    pgpVerified -> PgpSignatureState.VERIFIED_SEEN_BEFORE
-    pgpSignerFingerprint.isBlank() -> PgpSignatureState.SIGNER_UNKNOWN
+    // The relay's check, against a key this device never pinned: no continuity to claim.
+    pgpVerified || pgpSignerFingerprint.isBlank() -> PgpSignatureState.SIGNER_UNKNOWN
     else -> PgpSignatureState.INVALID
 }
 

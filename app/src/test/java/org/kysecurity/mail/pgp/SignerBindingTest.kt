@@ -32,7 +32,7 @@ class SignerBindingTest {
     @Test
     fun aServerSuppliedVerifiedFlagCannotConfirmASigner() {
         val state = signatureStateFor(sig(), listOf(key(verified = true, source = "qr")))
-        assertEquals(PgpSignatureState.VERIFIED_SEEN_BEFORE, state)
+        assertEquals(PgpSignatureState.SIGNER_UNKNOWN, state)
     }
 
     @Test
@@ -77,8 +77,20 @@ class SignerBindingTest {
     }
 
     @Test
-    fun autocryptKeyIsNeverConfirmed() {
-        val state = signatureStateFor(sig(), listOf(key(source = "autocrypt")))
+    fun aRelayKeyWithNoLocalRecordIsNeverSeenBefore() {
+        for (source in listOf("autocrypt", "qr", "manual")) {
+            val state = signatureStateFor(sig(), listOf(key(verified = true, source = source)))
+            assertEquals(source, PgpSignatureState.SIGNER_UNKNOWN, state)
+        }
+    }
+
+    @Test
+    fun onlyALocalKeyEarnsSeenBefore() {
+        val state = signatureStateFor(
+            sig(),
+            serverKeys = emptyList(),
+            localKeys = listOf(LocalSignerKey(TestPgpKey.ARMORED, confirmed = false)),
+        )
         assertEquals(PgpSignatureState.VERIFIED_SEEN_BEFORE, state)
     }
 
@@ -122,7 +134,9 @@ class SignerBindingTest {
     @Test
     fun aSignatureMatchingTheSendersBoundKeyIdIsStillVerified() {
         val seenBefore = signatureStateFor(
-            sig(signerKeyId = testKeyId), listOf(key(verified = false, source = "autocrypt")),
+            sig(signerKeyId = testKeyId),
+            serverKeys = emptyList(),
+            localKeys = listOf(LocalSignerKey(TestPgpKey.ARMORED, confirmed = false)),
         )
         assertEquals(PgpSignatureState.VERIFIED_SEEN_BEFORE, seenBefore)
 
@@ -154,7 +168,7 @@ class SignerBindingTest {
             sig(signerKeyId = testKeyId), // testKeyId belongs to TestPgpKey.ARMORED, not ARMORED_PUBLIC
             listOf(confirmedButDidNotSign, autocryptAndDidSign),
         )
-        assertEquals(PgpSignatureState.VERIFIED_SEEN_BEFORE, state)
+        assertEquals(PgpSignatureState.SIGNER_UNKNOWN, state)
     }
 
     @Test
@@ -188,7 +202,7 @@ class SignerBindingTest {
             source = "manual",
         )
         val state = signatureStateFor(sig(), listOf(keyWithUselessAddress))
-        assertEquals(PgpSignatureState.VERIFIED_SEEN_BEFORE, state)
+        assertEquals(PgpSignatureState.SIGNER_UNKNOWN, state)
     }
 
     /** [onto]'s primary plus [armoredPublicKey]'s subkeys; BouncyCastle checks no binding signature. */

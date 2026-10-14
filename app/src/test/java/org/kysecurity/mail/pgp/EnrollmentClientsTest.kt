@@ -136,7 +136,7 @@ class EnrollmentClientsTest {
 
         val result = clients.fetchEnvelope("https://relay.example.com", "dev-1", "secret-1")
 
-        assertEquals(EnrollmentCallResult.Envelope("ENV"), result)
+        assertEquals(EnrollmentCallResult.Envelope("ENV", null), result)
         val sent = factory.requests.single()
         assertEquals("https://relay.example.com/api/pgp/device/envelope", sent.url.toString())
         assertTrue("no query string may be sent", sent.url.querySize == 0)

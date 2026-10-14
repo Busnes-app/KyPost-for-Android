@@ -16,6 +16,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.kysecurity.mail.CachedDraft
 import org.kysecurity.mail.ComposeActivity
 import org.kysecurity.mail.ComposeDraftCache
 import org.kysecurity.mail.ForwardAttachmentHandoff
@@ -219,6 +220,20 @@ class ComposeIntentTest {
         ActivityScenario.launch<ComposeActivity>(intent).use { scenario ->
             scenario.recreate()
             scenario.onActivity { activity -> assertEquals(ReplyRef("7", "Drafts"), activity.sourceDraftForTest()) }
+        }
+    }
+
+    @Test
+    fun aNewShareRequestDoesNotRestoreAnUnrelatedDraft() {
+        ComposeDraftCache.take()
+        ComposeDraftCache.save(CachedDraft("old@example.com", "", "", "Old draft", "<p>old</p>", emptyList()))
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:bob@example.com?subject=New"))
+            .setClass(context, ComposeActivity::class.java)
+
+        ActivityScenario.launch<ComposeActivity>(intent).use { scenario ->
+            scenario.onActivity { activity -> assertNull(activity.restoredDraftForTest) }
+            onView(withId(R.id.composeSubjectField)).check(matches(withText("New")))
         }
     }
 

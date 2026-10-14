@@ -26,6 +26,9 @@ object PgpFingerprint {
         format(primary.fingerprint)
     }.getOrNull()
 
+    /** For this device's own key, which needs no binding check. */
+    internal fun of(key: org.bouncycastle.openpgp.PGPPublicKey): String = format(key.fingerprint)
+
     private fun format(bytes: ByteArray): String =
         bytes.joinToString("") { "%02X".format(it) }.chunked(4).joinToString(" ")
 }

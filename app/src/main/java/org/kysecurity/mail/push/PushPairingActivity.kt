@@ -284,19 +284,11 @@ class PushPairingActivity : LockedActivity() {
     }
 
     private fun showSyncIntroDialog(settings: DeviceContactSyncSettings) {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.contact_sync_intro_title)
-            .setMessage(R.string.contact_sync_intro_message)
-            .setPositiveButton(R.string.contact_sync_intro_positive) { _, _ ->
-                // The permission callback calls scanQr(); calling here too would stack it on the system dialog.
-                val requestedPermission = syncEnabler.checkAndEnable()
-                if (!requestedPermission) scanQr()
-            }
-            .setNegativeButton(R.string.contact_sync_intro_negative) { _, _ -> scanQr() }
-            .setOnCancelListener { scanQr() }
-            .setOnDismissListener { settings.setHasShownSyncIntro(true) }
-            .create()
-            .showSecurely()
+        syncEnabler.askToEnable(
+            onDecline = ::scanQr,
+            // The permission callback calls scanQr(); calling here too would stack it on the system dialog.
+            onContinue = { requestedPermission -> if (!requestedPermission) scanQr() },
+        ).setOnDismissListener { settings.setHasShownSyncIntro(true) }
     }
 
     private fun scanQr() {

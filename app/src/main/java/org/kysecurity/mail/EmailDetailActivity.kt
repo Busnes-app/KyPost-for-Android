@@ -401,7 +401,7 @@ class EmailDetailActivity : LockedActivity() {
         // Routine since the inbox went bodies=0: the body is fetched on open, so any network
         // failure lands here rather than needing a missing cache row.
         val fetchFailure = bodyFetchFailureNotice(outcome)
-        val pgpState = pgpMessageStateOf(pgpEncrypted, pgpDecryptError, content?.html, bodyUnavailable)
+        val pgpState = pgpMessageStateOf(pgpEncrypted, pgpDecryptError, !content?.html.isNullOrBlank(), bodyUnavailable)
         // A client-protected message has no body to fall back to, and emailPreview is the
         // placeholder subject line — rendering it would look like the message content.
         val bodyMode = content?.bodyMode?.takeIf { it == "html" || it == "plain" } ?: emailBodyMode
@@ -654,6 +654,7 @@ class EmailDetailActivity : LockedActivity() {
         PgpSignatureState.SIGNER_UNKNOWN -> "⬜ " + getString(R.string.email_pgp_signature_signer_unknown)
         PgpSignatureState.INVALID -> "⚠️ " + getString(R.string.email_pgp_signature_invalid)
         PgpSignatureState.KEY_CHANGED -> "⚠️ " + getString(R.string.email_pgp_signature_key_changed)
+        PgpSignatureState.FOR_ANOTHER_RECIPIENT -> "⚠️ " + getString(R.string.email_pgp_signature_for_another_recipient)
         PgpSignatureState.NONE -> null
     }
 
@@ -1699,6 +1700,10 @@ internal fun blockExternalResources(
     // images" clears blockNetworkLoads. A frame with no src and no srcdoc renders nothing anyway,
     // so there is nothing to preserve — the composer's Safelist drops the tag for the same reason.
     document.select("iframe").remove()
+    // A reader submits nothing. Form wrappers and labelled controls unwrap so their text still
+    // reads; inputs and selects carry no reading text and go whole.
+    document.select("input, select").remove()
+    document.select("form, button, textarea").unwrap()
     // Text naming one address over an href to another is the oldest phish in mail. Advisory: the
     // tap still goes through the confirm dialog, which shows the real host either way.
     document.select("a[href]").forEach { anchor ->

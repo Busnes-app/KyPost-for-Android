@@ -25,6 +25,8 @@ import org.kysecurity.mail.contacts.toDto
 import org.kysecurity.mail.data.DataRuntime
 import org.kysecurity.mail.push.PushRuntime
 import org.kysecurity.mail.push.pinnedPairingCallFactory
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -48,7 +50,11 @@ class PgpKeyActivity : LockedActivity() {
     // lazy: pinnedPairingCallFactory needs a Context that does not exist at property-init time.
     private val client by lazy { PgpQrClient(callFactory = pinnedPairingCallFactory(this)) }
     private val bootstrapClient by lazy { PgpBootstrapClient(callFactory = pinnedPairingCallFactory(this)) }
+    private val vaultOpener = AndroidVaultOpener(this)
+    private var vaultOpenOffered = false
+    private var ownQrJob: Job? = null
     private var pendingKey: PgpQrKeyDto? = null
+    private var pendingVerified = false
 
     // Registered here and not in onCreateUnlocked: see QrScannerFactory for why the order of
     // these registrations has to be identical on every creation.
@@ -99,11 +105,14 @@ class PgpKeyActivity : LockedActivity() {
     }
 
     private fun mintAndRenderOwnQr() {
+        // The vault prompt pauses and resumes this screen; that resume must not mint a second code.
+        if (ownQrJob?.isActive == true) return
         qrImage.visibility = View.GONE
         qrExpiresText.text = ""
+        qrMyFingerprintText.visibility = View.GONE
         qrStatusText.text = getString(R.string.pgp_qr_my_code_loading)
 
-        lifecycleScope.launch {
+        ownQrJob = lifecycleScope.launch {
             val pairing = PushRuntime.graph(this@PgpKeyActivity).repository.pairingForAuthenticatedCall()
             val deviceId = pairing?.deviceId
             val deviceSecret = pairing?.deviceSecret
@@ -111,6 +120,7 @@ class PgpKeyActivity : LockedActivity() {
                 qrStatusText.text = getString(R.string.pgp_qr_my_code_not_paired)
                 return@launch
             }
+            openVaultOnce()
 
             when (val result = client.mintToken(pairing.serverUrl, deviceId, deviceSecret)) {
                 is PgpQrTokenResult.Success -> renderQr(result.token, pairing.serverUrl, deviceId, deviceSecret)
@@ -122,9 +132,22 @@ class PgpKeyActivity : LockedActivity() {
         }
     }
 
-    private fun renderQr(token: PgpQrTokenDto, serverUrl: String, deviceId: String, deviceSecret: String) {
+    /** Asked once per screen: declining leaves the server-reported fingerprint and a QR without one. */
+    private suspend fun openVaultOnce() {
+        if (vaultOpenOffered || EnrollmentSession.isHeld()) return
+        vaultOpenOffered = true
+        try {
+            vaultOpener.open()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+        }
+    }
+
+    private suspend fun renderQr(token: PgpQrTokenDto, serverUrl: String, deviceId: String, deviceSecret: String) {
+        val own = ownFingerprint { bootstrapClient.fetch(serverUrl, deviceId, deviceSecret) }
         // Built from the paired origin: the server's `token.url` could point outside the TLS pin.
-        val ownUrl = ownQrUrl(serverUrl, token.token)
+        val ownUrl = ownQrUrl(serverUrl, token.token, (own as? OwnFingerprint.Local)?.fingerprint)
         val bitmap = ownUrl?.let { runCatching { renderQrBitmap(it, QR_SIZE_PX) }.getOrNull() }
         if (bitmap == null) {
             qrStatusText.text = getString(R.string.pgp_qr_my_code_render_failed)
@@ -134,22 +157,13 @@ class PgpKeyActivity : LockedActivity() {
         qrImage.visibility = View.VISIBLE
         qrStatusText.text = ""
         qrExpiresText.text = getString(R.string.pgp_qr_my_code_expires, token.expiresAt)
-        renderOwnFingerprint(serverUrl, deviceId, deviceSecret)
-    }
-
-    /** Shows the user their own fingerprint, to answer the other device's "does this match?". */
-    private fun renderOwnFingerprint(serverUrl: String, deviceId: String, deviceSecret: String) {
-        lifecycleScope.launch {
-            val fingerprint = ownFingerprintFromBootstrap(
-                bootstrapClient.fetch(serverUrl, deviceId, deviceSecret),
-            )
-            qrMyFingerprintText.text = if (fingerprint != null) {
-                getString(R.string.pgp_qr_my_fingerprint_label, fingerprint)
-            } else {
-                getString(R.string.pgp_qr_my_fingerprint_unavailable)
-            }
-            qrMyFingerprintText.visibility = View.VISIBLE
+        qrMyFingerprintText.text = when {
+            own is OwnFingerprint.Local -> getString(R.string.pgp_qr_my_fingerprint_label, own.fingerprint)
+            own is OwnFingerprint.ServerReported && own.fingerprint != null ->
+                getString(R.string.pgp_qr_my_fingerprint_server_label, own.fingerprint)
+            else -> getString(R.string.pgp_qr_my_fingerprint_unavailable)
         }
+        qrMyFingerprintText.visibility = View.VISIBLE
     }
 
     private fun renderQrBitmap(content: String, sizePx: Int): Bitmap {
@@ -189,7 +203,7 @@ class PgpKeyActivity : LockedActivity() {
         scanStatusText.text = getString(R.string.pgp_qr_my_code_loading)
         lifecycleScope.launch {
             when (val result = client.fetchKey(parsed.serverUrl, parsed.token)) {
-                is PgpQrKeyResult.Success -> showFetchedKey(result.key)
+                is PgpQrKeyResult.Success -> showFetchedKey(result.key, parsed.fingerprint)
                 is PgpQrKeyResult.Forbidden -> {
                     scanStatusText.text = getString(R.string.pgp_qr_scan_forbidden)
                     scanButton.setText(R.string.pgp_qr_scan_scan_again_button)
@@ -210,7 +224,7 @@ class PgpKeyActivity : LockedActivity() {
         }
     }
 
-    private fun showFetchedKey(key: PgpQrKeyDto) {
+    private fun showFetchedKey(key: PgpQrKeyDto, expectedFingerprint: String?) {
         // Never the server's `fingerprint` field: it has no cryptographic tie to `publicKey`.
         val localFingerprint = PgpFingerprint.compute(key.publicKey)
         if (localFingerprint == null) {
@@ -219,8 +233,22 @@ class PgpKeyActivity : LockedActivity() {
             scanButton.setText(R.string.pgp_qr_scan_scan_again_button)
             return
         }
+        val check = checkScannedKey(expectedFingerprint, localFingerprint)
+        if (check == ScannedKeyCheck.MISMATCH) {
+            resetConfirmationState()
+            scanStatusText.text = getString(R.string.pgp_qr_scan_mismatch)
+            scanButton.setText(R.string.pgp_qr_scan_scan_again_button)
+            return
+        }
         pendingKey = key
-        scanStatusText.text = getString(R.string.pgp_qr_scan_confirm_prompt)
+        pendingVerified = check == ScannedKeyCheck.CONFIRMED
+        if (pendingVerified) {
+            scanStatusText.text = getString(R.string.pgp_qr_scan_confirm_prompt)
+            confirmButton.setText(R.string.pgp_qr_scan_confirm_button)
+        } else {
+            scanStatusText.text = getString(R.string.pgp_qr_scan_unverified_prompt)
+            confirmButton.setText(R.string.pgp_qr_scan_save_unverified_button)
+        }
         scanNameText.text = getString(R.string.pgp_qr_scan_name_label, key.name)
         scanNameText.visibility = View.VISIBLE
         scanFingerprintText.text = getString(R.string.pgp_qr_scan_fingerprint_label, localFingerprint)
@@ -242,6 +270,7 @@ class PgpKeyActivity : LockedActivity() {
 
     private fun resetConfirmationState() {
         pendingKey = null
+        pendingVerified = false
         scanNameText.visibility = View.GONE
         scanFingerprintText.visibility = View.GONE
         scanAddressesText.visibility = View.GONE
@@ -259,6 +288,7 @@ class PgpKeyActivity : LockedActivity() {
 
     private fun showSaveChoiceDialog(key: PgpQrKeyDto) {
         val addresses = scannedAddresses(key)
+        val verified = pendingVerified
         AlertDialog.Builder(this)
             .setTitle(R.string.pgp_qr_scan_save_choice_title)
             // Restate the binding at the point of commitment: "Create New Contact" writes every
@@ -270,7 +300,7 @@ class PgpKeyActivity : LockedActivity() {
                     getString(R.string.pgp_qr_scan_save_choice_body, addresses.joinToString("\n"))
                 },
             )
-            .setPositiveButton(R.string.pgp_qr_scan_save_new_button) { _, _ -> createNewContactFromCard(key) }
+            .setPositiveButton(R.string.pgp_qr_scan_save_new_button) { _, _ -> createNewContactFromCard(key, verified) }
             .setNegativeButton(R.string.pgp_qr_scan_save_existing_button) { _, _ -> launchContactPicker() }
             .create()
             .showSecurely()
@@ -306,13 +336,13 @@ class PgpKeyActivity : LockedActivity() {
         )
     }
 
-    private fun createNewContactFromCard(key: PgpQrKeyDto) {
+    private fun createNewContactFromCard(key: PgpQrKeyDto, verified: Boolean) {
         val card = key.contactCard ?: return
         val dto = contactDtoFromCard(card, fallbackName = key.name, pgpKey = key.publicKey)
         lifecycleScope.launch {
             val graph = ContactsRuntime.graph(this@PgpKeyActivity)
-            // The fingerprint and these addresses were both confirmed on screen before this point.
-            graph.repository.queueCreate(dto, verifiedInPerson = true)
+            // A pin only when the key matched the scanned code; the addresses were shown before this point.
+            graph.repository.queueCreate(dto, verifiedInPerson = verified)
             graph.coordinator.syncNowAsync()
 
             Toast.makeText(this@PgpKeyActivity, R.string.pgp_qr_scan_saved_new, Toast.LENGTH_SHORT).show()
@@ -324,6 +354,7 @@ class PgpKeyActivity : LockedActivity() {
 
     private fun saveKeyToContact(uid: String) {
         val key = pendingKey ?: return
+        val verified = pendingVerified
         lifecycleScope.launch {
             val entity = DataRuntime.graph(this@PgpKeyActivity).database.contactDao().getByUid(uid)
             if (entity == null) {
@@ -336,8 +367,8 @@ class PgpKeyActivity : LockedActivity() {
             val dto = entity.toDto().copy(pgpKey = key.publicKey)
 
             val graph = ContactsRuntime.graph(this@PgpKeyActivity)
-            // Verified rotation: the user just compared this fingerprint out of band.
-            graph.repository.queueUpdate(dto, identityChanged = false, verifiedInPerson = true)
+            // Verified rotation only when the key matched the scanned code.
+            graph.repository.queueUpdate(dto, identityChanged = false, verifiedInPerson = verified)
             graph.coordinator.syncNowAsync()
 
             Toast.makeText(this@PgpKeyActivity, R.string.pgp_qr_scan_saved, Toast.LENGTH_SHORT).show()
@@ -349,16 +380,27 @@ class PgpKeyActivity : LockedActivity() {
 
     companion object {
         private const val QR_SIZE_PX = 720
+        private val QR_FINGERPRINT = Regex("[0-9A-F]{40}")
 
-        /** Never the server's `url` field — see [renderQr]. Null if no valid URL can be built. */
-        internal fun ownQrUrl(serverUrl: String, token: String): String? {
+        /** Never the server's `url` field — see [renderQr]. Null if no valid URL can be built.
+         *  [fingerprint] goes in the fragment, which is never sent to the server; only a v4 one fits. */
+        internal fun ownQrUrl(serverUrl: String, token: String, fingerprint: String? = null): String? {
             if (token.isBlank()) return null
             val base = serverUrl.trimEnd('/').toHttpUrlOrNull() ?: return null
+            val fp = fingerprint?.replace(" ", "")?.takeIf { QR_FINGERPRINT.matches(it) }
             return base.newBuilder()
                 .addPathSegments("api/pgp/qr/key")
                 .addQueryParameter("t", token)
+                .fragment(fp?.let { "fp=$it" })
                 .build()
                 .toString()
+        }
+
+        /** [expected] is the code's `fp`; null means the code carried none. */
+        internal fun checkScannedKey(expected: String?, computed: String): ScannedKeyCheck = when {
+            expected == null -> ScannedKeyCheck.UNVERIFIED
+            QR_FINGERPRINT.matches(expected) && expected == computed.replace(" ", "") -> ScannedKeyCheck.CONFIRMED
+            else -> ScannedKeyCheck.MISMATCH
         }
 
         /** Parses a decoded QR payload into the `(serverUrl, token)` pair [PgpQrClient.fetchKey]
@@ -374,7 +416,9 @@ class PgpKeyActivity : LockedActivity() {
                 .build()
                 .toString()
                 .trimEnd('/')
-            return ParsedPgpQrKeyUrl(serverUrl = serverUrl, token = token)
+            // Any fragment but `fp=` becomes "" so it fails the match rather than reading as absent.
+            val fingerprint = url.fragment?.let { if (it.startsWith("fp=")) it.removePrefix("fp=") else "" }
+            return ParsedPgpQrKeyUrl(serverUrl = serverUrl, token = token, fingerprint = fingerprint)
         }
 
         /** `ContactDto.fn` must be non-blank; a card's `fn` is `omitempty`, hence the fallback. */
@@ -408,4 +452,6 @@ class PgpKeyActivity : LockedActivity() {
     }
 }
 
-internal data class ParsedPgpQrKeyUrl(val serverUrl: String, val token: String)
+internal data class ParsedPgpQrKeyUrl(val serverUrl: String, val token: String, val fingerprint: String? = null)
+
+internal enum class ScannedKeyCheck { CONFIRMED, MISMATCH, UNVERIFIED }

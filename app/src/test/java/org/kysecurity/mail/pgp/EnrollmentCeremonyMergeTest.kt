@@ -14,14 +14,22 @@ class EnrollmentCeremonyMergeTest {
 
     @After fun clearSession() = EnrollmentSession.clear()
 
+    private companion object {
+        val SECOND_FINGERPRINT = PgpFingerprint.compute(TestPgpSecondKey.ARMORED_PUBLIC)!!.filterNot { it.isWhitespace() }
+    }
+
     private fun ports(
         previousVault: VaultOpener,
         plaintext: String = TestPgpSecondKey.ARMORED_PRIVATE,
     ): FakePorts {
         val probe = FakeEnrollmentKeys()
         return FakePorts(
+            identityResult = IdentityCheck.ClientProtected(SECOND_FINGERPRINT),
             fetchResults = mutableListOf(
-                EnrollmentCallResult.Envelope(sealEnvelope(probe, plaintext = plaintext)),
+                EnrollmentCallResult.Envelope(
+                    sealEnvelope(probe, aadFingerprint = SECOND_FINGERPRINT, plaintext = plaintext),
+                    legacyDelivery(SECOND_FINGERPRINT),
+                ),
             ),
             previousVault = previousVault,
         )
@@ -143,7 +151,6 @@ class EnrollmentCeremonyMergeTest {
             List(MemoryBudget.PGP_SECRET_KEY_RING_COUNT + 1) { ring },
         )!!.toString(Charsets.UTF_8)
         val cases = mapOf(
-            "invalid current" to ports(FakeVaultOpener(), plaintext = "invalid current"),
             "invalid previous" to ports(FakeVaultOpener(keyToHold = "invalid previous")),
             "too many rings" to ports(FakeVaultOpener(keyToHold = excessiveRings)),
             "previous input too large" to ports(

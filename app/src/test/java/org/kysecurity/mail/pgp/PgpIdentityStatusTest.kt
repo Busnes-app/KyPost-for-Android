@@ -1,6 +1,8 @@
 package org.kysecurity.mail.pgp
 
 import org.junit.Assert.assertEquals
+import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -67,6 +69,26 @@ class PgpIdentityStatusTest {
     @Test
     fun bootstrapWithoutIdentity_isNull() {
         assertNull(ownFingerprintFromBootstrap(PgpBootstrapResult.Success(false, "", "")))
+    }
+
+    @After
+    fun clearHeldKey() = EnrollmentSession.clear()
+
+    private val serverReport = PgpBootstrapResult.Success(hasIdentity = true, protection = "client", publicKey = TestPgpKey.ARMORED)
+
+    /** The server reports a different key; the device's own signer is what is shown. */
+    @Test
+    fun enrolledDevice_showsItsOwnKey_notTheServerReport() = runBlocking {
+        EnrollmentSession.put(TestPgpPrivateKey.ARMORED_PRIVATE.toCharArray())
+        assertEquals(
+            OwnFingerprint.Local("B30A CD64 E04B 8E1B 0379 A320 1D6B DF09 3FAD 1D11"),
+            ownFingerprint { serverReport },
+        )
+    }
+
+    @Test
+    fun deviceWithoutSigner_showsTheServerReport_labelledAsSuch() = runBlocking {
+        assertEquals(OwnFingerprint.ServerReported(TestPgpKey.FINGERPRINT), ownFingerprint { serverReport })
     }
 
     @Test
