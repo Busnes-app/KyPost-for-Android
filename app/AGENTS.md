@@ -146,6 +146,11 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
 - CI reinstalls the debug APK after instrumentation cleanup, then measures the median of three
   cold launcher starts on the API 34 Play emulator through `scripts/check-startup-time.sh`; keep
   it a coarse regression ceiling, not a device benchmark.
+- `ci-play-release` and `ci-fdroid-release` (`.github/workflows/release-smoke.yml`) install the
+  minified release build on an API 34 emulator and run `src/releaseSmoke/` against it, selected by
+  `-PkypostReleaseSmoke` (`testBuildType = "release"`). Signed with a per-run throwaway key; no
+  secrets. Smoke tests stay in Java and name app classes and views by string: R8 renames or drops
+  anything else they could link against.
 
 # Child DOX Index
 

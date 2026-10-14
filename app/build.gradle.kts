@@ -248,6 +248,17 @@ android {
         }
     }
 
+    // The release smoke workflows (ci-play-release.yml, ci-fdroid-release.yml): instrument the
+    // minified release build, with src/releaseSmoke as the only test source. This picks which build
+    // the test APK targets; the release APK and its signing gate below are unchanged.
+    if (providers.gradleProperty("kypostReleaseSmoke").isPresent) {
+        testBuildType = "release"
+        sourceSets.getByName("androidTest") {
+            java.setSrcDirs(listOf("src/releaseSmoke/java"))
+            kotlin.setSrcDirs(listOf("src/releaseSmoke/java"))
+        }
+    }
+
     buildFeatures {
         buildConfig = true
         // Required for the resValue("string", "contact_account_type", …) call above.
