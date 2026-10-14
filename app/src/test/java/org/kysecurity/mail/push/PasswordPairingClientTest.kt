@@ -1,5 +1,8 @@
 package org.kysecurity.mail.push
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -9,6 +12,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.kysecurity.mail.testing.BodyRecordingCallFactory
 import org.kysecurity.mail.testing.response
+import java.security.MessageDigest
+import java.util.Base64
 
 class PasswordPairingClientTest {
     private val server = "https://mail.example.com"
@@ -44,15 +49,45 @@ class PasswordPairingClientTest {
         )
     }
 
+    private val json = Json { ignoreUnknownKeys = true }
+    private val challenge by lazy { json.decodeFromString<PowChallenge>(powChallenge) }
+
     @Test
-    fun solvePow_matchesServerAndBrowser() {
-        val json = Json { ignoreUnknownKeys = true }
-        val challenge = json.decodeFromString<PowChallenge>(powChallenge)
+    fun solvePow_matchesServerAndBrowser() = runBlocking {
         assertEquals(powToken, solvePow(challenge, json))
         // The answer lies outside a smaller search space, and the algorithm is fixed.
         assertNull(solvePow(challenge.copy(maxnumber = 3140), json))
         assertNull(solvePow(challenge.copy(algorithm = "SHA-1"), json))
     }
+
+    @Test
+    fun solvePow_refusesSaltsOutsideTheServerFormat() = runBlocking {
+        // Solvable at number 0, so only the format check can return null.
+        fun solvableAtZero(salt: String) = challenge.copy(salt = salt, challenge = sha256Hex(salt + "0"))
+        assertNull(solvePow(solvableAtZero("a".repeat(1 shl 20)), json))
+        assertNull(solvePow(solvableAtZero("A".repeat(32)), json))
+        assertEquals(0, solvedNumber(solvePow(solvableAtZero("a".repeat(32)), json)!!))
+    }
+
+    @Test
+    fun solvePow_stopsWhenCancelled() {
+        // No answer in range: without a cancellation check this would return null, not throw.
+        val unsolvable = challenge.copy(challenge = "0".repeat(64), maxnumber = 100_000)
+        var outcome: Result<String?>? = null
+        runBlocking {
+            launch {
+                coroutineContext.job.cancel()
+                outcome = runCatching { solvePow(unsolvable, json) }
+            }
+        }
+        assertTrue(outcome!!.exceptionOrNull() is CancellationException)
+    }
+
+    private fun sha256Hex(s: String) =
+        MessageDigest.getInstance("SHA-256").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }
+
+    private fun solvedNumber(token: String) =
+        Regex("\"number\":(\\d+)").find(String(Base64.getDecoder().decode(token)))!!.groupValues[1].toInt()
 
     @Test
     fun mint_sendsOnlyTheAuthSecret() = runBlocking {

@@ -1,6 +1,8 @@
 package org.kysecurity.mail.push
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -62,16 +64,31 @@ private data class PowSolution(
 // 10x the server's escalation ceiling (1,000,000): room for a raised POW_MAX_NUMBER, not a hang.
 private const val MAX_POW_NUMBER = 10_000_000
 
+// The server's exact format (captcha.IssueAt): salt is hex of 16 bytes, challenge a SHA-256 in hex.
+private val POW_SALT = Regex("[0-9a-f]{32}")
+private val POW_CHALLENGE = Regex("[0-9a-f]{64}")
+
 /**
  * frontend/src/lib/pow.ts: find number in 0..maxnumber with SHA-256(salt + number) == challenge,
- * then return base64(JSON(challenge + number)). Null when there is no answer in range.
+ * then return base64(JSON(challenge + number)). Null when malformed or no answer is in range.
+ * Cancellable: leaving the screen stops the search.
  */
-internal fun solvePow(c: PowChallenge, json: Json): String? {
-    if (c.algorithm != "SHA-256" || c.maxnumber !in 0..MAX_POW_NUMBER || c.challenge.length != 64) return null
+internal suspend fun solvePow(c: PowChallenge, json: Json): String? {
+    if (c.algorithm != "SHA-256" || c.maxnumber !in 0..MAX_POW_NUMBER ||
+        !POW_SALT.matches(c.salt) || !POW_CHALLENGE.matches(c.challenge)
+    ) return null
     val target = ByteArray(32) { c.challenge.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
-    val sha = MessageDigest.getInstance("SHA-256")
-    val number = (0..c.maxnumber).firstOrNull { MessageDigest.isEqual(sha.digest((c.salt + it).toByteArray()), target) }
-        ?: return null
+    val salted = MessageDigest.getInstance("SHA-256").apply { update(c.salt.toByteArray()) }
+    var number = -1
+    for (n in 0..c.maxnumber) {
+        if (n % 4096 == 0) currentCoroutineContext().ensureActive()
+        val sha = salted.clone() as MessageDigest
+        if (MessageDigest.isEqual(sha.digest(n.toString().toByteArray()), target)) {
+            number = n
+            break
+        }
+    }
+    if (number < 0) return null
     val solution = PowSolution(c.algorithm, c.salt, c.challenge, c.maxnumber, c.expires, c.clientip, c.signature, number)
     return Base64.getEncoder().encodeToString(json.encodeToString(solution).toByteArray())
 }
@@ -134,9 +151,10 @@ class PasswordPairingClient(
         if (provider == "pow") {
             val (powCode, powRaw) = get(api("/api/auth/pow-challenge")).getOrElse { return unreachable(it) }
             if (powCode != 200) return PairingParseResult.Error(errorFor(powCode, powRaw))
-            captchaToken = withContext(Dispatchers.Default) {
-                runCatching { solvePow(json.decodeFromString<PowChallenge>(powRaw), json) }.getOrNull()
-            } ?: return PairingParseResult.Error("The server sent an unusable security check")
+            val challenge = runCatching { json.decodeFromString<PowChallenge>(powRaw) }.getOrNull()
+            // Not inside runCatching, which would swallow the solver's cancellation.
+            captchaToken = challenge?.let { withContext(Dispatchers.Default) { solvePow(it, json) } }
+                ?: return PairingParseResult.Error("The server sent an unusable security check")
         }
 
         val body = json.encodeToString(PasswordPairingRequest(user, authSecret, captchaToken))

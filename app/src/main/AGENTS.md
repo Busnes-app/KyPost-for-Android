@@ -68,7 +68,10 @@ Owns production Android app code and resources.
   plaintext password never leaves the device), and posts `{username, authSecret, captchaToken?}`
   to `/api/notifications/review-pairing`. For the built-in proof-of-work CAPTCHA (`pow`, the
   server default) it fetches `GET /api/auth/pow-challenge` after the derivation (the challenge
-  is single-use, IP-bound and expires in 5 minutes) and solves it like `pow.ts` (`solvePow`). A
+  is single-use, IP-bound and expires in 5 minutes) and solves it like `pow.ts` (`solvePow`).
+  The relay is untrusted input there: `solvePow` accepts only the server's exact format (32-hex
+  salt, 64-hex challenge, `SHA-256`, `maxnumber` at most 10,000,000), hashes the salt once and
+  clones the digest per candidate, and checks cancellation every 4096 candidates. A
   third-party provider (Turnstile, Friendly Captcha) is refused with a message naming
   `CAPTCHA_PROVIDER=pow`, before anything else is sent. `PasswordPairingClientTest` pins both
   against server-generated vectors. The activity clears the password field, then feeds the
