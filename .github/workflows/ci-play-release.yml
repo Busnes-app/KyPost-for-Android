@@ -19,4 +19,5 @@ jobs:
     name: ci-play-release
     uses: ./.github/workflows/release-smoke.yml
     with:
-      flavor: Play
+      flavor: play
+      package: org.kysecurity.mail

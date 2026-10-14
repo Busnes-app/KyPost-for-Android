@@ -1,9 +1,9 @@
 name: release-smoke
 
-# Installs one flavor's minified release build on an emulator and runs
-# app/src/releaseSmoke against it. Called by ci-play-release.yml and ci-fdroid-release.yml, so
-# each flavor reports as its own check. ci.yml's emulator legs only ever run debug, and a missing
-# R8 keep rule only shows on the release build, at launch.
+# Installs one flavor's minified release build on an emulator and runs scripts/release-smoke.sh
+# against it. Called by ci-play-release.yml and ci-fdroid-release.yml, so each flavor reports as
+# its own check. ci.yml's emulator legs only ever run debug, and a missing R8 keep rule only shows
+# on the release build, at launch.
 #
 # No secrets, on purpose: the callers run on pull_request. The release key lives on release.yml's
 # protected environment, which this workflow never names. The build is signed with a key generated
@@ -12,7 +12,11 @@ on:
   workflow_call:
     inputs:
       flavor:
-        description: Capitalised flavor name, as in connected<Flavor>ReleaseAndroidTest.
+        description: Flavor name as in app/build.gradle.kts, e.g. play.
+        required: true
+        type: string
+      package:
+        description: The flavor's applicationId.
         required: true
         type: string
 
@@ -24,6 +28,9 @@ jobs:
     name: smoke
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      FLAVOR: ${{ inputs.flavor }}
+      PACKAGE: ${{ inputs.package }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
@@ -49,8 +56,10 @@ jobs:
           } >> "$GITHUB_ENV"
 
       # Built before the emulator boots, so a build failure does not cost an emulator start.
-      - name: build release and smoke test APKs
-        run: ./gradlew -PkypostReleaseSmoke :app:assemble${{ inputs.flavor }}Release :app:assemble${{ inputs.flavor }}ReleaseAndroidTest
+      - name: build the release APK
+        run: |
+          ./gradlew ":app:assemble${FLAVOR^}Release"
+          cp "app/build/outputs/apk/$FLAVOR/release/app-$FLAVOR-release.apk" "$RUNNER_TEMP/smoke.apk"
 
       # Same emulator setup as ci.yml's instrumented job, minus the lock-screen PIN: nothing here
       # needs a secure keyguard, and that PIN is what made the keyguard hard to dismiss there.
@@ -74,18 +83,4 @@ jobs:
             adb wait-for-device
             adb shell input keyevent 224
             adb shell wm dismiss-keyguard
-            adb logcat -c || true
-            ./gradlew -PkypostReleaseSmoke connected${{ inputs.flavor }}ReleaseAndroidTest || echo failed > /tmp/testfail.txt
-            adb logcat -d > /tmp/logcat.txt 2>/dev/null || true
-            grep -A3 "FATAL EXCEPTION" /tmp/logcat.txt > /tmp/crashes.txt || true
-            cat /tmp/crashes.txt
-            if grep -q "Process: org.kysecurity.mail" /tmp/crashes.txt; then echo "The release build crashed; see the logcat excerpt above." >&2; exit 1; fi
-            if [ -f /tmp/testfail.txt ]; then echo "release smoke tests failed" >&2; exit 1; fi
-
-      - name: smoke test report
-        if: failure()
-        run: |
-          find app/build/outputs/androidTest-results -name '*.xml' -exec grep -l '<failure' {} + | while read -r f; do
-            echo "=== $f ==="
-            cat "$f"
-          done || true
+            sh scripts/release-smoke.sh "$RUNNER_TEMP/smoke.apk" "$PACKAGE"
