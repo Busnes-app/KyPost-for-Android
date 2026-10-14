@@ -31,7 +31,9 @@ internal sealed class RawSignature {
      *  an accusation; see [PgpSignatureState.SIGNER_UNKNOWN]. */
     data class NoSuchKey(val keyId: Long) : RawSignature()
 
-    data class Checked(val keyId: Long, val verified: Boolean) : RawSignature()
+    /** [forAnotherRecipient]: the signature names its intended recipients (RFC 9580 subpacket 35)
+     *  and none is the key this device decrypted with. */
+    data class Checked(val keyId: Long, val verified: Boolean, val forAnotherRecipient: Boolean = false) : RawSignature()
 
     val present: Boolean get() = this !is Absent
 
@@ -99,6 +101,7 @@ internal object PgpDecryptor {
         // which is ours, and the packet order is the sender's choice.
         var clear: InputStream? = null
         var encrypted: PGPPublicKeyEncryptedData? = null
+        var ours: List<ByteArray> = emptyList()
         for (item in encryptedList.encryptedDataObjects) {
             val pked = item as? PGPPublicKeyEncryptedData ?: continue
             // PGPSecretKeyRingCollection has no KeyIdentifier overload, so the id is routed through
@@ -108,12 +111,12 @@ internal object PgpDecryptor {
             // this device is a candidate, historical members included, and a wrong one is skipped.
             val hidden = keyId == 0L
             val candidates = if (hidden) {
-                secretKeys.keyRings.asSequence().flatMap { it.secretKeys.asSequence() }
-                    .filter { it.publicKey.isEncryptionKey }.toList()
+                secretKeys.keyRings.asSequence().flatMap { ring -> ring.secretKeys.asSequence().map { ring to it } }
+                    .filter { it.second.publicKey.isEncryptionKey }.toList()
             } else {
-                listOfNotNull(secretKeys.getSecretKey(keyId))
+                listOfNotNull(secretKeys.getSecretKeyRing(keyId)?.let { ring -> ring.getSecretKey(keyId)?.let { ring to it } })
             }
-            for (secretKey in candidates) {
+            for ((ring, secretKey) in candidates) {
                 // Empty passphrase: the armored key came out of the device envelope already
                 // unwrapped. A key that still needs one is not a key this device can use.
                 val privateKey = secretKey.extractPrivateKey(
@@ -126,6 +129,8 @@ internal object PgpDecryptor {
                 }
                 clear = stream
                 encrypted = pked
+                // Senders name the primary (RFC 9580); the decrypting subkey is accepted too.
+                ours = listOf(ring.publicKey.fingerprint, secretKey.publicKey.fingerprint)
                 break
             }
             if (clear != null) break
@@ -134,7 +139,7 @@ internal object PgpDecryptor {
             return DecryptResult.Failed("this message is not encrypted to a key on this device")
         }
 
-        val literal = readLiteral(clear, signerPublicKeys)
+        val literal = readLiteral(clear, signerPublicKeys, ours)
             ?: return DecryptResult.Failed("this message is too large or too deeply nested to open")
         val (plaintext, signature) = literal
 
@@ -188,6 +193,7 @@ internal object PgpDecryptor {
     private fun readLiteral(
         clear: InputStream,
         signerPublicKeys: List<String>,
+        decryptedWith: List<ByteArray>,
     ): Pair<ByteArray, RawSignature>? {
         var factory = org.bouncycastle.openpgp.jcajce.JcaPGPObjectFactory(clear)
         var onePass: org.bouncycastle.openpgp.PGPOnePassSignature? = null
@@ -207,7 +213,7 @@ internal object PgpDecryptor {
                 is PGPLiteralData -> {
                     val bytes = readAllWithLimit(obj.inputStream, MAX_DECRYPTED_PLAINTEXT_BYTES)
                         ?: return null
-                    return bytes to verifyOnePass(onePass, bytes, factory, signerPublicKeys)
+                    return bytes to verifyOnePass(onePass, bytes, factory, signerPublicKeys, decryptedWith)
                 }
             }
             obj = factory.nextObject()
@@ -258,6 +264,7 @@ internal object PgpDecryptor {
         body: ByteArray,
         factory: org.bouncycastle.openpgp.jcajce.JcaPGPObjectFactory,
         signerPublicKeys: List<String>,
+        decryptedWith: List<ByteArray>,
     ): RawSignature {
         if (onePass == null) return RawSignature.Absent
         val tail = generateSequence { factory.nextObject() }
@@ -283,6 +290,10 @@ internal object PgpDecryptor {
             onePass.verify(tail[0])
         }.getOrDefault(false)
 
-        return RawSignature.Checked(onePass.keyID, valid)
+        // Hashed only: an unhashed subpacket is not covered by the signature.
+        val intended = tail[0].hashedSubPackets?.intendedRecipientFingerprints.orEmpty()
+        val forAnother = intended.isNotEmpty() &&
+            intended.none { named -> decryptedWith.any { it.contentEquals(named.fingerprint) } }
+        return RawSignature.Checked(onePass.keyID, valid, forAnotherRecipient = forAnother)
     }
 }

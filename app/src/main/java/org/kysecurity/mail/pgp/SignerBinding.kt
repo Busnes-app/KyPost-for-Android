@@ -118,6 +118,7 @@ private fun verdictFor(signature: RawSignature, confirmed: Boolean): PgpSignatur
         is RawSignature.NoSuchKey -> PgpSignatureState.SIGNER_UNKNOWN
         is RawSignature.Checked -> when {
             !signature.verified -> PgpSignatureState.INVALID
+            signature.forAnotherRecipient -> PgpSignatureState.FOR_ANOTHER_RECIPIENT
             confirmed -> PgpSignatureState.VERIFIED_CONFIRMED
             else -> PgpSignatureState.VERIFIED_SEEN_BEFORE
         }
