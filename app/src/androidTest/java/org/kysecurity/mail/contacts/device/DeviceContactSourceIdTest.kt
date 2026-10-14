@@ -12,7 +12,10 @@ import org.kysecurity.mail.contacts.ContactSyncClient
 import org.kysecurity.mail.contacts.ContactSyncRepository
 import org.kysecurity.mail.contacts.GroupSyncRepository
 import org.kysecurity.mail.contacts.GroupsSyncClient
+import org.kysecurity.mail.contacts.TEST_PAIRING
 import org.kysecurity.mail.data.AppDatabase
+import org.kysecurity.mail.push.PairingData
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import org.junit.After
@@ -26,6 +29,7 @@ import org.junit.runner.RunWith
 class DeviceContactSourceIdTest {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
     private val accounts = DeviceContactAccountManager(context)
+    private val settings = DeviceContactSyncSettings(context)
     private lateinit var db: AppDatabase
     private lateinit var syncRepository: ContactSyncRepository
     private lateinit var repository: DeviceContactRepository
@@ -55,6 +59,7 @@ class DeviceContactSourceIdTest {
 
     @After
     fun tearDown() {
+        settings.setEnabled(false)
         db.close()
         DeviceContactPurge.deleteSyncedRows(context)
         accounts.removeAccountBlocking()
@@ -124,5 +129,106 @@ class DeviceContactSourceIdTest {
         assertEquals("New Name", db.contactDao().getByUid(uid)!!.fn)
         assertEquals("New Name", deviceDisplayName(rawContactId))
         assertEquals("no duplicate row", 1, ownRowsFor(uid))
+    }
+
+    /** A raw contact of our account written as another Contacts app would: no SOURCE_ID. */
+    private fun insertCreatedElsewhere(): Long = context.contentResolver.applyBatch(
+        ContactsContract.AUTHORITY,
+        arrayListOf(
+            android.content.ContentProviderOperation.newInsert(ContactsContract.RawContacts.CONTENT_URI)
+                .withValue(ContactsContract.RawContacts.ACCOUNT_TYPE, DeviceContactAccount.ACCOUNT_TYPE)
+                .withValue(ContactsContract.RawContacts.ACCOUNT_NAME, DeviceContactAccount.ACCOUNT_NAME)
+                .build(),
+            android.content.ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE)
+                .withValue(ContactsContract.CommonDataKinds.StructuredName.DISPLAY_NAME, CREATED_ELSEWHERE)
+                .build(),
+        ),
+    )[0].uri!!.lastPathSegment!!.toLong()
+
+    private fun pairedRepository(pairing: () -> PairingData?, beforeImport: suspend () -> Unit = {}) =
+        DeviceContactRepository(
+            context = context,
+            db = db,
+            syncRepository = ContactSyncRepository(
+                db = db,
+                client = ContactSyncClient(callFactory = OkHttpClient()),
+                cursorStore = ContactCursorStore(context, db),
+                pairingProvider = pairing,
+            ),
+            groupSyncRepository = GroupSyncRepository(db, GroupsSyncClient(callFactory = OkHttpClient())) { null },
+            beforeImport = beforeImport,
+        )
+
+    private suspend fun queuedCreatedElsewhere(): List<ContactDto> {
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        return db.pendingContactChangeDao().getAllPending()
+            .filter { it.changeType == ContactSyncRepository.CHANGE_CREATE }
+            .map { json.decodeFromString(ContactDto.serializer(), it.payloadJson) }
+            .filter { it.fn == CREATED_ELSEWHERE }
+    }
+
+    /** The pairing is replaced while the pass runs: the session ends, the outbox and contacts are
+     *  purged and a new pairing is active. The outgoing account's contact must not reach it. */
+    @Test
+    fun aPairingReplacedDuringThePass_queuesNothingForTheNewPairing() = runBlocking {
+        settings.setEnabled(true)
+        insertCreatedElsewhere()
+        var active = TEST_PAIRING
+        val paired = pairedRepository({ active }) {
+            org.kysecurity.mail.ProcessState.resetAll()
+            db.pendingContactChangeDao().clearAll()
+            db.contactDao().clearAll()
+            active = TEST_PAIRING.copy(subscriberId = "sub-replacement")
+        }
+
+        paired.syncAll()
+
+        assertEquals(emptyList<ContactDto>(), queuedCreatedElsewhere())
+        assertEquals(null, db.contactDao().observeAll().first().firstOrNull { it.fn == CREATED_ELSEWHERE })
+    }
+
+    /** The purge's database step lands inside the pass, before the session ends and while the
+     *  outgoing pairing is still active: the create must not land after it. */
+    @Test
+    fun thePurgesDatabaseStepDuringThePass_leavesNothingQueued() = runBlocking {
+        settings.setEnabled(true)
+        insertCreatedElsewhere()
+        val paired = pairedRepository({ TEST_PAIRING }) {
+            settings.clearConsentDuring {
+                db.pendingContactChangeDao().clearAll()
+                db.contactDao().clearAll()
+                db.deviceContactLinkDao().deleteAll()
+            }
+        }
+
+        paired.syncAll()
+
+        assertEquals(emptyList<ContactDto>(), queuedCreatedElsewhere())
+        assertEquals(null, db.contactDao().observeAll().first().firstOrNull { it.fn == CREATED_ELSEWHERE })
+    }
+
+    /** A contact created under the KyPost account by another Contacts app is uploaded and linked,
+     *  once, rather than left unsynced for a teardown to delete. */
+    @Test
+    fun aContactCreatedInOurAccountElsewhere_isUploadedOnce() = runBlocking {
+        settings.setEnabled(true)
+        val rawContactId = insertCreatedElsewhere()
+        val paired = pairedRepository({ TEST_PAIRING })
+
+        paired.syncAll()
+        paired.syncAll()
+
+        val created = queuedCreatedElsewhere()
+        assertEquals("queued once", 1, created.size)
+        val uid = created.single().uid
+        assertEquals("linked to the row", rawContactId, db.deviceContactLinkDao().getByUid(uid)?.rawContactId)
+        assertEquals("the row carries the uid, and no copy was written", 1, ownRowsFor(uid))
+        assertEquals(1, ownRowCount())
+    }
+
+    private companion object {
+        const val CREATED_ELSEWHERE = "Created Elsewhere Probe"
     }
 }
