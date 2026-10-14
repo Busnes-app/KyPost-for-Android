@@ -175,12 +175,23 @@ class AppLockManager(
         Unit
     }
 
-    /** Under [pinGate], so a PIN unlock already running cannot seal again after the switch-off.
-     *  Switching on seals nothing: the next PIN entry does. Returns what could not be removed. */
-    suspend fun setBiometricEnabled(enabled: Boolean): List<String> = withContext(Dispatchers.Default) {
+    /** Turning biometric unlock on is a PIN check like any other, and seals with that PIN. */
+    suspend fun enableBiometric(pin: CharArray): UnlockAttemptResult = withContext(Dispatchers.Default) {
         pinGate.withLock {
-            state.setBiometricEnabled(enabled)
-            if (enabled) emptyList() else sealer.destroy()
+            verifyLocked(pin) {
+                state.setBiometricEnabled(true)
+                runCatching { sealer.seal(deriveUsingPersistedSalt(pin)) }
+                    .onFailure { android.util.Log.i("AppLockManager", "Could not seal keys for biometric unlock", it) }
+            }
+        }
+    }
+
+    /** Under [pinGate], so a PIN unlock already running cannot seal again after the switch-off.
+     *  Returns what could not be removed. */
+    suspend fun disableBiometric(): List<String> = withContext(Dispatchers.Default) {
+        pinGate.withLock {
+            state.setBiometricEnabled(false)
+            sealer.destroy()
         }
     }
 

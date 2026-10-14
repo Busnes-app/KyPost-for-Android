@@ -320,7 +320,7 @@ class FoldLockBehaviourTest {
 }
 
 /** Write the tripwire file AFTER the encrypted one, or the teardown arms SecurityWipe. */
-private class AppLockSnapshot(
+internal class AppLockSnapshot(
     private val context: Context,
     private val secure: Map<String, Any?>,
     private val tripwire: Map<String, Any?>,

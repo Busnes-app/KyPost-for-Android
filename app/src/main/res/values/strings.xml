@@ -681,6 +681,7 @@
     <string name="security_credential_gate_warning_body">While this is on, new-mail notifications show only that something arrived — no sender and no subject — until you open the app and enter your PIN. Sign-in approvals still arrive, but answering one needs your PIN, not just a fingerprint. Turn this on only if you understand that tradeoff.</string>
     <string name="security_credential_gate_warning_confirm">Turn on anyway</string>
     <string name="security_credential_gate_pin_title">Enter your PIN to continue</string>
+    <string name="security_confirm_change_title">Enter your PIN to change this</string>
     <string name="security_confirm_pin_hint">Confirm PIN</string>
     <string name="security_pin_mismatch">PINs didn\'t match — try again</string>
     <string name="security_change_pin_title">Change PIN</string>

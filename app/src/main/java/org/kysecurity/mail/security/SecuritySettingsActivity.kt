@@ -84,6 +84,7 @@ class SecuritySettingsActivity : LockedActivity() {
     private var suppressLockToggleListener = false
     private var suppressCredentialGateListener = false
     private var suppressHostileLocationListener = false
+    private var suppressBiometricListener = false
 
     /** Read once, off the main thread: most of these come from the Keystore-backed store. */
     private data class SettingsSnapshot(
@@ -233,7 +234,9 @@ class SecuritySettingsActivity : LockedActivity() {
                     else R.string.security_hostile_location_confirm_disable_body,
                 )
                 .setPositiveButton(R.string.security_hostile_location_confirm_positive) { _, _ ->
-                    applyHostileLocationProtection(hostileLocationSettings, checked)
+                    confirmWithPinIf(!checked, onRefused = { revertHostileLocationSwitch(!checked) }) {
+                        applyHostileLocationProtection(hostileLocationSettings, checked)
+                    }
                 }
                 .setNegativeButton(R.string.cancel) { _, _ -> revertHostileLocationSwitch(!checked) }
                 .setOnCancelListener { revertHostileLocationSwitch(!checked) }
@@ -271,11 +274,20 @@ class SecuritySettingsActivity : LockedActivity() {
             if (suppressLockToggleListener) return@setOnCheckedChangeListener
             onLockToggle(checked)
         }
-        // Switching it off destroys the sealed keys, not just the setting; on seals at the next PIN.
+        // Switching it off destroys the sealed keys, not just the setting.
         biometricSwitch.setOnCheckedChangeListener { _, checked ->
-            lifecycleScope.launch {
-                withContext(SecurityWork) {
-                    SecurityRuntime.graph(this@SecuritySettingsActivity).appLockManager.setBiometricEnabled(checked)
+            if (suppressBiometricListener) return@setOnCheckedChangeListener
+            val appLockManager = SecurityRuntime.graph(this).appLockManager
+            if (!checked) {
+                lifecycleScope.launch { appLockManager.disableBiometric() }
+                return@setOnCheckedChangeListener
+            }
+            // On is weaker, so it takes the PIN, which also seals the keys.
+            promptForPin(R.string.security_confirm_change_title, onCancelled = { revertBiometricSwitch(false) }) { entered ->
+                lifecycleScope.launch {
+                    if (!resolvePinAttempt(entered.usePin { appLockManager.enableBiometric(it) })) {
+                        revertBiometricSwitch(false)
+                    }
                 }
             }
         }
@@ -508,6 +520,13 @@ class SecuritySettingsActivity : LockedActivity() {
     }
 
     /** Same re-entrancy hazard as [revertLockSwitch], guarded the same way. */
+    private fun revertBiometricSwitch(checked: Boolean) {
+        suppressBiometricListener = true
+        biometricSwitch.isChecked = checked
+        suppressBiometricListener = false
+    }
+
+    /** Same re-entrancy hazard as [revertLockSwitch], guarded the same way. */
     private fun revertHostileLocationSwitch(checked: Boolean) {
         suppressHostileLocationListener = true
         hostileLocationSwitch.isChecked = checked
@@ -595,17 +614,25 @@ class SecuritySettingsActivity : LockedActivity() {
                 resources.getQuantityString(R.plurals.security_wipe_threshold_attempts, attempts, attempts)
             }
         }.toTypedArray()
-        val current = choices.indexOf(appLockStore.wipeAfterAttempts()).takeIf { it >= 0 } ?: 0
+        val stored = appLockStore.wipeAfterAttempts()
+        val current = choices.indexOf(stored).takeIf { it >= 0 } ?: 0
         AlertDialog.Builder(this)
             .setTitle(R.string.security_wipe_threshold_dialog_title)
-            .setMessage(R.string.security_wipe_threshold_dialog_message)
+            // A view, not setMessage: AlertDialog shows a message INSTEAD of the choice list.
+            .setView(
+                caption(getString(R.string.security_wipe_threshold_dialog_message)).apply {
+                    setPadding(dpToPx(24), dpToPx(8), dpToPx(24), 0)
+                },
+            )
             .setSingleChoiceItems(labels, current) { dialog, which ->
                 val chosen = choices[which]
-                lifecycleScope.launch {
-                    withContext(SecurityWork) { appLockStore.setWipeAfterAttempts(chosen) }
-                    wipeThresholdButton.text = wipeThresholdButtonLabel(chosen)
-                }
                 dialog.dismiss()
+                confirmWithPinIf(LockoutPolicy.weakensWipe(stored, chosen)) {
+                    lifecycleScope.launch {
+                        withContext(SecurityWork) { appLockStore.setWipeAfterAttempts(chosen) }
+                        wipeThresholdButton.text = wipeThresholdButtonLabel(chosen)
+                    }
+                }
             }
             .setNegativeButton(R.string.cancel, null)
             .create()
@@ -615,13 +642,17 @@ class SecuritySettingsActivity : LockedActivity() {
     private fun promptLockGrace(settings: AppLockSettings) {
         val options = AppLockSettings.OPTIONS_MILLIS
         val labels = options.map { lockGraceLabel(it) }.toTypedArray()
-        val current = options.indexOfFirst { it == settings.graceMillis() }.takeIf { it >= 0 } ?: 0
+        val stored = settings.graceMillis()
+        val current = options.indexOfFirst { it == stored }.takeIf { it >= 0 } ?: 0
         AlertDialog.Builder(this)
             .setTitle(R.string.security_lock_grace_dialog_title)
             .setSingleChoiceItems(labels, current) { dialog, which ->
-                settings.setGraceMillis(options[which])
-                lockGraceButton.text = lockGraceButtonLabel(options[which])
+                val chosen = options[which]
                 dialog.dismiss()
+                confirmWithPinIf(AppLockSettings.weakensGrace(stored, chosen)) {
+                    settings.setGraceMillis(chosen)
+                    lockGraceButton.text = lockGraceButtonLabel(chosen)
+                }
             }
             .setNegativeButton(R.string.cancel, null)
             .create()
@@ -989,6 +1020,25 @@ class SecuritySettingsActivity : LockedActivity() {
         // the posture is now stated rather than inferred from a missing key.
         store.savePairing(currentPairing, gateEnabled = false)
         return true
+    }
+
+    /** Every change that weakens protection runs [apply] only after the same throttled PIN check
+     *  as disabling the lock; a strengthening change applies at once. */
+    private fun confirmWithPinIf(weakens: Boolean, onRefused: () -> Unit = {}, apply: () -> Unit) {
+        if (!weakens) {
+            apply()
+            return
+        }
+        promptForPin(R.string.security_confirm_change_title, onCancelled = onRefused) { entered ->
+            lifecycleScope.launch {
+                val appLockManager = SecurityRuntime.graph(this@SecuritySettingsActivity).appLockManager
+                if (resolvePinAttempt(entered.usePin { appLockManager.verifyPinThrottled(it) })) {
+                    apply()
+                } else {
+                    onRefused()
+                }
+            }
+        }
     }
 
     /** Single-field PIN prompt shared by the change-PIN, disable-lock and credential-gate flows. */
