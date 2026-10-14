@@ -15,31 +15,27 @@ object DeviceContactMatcher {
         return if (digits.length == 11 && digits.startsWith("1")) digits.substring(1) else digits
     }
 
-    /** Values carry their owner's position, so [findMatch] returns the lowest-positioned match. */
-    class Index private constructor(private val byValue: Map<String, Match>) {
+    /** Values keep their first owner, so [findMatch] returns the lowest-positioned match. */
+    class Index private constructor() {
         private data class Match(val uid: String, val ordinal: Int)
+
+        private val byValue = HashMap<String, Match>()
+        private var size = 0
 
         fun findMatch(candidateEmails: List<String>, candidatePhones: List<String>): String? {
             val keys = candidateEmails.mapNotNull { emailKey(it) } + candidatePhones.mapNotNull { phoneKey(it) }
             return keys.mapNotNull { byValue[it] }.minByOrNull { it.ordinal }?.uid
         }
 
+        /** Positioned after every contact already indexed. */
+        fun add(contact: ContactDto) {
+            val match = Match(contact.uid, size++)
+            (contact.emails.mapNotNull { emailKey(it.value) } + contact.phones.mapNotNull { phoneKey(it.value) })
+                .forEach { byValue.putIfAbsent(it, match) }
+        }
+
         companion object {
-            fun of(existing: List<ContactDto>): Index {
-                val byValue = HashMap<String, Match>()
-                existing.forEachIndexed { ordinal, contact ->
-                    val match = Match(contact.uid, ordinal)
-                    (
-                        contact.emails.mapNotNull { emailKey(it.value) } +
-                            contact.phones.mapNotNull { phoneKey(it.value) }
-                        )
-                        .forEach { key ->
-                            val current = byValue[key]
-                            if (current == null || ordinal < current.ordinal) byValue[key] = match
-                        }
-                }
-                return Index(byValue)
-            }
+            fun of(existing: List<ContactDto>): Index = Index().apply { existing.forEach(::add) }
         }
     }
 

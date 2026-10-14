@@ -330,8 +330,9 @@ class DeviceContactRepository(
             return@withContext
         }
 
-        val existing = db.contactDao().observeAll().first().map { it.toDto() }
+        val existing = db.contactDao().observeAll().first().mapTo(mutableListOf()) { it.toDto() }
         // Built once for the whole loop; findMatch(…, existing) was O(candidates x contacts).
+        // Each create joins both, so the same person in two accounts is uploaded once.
         val matchIndex = DeviceContactMatcher.Index.of(existing)
 
         for (rawContactId in rawContactCandidates) {
@@ -373,7 +374,11 @@ class DeviceContactRepository(
                         // the pairing cannot change between this check and the write.
                         val stillCurrent = org.kysecurity.mail.ProcessState.isCurrent(session) &&
                             syncRepository.destination() == destination
-                        if (stillCurrent) syncRepository.queueCreate(newDto)
+                        if (stillCurrent) {
+                            val created = newDto.copy(uid = syncRepository.queueCreate(newDto))
+                            existing += created
+                            matchIndex.add(created)
+                        }
                         stillCurrent
                     }
                     // The pairing this scan started under is gone: nothing more may be queued.

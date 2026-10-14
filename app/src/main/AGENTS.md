@@ -906,7 +906,9 @@ Owns production Android app code and resources.
   lock and clears consent (`clearConsentDuring`): the purge advances the generation only at its
   end, so this is what stops an import from landing in the outbox the next pairing inherits. Adding an account rewinds the scan watermark so its existing contacts
   are seen; a scan moves the watermark to its own start time only if `consentRevision` is
-  unchanged since it began, so a rewind made mid-scan survives it. The choice is the Contacts menu's "Import from other accounts…" dialog, whose copy
+  unchanged since it began, so a rewind made mid-scan survives it. Each create a scan queues joins its match index, so the
+  same person in two consented accounts is uploaded once
+  (`DeviceContactImportConsentTest.theSamePersonTwiceInOneScan_isImportedOnce`). The choice is the Contacts menu's "Import from other accounts…" dialog, whose copy
   says the contacts go to the user's KyPost server. `DeviceContactImportConsentTest`.
 - **Deletes reach the phone through Room.** `syncAll`'s `removeDeletedContacts` stage removes the
   raw contact of every link whose Room contact is gone, so server tombstones, snapshot prunes and

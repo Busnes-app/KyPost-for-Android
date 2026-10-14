@@ -55,12 +55,7 @@ class DeviceContactImportConsentTest {
     @After
     fun tearDown() {
         db.close()
-        context.contentResolver.delete(
-            ContactsContract.RawContacts.CONTENT_URI.buildUpon()
-                .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true").build(),
-            "${ContactsContract.RawContacts._ID} = ?",
-            arrayOf(localRawContactId.toString()),
-        )
+        deleteRawContact(localRawContactId)
         runBlocking { settings.setImportAccounts(destination, emptySet()) }
         DeviceContactPurge.deleteSyncedRows(context)
         accounts.removeAccountBlocking()
@@ -104,6 +99,15 @@ class DeviceContactImportConsentTest {
             ),
         )
         return results[0].uri!!.lastPathSegment!!.toLong()
+    }
+
+    private fun deleteRawContact(rawContactId: Long) {
+        context.contentResolver.delete(
+            ContactsContract.RawContacts.CONTENT_URI.buildUpon()
+                .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true").build(),
+            "${ContactsContract.RawContacts._ID} = ?",
+            arrayOf(rawContactId.toString()),
+        )
     }
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -215,6 +219,21 @@ class DeviceContactImportConsentTest {
         val snapshot = repository.readRawContactSnapshot(rawContactId)
 
         assertEquals(own, snapshot?.let { DeviceAccount(it.accountType, it.accountName) })
+    }
+
+    /** The same person stored twice (two accounts, or one twice) is uploaded once: each create
+     *  a scan queues is matched by the rest of that scan. */
+    @Test
+    fun theSamePersonTwiceInOneScan_isImportedOnce() = runBlocking {
+        settings.setImportAccounts(destination, setOf(DeviceAccount(null, null).key))
+        val twin = insertLocalContact(PROBE_NAME, "consent-probe@example.com")
+        try {
+            repository.syncAll()
+
+            assertEquals(importState(), 1, queuedProbeCreates())
+        } finally {
+            deleteRawContact(twin)
+        }
     }
 
     private fun rawContactExists(rawContactId: Long): Boolean = context.contentResolver.query(
