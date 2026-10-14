@@ -58,6 +58,8 @@ class DeviceContactRepository(
 
     // Shares syncRepository.syncMutex with ContactSyncRepository.sync(); both write the same table.
     suspend fun syncAll(): List<String> = syncRepository.syncMutex.withLock {
+        // The session this pass belongs to; an account purge ends it.
+        val session = org.kysecurity.mail.ProcessState.generation()
         listOfNotNull(
             stage("ensureAccountVisible") { ensureAccountContactsVisible() },
             stage("pruneForeignLinks") { pruneForeignLinks() },
@@ -69,7 +71,7 @@ class DeviceContactRepository(
                 check(refreshed) { "Group refresh: $outcome" }
             },
             stage("adoptLostLinks") { adoptLostLinks() },
-            stage("queueRowsCreatedElsewhere") { queueRowsCreatedElsewhere() },
+            stage("queueRowsCreatedElsewhere") { queueRowsCreatedElsewhere(session) },
             stage("pullDeviceChanges") { pullDeviceChangesForOwnAccount() },
             stage("removeDeletedContacts") { removeRowsOfDeletedContacts() },
             stage("importNewDeviceContacts") { importNewDeviceContacts() },
@@ -1022,11 +1024,11 @@ class DeviceContactRepository(
     /** A row of ours with no SOURCE_ID and no link was created by another Contacts app: it is a
      *  create, or teardown deletes it unsynced. The link lands with the queued create, so a death
      *  before the SOURCE_ID backfill leaves a linked row to stamp, never a second create. Each write
-     *  holds the account purge's lock and rechecks the session and pairing the pass began under, so
-     *  an outgoing account's contact never lands in the outbox the next pairing inherits. */
-    private suspend fun queueRowsCreatedElsewhere() {
+     *  holds the account purge's lock and needs the pass's [session], its pairing, and sync still on
+     *  (the purge turns it off under that lock), so an outgoing account's contact never lands in the
+     *  outbox the next pairing inherits. */
+    private suspend fun queueRowsCreatedElsewhere(session: Long) {
         val destination = syncRepository.destination() ?: return
-        val session = org.kysecurity.mail.ProcessState.generation()
         val linkedRows = db.deviceContactLinkDao().getAll().mapTo(HashSet()) { it.rawContactId }
         val unlinked = withContext(Dispatchers.IO) {
             contentResolver.query(
@@ -1046,7 +1048,7 @@ class DeviceContactRepository(
             beforeImport()
             val current = settings.withPurgeLock {
                 val stillCurrent = org.kysecurity.mail.ProcessState.isCurrent(session) &&
-                    syncRepository.destination() == destination
+                    syncRepository.destination() == destination && settings.isEnabled()
                 if (stillCurrent) {
                     db.withTransaction {
                         val uid = syncRepository.queueCreate(dto)

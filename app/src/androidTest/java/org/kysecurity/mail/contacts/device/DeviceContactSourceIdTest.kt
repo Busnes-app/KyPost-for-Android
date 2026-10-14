@@ -29,6 +29,7 @@ import org.junit.runner.RunWith
 class DeviceContactSourceIdTest {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
     private val accounts = DeviceContactAccountManager(context)
+    private val settings = DeviceContactSyncSettings(context)
     private lateinit var db: AppDatabase
     private lateinit var syncRepository: ContactSyncRepository
     private lateinit var repository: DeviceContactRepository
@@ -58,6 +59,7 @@ class DeviceContactSourceIdTest {
 
     @After
     fun tearDown() {
+        settings.setEnabled(false)
         db.close()
         DeviceContactPurge.deleteSyncedRows(context)
         accounts.removeAccountBlocking()
@@ -171,6 +173,7 @@ class DeviceContactSourceIdTest {
      *  purged and a new pairing is active. The outgoing account's contact must not reach it. */
     @Test
     fun aPairingReplacedDuringThePass_queuesNothingForTheNewPairing() = runBlocking {
+        settings.setEnabled(true)
         insertCreatedElsewhere()
         var active = TEST_PAIRING
         val paired = pairedRepository({ active }) {
@@ -186,10 +189,31 @@ class DeviceContactSourceIdTest {
         assertEquals(null, db.contactDao().observeAll().first().firstOrNull { it.fn == CREATED_ELSEWHERE })
     }
 
+    /** The purge's database step lands inside the pass, before the session ends and while the
+     *  outgoing pairing is still active: the create must not land after it. */
+    @Test
+    fun thePurgesDatabaseStepDuringThePass_leavesNothingQueued() = runBlocking {
+        settings.setEnabled(true)
+        insertCreatedElsewhere()
+        val paired = pairedRepository({ TEST_PAIRING }) {
+            settings.clearConsentDuring {
+                db.pendingContactChangeDao().clearAll()
+                db.contactDao().clearAll()
+                db.deviceContactLinkDao().deleteAll()
+            }
+        }
+
+        paired.syncAll()
+
+        assertEquals(emptyList<ContactDto>(), queuedCreatedElsewhere())
+        assertEquals(null, db.contactDao().observeAll().first().firstOrNull { it.fn == CREATED_ELSEWHERE })
+    }
+
     /** A contact created under the KyPost account by another Contacts app is uploaded and linked,
      *  once, rather than left unsynced for a teardown to delete. */
     @Test
     fun aContactCreatedInOurAccountElsewhere_isUploadedOnce() = runBlocking {
+        settings.setEnabled(true)
         val rawContactId = insertCreatedElsewhere()
         val paired = pairedRepository({ TEST_PAIRING })
 

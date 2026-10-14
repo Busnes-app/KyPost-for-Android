@@ -825,7 +825,8 @@ Owns production Android app code and resources.
   A live row of our account with neither SOURCE_ID nor link was created there by another
   Contacts app: `queueRowsCreatedElsewhere` queues it as a create and writes its link in one
   transaction, and the backfill then stamps SOURCE_ID. Like an import, each write holds the purge's
-  lock (`withPurgeLock`) and needs the session and pairing the pass began under. Without it the row never reached the
+  lock (`withPurgeLock`) and needs the pass's session, its pairing, and sync still on — the
+  purge's database step turns sync off under that lock, before the session ends. Without it the row never reached the
   server, and turning sync off, unpairing or Hostile Location Protection deleted it.
   `DeviceContactSourceIdTest` (real CP2) pins it; `MIGRATION_13_14` indexes the link table's
   `rawContactId`.
@@ -877,7 +878,7 @@ Owns production Android app code and resources.
   scan already running. Inside that lock the scan also checks that its session
   (`ProcessState.generation()`, captured at scan start) and its pairing destination are still
   current, and abandons the scan if not. The account purge's database step runs under the same
-  lock and clears consent (`clearConsentDuring`): the purge advances the generation only at its
+  lock and clears consent and turns device sync off (`clearConsentDuring`): the purge advances the generation only at its
   end, so this is what stops an import from landing in the outbox the next pairing inherits. Adding an account rewinds the scan watermark so its existing contacts
   are seen; a scan moves the watermark to its own start time only if `consentRevision` is
   unchanged since it began, so a rewind made mid-scan survives it. The choice is the Contacts menu's "Import from other accounts…" dialog, whose copy
