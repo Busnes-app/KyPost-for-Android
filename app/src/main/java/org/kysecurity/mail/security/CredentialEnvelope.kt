@@ -58,6 +58,19 @@ object CredentialEnvelope {
     }
 }
 
-fun interface BiometricKeySealer {
+interface BiometricKeySealer {
     fun seal(keys: CredentialKeys)
+
+    /** Null when nothing is sealed or the key is gone. */
+    fun prepareUnlock(): BiometricUnlock?
+
+    /** Names what it could not remove. */
+    fun destroy(): List<String>
+}
+
+/** For a manager with no biometric hardware behind it: tests, and nothing else. */
+object NoBiometricSealer : BiometricKeySealer {
+    override fun seal(keys: CredentialKeys) = Unit
+    override fun prepareUnlock(): BiometricUnlock? = null
+    override fun destroy(): List<String> = emptyList()
 }

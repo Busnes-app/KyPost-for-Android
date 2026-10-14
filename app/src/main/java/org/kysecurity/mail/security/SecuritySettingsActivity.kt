@@ -271,15 +271,11 @@ class SecuritySettingsActivity : LockedActivity() {
             if (suppressLockToggleListener) return@setOnCheckedChangeListener
             onLockToggle(checked)
         }
-        // commit()-backed Keystore write; a click listener may not do that on the main thread.
+        // Switching it off destroys the sealed keys, not just the setting; on seals at the next PIN.
         biometricSwitch.setOnCheckedChangeListener { _, checked ->
             lifecycleScope.launch {
                 withContext(SecurityWork) {
-                    appLockStore.setBiometricEnabled(checked)
-                    // Switching it off destroys the sealed keys, not just the setting.
-                    if (!checked) {
-                        SecurityRuntime.graph(this@SecuritySettingsActivity).biometricUnlockVault.destroy()
-                    }
+                    SecurityRuntime.graph(this@SecuritySettingsActivity).appLockManager.setBiometricEnabled(checked)
                 }
             }
         }
@@ -738,9 +734,6 @@ class SecuritySettingsActivity : LockedActivity() {
                         withContext(SecurityWork) {
                             appLockStore.setPin(entered)
                             appLockStore.enableLock()
-                            // Seal now, so the biometric switch below has something to offer.
-                            SecurityRuntime.graph(this@SecuritySettingsActivity)
-                                .appLockManager.resealForBiometric(entered)
                         }
                     }
                     changePinButton.visibility = View.VISIBLE

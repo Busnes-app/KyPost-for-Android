@@ -77,8 +77,10 @@ private object TestPepper : CredentialPepper {
  *  unlock handed over to be sealed. */
 private class FakeSealer : BiometricKeySealer {
     var sealed: CredentialKeys? = null
-        private set
     override fun seal(keys: CredentialKeys) { sealed = keys }
+    override fun prepareUnlock(): BiometricUnlock? =
+        sealed?.let { BiometricUnlock(javax.crypto.Cipher.getInstance("AES/GCM/NoPadding"), ByteArray(1)) }
+    override fun destroy(): List<String> { sealed = null; return emptyList() }
 }
 
 class AppLockManagerTest {
@@ -346,6 +348,7 @@ class AppLockManagerTest {
     @Test
     fun attemptPin_sealsTheDerivedKeys_evenWithTheGateOff() = runBlocking {
         assertFalse("precondition: this is the default configuration", state.isCredentialPinGateEnabled())
+        state.setBiometricEnabled(true)
 
         manager.attemptPin("482913".toCharArray())
 
@@ -354,7 +357,70 @@ class AppLockManagerTest {
 
     @Test
     fun attemptPin_withWrongPin_sealsNothing() = runBlocking {
+        state.setBiometricEnabled(true)
         manager.attemptPin("000001".toCharArray())
+
+        assertNull(sealer.sealed)
+    }
+
+    @Test
+    fun attemptPin_withBiometricOff_sealsNothing() = runBlocking {
+        assertFalse("precondition: biometric unlock is off by default", state.isBiometricEnabled())
+
+        manager.attemptPin("482913".toCharArray())
+
+        assertNull(sealer.sealed)
+    }
+
+    @Test
+    fun attemptPin_withBiometricOff_removesKeysSealedEarlier() = runBlocking {
+        sealer.seal(CredentialCipher.deriveKeys("482913".toCharArray(), CredentialCipher.randomSalt(), TestPepper))
+
+        manager.attemptPin("482913".toCharArray())
+
+        assertNull(sealer.sealed)
+    }
+
+    @Test
+    fun setBiometricEnabled_off_removesTheSealedKeysAndTheyStayGone() = runBlocking {
+        state.setBiometricEnabled(true)
+        manager.attemptPin("482913".toCharArray())
+        assertNotNull("precondition: an enabled unlock seals", sealer.sealed)
+
+        manager.setBiometricEnabled(false)
+        assertNull(sealer.sealed)
+
+        manager.lockNow()
+        manager.attemptPin("482913".toCharArray())
+        manager.resealForBiometric("482913".toCharArray())
+        assertNull(sealer.sealed)
+        assertFalse(state.isBiometricEnabled())
+    }
+
+    @Test
+    fun setBiometricEnabled_on_sealsAtTheNextPinUnlock() = runBlocking {
+        manager.setBiometricEnabled(true)
+        assertNull(sealer.sealed)
+
+        manager.attemptPin("482913".toCharArray())
+
+        assertNotNull(sealer.sealed)
+    }
+
+    @Test
+    fun biometricUnlockOnOffer_isNullWhileBiometricIsOff_whateverIsSealed() {
+        sealer.seal(CredentialCipher.deriveKeys("482913".toCharArray(), CredentialCipher.randomSalt(), TestPepper))
+
+        assertNull(manager.biometricUnlockOnOffer())
+        state.setBiometricEnabled(true)
+        assertNotNull(manager.biometricUnlockOnOffer())
+    }
+
+    @Test
+    fun resealForBiometric_withBiometricOff_sealsNothing() = runBlocking {
+        state.putCredentialSaltIfAbsent(CredentialCipher.randomSalt())
+
+        manager.resealForBiometric("112233".toCharArray())
 
         assertNull(sealer.sealed)
     }
@@ -446,6 +512,7 @@ class AppLockManagerTest {
 
     @Test
     fun resealForBiometric_sealsTheKeysOfTheNewPin() = runBlocking {
+        state.setBiometricEnabled(true)
         state.putCredentialSaltIfAbsent(CredentialCipher.randomSalt())
 
         manager.resealForBiometric("112233".toCharArray())

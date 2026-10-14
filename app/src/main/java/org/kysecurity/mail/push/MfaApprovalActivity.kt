@@ -265,10 +265,11 @@ class MfaApprovalActivity : AppCompatActivity() {
     private fun requireAuthentication() {
         authInFlight = true
         lifecycleScope.launch {
-            // Keystore and disk, so never on Main. Null unlock means nothing is sealed on this device.
+            // Keystore and disk, so never on Main. Null unlock means biometric unlock is off or
+            // nothing is sealed; either way the PIN or device-credential path below decides.
             val (unlock, posture) = withContext(Dispatchers.IO) {
                 val graph = SecurityRuntime.graph(this@MfaApprovalActivity)
-                graph.biometricUnlockVault.prepareUnlock() to LockPosture(
+                graph.appLockManager.biometricUnlockOnOffer() to LockPosture(
                     lockEnabled = graph.appLockStore.isLockEnabled(),
                     credentialGateEnabled = graph.appLockStore.isCredentialPinGateEnabled(),
                 )
