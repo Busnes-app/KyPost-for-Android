@@ -320,16 +320,10 @@ class ComposeActivity : LockedActivity() {
         ccInput.onRecipientsChanged = onRecipientsChanged
         bccInput.onRecipientsChanged = onRecipientsChanged
 
-        // A draft the app lock destroyed wins over an internal Reply/Forward prefill. A public
-        // mailto/share request is a new composition, though: restoring an unrelated prior draft
-        // silently replaces what the sending app asked the user to send.
-        val restored = if (intent.isExternalComposeIntent()) {
-            ComposeDraftCache.resetForNewSession()
-            ComposeDraftCache.take() // Unseal so this new composition can survive lock teardown.
-            null
-        } else {
-            ComposeDraftCache.take()
-        }
+        // A draft the app lock destroyed wins over an internal Reply/Forward prefill.
+        val restored = ComposeDraftCache.takeOnOpen(
+            newExternalRequest = intent.isExternalComposeIntent() && savedInstanceState == null,
+        )
         // Taken either way, so a token cannot linger for a later composition.
         val handedOff = ReplyThreadHandoff.take(intent.getStringExtra(EXTRA_REPLY_TOKEN))
         replyTo = if (restored != null) restored.replyTo else handedOff.takeUnless { intent.isExternalComposeIntent() }

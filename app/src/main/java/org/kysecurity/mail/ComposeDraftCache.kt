@@ -28,6 +28,16 @@ object ComposeDraftCache : ProcessScopedState {
         return current
     }
 
+    /** What a compose screen opens with. A new public mailto/share request starts clean: restoring
+     *  an unrelated draft would replace what the sending app asked the user to send. Recreating
+     *  that screen (a rotation) is the same composition and takes its own draft back. */
+    fun takeOnOpen(newExternalRequest: Boolean): CachedDraft? {
+        if (!newExternalRequest) return take()
+        resetForNewSession()
+        take() // Unseals, so this new composition can survive a lock teardown.
+        return null
+    }
+
     fun clear() {
         draft = null
         sealed = true
