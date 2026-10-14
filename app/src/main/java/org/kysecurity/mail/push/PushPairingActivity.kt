@@ -103,7 +103,6 @@ class PushPairingActivity : LockedActivity() {
 
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
         setContentView(R.layout.activity_push_pairing)
-        Class.forName(listOf("org.kysecurity.mail.push", "PairingParseResult").joinToString("."))
         setTitle(R.string.push_pairing_title)
 
         PushNotificationDispatcher.ensureChannel(this)
