@@ -7,11 +7,13 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.Call
+import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.kysecurity.mail.executeSync
 import org.kysecurity.mail.pgp.hkdfSha256
+import java.security.MessageDigest
 import java.util.Base64
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.PBEKeySpec
@@ -20,12 +22,59 @@ import javax.crypto.spec.PBEKeySpec
 private data class PasswordPairingRequest(
     @SerialName("username") val username: String,
     @SerialName("authSecret") val authSecret: String,
+    @SerialName("captchaToken") val captchaToken: String? = null,
 ) {
     override fun toString(): String = "PasswordPairingRequest(redacted)"
 }
 
 @Serializable
 private data class LoginParams(@SerialName("salt") val salt: String = "", @SerialName("iterations") val iterations: Int = 0)
+
+/** `provider` is "" when CAPTCHA is off, "pow" for the built-in check, else a third party. */
+@Serializable
+private data class CaptchaConfig(@SerialName("provider") val provider: String)
+
+/** KyPost-Server captcha.Challenge. Every field is HMAC-signed and echoed back unchanged. */
+@Serializable
+internal data class PowChallenge(
+    val algorithm: String,
+    val salt: String,
+    val challenge: String,
+    val maxnumber: Int,
+    val expires: Long,
+    val clientip: String,
+    val signature: String,
+)
+
+// Field order matches the web client's token byte for byte; the server does not depend on it.
+@Serializable
+private data class PowSolution(
+    val algorithm: String,
+    val salt: String,
+    val challenge: String,
+    val maxnumber: Int,
+    val expires: Long,
+    val clientip: String,
+    val signature: String,
+    val number: Int,
+)
+
+// 10x the server's escalation ceiling (1,000,000): room for a raised POW_MAX_NUMBER, not a hang.
+private const val MAX_POW_NUMBER = 10_000_000
+
+/**
+ * frontend/src/lib/pow.ts: find number in 0..maxnumber with SHA-256(salt + number) == challenge,
+ * then return base64(JSON(challenge + number)). Null when there is no answer in range.
+ */
+internal fun solvePow(c: PowChallenge, json: Json): String? {
+    if (c.algorithm != "SHA-256" || c.maxnumber !in 0..MAX_POW_NUMBER || c.challenge.length != 64) return null
+    val target = ByteArray(32) { c.challenge.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+    val sha = MessageDigest.getInstance("SHA-256")
+    val number = (0..c.maxnumber).firstOrNull { MessageDigest.isEqual(sha.digest((c.salt + it).toByteArray()), target) }
+        ?: return null
+    val solution = PowSolution(c.algorithm, c.salt, c.challenge, c.maxnumber, c.expires, c.clientip, c.signature, number)
+    return Base64.getEncoder().encodeToString(json.encodeToString(solution).toByteArray())
+}
 
 @Serializable
 private data class PasswordPairingResponse(@SerialName("deepLink") val deepLink: String = "")
@@ -57,16 +106,22 @@ class PasswordPairingClient(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
     suspend fun mint(serverUrl: String, username: String, password: String): PairingParseResult {
-        val endpoint = pairingEndpoint(serverUrl, "/api/notifications/review-pairing")
-        val paramsEndpoint = pairingEndpoint(serverUrl, "/api/auth/login-params")
-        if (endpoint == null || paramsEndpoint == null) return PairingParseResult.Error("Server URL must use https")
+        pairingEndpoint(serverUrl, "") ?: return PairingParseResult.Error("Server URL must use https")
+        fun api(path: String) = checkNotNull(pairingEndpoint(serverUrl, path))
         if (username.isBlank() || password.isBlank()) return PairingParseResult.Error("Enter your username and password")
         val user = username.trim()
-        val paramsUrl = paramsEndpoint.newBuilder().addQueryParameter("username", user).build()
 
-        val (paramsCode, paramsRaw) = call(Request.Builder().url(paramsUrl).get().build())
-            .getOrElse { return unreachable(it) }
-        if (paramsCode != 200) return PairingParseResult.Error(errorFor(paramsCode))
+        // Checked first so an unsolvable CAPTCHA fails before the slow derivation.
+        val (cfgCode, cfgRaw) = get(api("/api/auth/captcha-config")).getOrElse { return unreachable(it) }
+        val provider = runCatching { json.decodeFromString<CaptchaConfig>(cfgRaw).provider }.getOrNull()
+        if (cfgCode != 200 || provider == null) return PairingParseResult.Error("Could not read the server's security-check settings ($cfgCode)")
+        if (provider != "" && provider != "pow") {
+            return PairingParseResult.Error("This server uses a third-party CAPTCHA. Review pairing needs CAPTCHA_PROVIDER=pow or CAPTCHA turned off.")
+        }
+
+        val paramsUrl = api("/api/auth/login-params").newBuilder().addQueryParameter("username", user).build()
+        val (paramsCode, paramsRaw) = get(paramsUrl).getOrElse { return unreachable(it) }
+        if (paramsCode != 200) return PairingParseResult.Error(errorFor(paramsCode, paramsRaw))
         val authSecret = withContext(Dispatchers.Default) {
             runCatching {
                 val params = json.decodeFromString<LoginParams>(paramsRaw)
@@ -74,13 +129,26 @@ class PasswordPairingClient(
             }.getOrNull()
         } ?: return PairingParseResult.Error("The server sent unusable sign-in parameters")
 
-        val body = json.encodeToString(PasswordPairingRequest(user, authSecret))
-        val (code, raw) = call(Request.Builder().url(endpoint).post(body.toRequestBody("application/json".toMediaType())).build())
-            .getOrElse { return unreachable(it) }
-        if (code != 200) return PairingParseResult.Error(errorFor(code))
+        // Fetched after the derivation: the challenge expires, and is single-use and IP-bound.
+        var captchaToken: String? = null
+        if (provider == "pow") {
+            val (powCode, powRaw) = get(api("/api/auth/pow-challenge")).getOrElse { return unreachable(it) }
+            if (powCode != 200) return PairingParseResult.Error(errorFor(powCode, powRaw))
+            captchaToken = withContext(Dispatchers.Default) {
+                runCatching { solvePow(json.decodeFromString<PowChallenge>(powRaw), json) }.getOrNull()
+            } ?: return PairingParseResult.Error("The server sent an unusable security check")
+        }
+
+        val body = json.encodeToString(PasswordPairingRequest(user, authSecret, captchaToken))
+        val request = Request.Builder().url(api("/api/notifications/review-pairing"))
+            .post(body.toRequestBody("application/json".toMediaType())).build()
+        val (code, raw) = call(request).getOrElse { return unreachable(it) }
+        if (code != 200) return PairingParseResult.Error(errorFor(code, raw))
         val deepLink = runCatching { json.decodeFromString<PasswordPairingResponse>(raw).deepLink }.getOrNull().orEmpty()
         return NativePairingDeepLinkParser.parse(deepLink)
     }
+
+    private suspend fun get(url: HttpUrl) = call(Request.Builder().url(url).get().build())
 
     private suspend fun call(request: Request): Result<Pair<Int, String>> = withContext(Dispatchers.IO) {
         callFactory.executeSync(request) { response -> response.code to response.body?.string().orEmpty() }
@@ -88,8 +156,9 @@ class PasswordPairingClient(
 
     private fun unreachable(e: Throwable) = PairingParseResult.Error(e.message ?: "Could not reach the server")
 
-    private fun errorFor(code: Int) = when (code) {
-        401 -> "Username or password is incorrect"
+    private fun errorFor(code: Int, body: String) = when (code) {
+        // verifyLogin's CAPTCHA refusals (failed, expired, address changed) are 401s too.
+        401 -> if ("captcha" in body || "security check" in body) "The security check failed. Try again" else "Username or password is incorrect"
         403 -> "This account requires an interactive sign-in"
         404 -> "Fast pairing is not enabled on this server"
         429 -> "Too many attempts. Try again later"
