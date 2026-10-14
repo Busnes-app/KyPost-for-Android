@@ -31,7 +31,8 @@ class DeviceContactRepository(
     private val syncRepository: ContactSyncRepository,
     private val groupSyncRepository: GroupSyncRepository,
     private val now: () -> Long = System::currentTimeMillis,
-    /** Runs just before each import is queued; tests use it to change consent mid-scan. */
+    /** Runs just before each import or row created elsewhere is queued; tests use it to change
+     *  consent or the pairing mid-scan. */
     private val beforeImport: suspend () -> Unit = {},
 ) {
     private val contentResolver = context.contentResolver
@@ -1020,8 +1021,12 @@ class DeviceContactRepository(
 
     /** A row of ours with no SOURCE_ID and no link was created by another Contacts app: it is a
      *  create, or teardown deletes it unsynced. The link lands with the queued create, so a death
-     *  before the SOURCE_ID backfill leaves a linked row to stamp, never a second create. */
+     *  before the SOURCE_ID backfill leaves a linked row to stamp, never a second create. Each write
+     *  holds the account purge's lock and rechecks the session and pairing the pass began under, so
+     *  an outgoing account's contact never lands in the outbox the next pairing inherits. */
     private suspend fun queueRowsCreatedElsewhere() {
+        val destination = syncRepository.destination() ?: return
+        val session = org.kysecurity.mail.ProcessState.generation()
         val linkedRows = db.deviceContactLinkDao().getAll().mapTo(HashSet()) { it.rawContactId }
         val unlinked = withContext(Dispatchers.IO) {
             contentResolver.query(
@@ -1034,17 +1039,27 @@ class DeviceContactRepository(
             )?.use { c -> buildList { while (c.moveToNext()) add(c.getLong(0)) } }.orEmpty()
         }.filterNot { it in linkedRows }
         if (unlinked.isEmpty()) return
+        val settings = DeviceContactSyncSettings(context)
         for (rawContactId in unlinked) {
             val snapshot = readRawContactSnapshot(rawContactId) ?: continue
             val dto = snapshot.toContactDto("", 0)
-            db.withTransaction {
-                val uid = syncRepository.queueCreate(dto)
-                db.deviceContactLinkDao().upsert(
-                    org.kysecurity.mail.data.DeviceContactLinkEntity(
-                        uid, rawContactId, snapshot.lastUpdatedEpochMs, syncedJsonOf(dto.copy(uid = uid)),
-                    ),
-                )
+            beforeImport()
+            val current = settings.withPurgeLock {
+                val stillCurrent = org.kysecurity.mail.ProcessState.isCurrent(session) &&
+                    syncRepository.destination() == destination
+                if (stillCurrent) {
+                    db.withTransaction {
+                        val uid = syncRepository.queueCreate(dto)
+                        db.deviceContactLinkDao().upsert(
+                            org.kysecurity.mail.data.DeviceContactLinkEntity(
+                                uid, rawContactId, snapshot.lastUpdatedEpochMs, syncedJsonOf(dto.copy(uid = uid)),
+                            ),
+                        )
+                    }
+                }
+                stillCurrent
             }
+            if (!current) return
         }
         ownRawContactsBySourceId(db.deviceContactLinkDao().getAll())
     }

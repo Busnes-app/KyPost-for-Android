@@ -69,6 +69,9 @@ class DeviceContactSyncSettings(context: Context) {
     suspend fun <T> whileConsented(destination: String, accountKey: String, block: suspend () -> T): T? =
         consentLock.withLock { if (accountKey in importAccounts(destination)) block() else null }
 
+    /** Runs [block] under the lock the account purge holds through [clearConsentDuring]. */
+    suspend fun <T> withPurgeLock(block: suspend () -> T): T = consentLock.withLock { block() }
+
     fun hasShownSyncIntro(): Boolean = prefs.getBoolean(KEY_SHOWN_INTRO, false)
 
     fun setHasShownSyncIntro(shown: Boolean) {
