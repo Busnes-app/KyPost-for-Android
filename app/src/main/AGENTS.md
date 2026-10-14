@@ -62,12 +62,16 @@ Owns production Android app code and resources.
 - The device must be paired via `PushPairingActivity` to use relay mail; there is no separate
   mobile login or mail-password form. Never build UI for the server's web-only mail configuration
   endpoints; an unconfigured relay is an empty state, not a form.
-- `PasswordPairingActivity` is the review-only convenience path: it sends a server URL and
-  one-time username/password to `/api/notifications/review-pairing`, clears the password field,
-  then feeds the returned deep link through the ordinary parser, confirmation, registration,
-  TLS-pin, and credential-storage flow. The relay exposes that endpoint only when its
-  `REVIEW_PAIRING_USERNAME` flag names a disposable account or a trailing-`*` username prefix;
-  this is not a second mobile auth mode. Normal builds hide its entry button; build the Play
+- `PasswordPairingActivity` is the review-only convenience path. `PasswordPairingClient` reads
+  `GET /api/auth/login-params?username=`, derives `authSecret` on-device exactly as the web
+  client's `authSecret.ts` (`deriveAuthSecret`, pinned to the server's known-answer vector by
+  `PasswordPairingClientTest`; the plaintext password never leaves the device), and posts
+  `{username, authSecret}` to `/api/notifications/review-pairing`. The activity clears the
+  password field, then feeds the returned deep link through the ordinary parser, confirmation,
+  registration, TLS-pin, and credential-storage flow. The relay exposes that endpoint only when
+  its `REVIEW_PAIRING_USERNAME` flag names one disposable account (exact match); it sends no
+  CAPTCHA token, so a relay with CAPTCHA configured refuses it with 401. This is not a second
+  mobile auth mode. Normal builds hide its entry button; build the Play
   review artifact with `-PenableReviewPairing=true` to expose it.
 - `mail/RelayMailSource` calls relay endpoints over OkHttp with device-id/device-secret headers.
   `mail/MailRepository` writes results into the Room cache (`data/AppDatabase`,
