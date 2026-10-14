@@ -395,13 +395,23 @@ Owns production Android app code and resources.
   attached to a contact by hand or by the QR scan; the account's real identity lives server-side.
   Two helpers exist because of this and are the only correct readers: `contactHasLinkedPgpKey`
   (badge: self also counts as linked when `pgp.hasPgpIdentity` says so) and
-  `pgp.ownFingerprintFromBootstrap` (the fingerprint `PgpKeyActivity` shows beside the user's own
-  QR, from `GET /api/pgp/bootstrap`'s `publicKey`, hashed locally by `PgpFingerprint`). Reading
+  `pgp.ownFingerprintFromBootstrap` (the server-reported fallback `pgp.ownFingerprint` gives
+  `PgpKeyActivity` when the vault holds no signer, from `GET /api/pgp/bootstrap`'s `publicKey`,
+  hashed locally by `PgpFingerprint`). Reading
   `contactDao().getSelf()?.pgpKey` for either is the bug both replaced — it is empty for
   essentially every user. Do not source that fingerprint from the QR token instead: `/api/pgp/qr/key`
   is single-use server-side, so fetching our own key with it burns the code being displayed.
   Never render the server's own `fingerprint` field for either side of the exchange; it is a claim
   beside the key with no cryptographic tie to it.
+- **The QR key check compares two devices, not the server with itself.** The code is
+  `{server}/api/pgp/qr/key?t=<token>#fp=<40 uppercase hex>`; the fragment never reaches the server.
+  `fp` and the fingerprint shown beside the code come from this device's own signer
+  (`EnrollmentSession.withSigner`, the vault opened once per screen). With no signer the screen
+  shows the bootstrap fingerprint labelled as the server's report and the code carries no `fp`.
+  The scanner fingerprints the fetched key itself (`checkScannedKey`): equal `fp` pins it
+  confirmed; a different or malformed `fp`, or any other fragment, saves nothing; no fragment
+  saves it as a plain contact key (`verifiedInPerson = false`), never a pin. `PgpKeyActivityTest`,
+  `PgpIdentityStatusTest`.
 - Client-protected messages offer "Open in webmail" via `pgp.webmailMessageUrl`, which builds
   `{serverUrl}/read?mailbox=&message=` — the same route a web push click uses, so no server change
   backs it. INBOX is sent as an absent `mailbox` param, matching the links the web app builds for
