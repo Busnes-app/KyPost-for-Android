@@ -62,12 +62,23 @@ Owns production Android app code and resources.
 - The device must be paired via `PushPairingActivity` to use relay mail; there is no separate
   mobile login or mail-password form. Never build UI for the server's web-only mail configuration
   endpoints; an unconfigured relay is an empty state, not a form.
-- `PasswordPairingActivity` is the review-only convenience path: it sends a server URL and
-  one-time username/password to `/api/notifications/review-pairing`, clears the password field,
-  then feeds the returned deep link through the ordinary parser, confirmation, registration,
-  TLS-pin, and credential-storage flow. The relay exposes that endpoint only when its
-  `REVIEW_PAIRING_USERNAME` flag names a disposable account or a trailing-`*` username prefix;
-  this is not a second mobile auth mode. Normal builds hide its entry button; build the Play
+- `PasswordPairingActivity` is the review-only convenience path. `PasswordPairingClient` reads
+  `GET /api/auth/captcha-config`, then `GET /api/auth/login-params?username=`, derives
+  `authSecret` on-device exactly as the web client's `authSecret.ts` (`deriveAuthSecret`; the
+  plaintext password never leaves the device), and posts `{username, authSecret, captchaToken?}`
+  to `/api/notifications/review-pairing`. For the built-in proof-of-work CAPTCHA (`pow`, the
+  server default) it fetches `GET /api/auth/pow-challenge` after the derivation (the challenge
+  is single-use, IP-bound and expires in 5 minutes) and solves it like `pow.ts` (`solvePow`).
+  The relay is untrusted input there: `solvePow` accepts only the server's exact format (32-hex
+  salt, 64-hex challenge, `SHA-256`, `maxnumber` at most 10,000,000), hashes the salt once and
+  clones the digest per candidate, and checks cancellation every 4096 candidates. A
+  third-party provider (Turnstile, Friendly Captcha) is refused with a message naming
+  `CAPTCHA_PROVIDER=pow`, before anything else is sent. `PasswordPairingClientTest` pins both
+  against server-generated vectors. The activity clears the password field, then feeds the
+  returned deep link through the ordinary parser, confirmation, registration, TLS-pin, and
+  credential-storage flow. The relay exposes that endpoint only when its
+  `REVIEW_PAIRING_USERNAME` flag names one disposable account (exact match). This is not a
+  second mobile auth mode. Normal builds hide its entry button; build the Play
   review artifact with `-PenableReviewPairing=true` to expose it.
 - `mail/RelayMailSource` calls relay endpoints over OkHttp with device-id/device-secret headers.
   `mail/MailRepository` writes results into the Room cache (`data/AppDatabase`,
