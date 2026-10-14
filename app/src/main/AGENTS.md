@@ -322,10 +322,11 @@ Owns production Android app code and resources.
   `envelopeVersions: [2, 3]`; omitting the list resets the server's claim to `[2]` and the browser
   then refuses to seal v3, so never drop it. The envelope fetch carries `DeliveryMetadata`
   (`version`, `fingerprint`, `materialGeneration`, the keyring's `primaryFingerprints` and
-  `keyFingerprints`), absent only from a server older than #210. The ceremony opens a v3 envelope
-  only with a v3 delivery record whose fingerprint is the checked identity, and `importKeyring`'s
-  `validate` rejects a ring whose generation, member set or inventory differs from that record
-  (`KEYRING_REJECTED`, nothing sealed). Every acknowledgement is an `EnrollmentReport`:
+  `keyFingerprints`), absent only from a server older than #210. The ceremony opens any envelope
+  only with a delivery record of the same version whose fingerprint is the checked identity
+  (`ENVELOPE_MALFORMED` otherwise). A v2 plaintext must be exactly one secret key ring whose
+  primary is that identity, and `importKeyring`'s `validate` rejects a ring whose generation,
+  member set or inventory differs from the record (both `KEYRING_REJECTED`, nothing sealed). Every acknowledgement is an `EnrollmentReport`:
   `NotEnrolled` (which also makes the server forget its delivery record), `Legacy` (the bare
   boolean; a converted account refuses it with 409), or `Keyring(materialGeneration, fingerprint)`
   sent with `envelopeVersion: 3`. The server matches a keyring acknowledgement against the

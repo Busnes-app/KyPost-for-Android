@@ -33,7 +33,7 @@ internal enum class FailureReason {
 
     SEAL_FAILED,
 
-    /** The keyring inside a v3 envelope is not the one the server recorded delivering, or cannot
+    /** The keys inside the envelope are not the ones the server recorded delivering, or cannot
      *  replace what this device already holds. Nothing was saved; never a retry. */
     KEYRING_REJECTED,
 

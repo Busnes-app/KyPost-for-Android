@@ -45,7 +45,7 @@ private data class KeyringStateDto(
 @Serializable
 private data class DeviceEnvelopeResponse(
     @SerialName("envelope") val envelope: String? = null,
-    /** Absent from servers before KyPost-Server #210; a v3 envelope without it is refused. */
+    /** Absent from servers before KyPost-Server #210; an envelope without it is refused. */
     @SerialName("version") val version: Int? = null,
     @SerialName("fingerprint") val fingerprint: String? = null,
     @SerialName("materialGeneration") val materialGeneration: Long? = null,
@@ -76,8 +76,8 @@ internal sealed class EnrollmentReport {
 
 internal sealed class EnrollmentCallResult {
     object Ok : EnrollmentCallResult()
-    /** [delivery] is null only from a server too old to record deliveries. */
-    data class Envelope(val envelope: String, val delivery: DeliveryMetadata? = null) : EnrollmentCallResult()
+    /** [delivery] is null when the reply does not name the recorded delivery; the ceremony refuses it. */
+    data class Envelope(val envelope: String, val delivery: DeliveryMetadata?) : EnrollmentCallResult()
 
     /** 409: the server compared the claim with its own record and refused. Never retried. */
     object Conflict : EnrollmentCallResult()
@@ -120,7 +120,7 @@ internal class EnrollmentClients(
             val envelope = parsed?.envelope
             when {
                 parsed == null || envelope.isNullOrBlank() -> EnrollmentCallResult.Failed("Malformed envelope response")
-                parsed.version == null || parsed.fingerprint == null -> EnrollmentCallResult.Envelope(envelope)
+                parsed.version == null || parsed.fingerprint == null -> EnrollmentCallResult.Envelope(envelope, null)
                 else -> EnrollmentCallResult.Envelope(
                     envelope,
                     DeliveryMetadata(

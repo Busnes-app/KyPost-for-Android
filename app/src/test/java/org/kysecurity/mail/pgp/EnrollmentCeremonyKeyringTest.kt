@@ -35,11 +35,12 @@ class EnrollmentCeremonyKeyringTest {
     private fun ports(
         delivery: DeliveryMetadata? = this.delivery,
         reportResult: EnrollmentCallResult = EnrollmentCallResult.Ok,
+        identity: String = active,
     ): FakePorts {
         val probe = FakeEnrollmentKeys()
-        val envelope = sealEnvelope(probe, aadFingerprint = active, plaintext = ringJson, version = ENVELOPE_VERSION_KEYRING)
+        val envelope = sealEnvelope(probe, aadFingerprint = identity, plaintext = ringJson, version = ENVELOPE_VERSION_KEYRING)
         return FakePorts(
-            identityResult = IdentityCheck.ClientProtected(active),
+            identityResult = IdentityCheck.ClientProtected(identity),
             fetchResults = mutableListOf(EnrollmentCallResult.Envelope(envelope, delivery)),
             reportResult = reportResult,
         )
@@ -94,6 +95,32 @@ class EnrollmentCeremonyKeyringTest {
 
         assertEquals(EnrollmentUiState.Failed(FailureReason.KEYRING_REJECTED), ports.states.last())
         assertTrue(ports.sealer.kinds.isEmpty())
+    }
+
+    /** The ring's active primary must be the identity the delivery names, even when the ring
+     *  otherwise matches the record. */
+    @Test
+    fun aRingWhoseActiveKeyIsNotTheRecordedIdentityIsRejected() = runBlocking {
+        val other = members.first { it != active }
+        val ports = ports(delivery = delivery.copy(fingerprint = other), identity = other)
+
+        ports.ceremony().run()
+
+        assertEquals(EnrollmentUiState.Failed(FailureReason.KEYRING_REJECTED), ports.states.last())
+        assertTrue(ports.sealer.kinds.isEmpty())
+        assertTrue(ports.transport.reported.isEmpty())
+        assertEquals(1, ports.keys.deleteCalls)
+    }
+
+    /** Bootstrap reports the fingerprint spaced; the server records it bare. */
+    @Test
+    fun theSpacedIdentityFormMatchesTheRecordedDelivery() = runBlocking {
+        val ports = ports(identity = active.chunked(4).joinToString(" "))
+
+        ports.ceremony().run()
+
+        assertEquals(EnrollmentUiState.Enrolled, ports.states.last())
+        assertEquals(listOf(VaultRecordKind.KEYRING), ports.sealer.kinds)
     }
 
     /** A v3 envelope from a server that recorded no delivery cannot be validated, so it is not
