@@ -293,6 +293,23 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate17To18_createsAnEmptyImportedContactsTable_keepingLinks() {
+        helper.createDatabase(TEST_DB, 17).apply {
+            execSQL("INSERT INTO device_contact_links (uid, rawContactId, deviceUpdatedAtEpochMs, syncedJson) VALUES ('u1', 7, 0, '')")
+            close()
+        }
+
+        val migrated = helper.runMigrationsAndValidate(TEST_DB, 18, true, AppDatabase.MIGRATION_17_18)
+
+        migrated.query("SELECT COUNT(*) FROM imported_device_contacts").use { cursor ->
+            assertEquals(true, cursor.moveToFirst())
+            assertEquals(0, cursor.getInt(0))
+        }
+        migrated.execSQL("INSERT INTO imported_device_contacts (sourceKey) VALUES ('k')")
+        migrated.query("SELECT uid FROM device_contact_links").use { cursor -> assertEquals(1, cursor.count) }
+    }
+
     private fun insertV11Email(messageId: String, folder: String, subject: String) =
         "INSERT INTO emails " +
             "(messageId, folder, sender, sentTo, cc, bcc, subject, preview, bodyMode, label, " +

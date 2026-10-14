@@ -236,6 +236,23 @@ class DeviceContactImportConsentTest {
         }
     }
 
+    /** A contact deleted in KyPost stays deleted: its source row is not imported again, even
+     *  after a rewind (a newly consented account) reads every contact once more. */
+    @Test
+    fun anImportedContactDeletedInKyPost_isNotImportedAgain() = runBlocking {
+        settings.setImportAccounts(destination, setOf(DeviceAccount(null, null).key))
+        repository.syncAll()
+        assertEquals(importState(), 1, queuedProbeCreates())
+        // Uploaded, then deleted on another device: gone from Room and from the outbox.
+        db.pendingContactChangeDao().clearAll()
+        db.contactDao().clearAll()
+        settings.setLastForeignScanAtEpochMs(0L)
+
+        repository.syncAll()
+
+        assertEquals(importState(), 0, queuedProbeCreates())
+    }
+
     private fun rawContactExists(rawContactId: Long): Boolean = context.contentResolver.query(
         ContactsContract.RawContacts.CONTENT_URI,
         arrayOf(ContactsContract.RawContacts._ID),

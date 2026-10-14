@@ -18,11 +18,12 @@ import org.kysecurity.mail.contacts.GroupSyncRepository
 import org.kysecurity.mail.contacts.device.DeviceContactMappers.toContactDto
 import org.kysecurity.mail.contacts.device.DeviceContactMappers.toDto
 import org.kysecurity.mail.data.AppDatabase
+import org.kysecurity.mail.data.ImportedDeviceContactEntity
+import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.util.UUID
 
 class DeviceContactRepository(
     private val context: Context,
@@ -297,12 +298,15 @@ class DeviceContactRepository(
             ContactsContract.RawContacts.CONTACT_ID,
             ContactsContract.RawContacts.ACCOUNT_TYPE,
             ContactsContract.RawContacts.ACCOUNT_NAME,
+            ContactsContract.RawContacts.SOURCE_ID,
         )
 
         val selection = FOREIGN_LIVE_ROWS
         val selectionArgs = arrayOf(DeviceContactAccount.ACCOUNT_TYPE)
 
-        val rawContactCandidates = mutableListOf<Long>()
+        val imported = db.importedDeviceContactDao().allKeys().toHashSet()
+        // Raw contact id to its source key.
+        val rawContactCandidates = mutableListOf<Pair<Long, String>>()
         contentResolver.query(
             ContactsContract.RawContacts.CONTENT_URI,
             projection,
@@ -318,10 +322,16 @@ class DeviceContactRepository(
                     cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.ACCOUNT_NAME)),
                 )
                 if (account.key !in consented) continue
+                val sourceKey = importSourceKey(
+                    account,
+                    cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.RawContacts.SOURCE_ID)),
+                    rawContactId,
+                )
+                if (sourceKey in imported) continue
 
                 val lastUpdated = queryContactLastUpdated(contactId)
                 if (lastUpdated > watermarkMs) {
-                    rawContactCandidates.add(rawContactId)
+                    rawContactCandidates.add(rawContactId to sourceKey)
                 }
             }
         }
@@ -335,7 +345,7 @@ class DeviceContactRepository(
         // Each create joins both, so the same person in two accounts is uploaded once.
         val matchIndex = DeviceContactMatcher.Index.of(existing)
 
-        for (rawContactId in rawContactCandidates) {
+        for ((rawContactId, sourceKey) in rawContactCandidates) {
             val candidate = readRawContactSnapshot(rawContactId)
             if (candidate == null) continue
 
@@ -344,47 +354,38 @@ class DeviceContactRepository(
             val candidateEmails = candidate.emails.map { it.value }
             val candidatePhones = candidate.phones.map { it.value }
 
-            val matchedUid = matchIndex.findMatch(candidateEmails, candidatePhones)
-
-            if (matchedUid != null) {
-                // Never link a uid to another account's raw contact: our writes go out as a sync
-                // adapter, which bypasses CP2's guards. The match still skips the re-import.
-                if (candidate.accountType == DeviceContactAccount.ACCOUNT_TYPE) {
-                    db.deviceContactLinkDao().upsert(
-                        org.kysecurity.mail.data.DeviceContactLinkEntity(
-                            uid = matchedUid,
-                            rawContactId = rawContactId,
-                            deviceUpdatedAtEpochMs = candidate.lastUpdatedEpochMs,
-                        ),
-                    )
-                }
-            } else if (candidateEmails.isNotEmpty() || candidatePhones.isNotEmpty()) {
-                // The WHOLE email and phone lists: matching only the head created duplicates.
-                val alreadyImported = existing.any { existingContact ->
+            // The WHOLE email and phone lists: matching only the head created duplicates.
+            val alreadyInKyPost = matchIndex.findMatch(candidateEmails, candidatePhones) != null ||
+                existing.any { existingContact ->
                     existingContact.fn.equals(candidate.fn, ignoreCase = true) &&
                         sharesAnyIdentifier(existingContact, candidateEmails, candidatePhones)
                 }
-                if (!alreadyImported) {
-                    val newDto = candidate.toContactDto(UUID.randomUUID().toString(), 0)
-                    beforeImport()
-                    // Consent read now, not at scan start: it may have been withdrawn since.
-                    val account = DeviceAccount(candidate.accountType, candidate.accountName).key
-                    val current = settings.whileConsented(destination, account) {
-                        // Checked under the consent lock the purge also takes, so the session and
-                        // the pairing cannot change between this check and the write.
-                        val stillCurrent = org.kysecurity.mail.ProcessState.isCurrent(session) &&
-                            syncRepository.destination() == destination
-                        if (stillCurrent) {
+            if (!alreadyInKyPost && candidateEmails.isEmpty() && candidatePhones.isEmpty()) continue
+
+            if (!alreadyInKyPost) beforeImport()
+            // Consent read now, not at scan start: it may have been withdrawn since.
+            val account = DeviceAccount(candidate.accountType, candidate.accountName).key
+            val current = settings.whileConsented(destination, account) {
+                // Checked under the consent lock the purge also takes, so the session and
+                // the pairing cannot change between this check and the write.
+                val stillCurrent = org.kysecurity.mail.ProcessState.isCurrent(session) &&
+                    syncRepository.destination() == destination
+                if (stillCurrent) {
+                    db.withTransaction {
+                        if (!alreadyInKyPost) {
+                            val newDto = candidate.toContactDto("", 0)
                             val created = newDto.copy(uid = syncRepository.queueCreate(newDto))
                             existing += created
                             matchIndex.add(created)
                         }
-                        stillCurrent
+                        // Taken once: a contact later deleted in KyPost is not imported back.
+                        db.importedDeviceContactDao().insert(ImportedDeviceContactEntity(sourceKey))
                     }
-                    // The pairing this scan started under is gone: nothing more may be queued.
-                    if (current == false) return@withContext
                 }
+                stillCurrent
             }
+            // The pairing this scan started under is gone: nothing more may be queued.
+            if (current == false) return@withContext
         }
 
         settings.advanceScanWatermark(revision, scanStartedAtMs)
@@ -1290,6 +1291,12 @@ class DeviceContactRepository(
             )
         }
 }
+
+/** Which foreign raw contact an import took. Its account's SOURCE_ID is that account's server id,
+ *  which survives the account being resynced or re-added (raw contact ids do not); accounts with
+ *  no sync adapter (phone storage, SIM) have none, but are never resynced, so their row id holds. */
+internal fun importSourceKey(account: DeviceAccount, sourceId: String?, rawContactId: Long): String =
+    account.key + "\n" + (sourceId?.takeIf { it.isNotEmpty() }?.let { "s:$it" } ?: "r:$rawContactId")
 
 /** Live raw contacts of every account but ours, including the account-less local store. */
 private const val FOREIGN_LIVE_ROWS =
