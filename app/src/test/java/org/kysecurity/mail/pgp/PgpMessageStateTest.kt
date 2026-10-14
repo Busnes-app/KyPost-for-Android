@@ -47,12 +47,11 @@ class PgpMessageStateTest {
     }
 
     @Test
-    fun serverVerifiedNeverClaimsTheUserConfirmedTheKey() {
-        // The relay's two booleans cannot tell a fingerprint-confirmed key from an
-        // Autocrypt-harvested one, so the mapping takes the weaker claim. Promoting this to
-        // VERIFIED_CONFIRMED would reintroduce the exact over-claim Part 0.2 removed.
+    fun serverVerifiedClaimsNoKeyThisDeviceHolds() {
+        // The relay checked against a key this device never pinned, so neither identity nor
+        // continuity is ours to claim.
         assertEquals(
-            PgpSignatureState.VERIFIED_SEEN_BEFORE,
+            PgpSignatureState.SIGNER_UNKNOWN,
             pgpSignatureStateOf(pgpSigned = true, pgpVerified = true),
         )
     }

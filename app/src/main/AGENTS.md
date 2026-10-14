@@ -370,7 +370,8 @@ Owns production Android app code and resources.
   (a key bound to the sender that the user
   confirmed out of band — the only state that claims identity), `VERIFIED_SEEN_BEFORE` (a bound key still matching its TOFU
   pin, but never confirmed — most keys arrive by Autocrypt harvest, so this claims only continuity,
-  "same key as last time", not who they say they are), `SIGNER_UNKNOWN` (no key bound to this sender
+  "same key as last time", not who they say they are; only a key this device holds earns it — a
+  relay-supplied key or the relay's `pgpVerified` flag alone yields `SIGNER_UNKNOWN`), `SIGNER_UNKNOWN` (no key bound to this sender
   at all — an ordinary correspondent not yet in the address book, a key that rotated before harvest,
   and a forged `From` are locally indistinguishable, so this is not an accusation), `KEY_CHANGED` (a
   key IS bound to this sender and no longer matches its TOFU pin — the one alarm worth raising), and
