@@ -90,4 +90,12 @@ class EmailDaoLazyBodyTest {
 
         assertNull(dao.getById("42", "INBOX"))
     }
+
+    /** The list reads no bodies: one opened message can be megabytes, more than a cursor window. */
+    @Test
+    fun theFolderListReadsNoBody() {
+        dao.upsertAll(listOf(row("42", "INBOX", body = "x".repeat(3 * 1024 * 1024))))
+
+        assertEquals(listOf("42"), dao.getByFolder("INBOX").map { it.messageId })
+    }
 }
