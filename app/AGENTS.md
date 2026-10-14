@@ -120,7 +120,9 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   `ComposeActivity`. Shared attachments still enter through the Activity's existing bounded
   attachment reader, which accepts only `content:` URIs from other packages' providers and
   refuses a descriptor whose `/proc/self/fd` path is under this app's data directories. An external compose request starts a new draft and must not restore an
-  unrelated `ComposeDraftCache` entry left by an earlier internal compose screen.
+  unrelated `ComposeDraftCache` entry left by an earlier internal compose screen. Recreating that
+  screen (a rotation, `savedInstanceState` set) is the same composition: it takes its own draft
+  back and adopts its send in flight (`ComposeDraftCache.takeOnOpen`).
   In-app launches go through `ComposeActivity.internalIntent` (the non-exported
   `InternalComposeActivity` alias); only those read the `compose_*` extras, including prefilled
   HTML. Every launch of the exported `ComposeActivity` gets public extras only, as plain text.
