@@ -914,7 +914,15 @@ Owns production Android app code and resources.
   are seen; a scan moves the watermark to its own start time only if `consentRevision` is
   unchanged since it began, so a rewind made mid-scan survives it. Each create a scan queues joins its match index, so the
   same person in two consented accounts is uploaded once
-  (`DeviceContactImportConsentTest.theSamePersonTwiceInOneScan_isImportedOnce`). The choice is the Contacts menu's "Import from other accounts…" dialog, whose copy
+  (`DeviceContactImportConsentTest.theSamePersonTwiceInOneScan_isImportedOnce`).
+  Each foreign raw contact the import queues, or finds already in KyPost, is recorded in
+  `imported_device_contacts` (`MIGRATION_17_18`) in the same transaction, and never imported
+  again, so a contact deleted in KyPost stays deleted even after a rewind. The key
+  (`importSourceKey`) is the account plus its SOURCE_ID, the other account's server id, which
+  survives that account being resynced or re-added; rows without one (phone storage, SIM) use
+  the raw contact id. The unpair purge clears the table; the wipe deletes the database. Imports
+  made before v18 are unrecorded until the next scan matches them
+  (`anImportedContactDeletedInKyPost_isNotImportedAgain`, `ImportSourceKeyTest`). The choice is the Contacts menu's "Import from other accounts…" dialog, whose copy
   says the contacts go to the user's KyPost server. `DeviceContactImportConsentTest`.
 - **Deletes reach the phone through Room.** `syncAll`'s `removeDeletedContacts` stage removes the
   raw contact of every link whose Room contact is gone, so server tombstones, snapshot prunes and

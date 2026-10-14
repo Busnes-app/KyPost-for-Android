@@ -17,8 +17,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         GroupLinkEntity::class,
         ContactSyncStateEntity::class,
         RecipientPinEntity::class,
+        ImportedDeviceContactEntity::class,
     ],
-    version = 17,
+    version = 18,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -32,6 +33,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun groupLinkDao(): GroupLinkDao
     abstract fun contactSyncStateDao(): ContactSyncStateDao
     abstract fun recipientPinDao(): RecipientPinDao
+    abstract fun importedDeviceContactDao(): ImportedDeviceContactDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -228,6 +230,15 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_16_17 = object : Migration(16, 17) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `emails` ADD COLUMN `wokenAt` TEXT")
+            }
+        }
+
+        /** Foreign raw contacts already imported. Starts empty: earlier imports were not recorded. */
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `imported_device_contacts` (`sourceKey` TEXT NOT NULL, PRIMARY KEY(`sourceKey`))",
+                )
             }
         }
     }

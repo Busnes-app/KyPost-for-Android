@@ -220,6 +220,7 @@ class PushRepository(
             db.groupDao().clearAll()
             db.groupLinkDao().clearAll()
             db.deviceContactLinkDao().deleteAll()
+            db.importedDeviceContactDao().clearAll()
             // The contact-sync cursor lives here now; without this a re-pair resumes from the old cursor.
             db.contactSyncStateDao().clearAll()
         } else {
