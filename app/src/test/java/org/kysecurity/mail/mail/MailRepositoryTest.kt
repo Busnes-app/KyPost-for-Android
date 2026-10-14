@@ -3,6 +3,8 @@ package org.kysecurity.mail.mail
 import org.kysecurity.mail.Email
 import org.kysecurity.mail.data.EmailDao
 import org.kysecurity.mail.data.EmailEntity
+import org.kysecurity.mail.data.EmailListRow
+import org.kysecurity.mail.data.toListRow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -43,12 +45,12 @@ private class FakeEmailDao : EmailDao {
 
     private fun key(id: String, folder: String) = folder to id
 
-    override fun getByFolder(folder: String): List<EmailEntity> {
+    override fun getByFolder(folder: String): List<EmailListRow> {
         if (failNextFolderRead) {
             failNextFolderRead = false
             throw IllegalStateException("simulated Room read failure")
         }
-        return rows.values.filter { it.folder == folder }
+        return rows.values.filter { it.folder == folder }.map { it.toListRow() }
     }
     override fun upsertAll(emails: List<EmailEntity>) {
         beforeUpsert?.invoke()

@@ -164,6 +164,11 @@ Owns production Android app code and resources.
   removal in one folder deleted the other. Every per-message DAO statement takes the folder.
   Still not UIDVALIDITY-aware — the relay does not expose it and a client cannot invent one; the
   daily full resync rewrites the window, so id reuse self-heals within a day. See `EmailEntity`.
+- `EmailDao.getByFolder` returns `EmailListRow`: every column but `body`, plus a computed
+  `hasBody`. The list repaints often and a cached body can be megabytes; the reader reads the body
+  by id (`MailRepository.fetchBody`). Never `SELECT *` emails for a list. Inbox work on the IO
+  executor goes through `executeGuarded`: a throw there would kill the process, so it keeps the
+  rows, marks the folder stale and toasts instead.
 - Woken snooze pin (KyPost-Server #386): an inbox row's optional `wokenAt` is when a snoozed message
   returned to INBOX. `EmailDao.getByFolder` orders by `COALESCE(wokenAt, atUtc)`, the row shows
   `atUtc` plus a "Snoozed" badge. An "updated" delta row replaces it, so one without `wokenAt`
