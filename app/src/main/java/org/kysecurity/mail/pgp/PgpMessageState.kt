@@ -21,14 +21,14 @@ enum class PgpMessageState {
 fun pgpMessageStateOf(
     pgpEncrypted: Boolean,
     pgpDecryptError: String,
-    body: String?,
+    hasBody: Boolean,
     /** True when the body could not be read at all (no cached row), as opposed to the server
      *  having delivered the message with no body. See [PgpMessageState.BODY_UNAVAILABLE]. */
     bodyUnavailable: Boolean = false,
 ): PgpMessageState = when {
     !pgpEncrypted -> PgpMessageState.NONE
     pgpDecryptError.isNotBlank() -> PgpMessageState.DECRYPT_FAILED
-    !body.isNullOrBlank() -> PgpMessageState.DECRYPTED_BY_SERVER
+    hasBody -> PgpMessageState.DECRYPTED_BY_SERVER
     bodyUnavailable -> PgpMessageState.BODY_UNAVAILABLE
     else -> PgpMessageState.CLIENT_PROTECTED
 }

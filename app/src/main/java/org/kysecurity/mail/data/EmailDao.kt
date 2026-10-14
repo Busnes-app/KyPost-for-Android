@@ -11,9 +11,16 @@ data class FolderUnread(val folder: String, val unread: Int)
 
 @Dao
 interface EmailDao {
-    /** A woken snooze sorts as if it arrived when it woke. Both are RFC 3339 UTC, so text order is time order. */
-    @Query("SELECT * FROM emails WHERE folder = :folder ORDER BY COALESCE(wokenAt, atUtc) DESC")
-    fun getByFolder(folder: String): List<EmailEntity>
+    /** A woken snooze sorts as if it arrived when it woke. Both are RFC 3339 UTC, so text order is time order.
+     *  `hasBody` blanks match Kotlin's `isNullOrBlank` for ASCII whitespace. */
+    @Query(
+        "SELECT messageId, folder, sender, sentTo, cc, bcc, subject, preview, " +
+            "(body IS NOT NULL AND TRIM(body, ' ' || char(9, 10, 11, 12, 13)) != '') AS hasBody, " +
+            "bodyMode, label, keywordsJson, status, atUtc, wokenAt, hasAttachments, sourceMode, " +
+            "pgpEncrypted, pgpSigned, pgpVerified, pgpSignerFingerprint, pgpDecryptError " +
+            "FROM emails WHERE folder = :folder ORDER BY COALESCE(wokenAt, atUtc) DESC",
+    )
+    fun getByFolder(folder: String): List<EmailListRow>
 
     @Upsert
     fun upsertAll(emails: List<EmailEntity>)

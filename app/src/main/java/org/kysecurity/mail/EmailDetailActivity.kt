@@ -401,7 +401,7 @@ class EmailDetailActivity : LockedActivity() {
         // Routine since the inbox went bodies=0: the body is fetched on open, so any network
         // failure lands here rather than needing a missing cache row.
         val fetchFailure = bodyFetchFailureNotice(outcome)
-        val pgpState = pgpMessageStateOf(pgpEncrypted, pgpDecryptError, content?.html, bodyUnavailable)
+        val pgpState = pgpMessageStateOf(pgpEncrypted, pgpDecryptError, !content?.html.isNullOrBlank(), bodyUnavailable)
         // A client-protected message has no body to fall back to, and emailPreview is the
         // placeholder subject line — rendering it would look like the message content.
         val bodyMode = content?.bodyMode?.takeIf { it == "html" || it == "plain" } ?: emailBodyMode

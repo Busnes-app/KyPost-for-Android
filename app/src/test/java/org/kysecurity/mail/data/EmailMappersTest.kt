@@ -27,7 +27,7 @@ class EmailMappersTest {
         )
 
         val entity = email.toEntity(folder = "INBOX", sourceMode = "relay")
-        val roundTripped = entity.toUiEmail()
+        val roundTripped = entity.toListRow().toUiEmail()
 
         assertEquals(email.id, roundTripped.id)
         assertEquals(email.subject, roundTripped.subject)
@@ -36,7 +36,9 @@ class EmailMappersTest {
         assertEquals(email.sentTo, roundTripped.sentTo)
         assertEquals(email.cc, roundTripped.cc)
         assertEquals(email.bcc, roundTripped.bcc)
-        assertEquals(email.body, roundTripped.body)
+        assertEquals(email.body, entity.body)
+        assertEquals(null, roundTripped.body)
+        assertEquals(true, roundTripped.hasBody)
         assertEquals(email.bodyMode, roundTripped.bodyMode)
         assertEquals(email.label, roundTripped.label)
         assertEquals(email.status, roundTripped.status)

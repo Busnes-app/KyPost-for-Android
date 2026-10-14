@@ -89,8 +89,9 @@ internal class FakeMailSource : MailSource {
         return sendOutcomes.poll(10, TimeUnit.SECONDS) ?: MailOutcome.UpstreamFailure("no stubbed send outcome")
     }
 
-    override fun fetchInbox(mailbox: String, limit: Int, forceFullResync: Boolean): MailOutcome<MailFetchResult> =
-        MailOutcome.UpstreamFailure("test relay")
+    var inbox: () -> MailOutcome<MailFetchResult> = { MailOutcome.UpstreamFailure("test relay") }
+
+    override fun fetchInbox(mailbox: String, limit: Int, forceFullResync: Boolean): MailOutcome<MailFetchResult> = inbox()
     override fun fetchOlder(mailbox: String, limit: Int, before: String): MailOutcome<MailPage> =
         MailOutcome.UpstreamFailure("test relay")
     override fun fetchMessageBody(messageId: String, folder: String): MailOutcome<MailMessageBody> =

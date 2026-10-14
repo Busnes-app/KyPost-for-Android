@@ -231,9 +231,23 @@ class InboxActivity : LockedActivity() {
     private fun repaintFromCache() {
         if (isFinishing || isDestroyed) return
         val folder = currentFolder
-        ioExecutor.execute {
+        executeGuarded(folder) {
             val cached = mailRepository.cachedEmails(folder)
             runOnUiThread { applyRefreshedEmails(folder, cached, isFinal = false, errorMessage = null) }
+        }
+    }
+
+    /** An uncaught throw on [ioExecutor] kills the process. A failure keeps the rows on screen,
+     *  marks [folder] stale and says so. Logs the type only: a message can carry mail content. */
+    private fun executeGuarded(folder: String, work: () -> Unit) = ioExecutor.execute {
+        try {
+            work()
+        } catch (e: RuntimeException) {
+            android.util.Log.w("InboxActivity", "Inbox refresh failed: ${e.javaClass.name}")
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                applyRefreshedEmails(folder, allEmails, isFinal = true, errorMessage = getString(R.string.inbox_refresh_failed))
+            }
         }
     }
 
@@ -566,8 +580,7 @@ class InboxActivity : LockedActivity() {
         // Snapshotted here: this request belongs to the folder on screen now, and the executor
         // may not reach it until the user has moved on. See [applyRefreshedEmails].
         val requestedFolder = currentFolder
-        ioExecutor.execute {
-            // try/finally: cachedEmails and rememberKeywords both touch Room and can throw.
+        executeGuarded(requestedFolder) {
             try {
                 refreshInboxOnIo(requestedFolder, showCacheFirst, forceFullResync)
             } finally {
@@ -778,7 +791,7 @@ class InboxActivity : LockedActivity() {
      *  which runs every refresh too, so an older snapshot cannot land after this one. */
     private fun recountUnread() {
         if (isDestroyed || ioExecutor.isShutdown) return
-        ioExecutor.execute {
+        executeGuarded(currentFolder) {
             val unread = mailRepository.unreadCounts()
             runOnUiThread { unreadByFolder = unread }
         }

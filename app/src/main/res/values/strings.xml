@@ -545,6 +545,7 @@
     <string name="loading_emails">Syncing emails…</string>
     <string name="inbox_updated">Updated %1$s</string>
     <string name="inbox_not_updated">Not updated yet</string>
+    <string name="inbox_refresh_failed">Couldn\'t refresh your mail. Pull down to try again.</string>
     <string name="inbox_empty">No messages in %1$s</string>
     <string name="search_hint">Search mail</string>
     <string name="search_no_results">No matching messages</string>

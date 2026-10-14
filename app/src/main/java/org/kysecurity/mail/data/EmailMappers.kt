@@ -6,7 +6,8 @@ import kotlinx.serialization.json.Json
 
 private val mapperJson = Json { ignoreUnknownKeys = true }
 
-fun EmailEntity.toUiEmail(): Email = Email(
+/** List rows carry no body; [Email.hasBody] says whether one is cached. */
+fun EmailListRow.toUiEmail(): Email = Email(
     id = messageId,
     subject = subject,
     sender = sender,
@@ -16,7 +17,7 @@ fun EmailEntity.toUiEmail(): Email = Email(
     sentTo = sentTo,
     cc = cc,
     bcc = bcc,
-    body = body,
+    hasBody = hasBody,
     bodyMode = bodyMode,
     label = label,
     status = status,
