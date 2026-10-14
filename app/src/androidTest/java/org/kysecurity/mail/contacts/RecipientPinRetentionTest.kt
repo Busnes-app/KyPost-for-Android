@@ -22,11 +22,15 @@ import org.kysecurity.mail.pgp.ClientEncryptedSender
 import org.kysecurity.mail.pgp.ClientSendOutcome
 import org.kysecurity.mail.pgp.EnrollmentSession
 import org.kysecurity.mail.pgp.OpenOutcome
+import org.kysecurity.mail.pgp.PgpSignatureState
+import org.kysecurity.mail.pgp.RawSignature
 import org.kysecurity.mail.pgp.ResolveResult
 import org.kysecurity.mail.pgp.ResolvedRecipientKey
 import org.kysecurity.mail.pgp.RoomLocalSignerKeys
 import org.kysecurity.mail.pgp.VaultOpener
 import org.kysecurity.mail.pgp.VaultRecordKind
+import org.kysecurity.mail.pgp.signatureStateFor
+import org.kysecurity.mail.pgp.signerKeyIdsOf
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -156,6 +160,26 @@ class RecipientPinRetentionTest {
 
         assertTrue("expected Sent, got $outcome", outcome is ClientSendOutcome.Sent)
         assertEquals(1, sent.size)
+    }
+
+    private suspend fun verdictFor(key: String) = signatureStateFor(
+        RawSignature.Checked(signerKeyIdsOf(key).first(), verified = true),
+        emptyList(),
+        RoomLocalSignerKeys { db }.keysFor(ALICE),
+    )
+
+    @Test
+    fun aQrKeySavedWithoutVerifying_isSeenBefore_neverConfirmed() = runBlocking {
+        repository.queueCreate(alice(key = KEY_A), verifiedInPerson = false)
+
+        assertEquals(PgpSignatureState.VERIFIED_SEEN_BEFORE, verdictFor(KEY_A))
+    }
+
+    @Test
+    fun aQrKeySavedAfterAMatchingFingerprint_isConfirmed() = runBlocking {
+        repository.queueCreate(alice(key = KEY_A), verifiedInPerson = true)
+
+        assertEquals(PgpSignatureState.VERIFIED_CONFIRMED, verdictFor(KEY_A))
     }
 
     internal companion object {
