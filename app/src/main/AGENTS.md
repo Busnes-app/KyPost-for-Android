@@ -43,6 +43,9 @@ Owns production Android app code and resources.
   refuses a builder chain ending in `.show()`.
 - The startup notices (credential reset, stranded downloads) are one-shot **per process**: the latch is spent when the dialog is built, and the pref behind it is cleared only by the user tapping OK. They are therefore claimed through `claimNotice` *after* the unlock redirect, and never by a screen that is going away — `MainActivity` sets `showsStartupNotices = false` because it routes on and finishes. A screen that finishes itself must do the same, or the notice (including "your cached mail is gone") dies unseen for the rest of the process. `StartupNoticeLatchTest` covers the gate.
 - Android 13+ notification runtime permission is requested from launcher UI.
+- Predictive back is on (`enableOnBackInvokedCallback`). Intercept Back only through
+  `onBackPressedDispatcher`; an `onBackPressed` override or a `KEYCODE_BACK` handler is never
+  called under it.
 - `signon/` is KyIdentity sign-in through KyAuth's AccountManager account. Details:
   - `AuthenticatorPin`: `decide` is the pure half. The button and the activity both require exactly one authenticator of type `org.kysecurity.identity`, package `org.kysecurity.authenticator`, one signer, and every certificate in KyAuth's signing history within the pinned SHA-256 set (`containsAll`; fail closed). Trade-off: a rotation makes KyAuth untrusted until KyPost pins the new certificate too. The manifest `<queries>` entry lets KyPost read KyAuth's certificate. Only debug builds honour Gradle property `kypostDebugKyAuthCert` (64 lowercase hex, validated at configuration time) as one extra digest, for a debug-signed KyAuth.
   - `KyIdentitySignOnClient` is pure JVM (no Android imports, never logs the ID token): `GET /api/auth/sso-config`, then `POST /api/auth/native/signon {idToken}`, answered like `review-pairing`. Error bodies are bounded and sanitised; a 403 body is shown only if plain text, first line, at most 200 chars. It refuses a deep link whose host differs from the relay host.
@@ -692,12 +695,17 @@ Owns production Android app code and resources.
   and a pending saved-position restore wins. `InboxNewMailTest` covers both branches.
 - Theme selection is managed in `ThemesActivity` and uses the shared theme name list based on
   `theme.ts` palettes, led by `Busnes Light`/`Busnes Dark` from `busnes-color-theme-handoff.md`.
-  `AppTheme.DEFAULT_THEME` (`Busnes Light`) is the only place the fallback name lives — the
-  stored-name read, the unknown-name fallback and the missing-palette fallback all go through it.
-  An install that never picked a theme moves from `Patina Ky` to `Busnes Light`; an explicit
-  choice is kept, because `getStoredThemeName` only discards names `THEME_OPTIONS` no longer
-  offers. Palette colors are opaque six-digit hex without exception: `blend()` returns
-  `Color.rgb`, so alpha in `line` survives as a fully opaque near-black in
+  `AppTheme.DEFAULT_THEME` (`FOLLOW_SYSTEM_THEME`, "Follow system") is the only place the
+  fallback name lives — the stored-name read, the unknown-name fallback and the missing-palette
+  fallback all go through it. "Follow system" heads `THEME_OPTIONS` but has no palette:
+  `themePaletteFor(name, systemDark)` resolves it to `Busnes Light` or `Busnes Dark`, and
+  `getStoredThemePalette` reads `systemDark` from the context's `uiMode`. A night-mode flip
+  recreates the Activity; a screen that declares `uiMode` in `configChanges`
+  (`KyIdentitySignOnActivity`) must repaint in `onConfigurationChanged` instead.
+  `FollowSystemThemeTest` covers both kinds. An install that never picked a theme follows the
+  system; an explicit choice is kept, because `getStoredThemeName` only discards names
+  `THEME_OPTIONS` no longer offers. Palette colors are opaque six-digit hex without exception:
+  `blend()` returns `Color.rgb`, so alpha in `line` survives as a fully opaque near-black in
   `applyEmptyStateBackground`. `ThemePaletteTableTest` holds both rules.
 - `SettingsActivity` is only a hub for existing settings surfaces: Security, Themes, Keywords,
   Pairing, PGP Key, Signature, and About. Keep settings logic in the destination screens rather

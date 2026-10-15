@@ -15,15 +15,32 @@ class ThemePaletteTableTest {
 
     @Test
     fun everyOfferedThemeHasItsOwnPalette() {
-        assertEquals(THEME_OPTIONS.toSet(), themePalettes.keys)
+        assertEquals(THEME_OPTIONS.toSet() - FOLLOW_SYSTEM_THEME, themePalettes.keys)
         assertEquals(THEME_OPTIONS.size, THEME_OPTIONS.toSet().size)
     }
 
     @Test
-    fun theDefaultIsBusnesLightAndIsOffered() {
-        assertEquals("Busnes Light", DEFAULT_THEME)
+    fun theDefaultFollowsTheSystemAndIsOffered() {
+        assertEquals(FOLLOW_SYSTEM_THEME, DEFAULT_THEME)
         assertTrue(THEME_OPTIONS.contains(DEFAULT_THEME))
-        assertTrue(themePalettes.containsKey(DEFAULT_THEME))
+    }
+
+    @Test
+    fun followSystemPaintsBusnesLightOrDark() {
+        assertEquals(themePalettes["Busnes Light"], themePaletteFor(FOLLOW_SYSTEM_THEME, systemDark = false))
+        assertEquals(themePalettes["Busnes Dark"], themePaletteFor(FOLLOW_SYSTEM_THEME, systemDark = true))
+    }
+
+    @Test
+    fun anUnknownNameFallsBackToTheDefault() {
+        assertEquals(themePalettes["Busnes Dark"], themePaletteFor("Retired Theme", systemDark = true))
+        assertEquals(themePalettes["Busnes Light"], themePaletteFor("Retired Theme", systemDark = false))
+    }
+
+    @Test
+    fun aNamedThemeIgnoresTheSystem() {
+        assertEquals(themePalettes["Forest"], themePaletteFor("Forest", systemDark = true))
+        assertEquals(themePalettes["Forest"], themePaletteFor("Forest", systemDark = false))
     }
 
     @Test
@@ -42,14 +59,14 @@ class ThemePaletteTableTest {
 
     @Test
     fun theBusnesPalettesMatchTheHandoff() {
-        val light = themePaletteFor("Busnes Light")
+        val light = themePaletteFor("Busnes Light", systemDark = false)
         assertEquals("#f8f6f0", light.bg)
         assertEquals("#ffffff", light.panel)
         assertEquals("#566461", light.ink)
         assertEquals("#182326", light.inkStrong)
         assertEquals("#bf3f18", light.accent)
 
-        val dark = themePaletteFor("Busnes Dark")
+        val dark = themePaletteFor("Busnes Dark", systemDark = false)
         assertEquals("#182326", dark.bg)
         assertEquals("#1f2b2e", dark.panel)
         assertEquals("#b3bcb8", dark.ink)

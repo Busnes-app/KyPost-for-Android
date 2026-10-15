@@ -25,7 +25,7 @@ class ContactsFabThemeTest {
         // Not the default theme, so a match can't come from the XML colors.
         saveThemeName(context, "Forest")
         try {
-            val accent = Color.parseColor(themePaletteFor("Forest").accent)
+            val accent = Color.parseColor(themePaletteFor("Forest", systemDark = false).accent)
             ActivityScenario.launch(ContactsListActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
                     val fab = activity.findViewById<FloatingActionButton>(R.id.btnAddContact)

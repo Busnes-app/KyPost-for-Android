@@ -3,6 +3,7 @@ package org.kysecurity.mail
 import android.app.Activity
 import android.content.Context
 import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
@@ -26,10 +27,14 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 const val THEME_STORAGE_KEY = "kypost-theme"
 
+/** Not a palette: paints Busnes Light or Busnes Dark from the system night mode. */
+const val FOLLOW_SYSTEM_THEME = "Follow system"
+
 /** Fallback when nothing is saved, and when a saved name is no longer offered. */
-const val DEFAULT_THEME = "Busnes Light"
+const val DEFAULT_THEME = FOLLOW_SYSTEM_THEME
 
 val THEME_OPTIONS = listOf(
+    FOLLOW_SYSTEM_THEME,
     "Busnes Light",
     "Busnes Dark",
     "Dark Matter",
@@ -111,11 +116,17 @@ fun saveThemeName(context: Context, themeName: String) {
 }
 
 fun getStoredThemePalette(context: Context): ThemePalette {
-    return themePaletteFor(getStoredThemeName(context))
+    return themePaletteFor(getStoredThemeName(context), isSystemDark(context))
 }
 
-fun themePaletteFor(themeName: String): ThemePalette {
-    return themePalettes[themeName] ?: themePalettes.getValue(DEFAULT_THEME)
+fun isSystemDark(context: Context): Boolean =
+    context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+
+/** The palette [themeName] paints with; unknown names fall back to [DEFAULT_THEME]. */
+fun themePaletteFor(themeName: String, systemDark: Boolean): ThemePalette {
+    val name = if (themeName in themePalettes || themeName == FOLLOW_SYSTEM_THEME) themeName else DEFAULT_THEME
+    if (name != FOLLOW_SYSTEM_THEME) return themePalettes.getValue(name)
+    return themePalettes.getValue(if (systemDark) "Busnes Dark" else "Busnes Light")
 }
 
 fun applyThemeToActivity(activity: Activity) {
