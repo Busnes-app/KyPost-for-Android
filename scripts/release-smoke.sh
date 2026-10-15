@@ -15,16 +15,30 @@ adb install -r "$apk" || exit 1
 adb shell pm grant "$pkg" android.permission.POST_NOTIFICATIONS
 adb logcat -c
 
+# Taps "Wait" on a system "isn't responding" dialog in the dump $1. A cold CI emulator's launcher
+# sometimes stalls and its dialog covers the app. An ANR of this app still fails, via logcat below.
+dismiss_anr_dialog() {
+  bounds=$(sed -n 's/.*resource-id="android:id\/aerr_wait"[^>]*bounds="\[\([0-9]*\),\([0-9]*\)\]\[\([0-9]*\),\([0-9]*\)\]".*/\1 \2 \3 \4/p' "$1")
+  [ -n "$bounds" ] || return 1
+  # shellcheck disable=SC2086 # split the four coordinates
+  set -- $bounds
+  echo "dismissing a system ANR dialog"
+  adb shell input tap $((($1 + $3) / 2)) $((($2 + $4) / 2))
+}
+
 # Waits up to 20 s for the window hierarchy to contain $1. The hierarchy, not a screenshot:
 # FLAG_SECURE blanks screenshots, while uiautomator still reads views and their text.
 expect() {
   i=0
   while [ "$i" -lt 20 ]; do
     adb shell rm -f /sdcard/smoke.xml
-    if adb shell uiautomator dump /sdcard/smoke.xml >/tmp/smoke-dump.txt 2>&1 &&
-      adb shell cat /sdcard/smoke.xml | grep -q "$1"; then
-      echo "ok: $2"
-      return 0
+    if adb shell uiautomator dump /sdcard/smoke.xml >/tmp/smoke-dump.txt 2>&1; then
+      adb shell cat /sdcard/smoke.xml >/tmp/smoke.xml
+      if grep -q "$1" /tmp/smoke.xml; then
+        echo "ok: $2"
+        return 0
+      fi
+      dismiss_anr_dialog /tmp/smoke.xml
     fi
     i=$((i + 1))
     sleep 1
@@ -56,6 +70,11 @@ adb logcat -d > /tmp/smoke-logcat.txt
 if grep -A3 'FATAL EXCEPTION' /tmp/smoke-logcat.txt | grep -q "Process: $pkg,"; then
   grep -A20 'FATAL EXCEPTION' /tmp/smoke-logcat.txt
   echo "FAILED: $pkg crashed"
+  failed=1
+fi
+if grep -q "ANR in $pkg" /tmp/smoke-logcat.txt; then
+  grep -A10 "ANR in $pkg" /tmp/smoke-logcat.txt
+  echo "FAILED: $pkg stopped responding"
   failed=1
 fi
 
