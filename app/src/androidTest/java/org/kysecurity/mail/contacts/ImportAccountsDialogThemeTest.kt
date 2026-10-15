@@ -45,7 +45,7 @@ class ImportAccountsDialogThemeTest {
 
     @Test
     fun theImportDialog_takesTheActivePalette() {
-        val palette = themePaletteFor(THEME)
+        val palette = themePaletteFor(THEME, systemDark = false)
         ActivityScenario.launch(ContactsListActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val dialog = activity.importAccountsDialog(listOf(DeviceAccount(null, null)), mutableSetOf()) {}

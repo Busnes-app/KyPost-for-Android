@@ -32,9 +32,12 @@ this list per-platform.
 
 Ahead of that list, web and Android also offer `Busnes Light` and `Busnes Dark` — the
 cream/charcoal pair with one orange accent from `busnes-color-theme-handoff.md`.
-`Busnes Light` is Android's default (`AppTheme.DEFAULT_THEME`, the single source for the
-fallback name); `Patina Ky` remains the default on iOS/macOS and Linux Mobile. Port the
-pair, and the default, when those platforms take their pass. Android's `line` holds the
+Android's default is `Follow system` (`AppTheme.DEFAULT_THEME`, the single source for the
+fallback name): not a palette, but a selector that paints `Busnes Light` or `Busnes Dark` from
+the system night mode. It adds no colors, so the palette tables stay identical; web has no
+equivalent yet and should gain one (`prefers-color-scheme`). `Patina Ky` remains the default
+on iOS/macOS and Linux Mobile. Port the pair, and the default, when those platforms take
+their pass. Android's `line` holds the
 handoff's control border **composited onto `panel`**, not its `rgba()` form: `blend()` in
 `AppTheme.kt` drops alpha, so a translucent `line` would paint the empty-state dashed
 border near-black on cream. The handoff's `buttonText` needs no palette field — it is what

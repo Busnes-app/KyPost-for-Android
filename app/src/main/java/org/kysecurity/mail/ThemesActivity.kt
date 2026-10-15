@@ -44,7 +44,7 @@ class ThemesActivity : LockedActivity() {
                 row.setPadding(padH, padV, padH, padV)
                 row.setTextColor(Color.parseColor(activePalette.inkStrong))
 
-                val rowPalette = themePaletteFor(THEME_OPTIONS[position])
+                val rowPalette = themePaletteFor(THEME_OPTIONS[position], isSystemDark(this@ThemesActivity))
                 val swatchSize = (22 * resources.displayMetrics.density).toInt()
                 val swatch = GradientDrawable().apply {
                     shape = GradientDrawable.OVAL

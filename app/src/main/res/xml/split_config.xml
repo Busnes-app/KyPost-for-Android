@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:window="http://schemas.android.com/apk/res-auto">
 
-    <!-- 800dp, not the layout's 600dp: measured on a Fold, 720 split the 751dp cover screen. -->
+    <!-- 840dp, the Material "expanded" width class, not the layout's 600dp: measured on a Fold,
+         720 split the 751dp cover screen. -->
     <!-- Fully qualified names, not a leading dot. androidx.window's RuleParser expands a
          leading-dot name against the applicationContext's package name, which is applicationId —
          "org.kysecurity.mail.github" on the github flavor, not the fixed namespace these classes
@@ -11,7 +12,7 @@
     <SplitPairRule
         window:splitRatio="0.4"
         window:splitLayoutDirection="locale"
-        window:splitMinWidthDp="800"
+        window:splitMinWidthDp="840"
         window:finishPrimaryWithSecondary="never"
         window:finishSecondaryWithPrimary="always"
         window:clearTop="true">
@@ -20,11 +21,11 @@
             window:secondaryActivityName="org.kysecurity.mail.EmailDetailActivity" />
     </SplitPairRule>
 
-    <!-- Same 800 threshold and the same reasoning as the rule above. -->
+    <!-- Same 840 threshold and the same reasoning as the rule above. -->
     <SplitPairRule
         window:splitRatio="0.4"
         window:splitLayoutDirection="locale"
-        window:splitMinWidthDp="800"
+        window:splitMinWidthDp="840"
         window:finishPrimaryWithSecondary="never"
         window:finishSecondaryWithPrimary="always"
         window:clearTop="true">
