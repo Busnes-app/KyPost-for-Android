@@ -26,6 +26,29 @@ dismiss_anr_dialog() {
   adb shell input tap $((($1 + $3) / 2)) $((($2 + $4) / 2))
 }
 
+# Says where a stalled app is stuck: its log, its Java stacks, and whether $1 shows up later.
+# Release builds are not debuggable, but the google_apis image allows adb root, so debuggerd can
+# read the stacks. Frames are R8-obfuscated; the workflow uploads mapping.txt to retrace them.
+stall_report() {
+  pid=$(adb shell pidof "$pkg" | tr -d '\r')
+  [ -n "$pid" ] || { echo "stall report: $pkg is not running"; return; }
+  echo "--- stall report: $pkg log"
+  adb logcat -d --pid="$pid" | tail -100
+  echo "--- stall report: $pkg Java stacks"
+  adb root >/dev/null && adb wait-for-device && adb shell debuggerd -j "$pid" | head -600
+  later=0
+  while [ "$later" -lt 60 ]; do
+    if adb shell uiautomator dump /sdcard/late.xml >/dev/null 2>&1 &&
+      adb shell cat /sdcard/late.xml | grep -q "$1"; then
+      echo "--- stall report: '$1' appeared $later s after the deadline (slow, not stuck)"
+      return
+    fi
+    later=$((later + 1))
+    sleep 1
+  done
+  echo "--- stall report: '$1' still absent 60 s after the deadline (stuck)"
+}
+
 # Waits up to 20 s for the window hierarchy to contain $1. The hierarchy, not a screenshot:
 # FLAG_SECURE blanks screenshots, while uiautomator still reads views and their text.
 expect() {
@@ -48,6 +71,7 @@ expect() {
   adb shell dumpsys activity activities | grep -E 'ResumedActivity|mKeyguardShowing'
   adb shell cat /sdcard/smoke.xml
   echo
+  stall_report "$1"
   return 1
 }
 

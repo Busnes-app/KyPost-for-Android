@@ -84,3 +84,12 @@ jobs:
             adb shell input keyevent 224
             adb shell wm dismiss-keyguard
             sh scripts/release-smoke.sh "$RUNNER_TEMP/smoke.apk" "$PACKAGE"
+
+      # Retraces the stall report's R8-obfuscated stacks. The mapping is build metadata, no secret.
+      - name: upload the R8 mapping
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mapping-${{ inputs.flavor }}
+          path: app/build/outputs/mapping/${{ inputs.flavor }}Release/mapping.txt
+          retention-days: 7
