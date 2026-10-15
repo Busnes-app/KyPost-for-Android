@@ -76,7 +76,7 @@ Material window size classes. Windows from 800 to 839dp go back to one pane.
 
 ## Phase 1 — Groundwork
 
-- [ ] **Follow system theme:**
+- [x] **Follow system theme:**
   - Add `"Follow system"` to `THEME_OPTIONS`. It resolves to Busnes Light or Busnes Dark from
     `Configuration.uiMode`. A `uiMode` change already recreates the Activity, so no new plumbing is
     needed.
@@ -86,12 +86,12 @@ Material window size classes. Windows from 800 to 839dp go back to one pane.
     following the system. Users who picked a theme keep it.
   - **Tests:** a JVM test of the resolver; an instrumented test that toggles night mode and checks
     the repaint.
-- [ ] **Predictive back:**
+- [x] **Predictive back:**
   - Add `android:enableOnBackInvokedCallback="true"` to the `<application>`. No Activity overrides
     `onBackPressed`. Compose and Unlock already use `onBackPressedDispatcher`, so the flag is safe.
   - **Test:** the existing discard-confirm test still passes on API 34 and 36.
-- [ ] **Themed icon:** add a `<monochrome>` layer to `mipmap-anydpi/ic_launcher*.xml`.
-- [ ] **Breakpoint:** change `splitMinWidthDp` from 800 to 840. Update the Inbox-rail and split
+- [x] **Themed icon:** add a `<monochrome>` layer to `mipmap-anydpi/ic_launcher*.xml`.
+- [x] **Breakpoint:** change `splitMinWidthDp` from 800 to 840. Update the Inbox-rail and split
       instrumented tests that assume 800.
 
 ## Phase 2 — Layouts for every tier, and foldables
