@@ -6,6 +6,7 @@ import android.accounts.AccountManagerFuture
 import android.accounts.AuthenticatorException
 import android.accounts.OperationCanceledException
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
@@ -63,6 +64,16 @@ class KyIdentitySignOnActivity : LockedActivity() {
 
     override fun onResume() {
         super.onResume()
+        repaint()
+    }
+
+    // configChanges includes uiMode, so a night-mode flip under "Follow system" lands here.
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        repaint()
+    }
+
+    private fun repaint() {
         if (redirectedToUnlock) return
         applyThemeToActivity(this)
         applyPrimaryButtonTheme(this, button)

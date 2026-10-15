@@ -700,10 +700,12 @@ Owns production Android app code and resources.
   fallback all go through it. "Follow system" heads `THEME_OPTIONS` but has no palette:
   `themePaletteFor(name, systemDark)` resolves it to `Busnes Light` or `Busnes Dark`, and
   `getStoredThemePalette` reads `systemDark` from the context's `uiMode`. A night-mode flip
-  recreates the Activity (no `configChanges`), which repaints it; `FollowSystemThemeTest` proves
-  it. An install that never picked a theme follows the system; an explicit choice is kept,
-  because `getStoredThemeName` only discards names `THEME_OPTIONS` no longer offers. Palette colors are opaque six-digit hex without exception: `blend()` returns
-  `Color.rgb`, so alpha in `line` survives as a fully opaque near-black in
+  recreates the Activity; a screen that declares `uiMode` in `configChanges`
+  (`KyIdentitySignOnActivity`) must repaint in `onConfigurationChanged` instead.
+  `FollowSystemThemeTest` covers both kinds. An install that never picked a theme follows the
+  system; an explicit choice is kept, because `getStoredThemeName` only discards names
+  `THEME_OPTIONS` no longer offers. Palette colors are opaque six-digit hex without exception:
+  `blend()` returns `Color.rgb`, so alpha in `line` survives as a fully opaque near-black in
   `applyEmptyStateBackground`. `ThemePaletteTableTest` holds both rules.
 - `SettingsActivity` is only a hub for existing settings surfaces: Security, Themes, Keywords,
   Pairing, PGP Key, Signature, and About. Keep settings logic in the destination screens rather

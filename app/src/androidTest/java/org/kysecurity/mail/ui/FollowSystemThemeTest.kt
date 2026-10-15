@@ -1,5 +1,6 @@
 package org.kysecurity.mail.ui
 
+import android.app.Activity
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.ParcelFileDescriptor
@@ -15,6 +16,7 @@ import org.kysecurity.mail.FOLLOW_SYSTEM_THEME
 import org.kysecurity.mail.ThemesActivity
 import org.kysecurity.mail.getStoredThemeName
 import org.kysecurity.mail.saveThemeName
+import org.kysecurity.mail.signon.KyIdentitySignOnActivity
 import org.kysecurity.mail.themePaletteFor
 
 /** "Follow system" repaints when the system night mode flips, with no app restart. */
@@ -27,34 +29,42 @@ class FollowSystemThemeTest {
         ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command))
             .bufferedReader().use { it.readText() }
 
-    private fun nightMode(on: Boolean) {
-        shell("cmd uimode night " + if (on) "yes" else "no")
+    private fun nightMode(mode: String) {
+        shell("cmd uimode night $mode")
         instrumentation.waitForIdleSync()
     }
 
+    /** A recreated screen. */
     @Test
-    fun followSystemSwitchesBetweenBusnesLightAndDark() {
+    fun themesScreenFollowsTheSystem() = assertFollowsSystem(ThemesActivity::class.java)
+
+    /** Declares uiMode in configChanges, so it repaints in onConfigurationChanged instead. */
+    @Test
+    fun kyIdentitySignOnFollowsTheSystem() = assertFollowsSystem(KyIdentitySignOnActivity::class.java)
+
+    private fun <A : Activity> assertFollowsSystem(screen: Class<A>) {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val previousTheme = getStoredThemeName(context)
-        val wasNight = shell("cmd uimode night").contains("yes")
+        // "Night mode: yes|no|auto|custom"
+        val previousMode = shell("cmd uimode night").substringAfter(':').trim()
         saveThemeName(context, FOLLOW_SYSTEM_THEME)
         try {
-            nightMode(false)
-            ActivityScenario.launch(ThemesActivity::class.java).use { scenario ->
-                assertEquals(bg(systemDark = false), decorColor(scenario))
-                nightMode(true)
+            nightMode("no")
+            ActivityScenario.launch(screen).use { scenario ->
+                assertEquals(bg(systemDark = false), awaitDecorColor(scenario, bg(systemDark = false)))
+                nightMode("yes")
                 assertEquals(bg(systemDark = true), awaitDecorColor(scenario, bg(systemDark = true)))
             }
         } finally {
-            nightMode(wasNight)
+            nightMode(previousMode)
             saveThemeName(context, previousTheme)
         }
     }
 
     private fun bg(systemDark: Boolean) = Color.parseColor(themePaletteFor(FOLLOW_SYSTEM_THEME, systemDark).bg)
 
-    /** The night-mode recreate is posted by the system, so idle sync alone does not cover it. */
-    private fun awaitDecorColor(scenario: ActivityScenario<ThemesActivity>, expected: Int): Int {
+    /** The night-mode change is posted by the system, so idle sync alone does not cover it. */
+    private fun <A : Activity> awaitDecorColor(scenario: ActivityScenario<A>, expected: Int): Int {
         val deadline = SystemClock.uptimeMillis() + 10_000
         var color = decorColor(scenario)
         while (color != expected && SystemClock.uptimeMillis() < deadline) {
@@ -64,9 +74,9 @@ class FollowSystemThemeTest {
         return color
     }
 
-    private fun decorColor(scenario: ActivityScenario<ThemesActivity>): Int {
+    private fun <A : Activity> decorColor(scenario: ActivityScenario<A>): Int {
         var color = 0
-        scenario.onActivity { color = (it.window.decorView.background as ColorDrawable).color }
+        scenario.onActivity { color = (it.window.decorView.background as? ColorDrawable)?.color ?: 0 }
         return color
     }
 }
