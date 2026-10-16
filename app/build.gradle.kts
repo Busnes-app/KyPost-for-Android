@@ -609,7 +609,7 @@ dependencies {
         "androidLintTool"("org.bouncycastle:bcprov-jdk18on:1.86")
         "androidLintTool"("org.bouncycastle:bcpkix-jdk18on:1.86")
         "androidLintTool"("org.bouncycastle:bcutil-jdk18on:1.86")
-        "androidLintTool"("org.apache.commons:commons-lang3:3.18.0")
+        "androidLintTool"("org.apache.commons:commons-lang3:3.21.0")
         "androidLintTool"("org.apache.httpcomponents:httpclient:4.5.14")
     }
 }
