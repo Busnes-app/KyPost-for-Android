@@ -1,5 +1,6 @@
 package org.kysecurity.mail.testing
 
+import org.kysecurity.mail.OfflineCall
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.CipherSuite
@@ -48,10 +49,9 @@ internal class ThrowingCallFactory(private val exception: Exception) : Call.Fact
     override fun newCall(request: Request): Call = ThrowingCall(request, exception)
 }
 
-private class FakeCall(private val req: Request, private val response: Response) : Call {
+private class FakeCall(private val req: Request, private val response: Response) : OfflineCall(req) {
     private var executed = false
     private var canceled = false
-    override fun request(): Request = req
     override fun execute(): Response {
         executed = true
         return response
@@ -60,18 +60,15 @@ private class FakeCall(private val req: Request, private val response: Response)
     override fun cancel() { canceled = true }
     override fun isExecuted(): Boolean = executed
     override fun isCanceled(): Boolean = canceled
-    override fun timeout(): Timeout = Timeout.NONE
     override fun clone(): Call = FakeCall(req, response)
 }
 
-private class ThrowingCall(private val req: Request, private val exception: Exception) : Call {
-    override fun request(): Request = req
+private class ThrowingCall(private val req: Request, private val exception: Exception) : OfflineCall(req) {
     override fun execute(): Response = throw exception
     override fun enqueue(responseCallback: Callback) = responseCallback.onFailure(this, IOException(exception))
     override fun cancel() {}
     override fun isExecuted(): Boolean = false
     override fun isCanceled(): Boolean = false
-    override fun timeout(): Timeout = Timeout.NONE
     override fun clone(): Call = ThrowingCall(req, exception)
 }
 

@@ -1,6 +1,7 @@
 package org.kysecurity.mail.push
 
 import android.content.Context
+import org.kysecurity.mail.OfflineCall
 import org.kysecurity.mail.PinPosture
 import org.kysecurity.mail.SingletonGraph
 import org.kysecurity.mail.pairingHttpClient
@@ -105,15 +106,13 @@ class PinnedOrFallbackCallFactory(
 
 /** A [Call] that fails with [cause] the moment it is executed or enqueued, so a refusal reaches
  *  callers through the same `IOException` path every other network failure does. */
-private class FailedCall(private val request: Request, private val cause: java.io.IOException) : Call {
+private class FailedCall(private val request: Request, private val cause: java.io.IOException) : OfflineCall(request) {
     @Volatile private var canceled = false
 
     /** A [Call] is single-use. Reporting `isExecuted() == false` after a refusal would offer a
      *  spent call back to any retry or instrumentation that asks, which is the one question this
      *  flag exists to answer. */
     private val executed = java.util.concurrent.atomic.AtomicBoolean(false)
-
-    override fun request(): Request = request
 
     override fun execute(): okhttp3.Response {
         markExecuted()
@@ -130,7 +129,6 @@ private class FailedCall(private val request: Request, private val cause: java.i
     override fun cancel() { canceled = true }
     override fun isExecuted(): Boolean = executed.get()
     override fun isCanceled(): Boolean = canceled
-    override fun timeout(): okio.Timeout = okio.Timeout.NONE
     override fun clone(): Call = FailedCall(request, cause)
 
     private fun markExecuted() = check(executed.compareAndSet(false, true)) { "Already Executed" }

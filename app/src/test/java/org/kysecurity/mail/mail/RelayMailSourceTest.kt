@@ -1,5 +1,6 @@
 package org.kysecurity.mail.mail
 
+import org.kysecurity.mail.OfflineCall
 import org.kysecurity.mail.HEADER_DEVICE_ID
 import org.kysecurity.mail.HEADER_DEVICE_SECRET
 import org.kysecurity.mail.pgp.OUTER_PLACEHOLDER_SUBJECT
@@ -15,7 +16,6 @@ import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
-import okio.Timeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -89,22 +89,19 @@ private class BodyRecordingCallFactory(private val responder: (Request) -> Respo
 /** A [Call.Factory] whose call always fails with [exception] — used to verify RelayMailSource's
  *  exception-to-[MailOutcome] mapping (e.g. a TLS pin mismatch) without a real network/TLS stack. */
 private class ThrowingCallFactory(private val exception: Throwable) : Call.Factory {
-    override fun newCall(request: Request): Call = object : Call {
-        override fun request(): Request = request
+    override fun newCall(request: Request): Call = object : OfflineCall(request) {
         override fun execute(): Response = throw exception
         override fun enqueue(responseCallback: Callback) = responseCallback.onFailure(this, java.io.IOException(exception))
         override fun cancel() {}
         override fun isExecuted(): Boolean = false
         override fun isCanceled(): Boolean = false
-        override fun timeout(): Timeout = Timeout.NONE
         override fun clone(): Call = this
     }
 }
 
-private class FakeCall(private val req: Request, private val response: Response) : Call {
+private class FakeCall(private val req: Request, private val response: Response) : OfflineCall(req) {
     private var executed = false
     private var canceled = false
-    override fun request(): Request = req
     override fun execute(): Response {
         executed = true
         return response
@@ -113,7 +110,6 @@ private class FakeCall(private val req: Request, private val response: Response)
     override fun cancel() { canceled = true }
     override fun isExecuted(): Boolean = executed
     override fun isCanceled(): Boolean = canceled
-    override fun timeout(): Timeout = Timeout.NONE
     override fun clone(): Call = FakeCall(req, response)
 }
 

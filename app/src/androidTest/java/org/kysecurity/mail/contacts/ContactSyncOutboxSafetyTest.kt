@@ -1,5 +1,6 @@
 package org.kysecurity.mail.contacts
 
+import org.kysecurity.mail.OfflineCall
 import androidx.room.Room
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -18,7 +19,6 @@ import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
-import okio.Timeout
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -206,10 +206,9 @@ private class RecordingCallFactory : Call.Factory {
     }
 }
 
-private class FakeCall(private val req: Request, private val response: Response) : Call {
+private class FakeCall(private val req: Request, private val response: Response) : OfflineCall(req) {
     private var executed = false
     private var canceled = false
-    override fun request(): Request = req
     override fun execute(): Response {
         executed = true
         return response
@@ -218,6 +217,5 @@ private class FakeCall(private val req: Request, private val response: Response)
     override fun cancel() { canceled = true }
     override fun isExecuted(): Boolean = executed
     override fun isCanceled(): Boolean = canceled
-    override fun timeout(): Timeout = Timeout.NONE
     override fun clone(): Call = FakeCall(req, response)
 }
