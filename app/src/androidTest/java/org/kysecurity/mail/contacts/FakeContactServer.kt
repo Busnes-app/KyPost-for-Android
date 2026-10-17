@@ -1,5 +1,6 @@
 package org.kysecurity.mail.contacts
 
+import org.kysecurity.mail.OfflineCall
 import kotlinx.serialization.json.Json
 import okhttp3.Call
 import okhttp3.Callback
@@ -9,7 +10,6 @@ import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import okio.Buffer
-import okio.Timeout
 import java.io.IOException
 import java.util.UUID
 
@@ -121,9 +121,8 @@ internal val TEST_PAIRING = org.kysecurity.mail.push.PairingData(
     pairedAtEpochMs = 0L,
 )
 
-private class FakeServerCall(private val req: Request, private val response: Response?) : Call {
+private class FakeServerCall(private val req: Request, private val response: Response?) : OfflineCall(req) {
     private var executed = false
-    override fun request(): Request = req
     override fun execute(): Response {
         executed = true
         return response ?: throw IOException("connection reset after the server committed")
@@ -132,6 +131,5 @@ private class FakeServerCall(private val req: Request, private val response: Res
     override fun cancel() = Unit
     override fun isExecuted(): Boolean = executed
     override fun isCanceled(): Boolean = false
-    override fun timeout(): Timeout = Timeout.NONE
     override fun clone(): Call = FakeServerCall(req, response)
 }

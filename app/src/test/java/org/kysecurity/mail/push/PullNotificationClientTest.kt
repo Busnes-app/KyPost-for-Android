@@ -1,5 +1,6 @@
 package org.kysecurity.mail.push
 
+import org.kysecurity.mail.OfflineCall
 import org.kysecurity.mail.HEADER_DEVICE_ID
 import org.kysecurity.mail.HEADER_DEVICE_SECRET
 import kotlinx.coroutines.runBlocking
@@ -10,7 +11,6 @@ import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
-import okio.Timeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -27,10 +27,9 @@ private class FakeCallFactory(private val responder: (Request) -> Response) : Ca
     }
 }
 
-private class FakeCall(private val req: Request, private val response: Response) : Call {
+private class FakeCall(private val req: Request, private val response: Response) : OfflineCall(req) {
     private var executed = false
     private var canceled = false
-    override fun request(): Request = req
     override fun execute(): Response {
         executed = true
         return response
@@ -39,7 +38,6 @@ private class FakeCall(private val req: Request, private val response: Response)
     override fun cancel() { canceled = true }
     override fun isExecuted(): Boolean = executed
     override fun isCanceled(): Boolean = canceled
-    override fun timeout(): Timeout = Timeout.NONE
     override fun clone(): Call = FakeCall(req, response)
 }
 
