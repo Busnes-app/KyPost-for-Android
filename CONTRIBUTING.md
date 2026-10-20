@@ -54,7 +54,7 @@ re-litigation in a PR:
 
 Use Android 12+ with a secure screen lock for runtime tests, the SDK required by the
 Gradle configuration, and the checked-in wrapper (JDK 21 daemon criteria). See
-[README setup](README.md#build-and-test) for the SDK path and Firebase requirements.
+[README setup](docs/DEVELOPMENT.md#build-and-test) for the SDK path and Firebase requirements.
 F-Droid builds omit Firebase; Play/GitHub require matching configuration.
 
 ```bash
