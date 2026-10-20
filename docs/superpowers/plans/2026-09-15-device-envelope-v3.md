@@ -4,7 +4,7 @@
 **Repo:** kypost-android
 **Worktree:** Main checkout; documentation only. Implementation starts in a new worktree.
 **Baseline:** Android `1fa836b07761f91af061eef5444e96cefdd78d75` (PRs #109–111 merged).
-**Server contract:** [PR #199](https://github.com/Busness-app/KyPost-Server/pull/199), merged at `dc2a70eb3a5288be64dd5e08482844a80dfb8969`.
+**Server contract:** [PR #199](https://github.com/Busnes-app/KyPost-Server/pull/199), merged at `dc2a70eb3a5288be64dd5e08482844a80dfb8969`.
 **Handoff:** Myslop `kypost-android-pgp-parity`, post #763.
 
 ## Objective and boundary
@@ -19,8 +19,8 @@ The older live-relay checks remain outstanding. They do not block native fixture
 
 Read these files at the server merge above, not an arbitrary later working tree:
 
-- [PGP_KEY_LIFECYCLE.md](https://github.com/Busness-app/KyPost-Server/blob/dc2a70eb3a5288be64dd5e08482844a80dfb8969/docs/PGP_KEY_LIFECYCLE.md): ring validation, device framing, persistence and rollout requirements. The larger lifecycle document still contains proposed work; implement the shipped v3 preparation contract only.
-- [E2E_PGP.md](https://github.com/Busness-app/KyPost-Server/blob/dc2a70eb3a5288be64dd5e08482844a80dfb8969/docs/E2E_PGP.md): interoperability claims and activation gates.
+- [PGP_KEY_LIFECYCLE.md](https://github.com/Busnes-app/KyPost-Server/blob/dc2a70eb3a5288be64dd5e08482844a80dfb8969/docs/PGP_KEY_LIFECYCLE.md): ring validation, device framing, persistence and rollout requirements. The larger lifecycle document still contains proposed work; implement the shipped v3 preparation contract only.
+- [E2E_PGP.md](https://github.com/Busnes-app/KyPost-Server/blob/dc2a70eb3a5288be64dd5e08482844a80dfb8969/docs/E2E_PGP.md): interoperability claims and activation gates.
 - `testdata/device-envelope-v3.json`: public test-only scalars, exact plaintext, ECDH/HKDF/AAD and ciphertext vectors for v2/v3.
 - `testdata/pgp-keyring-v1.json`: complete-ring and historical/hidden-recipient decryption fixtures.
 - `backend/internal/cryptutil/device_envelope_v3_test.go` and `frontend/src/lib/deviceEnvelopeV3.test.ts`: independent framing references. Apply the TypeScript skill if reading the latter.
