@@ -1,6 +1,25 @@
 # KyPost for Android
 
-KyPost is an Android email client backed by a self-hosted KyPost relay. It shows keyword-based inbox tabs and synchronizes contacts in both directions. Native-push pairing authenticates relay access and contact sync. The app gets push notifications through native backend pairing and FCM. The client does not use Novu. The backend owns any Novu integration behind its own registration endpoint.
+KyPost is an Android email client for a self-hosted KyPost server. Read and send mail,
+organize keyword-based inbox tabs, exchange PGP keys and synchronize contacts in both
+directions. Pairing creates per-device credentials; the phone does not need the mailbox’s
+IMAP/SMTP password. Play/GitHub builds receive FCM notifications; the Google-free F-Droid
+variant uses the server’s pull path.
+
+## Install and pair
+
+Requires Android 12+ with a secure screen lock and a reachable **KyPost server over HTTPS**.
+Install and configure [KyPost Server](https://github.com/Busnes-app/KyPost-Server) first,
+including the user’s IMAP/SMTP mailbox (or a separately qualified native mailbox). This
+client does not connect directly to an email provider.
+
+1. Use a signed APK from an actually published [GitHub release](https://github.com/Busnes-app/KyPost-for-Android/releases), or your approved Play listing. The GitHub v0.4.2 release is still a draft as of 2026-10-20; a draft is not a public download. F-Droid publication is pending. For local evaluation, use the debug build below.
+2. In KyPost’s web security/device settings, create a new pairing QR/link for your everyday account. Open it in the intended KyPost channel on the phone and confirm the displayed server.
+3. Grant notification permission if wanted, then verify inbox access and a controlled send/reply. A scanned QR is not a successful pairing until registration returns success.
+4. Device sign-on through KyAuth currently supports the pinned **Play** package only. GitHub and F-Droid variants hide/refuse it; use QR/link pairing there.
+
+Keep existing pairing and PGP recovery material when updating the same channel. Changing
+channel/package is a separate install and requires pairing again. See [Channels](#channels).
 
 ## Features
 
@@ -38,14 +57,16 @@ KyPost is an Android email client backed by a self-hosted KyPost relay. It shows
 
 ## Firebase setup
 
-1. In the same Firebase project, create or update a Firebase Android app for **each** of the
-   three application ids: `org.kysecurity.mail`, `org.kysecurity.mail.github`, and
-   `org.kysecurity.mail.fdroid`. The google-services plugin fails any variant whose applicationId
-   it cannot find a client for, so a `google-services.json` missing one silently means that
-   channel's build breaks at `process<Variant>GoogleServices`.
-2. Download the merged `google-services.json` (it holds all three clients once they exist).
-3. Put the file at `app/google-services.json`.
-4. Enable FCM in the Firebase project settings.
+Firebase is required for the `play` and `github` build variants only:
+
+1. Register `org.kysecurity.mail` and/or `org.kysecurity.mail.github` in your Firebase project for the variants you intend to build.
+2. Download `google-services.json` with the matching client entries and place it at `app/google-services.json` (gitignored).
+3. Enable FCM and configure the paired backend’s native push delivery.
+
+The `fdroid` variant contains no Google/Firebase code and disables its Google Services
+processing tasks. It needs neither a Firebase app entry nor `google-services.json`; its
+pull-based operation does not qualify FCM delivery. On Play/GitHub, a missing matching
+client fails `process<Variant>GoogleServices` rather than silently disabling push.
 
 ## Notification permission behavior (Android 13 and later)
 
@@ -65,7 +86,7 @@ KyPost is an Android email client backed by a self-hosted KyPost relay. It shows
 - Make sure the deep link scheme and host are exactly `kypost://native-pair`. The app no longer supports the legacy `novu-pair` host or the old `llamalabels://` scheme.
 - Make sure the required query parameters exist: `sub`, `srv`, and `pt`. A link that still carries `hash` comes from an outdated server; the app ignores the parameter and the server no longer accepts it.
 - Make sure the device can reach the resolved registration endpoint (`reg`, or `{srv}/api/notifications/native/register`).
-- Make sure the Firebase project has a registered app for whichever of the three packages you built (`org.kysecurity.mail`, `.github`, or `.fdroid`).
+- For Play/GitHub builds, make sure the Firebase project has a client for the package you built. F-Droid has no Firebase dependency; check its server/pull configuration instead.
 - If the registration fails with `400`, the request was malformed or missed a field.
 - If the registration fails with `401`, the pairing token (`pt`) is invalid or expired. Scan a new QR code.
 - If the registration fails with `503`, the backend has no `PAIRING_SECRET` configuration. The app cannot retry around this error.
@@ -73,12 +94,28 @@ KyPost is an Android email client backed by a self-hosted KyPost relay. It shows
 
 ## Privacy and data collection
 
+The Google/Firebase dependency details below apply to Play/GitHub variants. F-Droid omits those libraries; all variants still send pairing credentials to the chosen server.
+
 - The app does not use the Android advertising ID (AAID). No source file calls `AdvertisingIdClient`, and no merged manifest declares `com.google.android.gms.permission.AD_ID`.
 - No advertising or attribution library is in the dependency graph. The resolved Google Play services artifacts are `play-services-base`, `-basement`, `-cloud-messaging`, `-code-scanner`, `-stats`, and `-tasks`. Neither `play-services-ads-identifier` nor `play-services-appset` is present.
 - Firebase Analytics is not included. The build pulls `firebase-messaging`, `firebase-installations`, and their support artifacts. FCM identifies the device with the Firebase installation id, not with an advertising id.
 - The device identifiers the app does hold are the FCM token and the pairing material described in **Push notification pairing**. Both go only to the paired KyPost relay.
 
 ## Build and test
+
+Clone this repository, install Android SDK platform 36.1/build tools as required by the
+Gradle configuration, and set `ANDROID_HOME` or a gitignored `local.properties` SDK path.
+Use the checked-in wrapper; its daemon criteria select JDK 21. Play/GitHub builds also
+need the matching Firebase configuration above. For a local build without Firebase:
+
+```sh
+./gradlew assembleFdroidDebug
+# With a disposable Android 12+ device connected and USB debugging enabled:
+./gradlew installFdroidDebug
+```
+
+These are development APKs, not signed distribution releases. Use a separate test install
+and keep existing release-channel data. The Play-specific checks below need Firebase.
 
 ```sh
 ./gradlew testPlayDebugUnitTest
@@ -106,14 +143,21 @@ and live provider receipt remain separate checks.
 
 ### Release builds
 
-`:app:assembleRelease` **fails without signing material**, and that is deliberate: AGP does not fall back to the debug keystore, so without the guard the build emits an unsigned `app-release-unsigned.apk` on a green run. Add a `keystore.properties` at the repository root (it is gitignored):
+Use channel-specific tasks: `assembleGithubRelease`, `bundlePlayRelease`, or
+`assembleFdroidRelease`. Release packaging **fails without signing material** by design.
+Keep only the keystore path and alias in a gitignored `keystore.properties`:
 
 ```properties
 storeFile=/absolute/path/to/your.jks
-storePassword=…
-keyAlias=…
-keyPassword=…
+keyAlias=your-key-alias
 ```
+
+Supply passwords through `KYPOST_STORE_PASSWORD` and `KYPOST_KEY_PASSWORD`, with
+`KYPOST_KEYSTORE`/`KYPOST_KEY_ALIAS` available as environment overrides. Use a private
+secret mechanism rather than typing values into history. `checkSigningSecretsAreNotInTheTree`
+rejects cleartext signing passwords in `keystore.properties`; see
+[keystore.properties.example](keystore.properties.example). Preserve the release signer
+for future updates. Debug keys and CI’s throwaway signer are not distribution keys.
 
 - CI's `release-build` job generates a throwaway key per run, so every PR still verifies the R8 configuration and `lintVitalRelease` without the real key ever being reachable from a `pull_request` trigger.
 - Published builds come from `.github/workflows/release.yml` on a `v*` tag. It reads the real key from the protected `release` environment, checks the tag against `versionName`, and refuses to publish unless `apksigner` reports the expected `RELEASE_KEY_SHA256` signer. Never build a release for distribution from a workstation.
