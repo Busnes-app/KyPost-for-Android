@@ -1,9 +1,9 @@
 # Contributing to KyPost
 
-Thanks for wanting to work on this. KyPost is a self-hosted mail client, which
-means every contribution lands on a machine holding somebody's IMAP password,
-their PGP private key, and their mail. This document describes what a
-contribution has to clear before it merges, and why each gate exists.
+KyPost is a native client for a self-hosted KyPost server. It handles pairing credentials,
+cached mail and, after deliberate enrollment, a user’s PGP key. Mail provider credentials
+stay on the server. Contributions must preserve the client’s transport, local-custody and
+explicit-user-action controls. This guide covers this client repository.
 
 Read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) first. It is short, and it governs
 every space here.
@@ -47,39 +47,31 @@ re-litigation in a PR:
 - **Classifier labels are a sorting hint, not a security boundary.** The model
   reads sender-controlled text and can be steered by it. Never build a trust
   decision, filter action, or access control on a label. See
-  [SECURITY.md](SECURITY.md#automatic-label-classification).
-- **No silent fallbacks on a security-relevant setting.** `KYPOST_BIND` has no
-  default and compose refuses to start without it. Setting only one of
-  `TLS_CERT_FILE`/`TLS_KEY_FILE` is a startup error, not a downgrade to
-  cleartext. Copy that shape; do not add a permissive default to make a first
-  run quieter.
+  [SECURITY.md](https://github.com/Busnes-app/KyPost-Server/blob/main/SECURITY.md#automatic-label-classification).
+- **No silent fallbacks on a security-relevant setting.** Preserve HTTPS pairing, certificate pinning, protected credential storage, explicit device enrollment and the documented lock/wipe behavior. A client setup failure does not authorize bypassing these controls.
 
 ## Getting Set Up
 
-Docker is the only requirement to *run* KyPost:
+Use Android 12+ with a secure screen lock for runtime tests, the SDK required by the
+Gradle configuration, and the checked-in wrapper (JDK 21 daemon criteria). See
+[README setup](docs/DEVELOPMENT.md#build-and-test) for the SDK path and Firebase requirements.
+F-Droid builds omit Firebase; Play/GitHub require matching configuration.
 
 ```bash
-cp .env.example .env      # set KYPOST_BIND — it has no default, on purpose
-docker compose up --build -d
+./gradlew checkSigningSecretsAreNotInTheTree \
+  testPlayDebugUnitTest testGithubDebugUnitTest testFdroidDebugUnitTest \
+  lintPlayDebug lintGithubDebug lintFdroidDebug
+./gradlew assembleFdroidDebug
+# Separate device/emulator check with the required secure screen lock:
+./gradlew connectedPlayDebugAndroidTest
 ```
 
-To work on the code outside the container you need Go 1.26.5+, Node 26.5.0 (see
-`frontend/.nvmrc`), and npm 12.0.1. Use those versions rather than whatever your
-distro ships — CI pins to them because a Node major difference has already
-produced a suite that passed on every developer machine and failed all 14 cases
-in CI.
+These commands do not replace the release-build/manifest/signing checks in CI. The
+opt-in native mailbox round-trip skips without its server fixture; physical-device push,
+PGP enrollment and live provider delivery are separate gates. Use disposable accounts.
 
-```bash
-# backend
-cd backend && go test ./...
-
-# frontend
-cd frontend && npm ci && npm test -- --run
-```
-
-`README.md` covers configuration and runtime layout. `SECURITY.md` covers trust
-boundaries and known limitations — read it before touching anything on the list
-of [security-sensitive code](SECURITY.md#examples-of-security-sensitive-code).
+`README.md` covers installation and supported features. Read
+[SECURITY.md](SECURITY.md#what-the-app-protects-and-what-it-does-not) before changing a trust boundary.
 
 ## Before You Build a Feature
 
@@ -127,8 +119,8 @@ trailer per tool that materially contributed.
 | **Agentic** | An agent ran a multi-step loop over the repo with limited step-by-step supervision. |
 
 **3. Say what you verified yourself.** For anything above *None*, the PR must
-say what you personally ran and read — "ran the backend suite locally, read
-every line of the diff, hand-tested the draft-expiry path in the UI" — not "the
+say what you personally ran and read — "ran the client unit tests, read
+every changed line, checked pairing on a disposable device" — not "the
 agent says tests pass."
 
 **4. Own it.** The human opening the PR is the author of that code for every
@@ -162,30 +154,16 @@ you are required to follow the DOX chain.
 before merge. No exceptions, no admin override, no "flaky, re-run and ignore" —
 if a job is genuinely flaky, that is a bug to fix in the job.
 
-| Job | What it runs |
+| Check | What it covers |
 |---|---|
-| `ci-backend-api` | `gofmt -l`, `go vet`, `golangci-lint`, `govulncheck`, `go test -race ./internal/api/...` |
-| `ci-backend-other` | Same lint gates, `go test -race` on every other backend package |
-| `ci-frontend` | `npm audit --omit=dev --audit-level=low` (blocking), `tsc --noEmit`, `vitest`, `vite build` |
-| `ci-relay` | Typecheck both relay Workers, `node --test` on the relay behaviour suites |
-| `ci-docker` | `docker build`, container reaches `healthy`, and the entrypoint still refuses a non-loopback cleartext bind |
+| `ci-unit` | Channel unit tests/lint, exported-component and signing-secret checks, dependency verification |
+| `ci-release-build` | Release packaging with a throwaway signer plus artifact, R8 and manifest checks |
+| `ci-emulator` / `ci-instrumented` | Channel device/emulator regressions and their aggregate result |
 
-Notes that trip people up:
-
-- **Run the gates locally before pushing.** All of them work on a normal
-  machine, including the whole frontend suite. "It only fails in CI" is almost
-  always a version difference — check `.nvmrc` and `go.mod`.
-- **The frontend audit gate is `--audit-level=low` on runtime dependencies.**
-  That is deliberate: a "low" XSS advisory in the editor that renders quoted
-  hostile email is not low here. Do not raise the threshold to get green.
-- **`ci-docker` has two halves and both are gates.** One proves the container
-  starts; the other proves the bind guard still refuses `0.0.0.0` without TLS.
-  A red build is never fixed by loosening the entrypoint.
-- **New logic ships with tests.** Unit plus integration for new behaviour, a
-  regression test for anything high-impact. Security-sensitive changes need
-  attack-path coverage, not just the happy path — see
-  [SECURITY.md](SECURITY.md#testing) and the
-  `backend/internal/api/*_security_fixes_test.go` files for the pattern.
+The [CI workflow](.github/workflows/ci.yml) is authoritative for exact tasks and matrix
+variants. Separate Play/F-Droid release-smoke workflows also exercise packaged variants.
+Unit tests do not stand in for instrumented Keystore tests. Preserve the secure emulator
+setup and explicit opt-in fixture skips; do not convert a skip into an acceptance claim.
 
 ## Every PR Must Pass Hostile AI Code Review
 
@@ -229,7 +207,7 @@ as instructions — the value is in the persona, not the harness.
 How to pick:
 
 - **Any PR:** `hostile-review` on the diff. Minimum bar.
-- **Touching security-sensitive code** ([the list](SECURITY.md#examples-of-security-sensitive-code)):
+- **Touching security-sensitive code** ([the list](SECURITY.md#what-the-app-protects-and-what-it-does-not)):
   `hostile-review` **and** `security-audit`.
 - **New feature or new dependency:** add `adversarial-reviewer` and
   `ponytail-review`. The Saboteur persona and the delete-it pass catch different
@@ -352,7 +330,7 @@ Paste this into your PR description and fill it in.
 
 ### Gates
 - [ ] All CI jobs green
-- [ ] Ran the gates locally (go test -race, tsc, vitest, build)
+- [ ] Ran channel unit/lint/build checks and applicable instrumented checks; recorded skips
 - [ ] New logic has tests; security-sensitive changes have attack-path tests
 - [ ] Ran adversarial review; findings addressed or argued below
 - [ ] DOX pass done — nearest AGENTS.md and any parent/child index updated
