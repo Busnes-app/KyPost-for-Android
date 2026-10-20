@@ -4,10 +4,10 @@
 **Date:** 2026-08-24
 **Owner:** unassigned
 **Repos touched:** `kypost-server`, `kypost-android`. Findings only for `kypost-for-Mac`, `kypost-Linux`.
-**Shipped:** [Android#82](https://github.com/Busness-app/KyPost-for-Android/pull/82),
-[Android#83](https://github.com/Busness-app/KyPost-for-Android/pull/83),
-[Android#84](https://github.com/Busness-app/KyPost-for-Android/pull/84),
-[Server#134](https://github.com/Busness-app/KyPost-Server/pull/134)
+**Shipped:** [Android#82](https://github.com/Busnes-app/KyPost-for-Android/pull/82),
+[Android#83](https://github.com/Busnes-app/KyPost-for-Android/pull/83),
+[Android#84](https://github.com/Busnes-app/KyPost-for-Android/pull/84),
+[Server#134](https://github.com/Busnes-app/KyPost-Server/pull/134)
 
 > **Two retractions live in this document. Read §0 first.** §3's "R8 is exonerated" was wrong, and
 > §3.1's replacement candidate was also wrong. Both are kept, struck through rather than deleted,

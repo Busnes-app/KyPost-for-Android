@@ -1,6 +1,6 @@
 # Shared fixtures from KyPost-Server
 
-Copied unchanged from https://github.com/Busness-app/KyPost-Server at commit
+Copied unchanged from https://github.com/Busnes-app/KyPost-Server at commit
 `dc2a70eb3a5288be64dd5e08482844a80dfb8969` (merge of PR #199), `testdata/` directory.
 Every scalar, IV and key in them is public test data; none may appear in production defaults.
 

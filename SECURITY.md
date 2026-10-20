@@ -7,7 +7,7 @@ vulnerability and what the app does and does not protect.
 
 For **server-side** security (TLS termination, reverse proxies, key custody at rest,
 deployment hardening), see [SECURITY.md in the server
-repository](https://github.com/Busness-app/KyPost-Server/blob/main/SECURITY.md).
+repository](https://github.com/Busnes-app/KyPost-Server/blob/main/SECURITY.md).
 Report server vulnerabilities there, not here.
 
 ## Reporting Security Vulnerabilities
@@ -16,7 +16,7 @@ Report vulnerabilities in the Android app via GitHub Security Advisories rather 
 opening a public issue.
 
 1. Go to the [Security
-   Advisories](https://github.com/Busness-app/KyPost-for-Android/security/advisories)
+   Advisories](https://github.com/Busnes-app/KyPost-for-Android/security/advisories)
    page
 2. Click "Report a vulnerability"
 3. Provide a description, affected versions, and reproduction steps if you have them
@@ -225,8 +225,13 @@ Stated rather than left to be discovered:
   is installed, and the client refuses to trust the relay with its own public key. If you
   do not want Play Services in that path, pair by entering the URL rather than scanning.
 - **Push delivery** is either FCM (Google) or UnifiedPush (a distributor you choose), or
-  App Pull, which polls your own server and involves neither. Notification content is
-  end-to-end opaque to the push transport; what the transport learns is timing.
+  App Pull, which polls your own server and involves neither. UnifiedPush payloads are
+  encrypted to this device (RFC 8291), so the distributor learns timing, not content. FCM
+  payloads are not encrypted end to end: the push relay and Google can read them. By default
+  a mail push carries only a generic "You have a new email." and message/mailbox
+  identifiers. With Content Preview on it also carries the sender, subject and labels, and
+  an MFA prompt adds the sign-in's IP address and browser. Encrypted mail is never
+  previewed (see above).
 
 ### What is out of scope
 
@@ -245,7 +250,7 @@ branch for older versions.
 ## Security Contacts
 
 - **Vulnerability reports:** [GitHub Security
-  Advisories](https://github.com/Busness-app/KyPost-for-Android/security/advisories)
+  Advisories](https://github.com/Busnes-app/KyPost-for-Android/security/advisories)
 - **Maintainer:** [Yoshiofthewire](https://github.com/Yoshiofthewire)
 - **Code of Conduct concerns** are handled separately — see
   [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Security vulnerabilities are not a Code of
