@@ -59,7 +59,13 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
 - `SecurityWipe.wipeAndResetApp` destroys local plaintext **before** any network call, records a
   durable `wipe_in_progress` marker so an interrupted wipe resumes at next launch
   (`enforceTripwire` checks it first), and returns `WipeResult` — never report a wipe as complete
-  without checking it.
+  without checking it. A resume at startup runs before any screen, so no WebView is loaded yet:
+  its `webViewState` step must delete `app_webview` directly and not call the WebView statics,
+  which load Chromium and recreate the directory under the delete (a wipe that failed on every
+  launch). With nothing paired the wipe sends no deregister and reports none: an unpair that
+  escalates to a wipe has already sent it.
+- The reader shows an encryption badge on every encrypted message ("PGP: encrypted", or "PGP:
+  could not decrypt"), the same labels as iOS and the web reader, beside the signature notice.
 - `LockedActivity` redirects in `onCreate` (not only `onStart`), so every subclass must
   `if (redirectedToUnlock) return` immediately after `super.onCreate(...)` **and** in every other
   lifecycle callback that touches a `lateinit` view. `onDestroy` is the exception: property

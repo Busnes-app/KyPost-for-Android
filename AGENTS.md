@@ -73,3 +73,8 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 ## Child DOX Index
 
 - `app/` — Android application module, runtime code, resources, tests, and app-level verification contracts. See [app/AGENTS.md](app/AGENTS.md).
+
+
+## README and topic guides
+
+Keep `README.md` as the concise product overview and navigation. Detailed procedures live in `docs/CONNECTIONS.md`, `docs/DEVELOPMENT.md`. Update the owning topic guide and preserve README links when a procedure changes. Commands in these guides run from the repository root.

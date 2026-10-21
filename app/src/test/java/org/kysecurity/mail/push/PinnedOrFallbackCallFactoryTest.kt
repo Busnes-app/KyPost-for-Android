@@ -1,5 +1,6 @@
 package org.kysecurity.mail.push
 
+import org.kysecurity.mail.OfflineCall
 import okhttp3.Call
 import okhttp3.Request
 import okhttp3.Response
@@ -22,14 +23,12 @@ class PinnedOrFallbackCallFactoryTest {
         }
     }
 
-    private class NoopCall(private val request: Request) : Call {
-        override fun request() = request
+    private class NoopCall(private val request: Request) : OfflineCall(request) {
         override fun execute(): Response = throw UnsupportedOperationException()
         override fun enqueue(responseCallback: okhttp3.Callback) = Unit
         override fun cancel() = Unit
         override fun isExecuted() = false
         override fun isCanceled() = false
-        override fun timeout(): okio.Timeout = okio.Timeout.NONE
         override fun clone(): Call = NoopCall(request)
     }
 

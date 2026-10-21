@@ -150,6 +150,15 @@
                 android:textColor="#666666"
                 android:visibility="gone" />
 
+            <com.google.android.material.chip.Chip
+                android:id="@+id/emailPgpEncryptedBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:visibility="gone"
+                app:chipMinHeight="24dp"
+                app:ensureMinTouchTargetSize="false" />
+
             <View
                 android:id="@+id/emailDivider"
                 android:layout_width="match_parent"

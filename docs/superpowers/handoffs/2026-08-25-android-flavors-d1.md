@@ -18,7 +18,7 @@ files they name.
 Read `kypost-server/docs/PLATFORM_BASELINE.md` first — it is the contract this
 client implements against, and it is a **tracked** file, so it is also readable
 at
-<https://github.com/Busness-app/KyPost-Server/blob/main/docs/PLATFORM_BASELINE.md>.
+<https://github.com/Busnes-app/KyPost-Server/blob/main/docs/PLATFORM_BASELINE.md>.
 
 ---
 

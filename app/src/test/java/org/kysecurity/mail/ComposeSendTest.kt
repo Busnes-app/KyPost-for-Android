@@ -1,5 +1,6 @@
 package org.kysecurity.mail
 
+import org.kysecurity.mail.OfflineCall
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -8,7 +9,6 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Request
 import okhttp3.Response
-import okio.Timeout
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -37,9 +37,8 @@ class ComposeSendTest {
     }
 
     /** Blocks in [execute] until cancelled, like a request waiting on a slow relay. */
-    private class BlockingCall : Call {
+    private class BlockingCall : OfflineCall(Request.Builder().url("https://relay.example.test/api/mail/send").build()) {
         private val cancelled = CountDownLatch(1)
-        override fun request(): Request = Request.Builder().url("https://relay.example.test/api/mail/send").build()
         override fun execute(): Response {
             cancelled.await(30, TimeUnit.SECONDS)
             throw IOException("Canceled")
@@ -48,7 +47,6 @@ class ComposeSendTest {
         override fun cancel() = cancelled.countDown()
         override fun isExecuted(): Boolean = true
         override fun isCanceled(): Boolean = cancelled.count == 0L
-        override fun timeout(): Timeout = Timeout.NONE
         override fun clone(): Call = BlockingCall()
     }
 

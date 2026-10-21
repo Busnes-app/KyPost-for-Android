@@ -1,5 +1,6 @@
 package org.kysecurity.mail.contacts
 
+import org.kysecurity.mail.OfflineCall
 import org.kysecurity.mail.HEADER_DEVICE_SECRET
 import org.kysecurity.mail.HEADER_DEVICE_ID
 import kotlinx.coroutines.runBlocking
@@ -10,7 +11,6 @@ import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
-import okio.Timeout
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -31,10 +31,9 @@ private class GroupsThrowingCallFactory(private val exception: Exception) : Call
     override fun newCall(request: Request): Call = GroupsThrowingCall(request, exception)
 }
 
-private class GroupsFakeCall(private val req: Request, private val response: Response) : Call {
+private class GroupsFakeCall(private val req: Request, private val response: Response) : OfflineCall(req) {
     private var executed = false
     private var canceled = false
-    override fun request(): Request = req
     override fun execute(): Response {
         executed = true
         return response
@@ -43,18 +42,15 @@ private class GroupsFakeCall(private val req: Request, private val response: Res
     override fun cancel() { canceled = true }
     override fun isExecuted(): Boolean = executed
     override fun isCanceled(): Boolean = canceled
-    override fun timeout(): Timeout = Timeout.NONE
     override fun clone(): Call = GroupsFakeCall(req, response)
 }
 
-private class GroupsThrowingCall(private val req: Request, private val exception: Exception) : Call {
-    override fun request(): Request = req
+private class GroupsThrowingCall(private val req: Request, private val exception: Exception) : OfflineCall(req) {
     override fun execute(): Response = throw exception
     override fun enqueue(responseCallback: Callback) = responseCallback.onFailure(this, IOException(exception))
     override fun cancel() {}
     override fun isExecuted(): Boolean = false
     override fun isCanceled(): Boolean = false
-    override fun timeout(): Timeout = Timeout.NONE
     override fun clone(): Call = GroupsThrowingCall(req, exception)
 }
 

@@ -1,5 +1,6 @@
 package org.kysecurity.mail.push
 
+import org.kysecurity.mail.OfflineCall
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -24,14 +25,12 @@ import org.junit.Test
 class PairingRegistrationCredentialTest {
 
     /** okhttp3.Call has no test double in this module; only execute() is ever reached here. */
-    private class RecordingCall(private val request: Request, private val response: Response) : okhttp3.Call {
-        override fun request() = request
+    private class RecordingCall(private val request: Request, private val response: Response) : OfflineCall(request) {
         override fun execute() = response
         override fun enqueue(responseCallback: okhttp3.Callback) = throw UnsupportedOperationException()
         override fun cancel() = Unit
         override fun isExecuted() = false
         override fun isCanceled() = false
-        override fun timeout() = okio.Timeout.NONE
         override fun clone(): okhttp3.Call = this
     }
 

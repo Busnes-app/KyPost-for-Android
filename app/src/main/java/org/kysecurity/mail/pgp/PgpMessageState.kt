@@ -33,6 +33,14 @@ fun pgpMessageStateOf(
     else -> PgpMessageState.CLIENT_PROTECTED
 }
 
+/** The reader's encryption badge, the same two labels as iOS and the web reader. Null: not encrypted. */
+@androidx.annotation.StringRes
+fun pgpEncryptionBadgeOf(state: PgpMessageState): Int? = when (state) {
+    PgpMessageState.NONE -> null
+    PgpMessageState.DECRYPT_FAILED -> org.kysecurity.mail.R.string.email_pgp_badge_decrypt_failed
+    else -> org.kysecurity.mail.R.string.email_pgp_badge_encrypted
+}
+
 /** An unwarmed encrypted message looks unencrypted on the wire (`pgpEncrypted` is `omitempty`). */
 fun rendersNothing(state: PgpMessageState, body: String?, preview: String): Boolean =
     state == PgpMessageState.NONE && body.isNullOrBlank() && preview.isBlank()
