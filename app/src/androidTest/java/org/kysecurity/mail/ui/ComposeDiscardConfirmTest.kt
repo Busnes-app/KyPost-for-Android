@@ -1,6 +1,7 @@
 package org.kysecurity.mail.ui
 
 import android.content.Intent
+import androidx.annotation.StringRes
 import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
@@ -37,7 +38,7 @@ class ComposeDiscardConfirmTest {
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
 
             awaitDialog()
-            onView(withText(R.string.compose_discard_keep)).inRoot(isDialog()).perform(click())
+            tapPromptButton(scenario, R.string.compose_discard_keep)
 
             scenario.onActivity { assertFalse("keep editing must not finish the composer", it.isFinishing) }
             onView(withId(R.id.composeSubjectField)).check(matches(isDisplayed()))
@@ -50,7 +51,7 @@ class ComposeDiscardConfirmTest {
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
 
             awaitDialog()
-            onView(withText(R.string.compose_discard_confirm)).inRoot(isDialog()).perform(click())
+            tapPromptButton(scenario, R.string.compose_discard_confirm)
 
             awaitState(scenario, Lifecycle.State.DESTROYED)
         }
@@ -67,7 +68,7 @@ class ComposeDiscardConfirmTest {
 
             awaitDialog()
             scenario.onActivity { assertEquals(1, it.discardPromptCountForTest()) }
-            onView(withText(R.string.compose_discard_confirm)).inRoot(isDialog()).perform(click())
+            tapPromptButton(scenario, R.string.compose_discard_confirm)
 
             awaitState(scenario, Lifecycle.State.DESTROYED)
         }
@@ -101,6 +102,26 @@ class ComposeDiscardConfirmTest {
         throw AssertionError("the discard prompt never appeared", last)
     }
 
+    /** One UI drops a touch on a window that is still fading in (logcat: "Not sending motion to …
+     *  window opacity=0.40 is below the threshold"), and Espresso taps the moment the prompt is
+     *  up — so on a Galaxy the first tap can land mid-animation and go nowhere. Tap until the
+     *  prompt is gone: the composer has its window focus back, or Discard has started finishing it. */
+    private fun tapPromptButton(scenario: ActivityScenario<ComposeActivity>, @StringRes label: Int) {
+        val deadline = System.currentTimeMillis() + TIMEOUT_MS
+        while (true) {
+            onView(withText(label)).inRoot(isDialog()).perform(click())
+            val settled = System.currentTimeMillis() + TAP_SETTLE_MS
+            while (System.currentTimeMillis() < settled) {
+                if (scenario.state != Lifecycle.State.RESUMED) return
+                var focused = false
+                scenario.onActivity { focused = it.hasWindowFocus() }
+                if (focused) return
+                Thread.sleep(POLL_INTERVAL_MS)
+            }
+            if (System.currentTimeMillis() >= deadline) throw AssertionError("the discard prompt ignored every tap")
+        }
+    }
+
     private fun awaitState(scenario: ActivityScenario<ComposeActivity>, state: Lifecycle.State) {
         val deadline = System.currentTimeMillis() + TIMEOUT_MS
         while (System.currentTimeMillis() < deadline && scenario.state != state) Thread.sleep(POLL_INTERVAL_MS)
@@ -111,5 +132,6 @@ class ComposeDiscardConfirmTest {
         const val BODY = "account balance is 4212"
         const val TIMEOUT_MS = 20_000L
         const val POLL_INTERVAL_MS = 250L
+        const val TAP_SETTLE_MS = 2_000L
     }
 }
