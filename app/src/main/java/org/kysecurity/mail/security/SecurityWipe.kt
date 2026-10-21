@@ -113,8 +113,11 @@ object SecurityWipe {
      *  step: a clean wipe reported to the user as incomplete, having burnt two of three resumes. */
     private val wipeGate = kotlinx.coroutines.sync.Mutex()
 
-    /** [NonCancellable]: a half-finished wipe is worse than either outcome. */
-    suspend fun wipeAndResetApp(context: Context): WipeResult =
+    /** [NonCancellable]: a half-finished wipe is worse than either outcome.
+     *
+     *  [webViewMayBeLoaded] is false only from [enforceTripwire]: every screen waits on
+     *  [startupVerdict], so nothing can have loaded WebView in this process yet. */
+    suspend fun wipeAndResetApp(context: Context, webViewMayBeLoaded: Boolean = true): WipeResult =
         withContext(Dispatchers.IO + NonCancellable) {
             wipeGate.withLock {
                 // Mail work stays suspended for the WHOLE wipe, not just the database step: a task
@@ -124,14 +127,14 @@ object SecurityWipe {
                 // the wipe — see [org.kysecurity.mail.security.AppRestart].
                 org.kysecurity.mail.MailBackgroundExecutor.quiesce()
                 try {
-                    runWipe(context)
+                    runWipe(context, webViewMayBeLoaded)
                 } finally {
                     org.kysecurity.mail.MailBackgroundExecutor.resume()
                 }
             }
         }
 
-    private suspend fun runWipe(context: Context): WipeResult {
+    private suspend fun runWipe(context: Context, webViewMayBeLoaded: Boolean): WipeResult {
         // Before anything else, as in the account purge: outgoing-session work reads as stale.
         org.kysecurity.mail.ProcessState.advanceGeneration()
         val appContext = context.applicationContext
@@ -265,7 +268,7 @@ object SecurityWipe {
         // After the connector teardown above, which needs `unifiedpush.connector` to still hold the
         // distributor selection that `UnifiedPush.unregister` reads.
         step("sharedPrefs") { deleteAllSharedPrefs(appContext) }
-        step("webViewState") { clearWebViewState(appContext) }
+        step("webViewState") { clearWebViewState(appContext, webViewMayBeLoaded) }
         step("deviceContactRows") { deleteSyncedDeviceContactRows(appContext) }
         // Removing the account is what makes CP2 hard-delete the raw contacts under it.
         step("deviceContactAccount") {
@@ -333,16 +336,10 @@ object SecurityWipe {
 
         // Network LAST, bounded by the client's own callTimeout; not folded into `failed`.
         val deregistered = runCatching {
-            val client = pinnedDeregisterClient(pinForDeregister)
-            if (client == null) {
-                // Fail closed: no captured pin is TlsPinState.Lost, which must not be downgraded.
-                org.kysecurity.mail.push.DeregisterResult.Error(
-                    "no TLS pin was captured before the wipe; refusing to send the device secret unpinned",
-                )
-            } else {
+            deregisterForWipe(pairingForDeregister, pinForDeregister) { client, pairing ->
                 // Residue is deliberately ignored here: this IS the wipe, and purgeAccountScopedData
                 // already logs survivors. Escalating would recurse back into wipeAndResetApp.
-                PushRuntime.graph(appContext).repository.unpairDevice(client, pairingForDeregister).deregister
+                PushRuntime.graph(appContext).repository.unpairDevice(client, pairing).deregister
             }
         }.getOrElse { org.kysecurity.mail.push.DeregisterResult.Error(it.message ?: "deregister threw") }
         if (deregistered is org.kysecurity.mail.push.DeregisterResult.Error) {
@@ -386,6 +383,23 @@ object SecurityWipe {
             recordFailedSteps(appContext, failed, abandoned = givingUp)
             WipeResult.Incomplete(failed, willRetry = !givingUp)
         }
+    }
+
+    /** Null when nothing was paired: nothing to deregister, so a missing pin is no refusal. An
+     *  unpair that escalates to a wipe lands here, having sent its own deregister and cleared the
+     *  pin with the pairing; reporting "no TLS pin" then blamed the unpair for a skipped call. */
+    internal suspend fun deregisterForWipe(
+        pairing: org.kysecurity.mail.push.PairingData?,
+        pin: org.kysecurity.mail.push.TlsPin?,
+        send: suspend (org.kysecurity.mail.push.DeregisterClient, org.kysecurity.mail.push.PairingData) ->
+            org.kysecurity.mail.push.DeregisterResult,
+    ): org.kysecurity.mail.push.DeregisterResult? {
+        if (pairing == null) return null
+        // Fail closed: no captured pin is TlsPinState.Lost, which must not be downgraded.
+        val client = pinnedDeregisterClient(pin) ?: return org.kysecurity.mail.push.DeregisterResult.Error(
+            "no TLS pin was captured before the wipe; refusing to send the device secret unpinned",
+        )
+        return send(client, pairing)
     }
 
     /** Bound to a pin captured before deletion, since the state a factory would read is gone. */
@@ -543,17 +557,19 @@ object SecurityWipe {
     }
 
     /** Nothing is caught: failures must reach `failed`. WebView statics must run on Main. */
-    private suspend fun clearWebViewState(appContext: Context) {
-        withContext(Dispatchers.Main) {
-            android.webkit.WebStorage.getInstance().deleteAllData()
-            android.webkit.CookieManager.getInstance().removeAllCookies(null)
-            android.webkit.CookieManager.getInstance().flush()
+    private suspend fun clearWebViewState(appContext: Context, webViewMayBeLoaded: Boolean) {
+        val clearLiveWebView: (suspend () -> Unit)? = if (webViewMayBeLoaded) {
+            {
+                withContext(Dispatchers.Main) {
+                    android.webkit.WebStorage.getInstance().deleteAllData()
+                    android.webkit.CookieManager.getInstance().removeAllCookies(null)
+                    android.webkit.CookieManager.getInstance().flush()
+                }
+            }
+        } else {
+            null
         }
-        // app_webview holds the host-level record; deleteRecursively reports false, not throws.
-        val profile = File(appContext.dataDir, "app_webview")
-        if (profile.exists() && !profile.deleteRecursively()) {
-            throw IOException("Failed to delete the WebView profile directory")
-        }
+        clearWebViewProfile(File(appContext.dataDir, "app_webview"), clearLiveWebView)
 
         // Logged rather than thrown: files are still being created underneath in a live process.
         listOf(appContext.cacheDir, appContext.codeCacheDir).forEach { dir ->
@@ -562,6 +578,20 @@ object SecurityWipe {
                     android.util.Log.w(TAG, "Could not fully delete cache entry ${child.name}")
                 }
             }
+        }
+    }
+
+    /** Clears a live WebView through its statics, then deletes [profile], which holds the
+     *  host-level record.
+     *
+     *  On a cold start pass null. The statics load Chromium, which recreates [profile] under the
+     *  delete, so a resumed wipe failed this step on every launch: each launch re-ran the whole
+     *  wipe and erased whatever pairing had been made since. With nothing loaded, the directory
+     *  is all of WebView's state. Its delete reports false, not throws. */
+    internal suspend fun clearWebViewProfile(profile: File, clearLiveWebView: (suspend () -> Unit)?) {
+        clearLiveWebView?.invoke()
+        if (profile.exists() && !profile.deleteRecursively()) {
+            throw IOException("Failed to delete the WebView profile directory")
         }
     }
 
@@ -587,7 +617,7 @@ object SecurityWipe {
 
         if (wipeInterrupted(appContext)) {
             android.util.Log.e(TAG, "Previous wipe did not complete; resuming")
-            return wipeAndResetApp(appContext)
+            return wipeAndResetApp(appContext, webViewMayBeLoaded = false)
         }
 
         // Tri-state. `null` is "the encrypted store would not open", which is NOT "the PIN hash is
@@ -600,7 +630,7 @@ object SecurityWipe {
             false -> null
             true -> {
                 android.util.Log.e(TAG, "App-lock state vanished while a lock was configured; wiping")
-                wipeAndResetApp(appContext)
+                wipeAndResetApp(appContext, webViewMayBeLoaded = false)
             }
             null -> {
                 android.util.Log.e(TAG, "App-lock store is unreadable; refusing to wipe on an unproven tripwire")

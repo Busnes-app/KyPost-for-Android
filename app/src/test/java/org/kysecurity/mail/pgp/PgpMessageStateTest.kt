@@ -106,4 +106,19 @@ class PgpMessageStateTest {
         assertEquals("🔒", pgpRowMarker(PgpMessageState.CLIENT_PROTECTED, PgpSignatureState.UNSIGNED))
         assertNull(pgpRowMarker(PgpMessageState.NONE, PgpSignatureState.UNSIGNED))
     }
+
+    /** iOS shows "PGP: encrypted" on every encrypted message; Android showed only the signature. */
+    @Test
+    fun encryptionBadge_marksEveryEncryptedState() {
+        assertNull(pgpEncryptionBadgeOf(PgpMessageState.NONE))
+        assertEquals(
+            org.kysecurity.mail.R.string.email_pgp_badge_decrypt_failed,
+            pgpEncryptionBadgeOf(PgpMessageState.DECRYPT_FAILED),
+        )
+        listOf(
+            PgpMessageState.CLIENT_PROTECTED,
+            PgpMessageState.DECRYPTED_BY_SERVER,
+            PgpMessageState.BODY_UNAVAILABLE,
+        ).forEach { assertEquals(org.kysecurity.mail.R.string.email_pgp_badge_encrypted, pgpEncryptionBadgeOf(it), "$it") }
+    }
 }
