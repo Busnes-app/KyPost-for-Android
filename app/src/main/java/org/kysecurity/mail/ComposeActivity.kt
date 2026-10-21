@@ -257,8 +257,8 @@ class ComposeActivity : LockedActivity() {
         setContentView(R.layout.activity_compose)
         applyThemeToActivity(this)
 
-        // Resolved by id, not by cast: layout-w600dp/activity_compose.xml uses a different root
-        // element than the phone layout.
+        // Resolved by id, not by cast: the rail layouts (activity_compose_wide and
+        // activity_compose_rail) use a different root element than the phone layout.
         rootView = findViewById(R.id.composeRoot)
         // Keeps the composition out of the saved-state Bundle, which system_server owns.
         rootView.isSaveFromParentEnabled = false

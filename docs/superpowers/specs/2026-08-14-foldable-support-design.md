@@ -75,6 +75,8 @@ extending `NavigationBarView`, so `InboxActivity` widens its field type and runs
 including the `suppressFolderPickerReentry` guard, which is `NavigationBarView` reselection
 behaviour, not a bottom-nav quirk.
 
+> **Superseded 2026-10-21** (see the update below): the rail now anchors to `end`.
+
 The rail anchors to `start`, so the detail pane keeps the opposite edge and RTL mirrors both
 together. A rail on the trailing edge would collide with the detail pane and land in the middle of
 the screen.
@@ -115,6 +117,18 @@ has four.
 No Activity declares `screenOrientation`, so none of this is Fold-specific. An ordinary phone in
 landscape also clears 600dp and gets the rail. The claim earlier in this document that "every
 ordinary phone plus the cover screen keeps today's layouts unchanged" holds in portrait only.
+
+**Update 2026-10-21 — rail on the end edge, carried by the message pane.** On the Fold 8's
+landscape inner screen a right-hand rail is what the owner wants, so every `w600dp` layout now puts
+the rail on the `end` edge. In the split the rail can't come from the inbox (wrong pane, and a
+~373dp pane resolves the phone layout), so `EmailDetailActivity` carries its own rail on its end edge
+while the inbox pane hides its bottom bar: List | Message | Rail. A single two-pane Activity was
+not needed. Compose, Contacts and Settings are `alwaysExpand`, because launched from the message pane
+they would otherwise open inside it. Measured on the SM-F971U1 (inner screen natural orientation is
+landscape, 932dp): list pane 979px, message pane 1280px, rail 189px on the right edge.
+The rail also shows on `notlong` windows below 600dp, which is the Fold's 475x751dp cover screen,
+while a long 20:9 phone (Moto G Play, 411x845dp) keeps the bottom bar. The `layout-w600dp/` files
+moved to `layout/` and are selected by `values-w600dp` and `values-notlong` layout aliases.
 
 **Asked and answered: the nav bar cannot borrow space from the message pane.** A floating "island"
 nav that took its footprint from the preview rather than the list is not buildable under embedding —
@@ -239,7 +253,7 @@ state), `ContactEditActivity.kt` (stash to and take from the draft cache),
 
 **API 31.** Embedding inactive, behaviour identical to today.
 
-**RTL.** The rail anchors to `start` and mirrors with the detail pane.
+**RTL.** The rail anchors to `end` and mirrors with the detail pane.
 
 **Cover screen.** The `w600dp` variants never resolve; today's layouts are what render.
 
@@ -417,7 +431,8 @@ resolve. This is compilation evidence only — it is not execution evidence.
 Not attempted, for the environment reasons above. The seven checks are outstanding for whoever next
 has real hardware or can provision a foldable/large-screen AVD:
 
-1. Open the app unfolded → rail on the left, two panes once a message is open.
+1. Open the app unfolded → rail on the right, two panes once a message is open, with the rail
+   still on the right edge (done 2026-10-21 on SM-F971U1).
 2. Fold while reading a message → phone layout, message full-screen, list behind it.
 3. Unfold again within the 30s grace → returns to two panes, no PIN prompt.
 4. Fold, wait past the grace window, unfold → PIN prompt, then the inbox at defaults.

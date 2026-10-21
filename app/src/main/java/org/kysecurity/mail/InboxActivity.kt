@@ -19,6 +19,7 @@ import androidx.appcompat.view.ActionMode
 import androidx.appcompat.widget.SearchView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.ColorUtils
+import androidx.core.view.isVisible
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -43,6 +44,7 @@ import org.kysecurity.mail.mail.isFlaggedPhishing
 import org.kysecurity.mail.mail.notifiedMessage
 import org.kysecurity.mail.mail.userFacingMessage
 import org.kysecurity.mail.push.PushNotificationDispatcher
+import org.kysecurity.mail.ui.observeSplitPane
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import org.kysecurity.mail.security.LockedActivity
@@ -181,6 +183,8 @@ class InboxActivity : LockedActivity() {
         setupTabs()
         setupBottomNav()
         setupSwipeGestures()
+        // Beside an open message the rail moves to that pane's end edge (EmailDetailActivity).
+        observeSplitPane(this) { split -> bottomNav.isVisible = !split }
 
         // A recreate already consumed the tap; re-reading it reopens the message and resets the folder.
         if (savedInstanceState == null && takeNotificationTarget(intent)) {
@@ -513,6 +517,7 @@ class InboxActivity : LockedActivity() {
         intent.putExtra("email_pgp_signer_fingerprint", email.pgpSignerFingerprint)
         // The server's $Phishing IMAP keyword; see mail/PhishingFlag.kt for the case-insensitive match.
         intent.putExtra("email_suspicious", isFlaggedPhishing(email.keywords))
+        intent.putExtra(EmailDetailActivity.EXTRA_FOLDER_LABEL, currentFolderLabel())
         emailDetailLauncher.launch(intent)
     }
 
@@ -1019,7 +1024,7 @@ class InboxActivity : LockedActivity() {
             resources.getQuantityString(R.plurals.undo_message_several, rows, rows)
         }
         undoBar = Snackbar.make(recyclerView, message, UNDO_WINDOW_MS.toInt())
-            .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
+            .apply { if (bottomNav is BottomNavigationView && bottomNav.isVisible) anchorView = bottomNav }
             .setAction(R.string.undo) {
                 if (heldActions.undoAll()) {
                     rebuildTabs(allEmails)
@@ -1331,7 +1336,7 @@ class InboxActivity : LockedActivity() {
         Snackbar.make(recyclerView, getString(R.string.mail_action_failed, label, reason), Snackbar.LENGTH_LONG)
             .setAction(R.string.action_retry) { if (stillOurs()) submitRowAction(email, label, mutate) }
             // Above the phone's bottom bar; the w600dp rail runs the full height beside the list.
-            .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
+            .apply { if (bottomNav is BottomNavigationView && bottomNav.isVisible) anchorView = bottomNav }
             .show()
         rowActionFailureShownForTest?.invoke()
         return true

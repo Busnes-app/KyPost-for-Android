@@ -10,17 +10,6 @@
         android:layout_height="match_parent"
         android:orientation="horizontal">
 
-        <com.google.android.material.navigationrail.NavigationRailView
-            android:id="@+id/bottomNavigation"
-            android:layout_width="wrap_content"
-            android:layout_height="match_parent"
-            android:elevation="12dp"
-            app:labelVisibilityMode="labeled"
-            app:itemTextAppearanceActive="@style/TextAppearance.KyPost.BottomNavLabel"
-            app:itemTextAppearanceInactive="@style/TextAppearance.KyPost.BottomNavLabel"
-            app:itemIconSize="24dp"
-            app:menu="@menu/bottom_nav_menu" />
-
         <LinearLayout
             android:layout_width="0dp"
                 android:layout_height="match_parent"
@@ -112,6 +101,16 @@
 
         </LinearLayout>
 
+        <com.google.android.material.navigationrail.NavigationRailView
+            android:id="@+id/bottomNavigation"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:elevation="12dp"
+            app:labelVisibilityMode="labeled"
+            app:itemTextAppearanceActive="@style/TextAppearance.KyPost.BottomNavLabel"
+            app:itemTextAppearanceInactive="@style/TextAppearance.KyPost.BottomNavLabel"
+            app:itemIconSize="24dp"
+            app:menu="@menu/bottom_nav_menu" />
     </LinearLayout>
 
     <LinearLayout
