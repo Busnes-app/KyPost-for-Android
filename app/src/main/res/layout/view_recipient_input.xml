@@ -15,6 +15,7 @@
             android:id="@+id/recipientInputLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:minWidth="@dimen/compose_field_label_width"
             android:labelFor="@+id/recipientInputField"
             android:text="@string/email_to"
             android:textSize="12sp"
@@ -38,7 +39,7 @@
             android:background="?attr/selectableItemBackgroundBorderless"
             android:src="@drawable/ic_person"
             android:contentDescription="@string/compose_address_book_content_description"
-            android:visibility="gone" />
+            android:visibility="invisible" />
 
     </LinearLayout>
 

@@ -6,4 +6,9 @@
          room for pixel rounding. -->
     <dimen name="detail_action_size">35dp</dimen>
     <dimen name="detail_action_padding">8dp</dimen>
+    <!-- Compose header rows share these so To, Cc, Bcc and Subject boxes start and end on the same
+         lines: every label is at least this wide ("Subject" at 12sp is ~48dp), and every row keeps
+         the address-book button's slot (32dp + 4dp margin) even where the button is hidden. -->
+    <dimen name="compose_field_label_width">56dp</dimen>
+    <dimen name="compose_field_end_slot">36dp</dimen>
 </resources>

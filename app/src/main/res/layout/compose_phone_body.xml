@@ -70,6 +70,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginEnd="8dp"
+                        android:minWidth="@dimen/compose_field_label_width"
                         android:gravity="center_vertical"
                         android:labelFor="@+id/composeSubjectField"
                         android:text="@string/compose_subject"
@@ -81,6 +82,7 @@
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
+                        android:layout_marginEnd="@dimen/compose_field_end_slot"
                         android:importantForAutofill="no"
                         android:inputType="textCapSentences"
                         android:maxLines="1" />
