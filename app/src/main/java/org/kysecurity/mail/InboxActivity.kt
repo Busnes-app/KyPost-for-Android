@@ -242,6 +242,9 @@ class InboxActivity : LockedActivity() {
     private fun executeGuarded(folder: String, work: () -> Unit) = ioExecutor.execute {
         try {
             work()
+        } catch (e: InterruptedException) {
+            // shutdownNow() in onDestroy (a fold, rotation or close mid-refresh): nothing to repaint.
+            Thread.currentThread().interrupt()
         } catch (e: RuntimeException) {
             android.util.Log.w("InboxActivity", "Inbox refresh failed: ${e.javaClass.name}")
             runOnUiThread {
