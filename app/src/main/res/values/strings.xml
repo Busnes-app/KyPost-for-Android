@@ -192,6 +192,8 @@
     <string name="pgp_qr_bind_confirm_body">This key will be used whenever you write to %1$s at:\n\n%2$s\n\nCheck these are the addresses you expect. Another app on this device can change a contact\'s addresses.</string>
     <string name="pgp_qr_bind_confirm_body_no_addresses">%1$s has no email address on file, so this key will not be used for anything until you add one.</string>
     <string name="pgp_qr_bind_confirm_button">Bind key</string>
+    <string name="email_pgp_badge_encrypted">PGP: encrypted</string>
+    <string name="email_pgp_badge_decrypt_failed">PGP: could not decrypt</string>
     <string name="email_pgp_signature_invalid">Signing Key Mismatch</string>
     <string name="email_pgp_signature_confirmed">Key verified by QR Code</string>
     <string name="email_pgp_signature_seen_before">Key trusted on first use</string>

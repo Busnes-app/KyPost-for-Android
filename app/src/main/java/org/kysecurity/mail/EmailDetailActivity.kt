@@ -77,6 +77,7 @@ class EmailDetailActivity : LockedActivity() {
     private lateinit var phishingBar: TextView
     private lateinit var pgpBar: View
     private lateinit var pgpText: TextView
+    private lateinit var pgpEncryptedBadge: com.google.android.material.chip.Chip
     private lateinit var subjectView: TextView
     private lateinit var fromView: TextView
     private lateinit var recipientsView: TextView
@@ -218,6 +219,7 @@ class EmailDetailActivity : LockedActivity() {
         phishingBar.visibility = if (phishingFlagged) View.VISIBLE else View.GONE
         pgpBar = findViewById(R.id.emailPgpBar)
         pgpText = findViewById(R.id.emailPgpText)
+        pgpEncryptedBadge = findViewById(R.id.emailPgpEncryptedBadge)
         btnOpenInWebmail = findViewById(R.id.btnOpenInWebmail)
         btnDecryptHere = findViewById(R.id.btnDecryptHere)
         btnRetryPayload = findViewById(R.id.btnRetryPayload)
@@ -450,6 +452,7 @@ class EmailDetailActivity : LockedActivity() {
             loading.visibility = android.view.View.GONE
             imagesBlockedBar.visibility = if (hasRemoteImages) View.VISIBLE else View.GONE
             renderPgpBar(pgpState, pgpDecryptError, serverUrl, webmailUrl, nothingToRender, fetchFailure, emailFolder, emailId, emailSender)
+            renderEncryptionBadge(pgpState)
             applyReplyForwardAvailability(pgpState)
             if (content != null) {
                 toRecipients = content.toAddresses
@@ -643,6 +646,15 @@ class EmailDetailActivity : LockedActivity() {
             button.alpha = 0.4f
             button.contentDescription = notice
         }
+    }
+
+    /** iOS and the web reader say "PGP: encrypted" above the signature state; so does this. */
+    private fun renderEncryptionBadge(state: PgpMessageState) {
+        val label = org.kysecurity.mail.pgp.pgpEncryptionBadgeOf(state)
+        pgpEncryptedBadge.visibility = if (label == null) View.GONE else View.VISIBLE
+        if (label == null) return
+        pgpEncryptedBadge.setText(label)
+        applyStatusBadgeTheme(this, pgpEncryptedBadge, active = state != PgpMessageState.DECRYPT_FAILED)
     }
 
     /** Shared by [renderPgpBar] and [renderReadOutcome] so the wording cannot drift. */
