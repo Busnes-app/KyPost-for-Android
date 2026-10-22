@@ -6,13 +6,20 @@ import androidx.lifecycle.lifecycleScope
 import org.kysecurity.mail.push.PushNotificationDispatcher
 import org.kysecurity.mail.push.PushRuntime
 import org.kysecurity.mail.security.LockedActivity
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /** Routes in [onStart], strictly after [LockedActivity]'s lock check, never in `onCreate`. */
 class MainActivity : LockedActivity() {
 
+    /** Set only once the target has been started, never when routing merely begins: a
+     *  configuration change while [routing] waits destroys this instance and cancels it, and a
+     *  saved `true` would stop the recreated one from routing at all — a blank screen for good. */
     private var routed = false
+
+    /** In flight, so a second [onStart] on the same instance does not route twice. */
+    private var routing: Job? = null
 
     /** This screen finishes itself as soon as it has routed, so the startup notices belong to
      *  whatever it routes to — claimed here, they would go down with it unseen. */
@@ -24,9 +31,8 @@ class MainActivity : LockedActivity() {
 
     override fun onStartUnlocked() {
         // LockedActivity.onStart finishes us and shows UnlockActivity when the app is locked.
-        if (isFinishing || routed) return
-        routed = true
-        handleIntent(intent)
+        if (isFinishing || routed || routing?.isActive == true) return
+        routing = handleIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -47,7 +53,7 @@ class MainActivity : LockedActivity() {
         outState.putBoolean(STATE_ROUTED, routed)
     }
 
-    private fun handleIntent(intent: Intent) {
+    private fun handleIntent(intent: Intent): Job =
         lifecycleScope.launch {
             val configured = PushRuntime.graph(this@MainActivity).repository.state.first().pairing != null
 
@@ -64,10 +70,10 @@ class MainActivity : LockedActivity() {
             } else {
                 Intent(this@MainActivity, org.kysecurity.mail.push.PushPairingActivity::class.java)
             }
+            routed = true
             startActivity(targetIntent)
             finish()
         }
-    }
 
     /** Exported via LAUNCHER, so extras are attacker-reachable: accept only token-signed ones. */
     private fun notificationExtras(intent: Intent): Bundle? {
