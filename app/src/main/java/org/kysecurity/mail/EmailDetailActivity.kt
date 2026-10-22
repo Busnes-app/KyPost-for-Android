@@ -15,8 +15,10 @@ import android.widget.ImageButton
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.view.isVisible
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
+import com.google.android.material.navigation.NavigationBarView
 import org.kysecurity.mail.mail.AttachmentInfo
 import org.kysecurity.mail.mail.CalendarEvent
 import org.kysecurity.mail.mail.CalendarInvite
@@ -38,6 +40,7 @@ import org.kysecurity.mail.pgp.EncryptedMessageReader
 import org.kysecurity.mail.pgp.PayloadSource
 import org.kysecurity.mail.pgp.PgpMessageState
 import org.kysecurity.mail.pgp.PgpPayloadClient
+import org.kysecurity.mail.ui.observeSplitPane
 import org.kysecurity.mail.pgp.PgpSignatureState
 import org.kysecurity.mail.pgp.ReadOutcome
 import org.kysecurity.mail.pgp.openWebmail
@@ -176,6 +179,7 @@ class EmailDetailActivity : LockedActivity() {
 
         val root = findViewById<android.view.View>(R.id.emailDetailRoot)
         applyTopInsetWithHeader(this, root)
+        setupSplitRail()
 
         val emailId = emailId()
         val emailFolder = emailFolder()
@@ -1249,6 +1253,25 @@ class EmailDetailActivity : LockedActivity() {
         }
     }
 
+    /** The inbox's navigation on the end edge: while the inbox list is beside this pane, and
+     *  wherever a full-width screen would show a rail ([R.bool.nav_is_rail]). */
+    private fun setupSplitRail() {
+        val rail = findViewById<NavigationBarView>(R.id.detailRail)
+        // Inbox closes the message, so the list takes the window back with its own rail.
+        // closeOnLock: the message and any decrypted text must not stay alive behind the unlock
+        // screen, where a desktop window or a split could still show it.
+        setupPrimaryNavigation(
+            this, rail, R.id.nav_inbox,
+            onInboxSelected = { onBackPressedDispatcher.onBackPressed() },
+            closeOnLock = true,
+        )
+        intent.getStringExtra(EXTRA_FOLDER_LABEL)?.let { rail.menu.findItem(R.id.nav_inbox)?.title = it }
+        applyPrimaryNavigationTheme(this, rail)
+        applyRailInsets(this, rail)
+        val wide = resources.getBoolean(R.bool.nav_is_rail)
+        observeSplitPane(this) { split -> rail.isVisible = split || wide }
+    }
+
     override fun onResume() {
         super.onResume()
         if (redirectedToUnlock) return
@@ -1499,6 +1522,8 @@ class EmailDetailActivity : LockedActivity() {
         const val EXTRA_REMOVED_EMAIL_ID = "removed_email_id"
         const val EXTRA_MARKED_UNREAD_ID = "marked_unread_email_id"
         const val EXTRA_MARKED_UNREAD_FOLDER = "marked_unread_email_folder"
+        /** The inbox's label for its folder, so the split rail's Inbox item reads the same. */
+        const val EXTRA_FOLDER_LABEL = "folder_label"
 
         private const val STATE_MARK_READ_SUBMITTED = "mark_read_submitted"
         private const val STATE_MARK_READ_COUNT = "mark_read_count"

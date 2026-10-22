@@ -1,386 +1,406 @@
 <?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/emailDetailRoot"
+<!-- The rail shows in a split, where the inbox beside it hides its own navigation so the rail sits
+     on the window's end edge (List | Message | Rail), and wherever nav_is_rail is true. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fitsSystemWindows="true">
+    android:orientation="horizontal">
 
-    <LinearLayout
-        android:layout_width="match_parent"
+    <FrameLayout
+        android:id="@+id/emailDetailRoot"
+        android:layout_width="0dp"
         android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:padding="16dp"
-        android:clipToPadding="false">
+        android:layout_weight="1"
+        android:fitsSystemWindows="true">
 
-        <!-- Eight actions share this row: @dimen/detail_action_size is 35dp below a 360dp window,
-             40dp from it and 44dp from 400dp, so all eight fit at 320dp and 360dp. -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:orientation="horizontal">
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:clipToPadding="false">
 
+            <!-- Eight actions share this row: @dimen/detail_action_size is 35dp below a 360dp window,
+                 40dp from it and 44dp from 400dp, so all eight fit at 320dp and 360dp. -->
             <LinearLayout
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
                 android:orientation="horizontal">
 
-                <ImageButton
-                    android:id="@+id/actionReply"
-                    android:layout_width="@dimen/detail_action_size"
-                    android:layout_height="@dimen/detail_action_size"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/action_reply"
-                    android:padding="@dimen/detail_action_padding"
-                    android:src="@drawable/ic_reply" />
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
 
-                <ImageButton
-                    android:id="@+id/actionReplyAll"
-                    android:layout_width="@dimen/detail_action_size"
-                    android:layout_height="@dimen/detail_action_size"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/action_reply_all"
-                    android:padding="@dimen/detail_action_padding"
-                    android:src="@drawable/ic_reply_all" />
+                    <ImageButton
+                        android:id="@+id/actionReply"
+                        android:layout_width="@dimen/detail_action_size"
+                        android:layout_height="@dimen/detail_action_size"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/action_reply"
+                        android:padding="@dimen/detail_action_padding"
+                        android:src="@drawable/ic_reply" />
 
-                <ImageButton
-                    android:id="@+id/actionForward"
-                    android:layout_width="@dimen/detail_action_size"
-                    android:layout_height="@dimen/detail_action_size"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/action_forward"
-                    android:padding="@dimen/detail_action_padding"
-                    android:src="@drawable/ic_forward" />
+                    <ImageButton
+                        android:id="@+id/actionReplyAll"
+                        android:layout_width="@dimen/detail_action_size"
+                        android:layout_height="@dimen/detail_action_size"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/action_reply_all"
+                        android:padding="@dimen/detail_action_padding"
+                        android:src="@drawable/ic_reply_all" />
+
+                    <ImageButton
+                        android:id="@+id/actionForward"
+                        android:layout_width="@dimen/detail_action_size"
+                        android:layout_height="@dimen/detail_action_size"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/action_forward"
+                        android:padding="@dimen/detail_action_padding"
+                        android:src="@drawable/ic_forward" />
+
+                </LinearLayout>
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1" />
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <ImageButton
+                        android:id="@+id/actionMarkUnread"
+                        android:layout_width="@dimen/detail_action_size"
+                        android:layout_height="@dimen/detail_action_size"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/action_mark_unread"
+                        android:padding="@dimen/detail_action_padding"
+                        android:src="@drawable/ic_mark_unread" />
+
+                    <ImageButton
+                        android:id="@+id/actionArchive"
+                        android:layout_width="@dimen/detail_action_size"
+                        android:layout_height="@dimen/detail_action_size"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/action_archive"
+                        android:padding="@dimen/detail_action_padding"
+                        android:src="@drawable/ic_archive" />
+
+                    <ImageButton
+                        android:id="@+id/actionMove"
+                        android:layout_width="@dimen/detail_action_size"
+                        android:layout_height="@dimen/detail_action_size"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/action_move"
+                        android:padding="@dimen/detail_action_padding"
+                        android:src="@drawable/ic_move" />
+
+                    <ImageButton
+                        android:id="@+id/actionJunk"
+                        android:layout_width="@dimen/detail_action_size"
+                        android:layout_height="@dimen/detail_action_size"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/action_junk"
+                        android:padding="@dimen/detail_action_padding"
+                        android:src="@drawable/ic_spam" />
+
+                    <ImageButton
+                        android:id="@+id/actionDelete"
+                        android:layout_width="@dimen/detail_action_size"
+                        android:layout_height="@dimen/detail_action_size"
+                        android:background="?attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="@string/action_delete"
+                        android:padding="@dimen/detail_action_padding"
+                        android:src="@drawable/ic_delete" />
+
+                </LinearLayout>
 
             </LinearLayout>
+
+            <TextView
+                android:id="@+id/emailSubject"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:breakStrategy="balanced"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:textColor="#000000"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/emailFrom"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:breakStrategy="balanced"
+                android:textSize="14sp"
+                android:textColor="#666666"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/emailRecipients"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:breakStrategy="balanced"
+                android:textSize="14sp"
+                android:textColor="#666666"
+                android:visibility="gone" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/emailPgpEncryptedBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:visibility="gone"
+                app:chipMinHeight="24dp"
+                app:ensureMinTouchTargetSize="false" />
 
             <View
-                android:layout_width="0dp"
+                android:id="@+id/emailDivider"
+                android:layout_width="match_parent"
                 android:layout_height="1dp"
-                android:layout_weight="1" />
-
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal">
-
-                <ImageButton
-                    android:id="@+id/actionMarkUnread"
-                    android:layout_width="@dimen/detail_action_size"
-                    android:layout_height="@dimen/detail_action_size"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/action_mark_unread"
-                    android:padding="@dimen/detail_action_padding"
-                    android:src="@drawable/ic_mark_unread" />
-
-                <ImageButton
-                    android:id="@+id/actionArchive"
-                    android:layout_width="@dimen/detail_action_size"
-                    android:layout_height="@dimen/detail_action_size"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/action_archive"
-                    android:padding="@dimen/detail_action_padding"
-                    android:src="@drawable/ic_archive" />
-
-                <ImageButton
-                    android:id="@+id/actionMove"
-                    android:layout_width="@dimen/detail_action_size"
-                    android:layout_height="@dimen/detail_action_size"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/action_move"
-                    android:padding="@dimen/detail_action_padding"
-                    android:src="@drawable/ic_move" />
-
-                <ImageButton
-                    android:id="@+id/actionJunk"
-                    android:layout_width="@dimen/detail_action_size"
-                    android:layout_height="@dimen/detail_action_size"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/action_junk"
-                    android:padding="@dimen/detail_action_padding"
-                    android:src="@drawable/ic_spam" />
-
-                <ImageButton
-                    android:id="@+id/actionDelete"
-                    android:layout_width="@dimen/detail_action_size"
-                    android:layout_height="@dimen/detail_action_size"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="@string/action_delete"
-                    android:padding="@dimen/detail_action_padding"
-                    android:src="@drawable/ic_delete" />
-
-            </LinearLayout>
-
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/emailSubject"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:breakStrategy="balanced"
-            android:textSize="20sp"
-            android:textStyle="bold"
-            android:textColor="#000000"
-            android:layout_marginBottom="8dp" />
-
-        <TextView
-            android:id="@+id/emailFrom"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:breakStrategy="balanced"
-            android:textSize="14sp"
-            android:textColor="#666666"
-            android:layout_marginBottom="4dp" />
-
-        <TextView
-            android:id="@+id/emailRecipients"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:breakStrategy="balanced"
-            android:textSize="14sp"
-            android:textColor="#666666"
-            android:visibility="gone" />
-
-        <com.google.android.material.chip.Chip
-            android:id="@+id/emailPgpEncryptedBadge"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:visibility="gone"
-            app:chipMinHeight="24dp"
-            app:ensureMinTouchTargetSize="false"
-            xmlns:app="http://schemas.android.com/apk/res-auto" />
-
-        <View
-            android:id="@+id/emailDivider"
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="#cccccc"
-            android:layout_marginTop="12dp"
-            android:layout_marginBottom="12dp" />
-
-        <TextView
-            android:id="@+id/emailPhishingBar"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:breakStrategy="balanced"
-            android:textSize="13sp"
-            android:text="@string/email_phishing_warning"
-            android:visibility="gone" />
-
-        <LinearLayout
-            android:id="@+id/emailInviteCard"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:orientation="vertical"
-            android:padding="12dp"
-            android:visibility="gone">
+                android:background="#cccccc"
+                android:layout_marginTop="12dp"
+                android:layout_marginBottom="12dp" />
 
             <TextView
-                android:id="@+id/inviteMethod"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
-
-            <TextView
-                android:id="@+id/inviteTitle"
+                android:id="@+id/emailPhishingBar"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
                 android:breakStrategy="balanced"
-                android:textSize="16sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/inviteDetails"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textIsSelectable="true"
-                android:textSize="14sp" />
-
-            <TextView
-                android:id="@+id/inviteNotice"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:padding="8dp"
                 android:textSize="13sp"
+                android:text="@string/email_phishing_warning"
                 android:visibility="gone" />
 
-            <Button
-                android:id="@+id/btnInviteAdd"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="@string/invite_add" />
-
             <LinearLayout
-                android:id="@+id/inviteRsvpRow"
+                android:id="@+id/emailInviteCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:orientation="horizontal"
+                android:layout_marginBottom="8dp"
+                android:orientation="vertical"
+                android:padding="12dp"
                 android:visibility="gone">
 
-                <Button
-                    android:id="@+id/btnRsvpAccept"
-                    android:layout_width="0dp"
+                <TextView
+                    android:id="@+id/inviteMethod"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:id="@+id/inviteTitle"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginEnd="6dp"
-                    android:layout_weight="1"
-                    android:text="@string/rsvp_accept" />
+                    android:breakStrategy="balanced"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/inviteDetails"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textIsSelectable="true"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/inviteNotice"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:padding="8dp"
+                    android:textSize="13sp"
+                    android:visibility="gone" />
 
                 <Button
-                    android:id="@+id/btnRsvpTentative"
-                    android:layout_width="0dp"
+                    android:id="@+id/btnInviteAdd"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginEnd="6dp"
-                    android:layout_weight="1"
-                    android:text="@string/rsvp_tentative" />
+                    android:layout_marginTop="8dp"
+                    android:text="@string/invite_add" />
 
-                <Button
-                    android:id="@+id/btnRsvpDecline"
-                    android:layout_width="0dp"
+                <LinearLayout
+                    android:id="@+id/inviteRsvpRow"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/rsvp_decline" />
+                    android:layout_marginTop="8dp"
+                    android:orientation="horizontal"
+                    android:visibility="gone">
+
+                    <Button
+                        android:id="@+id/btnRsvpAccept"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:layout_weight="1"
+                        android:text="@string/rsvp_accept" />
+
+                    <Button
+                        android:id="@+id/btnRsvpTentative"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="6dp"
+                        android:layout_weight="1"
+                        android:text="@string/rsvp_tentative" />
+
+                    <Button
+                        android:id="@+id/btnRsvpDecline"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/rsvp_decline" />
+
+                </LinearLayout>
 
             </LinearLayout>
 
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/emailPgpBar"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:visibility="gone">
-
-            <TextView
-                android:id="@+id/emailPgpText"
+            <LinearLayout
+                android:id="@+id/emailPgpBar"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:breakStrategy="balanced"
+                android:layout_marginBottom="8dp"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/emailPgpText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:breakStrategy="balanced"
+                    android:visibility="gone" />
+
+                <Button
+                    android:id="@+id/btnOpenInWebmail"
+                    style="?android:attr/borderlessButtonStyle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="72dp"
+                    android:visibility="gone"
+                    android:text="@string/email_pgp_open_webmail_button" />
+
+                <Button
+                    android:id="@+id/btnDecryptHere"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="72dp"
+                    android:visibility="gone"
+                    android:text="@string/email_pgp_decrypt_button" />
+
+                <Button
+                    android:id="@+id/btnRetryPayload"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="72dp"
+                    android:visibility="gone"
+                    android:text="@string/email_pgp_retry_button" />
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/emailImagesBlockedBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/emailImagesBlockedText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textSize="13sp"
+                    android:text="@string/email_images_blocked_message" />
+
+                <Button
+                    android:id="@+id/btnShowImages"
+                    style="?android:attr/borderlessButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/email_show_images_button" />
+
+            </LinearLayout>
+
+            <ImageView
+                android:id="@+id/emailLockedPlaceholder"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:contentDescription="@string/email_pgp_locked_placeholder_description"
+                android:scaleType="fitCenter"
+                android:padding="48dp"
+                android:src="@drawable/ic_lock_large"
                 android:visibility="gone" />
 
-            <Button
-                android:id="@+id/btnOpenInWebmail"
-                style="?android:attr/borderlessButtonStyle"
+            <WebView
+                android:id="@+id/emailWebView"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="72dp"
-                android:visibility="gone"
-                android:text="@string/email_pgp_open_webmail_button" />
+                android:layout_height="0dp"
+                android:layout_weight="1" />
 
-            <Button
-                android:id="@+id/btnDecryptHere"
+            <ScrollView
+                android:id="@+id/emailPlainTextScroll"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="72dp"
-                android:visibility="gone"
-                android:text="@string/email_pgp_decrypt_button" />
-
-            <Button
-                android:id="@+id/btnRetryPayload"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="72dp"
-                android:visibility="gone"
-                android:text="@string/email_pgp_retry_button" />
-
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/emailImagesBlockedBar"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:visibility="gone">
-
-            <TextView
-                android:id="@+id/emailImagesBlockedText"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="0dp"
                 android:layout_weight="1"
-                android:textSize="13sp"
-                android:text="@string/email_images_blocked_message" />
+                android:fillViewport="true"
+                android:scrollbars="vertical"
+                android:visibility="gone">
 
-            <Button
-                android:id="@+id/btnShowImages"
-                style="?android:attr/borderlessButtonStyle"
-                android:layout_width="wrap_content"
+                <TextView
+                    android:id="@+id/emailPlainText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:breakStrategy="simple"
+                    android:fontFamily="@font/ibm_plex_mono"
+                    android:gravity="top|start"
+                    android:hyphenationFrequency="none"
+                    android:minWidth="0dp"
+                    android:scrollHorizontally="false"
+                    android:textSize="16sp"
+                    android:textIsSelectable="true" />
+            </ScrollView>
+
+            <TextView
+                android:id="@+id/emailAttachmentsLabel"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/email_show_images_button" />
+                android:layout_marginTop="8dp"
+                android:text="@string/email_attachments"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
+            <com.google.android.material.chip.ChipGroup
+                android:id="@+id/emailAttachmentChips"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:visibility="gone"
+                app:chipSpacingHorizontal="6dp" />
 
         </LinearLayout>
 
-        <ImageView
-            android:id="@+id/emailLockedPlaceholder"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:contentDescription="@string/email_pgp_locked_placeholder_description"
-            android:scaleType="fitCenter"
-            android:padding="48dp"
-            android:src="@drawable/ic_lock_large"
-            android:visibility="gone" />
-
-        <WebView
-            android:id="@+id/emailWebView"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
-        <ScrollView
-            android:id="@+id/emailPlainTextScroll"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:fillViewport="true"
-            android:scrollbars="vertical"
-            android:visibility="gone">
-
-            <TextView
-                android:id="@+id/emailPlainText"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:breakStrategy="simple"
-                android:fontFamily="@font/ibm_plex_mono"
-                android:gravity="top|start"
-                android:hyphenationFrequency="none"
-                android:minWidth="0dp"
-                android:scrollHorizontally="false"
-                android:textSize="16sp"
-                android:textIsSelectable="true" />
-        </ScrollView>
-
-        <TextView
-            android:id="@+id/emailAttachmentsLabel"
-            android:layout_width="match_parent"
+        <ProgressBar
+            android:id="@+id/emailBodyLoading"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="@string/email_attachments"
-            android:textStyle="bold"
-            android:visibility="gone" />
+            android:layout_gravity="center" />
+    </FrameLayout>
 
-        <com.google.android.material.chip.ChipGroup
-            android:id="@+id/emailAttachmentChips"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:visibility="gone"
-            app:chipSpacingHorizontal="6dp"
-            xmlns:app="http://schemas.android.com/apk/res-auto" />
-
-    </LinearLayout>
-
-    <ProgressBar
-        android:id="@+id/emailBodyLoading"
+    <com.google.android.material.navigationrail.NavigationRailView
+        android:id="@+id/detailRail"
         android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center" />
+        android:layout_height="match_parent"
+        android:elevation="12dp"
+        android:visibility="gone"
+        app:labelVisibilityMode="labeled"
+        app:itemTextAppearanceActive="@style/TextAppearance.KyPost.BottomNavLabel"
+        app:itemTextAppearanceInactive="@style/TextAppearance.KyPost.BottomNavLabel"
+        app:itemIconSize="24dp"
+        app:menu="@menu/bottom_nav_menu" />
 
-</FrameLayout>
+</LinearLayout>

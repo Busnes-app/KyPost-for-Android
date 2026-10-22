@@ -60,7 +60,7 @@ On top of the width tier, the layouts respond to three device states:
 
 | Surface | C | M | E | L | Fold states |
 | --- | --- | --- | --- | --- | --- |
-| **Navigation** | Bottom bar | Rail (today) | Rail | Rail | — |
+| **Navigation** | Bottom bar; rail on the end edge if `notlong` (Fold cover) | Rail, end edge | Rail, end edge; in the split the message pane carries it | Same as E | — |
 | **Inbox → message** | List, then message | Same as C | List \| message, 0.4 split | List pane fixed ~400dp \| message; reading column ≤ 720dp | Book: split on the hinge |
 | **Compose** | Full screen | Fields ≤ 720dp, centred (existing `w600dp` variant) | Same as M | Same as M | Hinge: toolbar inside one half |
 | **Contacts → detail/edit** | Stacked | Same as C | List \| detail | Same as E | Book: split on the hinge |

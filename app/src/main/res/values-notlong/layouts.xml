@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The rail layouts, shared by values-w600dp and values-notlong so each exists once.
+         w600dp outranks notlong, so a wide notlong window still gets activity_compose_wide. -->
+    <item name="activity_inbox" type="layout">@layout/activity_inbox_rail</item>
+    <item name="activity_contacts_list" type="layout">@layout/activity_contacts_list_rail</item>
+    <item name="activity_settings" type="layout">@layout/activity_settings_rail</item>
+    <item name="activity_compose" type="layout">@layout/activity_compose_rail</item>
+</resources>

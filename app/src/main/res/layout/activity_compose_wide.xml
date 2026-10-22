@@ -7,15 +7,9 @@
     android:layout_height="match_parent"
     android:orientation="horizontal">
 
-    <com.google.android.material.navigationrail.NavigationRailView
-        android:id="@+id/bottomNavigation"
-        android:layout_width="wrap_content"
-        android:layout_height="match_parent"
-        app:labelVisibilityMode="labeled"
-        app:menu="@menu/bottom_nav_menu" />
-
-    <!-- tools:ignore="InconsistentLayout": composeContent is deliberately only in the wide
-         layout, which is the one with a nav rail beside the content. ComposeActivity reads it as
+    <!-- tools:ignore="InconsistentLayout": composeContent is deliberately only in the rail
+         layouts (this one and activity_compose_rail), where a nav rail sits beside the content.
+         ComposeActivity reads it as
          `findViewById<View?>(R.id.composeContent) ?: rootView`, so the phone layout's absence is
          the documented path, not a missing widget. -->
     <LinearLayout
@@ -92,6 +86,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginEnd="8dp"
+                            android:minWidth="@dimen/compose_field_label_width"
                             android:gravity="center_vertical"
                             android:labelFor="@+id/composeSubjectField"
                             android:text="@string/compose_subject"
@@ -103,6 +98,7 @@
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
+                            android:layout_marginEnd="@dimen/compose_field_end_slot"
                                         android:importantForAutofill="no"
                             android:inputType="textCapSentences"
                             android:maxLines="1" />
@@ -265,4 +261,10 @@
 
     </LinearLayout>
 
+    <com.google.android.material.navigationrail.NavigationRailView
+        android:id="@+id/bottomNavigation"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        app:labelVisibilityMode="labeled"
+        app:menu="@menu/bottom_nav_menu" />
 </LinearLayout>

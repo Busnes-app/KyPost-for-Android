@@ -233,18 +233,19 @@ fun applyBottomInset(view: View) {
     ViewCompat.requestApplyInsets(view)
 }
 
-/** Rail equivalent of [applyBottomInset]: a full-height rail also needs top and start insets. */
+/** Rail equivalent of [applyBottomInset]: a full-height rail on the end edge also needs top and
+ *  end insets. */
 fun applyRailInsets(activity: Activity, view: View) {
-    val basePaddingStart = view.paddingStart
+    val basePaddingEnd = view.paddingEnd
     val basePaddingTop = view.paddingTop
     val basePaddingBottom = view.paddingBottom
     ViewCompat.setOnApplyWindowInsetsListener(view) { v, insets ->
         val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-        val startInset = if (v.layoutDirection == View.LAYOUT_DIRECTION_RTL) bars.right else bars.left
+        val endInset = if (v.layoutDirection == View.LAYOUT_DIRECTION_RTL) bars.left else bars.right
         v.setPaddingRelative(
-            basePaddingStart + startInset,
+            v.paddingStart,
             basePaddingTop + bars.top + actionBarSize(activity),
-            v.paddingEnd,
+            basePaddingEnd + endInset,
             basePaddingBottom + bars.bottom,
         )
         insets

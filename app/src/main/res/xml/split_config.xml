@@ -40,4 +40,18 @@
             window:secondaryActivityName="org.kysecurity.mail.contacts.ContactEditActivity" />
     </SplitPairRule>
 
+    <!-- The message pane carries the rail, so these navigation destinations start from inside a
+         split; without this they open in that pane beside the list. Compose covers both its
+         components: the exported one and the internal alias Reply, Forward and the rail use.
+         The rail's Lock opens UnlockActivity, or SecuritySettingsActivity when app lock is off:
+         in a pane, the inbox list beside it would stay readable and usable after a lock. -->
+    <ActivityRule window:alwaysExpand="true">
+        <ActivityFilter window:activityName="org.kysecurity.mail.ComposeActivity" />
+        <ActivityFilter window:activityName="org.kysecurity.mail.InternalComposeActivity" />
+        <ActivityFilter window:activityName="org.kysecurity.mail.contacts.ContactsListActivity" />
+        <ActivityFilter window:activityName="org.kysecurity.mail.SettingsActivity" />
+        <ActivityFilter window:activityName="org.kysecurity.mail.security.UnlockActivity" />
+        <ActivityFilter window:activityName="org.kysecurity.mail.security.SecuritySettingsActivity" />
+    </ActivityRule>
+
 </resources>
