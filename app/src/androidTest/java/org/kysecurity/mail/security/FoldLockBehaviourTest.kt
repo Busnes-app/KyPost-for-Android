@@ -13,6 +13,7 @@ import android.os.SystemClock
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.android.material.navigation.NavigationBarView
 import androidx.test.platform.app.InstrumentationRegistry
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicInteger
@@ -22,11 +23,13 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.kysecurity.mail.EmailDetailActivity
 import org.kysecurity.mail.InboxActivity
+import org.kysecurity.mail.R
 import org.kysecurity.mail.contacts.ContactsRuntime
 import org.kysecurity.mail.contacts.device.DeviceContactsRuntime
 import org.kysecurity.mail.mail.MailRuntime
@@ -196,6 +199,34 @@ class FoldLockBehaviourTest {
         )
     }
 
+    /** In a split the message rail holds the only Lock (the inbox hides its own navigation), so
+     *  the prompt must cover the window: in the message pane it left the inbox list beside it
+     *  readable and usable, because a visible screen only checks the lock when it starts. */
+    @Test
+    fun lockFromTheSplitRailCoversTheInboxPane() {
+        assumeTrue(
+            "Needs a window that splits (splitMinWidthDp is 840).",
+            context.resources.configuration.screenWidthDp >= 840,
+        )
+        val primary = startPane(InboxActivity::class.java)
+        val secondary = startPaneFrom(primary, EmailDetailActivity::class.java) {
+            putExtra("email_preview", "body")
+        }
+        val rail = secondary.findViewById<NavigationBarView>(R.id.detailRail)
+        assertTrue("Precondition: the message rail shows in the split.", awaitOnMain { rail.isShown })
+
+        val unlock = awaitCreated(UnlockActivity::class.java) {
+            instrumentation.runOnMainSync { rail.selectedItemId = R.id.nav_lock }
+        }
+        assertNotNull("Lock on the rail never opened the unlock prompt.", unlock)
+        assertTrue("The unlock prompt never reached RESUMED.", awaitResumed(unlock!!))
+        assertTrue(
+            "The inbox pane must not stay visible beside the unlock prompt.",
+            awaitOnMain { !activities.isStarted(primary) },
+        )
+        assertTrue("Lock on the message rail must close the message.", awaitFinished(secondary))
+    }
+
     /** Starts [cls] in its own task and waits for it to reach `RESUMED`. Only for the unlocked
      *  set-up launches: a gated screen never gets there, which is what [awaitCreated] is for. */
     private fun <T : Activity> startPane(cls: Class<T>, configure: Intent.() -> Unit = {}): T =
@@ -277,11 +308,14 @@ class FoldLockBehaviourTest {
     private class ActivityTracker : Application.ActivityLifecycleCallbacks {
         private val liveActivities = Collections.synchronizedList(mutableListOf<Activity>())
         private val resumedActivities = Collections.synchronizedList(mutableListOf<Activity>())
+        private val startedActivities = Collections.synchronizedList(mutableListOf<Activity>())
         val unlockPromptsCreated = AtomicInteger(0)
 
         fun live(): List<Activity> = synchronized(liveActivities) { liveActivities.toList() }
         fun isResumed(activity: Activity): Boolean =
             synchronized(resumedActivities) { resumedActivities.contains(activity) }
+        fun isStarted(activity: Activity): Boolean =
+            synchronized(startedActivities) { startedActivities.contains(activity) }
 
         override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {
             if (activity is UnlockActivity) unlockPromptsCreated.incrementAndGet()
@@ -299,10 +333,16 @@ class FoldLockBehaviourTest {
         override fun onActivityDestroyed(activity: Activity) {
             synchronized(liveActivities) { liveActivities.remove(activity) }
             synchronized(resumedActivities) { resumedActivities.remove(activity) }
+            synchronized(startedActivities) { startedActivities.remove(activity) }
         }
 
-        override fun onActivityStarted(activity: Activity) = Unit
-        override fun onActivityStopped(activity: Activity) = Unit
+        override fun onActivityStarted(activity: Activity) {
+            synchronized(startedActivities) { startedActivities.add(activity) }
+        }
+
+        override fun onActivityStopped(activity: Activity) {
+            synchronized(startedActivities) { startedActivities.remove(activity) }
+        }
         override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
     }
 

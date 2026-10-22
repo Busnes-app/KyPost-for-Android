@@ -1254,11 +1254,17 @@ class EmailDetailActivity : LockedActivity() {
     }
 
     /** The inbox's navigation on the end edge: while the inbox list is beside this pane, and
-     *  wherever a full-width screen would show a rail (w600dp). */
+     *  wherever a full-width screen would show a rail ([R.bool.nav_is_rail]). */
     private fun setupSplitRail() {
         val rail = findViewById<NavigationBarView>(R.id.detailRail)
         // Inbox closes the message, so the list takes the window back with its own rail.
-        setupPrimaryNavigation(this, rail, R.id.nav_inbox) { onBackPressedDispatcher.onBackPressed() }
+        // closeOnLock: the message and any decrypted text must not stay alive behind the unlock
+        // screen, where a desktop window or a split could still show it.
+        setupPrimaryNavigation(
+            this, rail, R.id.nav_inbox,
+            onInboxSelected = { onBackPressedDispatcher.onBackPressed() },
+            closeOnLock = true,
+        )
         intent.getStringExtra(EXTRA_FOLDER_LABEL)?.let { rail.menu.findItem(R.id.nav_inbox)?.title = it }
         applyPrimaryNavigationTheme(this, rail)
         applyRailInsets(this, rail)

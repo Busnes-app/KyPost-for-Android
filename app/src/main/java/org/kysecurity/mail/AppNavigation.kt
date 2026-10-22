@@ -24,6 +24,9 @@ fun setupPrimaryNavigation(
     nav: NavigationBarView,
     selectedItemId: Int,
     onInboxSelected: (() -> Unit)? = null,
+    // For a screen holding decrypted mail: Lock closes it rather than leaving it alive behind
+    // UnlockActivity. Not for every screen: finishing Compose clears its draft.
+    closeOnLock: Boolean = false,
 ) {
     fun navOrder(itemId: Int): Int = when (itemId) {
         R.id.nav_inbox -> 0
@@ -50,6 +53,7 @@ fun setupPrimaryNavigation(
         }
         graph.appLockManager.lockNow()
         activity.startActivity(Intent(activity, UnlockActivity::class.java))
+        if (closeOnLock) activity.finish()
     }
 
     nav.setOnItemSelectedListener { item ->
