@@ -943,14 +943,15 @@ class EmailDetailActivity : LockedActivity() {
         // addresses: a later pairing must never receive this account's reply.
         val session = ProcessState.generation()
         val account = withContext(Dispatchers.IO) { mailRepository.currentAccount() }
-        val addresses = ComposePgpController.from(this).accountAddresses()
-        val attendee = account?.let { org.kysecurity.mail.mail.rsvpAttendee(event, addresses) }
+        val pgp = ComposePgpController.from(this)
+        val attendee = account?.let { org.kysecurity.mail.mail.rsvpAttendee(event, pgp.accountAddresses()) }
         if (attendee == null) {
             Toast.makeText(this, R.string.rsvp_no_address, Toast.LENGTH_LONG).show()
             return false
         }
         // Answering as an alias must also send from it, or the organizer sees a stranger reply.
-        val sendAs = attendee.takeUnless { it.equals(addresses.firstOrNull()?.trim(), ignoreCase = true) }.orEmpty()
+        // Compared with the relay's own From, not addresses[0]: that is an alias when the login isn't an address.
+        val sendAs = attendee.takeUnless { it.equals(pgp.accountAddress().trim(), ignoreCase = true) }.orEmpty()
         val warning = getString(R.string.rsvp_confirm_not_sender).takeUnless {
             event.organizer.equals(extractAddress(senderHeader), ignoreCase = true)
         }

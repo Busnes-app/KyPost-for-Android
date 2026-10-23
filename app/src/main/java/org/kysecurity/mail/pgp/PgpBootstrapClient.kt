@@ -18,7 +18,7 @@ sealed class PgpBootstrapResult {
         val publicKey: String,
         /** Delivery `From` must equal this exactly or the relay answers 403. */
         val accountAddress: String = "",
-        /** The primary address, then every verified send-as alias. */
+        /** Every address this account sends as, primary first: what Reply All leaves out. */
         val addresses: List<String> = emptyList(),
     ) : PgpBootstrapResult()
 
@@ -31,8 +31,11 @@ private data class PgpBootstrapDto(
     val hasIdentity: Boolean = false,
     val protection: String = "",
     val publicKey: String = "",
-    /** Primary address first, then every verified send-as alias. */
+    /** Key User IDs: the IMAP login (often not an address) first, then domain-proven aliases. */
     val suggestedUserIDs: List<String> = emptyList(),
+    /** The real sending address first, then every verified alias. Absent on relays before
+     *  KyPost-Server#453; an empty array is that relay's real answer, not a reason to fall back. */
+    val accountAddresses: List<String>? = null,
 )
 
 class PgpBootstrapClient(
@@ -62,7 +65,7 @@ class PgpBootstrapClient(
             protection = parsed.protection,
             publicKey = parsed.publicKey,
             accountAddress = parsed.suggestedUserIDs.firstOrNull().orEmpty(),
-            addresses = parsed.suggestedUserIDs,
+            addresses = parsed.accountAddresses ?: parsed.suggestedUserIDs,
         )
     }
 }
