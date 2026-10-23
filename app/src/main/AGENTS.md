@@ -514,8 +514,11 @@ Owns production Android app code and resources.
     the server-side one works by storing plaintext, which is what client custody exists to prevent.
   - `accountAddress` is bootstrap's `suggestedUserIDs[0]` and nothing else — the server derives it
     from the same expression `handleMailSendPGP` feeds to `resolveMailFrom`. Do not derive it from
-    the public key's User ID or the self-contact. The whole list (account address plus verified
-    send-as aliases) is `addresses` (`accountAddresses()`), which Reply All (`replyAllRecipients`) leaves out.
+    the public key's User ID or the self-contact. The account's own addresses are `addresses`
+    (`accountAddresses()`), which Reply All (`replyAllRecipients`) leaves out: bootstrap's
+    `accountAddresses` (KyPost-Server #453, real sending address first, then verified aliases) when
+    the key is present, even as an empty array, else `suggestedUserIDs` for older relays. Never
+    repurpose `suggestedUserIDs`: it drives key User IDs and puts a non-address login first.
   - `ComposePgpController` caches the **bootstrap**, not the composed state: custody is fixed at key
     creation but enrollment can change mid-process, so it is re-probed on every `composeState()`.
   - Sign-only is impossible (the relay accepts `multipart/encrypted` only), so the two chips are
@@ -637,8 +640,8 @@ Owns production Android app code and resources.
   - `rsvpDraft` copies UID and SEQUENCE, restates RECURRENCE-ID without TZID (the REPLY has no
     VTIMEZONE), adds DTSTAMP, folds at 75 octets. An unreadable SEQUENCE or RECURRENCE-ID means
     no RSVP.
-  - ATTENDEE is the bootstrap `suggestedUserIDs` address the invite lists, else the primary; an
-    alias is also sent as `from`. No usable address means no RSVP.
+  - ATTENDEE is the `addresses` entry the invite lists, else the first; one that is not
+    `accountAddress` (an alias) is also sent as `from`. No usable address means no RSVP.
   - **Always** unencrypted and unsigned (the relay 400s `calendarReply` beside either flag), so
     each RSVP is confirmed in a dialog that says so. The draft never sets `sign`/`encrypt`.
   - Buttons need the relay's `calendarMethod` (#353): an older relay ignores `calendarReply` and

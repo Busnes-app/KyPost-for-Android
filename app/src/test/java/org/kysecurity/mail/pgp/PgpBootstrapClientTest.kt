@@ -2,6 +2,7 @@ package org.kysecurity.mail.pgp
 
 import org.kysecurity.mail.HEADER_DEVICE_SECRET
 import org.kysecurity.mail.HEADER_DEVICE_ID
+import org.kysecurity.mail.mail.replyAllRecipients
 import org.kysecurity.mail.testing.FakeCallFactory
 import org.kysecurity.mail.testing.ThrowingCallFactory
 import org.kysecurity.mail.testing.response
@@ -94,7 +95,8 @@ class PgpBootstrapClientTest {
         assertTrue("expected Failed, got $result", result is PgpBootstrapResult.Failed)
     }
 
-    /** `suggestedUserIDs[0]` is the server's own `resolveMailFrom` input, so it is authoritative. */
+    /** `suggestedUserIDs[0]` is the server's own `resolveMailFrom` input, so it is authoritative.
+     *  A relay before KyPost-Server#453 sends no `accountAddresses`, so own addresses fall back to it. */
     @Test
     fun parsesTheAccountAddressFromSuggestedUserIds() = runBlocking {
         val body = """{"hasIdentity":true,"protection":"client","suggestedUserIDs":["me@example.invalid","alias@example.invalid"]}"""
@@ -121,6 +123,63 @@ class PgpBootstrapClientTest {
 
         assertEquals("", (result as PgpBootstrapResult.Success).accountAddress)
     }
+
+    /** KyPost-Server#453: the login `demo` is no address, so `accountAddresses` names the real one.
+     *  It feeds Reply All only; the delivery `From` stays the relay's own `resolveMailFrom` input. */
+    @Test
+    fun ownAddressesComeFromAccountAddressesWhenTheRelaySendsThem() = runBlocking {
+        val result = fetch(
+            """{"hasIdentity":true,"protection":"client","suggestedUserIDs":["demo"],""" +
+                """"accountAddresses":["demo@kypost-demo.local","alias@example.invalid"]}""",
+        )
+
+        assertEquals(listOf("demo@kypost-demo.local", "alias@example.invalid"), result.addresses)
+        assertEquals("demo", result.accountAddress)
+    }
+
+    /** Present but empty is that relay's answer (no address is known), not an old relay. */
+    @Test
+    fun emptyAccountAddressesIsNotAFallbackToSuggestedUserIds() = runBlocking {
+        val result = fetch("""{"hasIdentity":true,"suggestedUserIDs":["demo"],"accountAddresses":[]}""")
+
+        assertEquals(emptyList<String>(), result.addresses)
+    }
+
+    /** The demo.kypost.org bug: Reply All put `demo@kypost-demo.local` back in Cc. */
+    @Test
+    fun replyAllOnANewRelayLeavesOutTheRealAddressAndKeepsEveryoneElse() = runBlocking {
+        val own = fetch(
+            """{"suggestedUserIDs":["demo"],"accountAddresses":["demo@kypost-demo.local","Alias@Example.invalid"]}""",
+        ).addresses
+
+        val recipients = replyAllRecipients(
+            sender = "Bob <bob@example.invalid>",
+            to = listOf("Demo <DEMO@kypost-demo.local>", "carol@example.invalid"),
+            cc = listOf("alias@example.invalid", "dave@example.invalid"),
+            own = own,
+        )
+
+        assertEquals(listOf("bob@example.invalid", "carol@example.invalid", "dave@example.invalid"), recipients)
+    }
+
+    /** An old relay's list is the fallback, exactly as before: its address entries are left out. */
+    @Test
+    fun replyAllOnAnOldRelayFallsBackToSuggestedUserIds() = runBlocking {
+        val own = fetch("""{"suggestedUserIDs":["me@example.invalid","alias@example.invalid"]}""").addresses
+
+        val recipients = replyAllRecipients(
+            sender = "me@example.invalid",
+            to = listOf("bob@example.invalid", "ALIAS@example.invalid"),
+            cc = listOf("carol@example.invalid"),
+            own = own,
+        )
+
+        assertEquals(listOf("bob@example.invalid", "carol@example.invalid"), recipients)
+    }
+
+    private suspend fun fetch(body: String): PgpBootstrapResult.Success =
+        PgpBootstrapClient(callFactory = FakeCallFactory { request -> response(request, body, 200) })
+            .fetch("https://relay.example.com", "device-1", "secret-1") as PgpBootstrapResult.Success
 
     @Test
     fun unusableServerUrl_isFailed() = runBlocking {
