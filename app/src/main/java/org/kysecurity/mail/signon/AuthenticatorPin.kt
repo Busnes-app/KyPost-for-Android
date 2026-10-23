@@ -15,9 +15,12 @@ object AuthenticatorPin {
     const val ACCOUNT_TYPE = "org.kysecurity.identity"
     const val KYAUTH_PACKAGE = "org.kysecurity.authenticator"
 
-    // KyAuth release signing certificate SHA-256 (Play App Signing uses the same key).
+    // KyAuth production signing certificates: GitHub release key and Play App Signing keys.
     internal val PINS: Set<String> = setOf(
         "52f61684029401fcb0137b334ad41907f83948fa1ec1377834f3b4291765fd7b",
+        "d419c37003033b87630a67f0f27f2295546ebd134956d3f37b20282964317f41",
+        "c3b2a095228c2b80d4646b162dc3478542ff36c692619c0da6a8aa49f8fb11e5",
+        "293d7cd424179eed61003a2d4e1f21f1fb9e41faafc666837c5bf1fab330bc7f",
     )
 
     fun trustedAuthenticator(context: Context): Boolean {

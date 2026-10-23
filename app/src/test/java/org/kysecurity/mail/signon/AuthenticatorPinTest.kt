@@ -16,6 +16,18 @@ class AuthenticatorPinTest {
     }
 
     @Test
+    fun decide_acceptsProductionPlaySignersAndRotationHistory() {
+        val play = "d419c37003033b87630a67f0f27f2295546ebd134956d3f37b20282964317f41"
+        val classical = "c3b2a095228c2b80d4646b162dc3478542ff36c692619c0da6a8aa49f8fb11e5"
+        val hybrid = "293d7cd424179eed61003a2d4e1f21f1fb9e41faafc666837c5bf1fab330bc7f"
+        for (history in listOf(setOf(play), setOf(classical), setOf(hybrid), setOf(play, classical, hybrid))) {
+            assertTrue("Genuine Play KyAuth signing history must be trusted: $history",
+                AuthenticatorPin.decide(listOf(kyauth), { history }, null))
+            assertFalse(AuthenticatorPin.decide(listOf(kyauth), { history + "00".repeat(32) }, null))
+        }
+    }
+
+    @Test
     fun decide_refusesWrongPackageOrCert() {
         assertFalse(AuthenticatorPin.decide(listOf("com.evil"), { setOf(pinned) }, null))
         assertFalse(AuthenticatorPin.decide(listOf(kyauth), { setOf("00".repeat(32)) }, null))
