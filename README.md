@@ -45,4 +45,6 @@ The Google/Firebase dependency details below apply to Play/GitHub variants. F-Dr
 ## Documentation
 
 - [Connections](docs/CONNECTIONS.md) — Push notification pairing, Pull mode (FCM and relay bypass), Notification permission behavior (Android 13 and later), Pairing from a desktop QR code, and related procedures. <a id="push-notification-pairing"></a><a id="pull-mode-fcm-and-relay-bypass"></a><a id="notification-permission-behavior-android-13-and-later"></a><a id="pairing-from-a-desktop-qr-code"></a><a id="troubleshooting-checklist"></a>
+- [Verifying releases](docs/VERIFYING-RELEASES.md) — Check a release APK's signing certificate and the commit it names, and why a rebuild does not match yet.
+- [Assurance case](docs/ASSURANCE-CASE.md) — Threat model, trust boundaries, and why the security requirements hold.
 - [Development](docs/DEVELOPMENT.md) — Firebase setup, Build and test, Test coverage. <a id="firebase-setup"></a><a id="build-and-test"></a><a id="release-builds"></a><a id="channels"></a><a id="test-coverage"></a>

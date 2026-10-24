@@ -255,3 +255,8 @@ branch for older versions.
 - **Code of Conduct concerns** are handled separately — see
   [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Security vulnerabilities are not a Code of
   Conduct matter.
+
+## See also
+
+- [docs/VERIFYING-RELEASES.md](docs/VERIFYING-RELEASES.md): verify a release APK's signer
+- [docs/ASSURANCE-CASE.md](docs/ASSURANCE-CASE.md): threat model and the argument that the protections above hold
