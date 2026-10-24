@@ -15,6 +15,7 @@ every space here.
 - [Before you build a feature](#before-you-build-a-feature)
 - [AI attribution is mandatory](#ai-attribution-is-mandatory)
 - [Every PR must pass CI](#every-pr-must-pass-ci)
+- [Coding standard](#coding-standard)
 - [Every PR must pass hostile AI code review](#every-pr-must-pass-hostile-ai-code-review)
 - [Adversarial review skills](#adversarial-review-skills)
 - [Security trade-offs, and when a feature gets rejected](#security-trade-offs-and-when-a-feature-gets-rejected)
@@ -164,6 +165,29 @@ The [CI workflow](.github/workflows/ci.yml) is authoritative for exact tasks and
 variants. Separate Play/F-Droid release-smoke workflows also exercise packaged variants.
 Unit tests do not stand in for instrumented Keystore tests. Preserve the secure emulator
 setup and explicit opt-in fixture skips; do not convert a skip into an acceptance claim.
+
+## Coding Standard
+
+Kotlin code follows the [Kotlin coding conventions](https://kotlinlang.org/docs/coding-conventions.html)
+(`kotlin.code.style=official` in `gradle.properties`, so Android Studio formats to them). Android
+code follows Android Lint. UI work follows [STYLE_GUIDE.md](STYLE_GUIDE.md), which is binding for
+colors, shape, typography and components. Beyond style, [AGENTS.md](AGENTS.md) sets the rules:
+smallest correct change, platform APIs first, and `ponytail:` comments on deliberate limits.
+
+CI enforces what a tool can check:
+
+| Standard | Enforced by |
+|---|---|
+| Kotlin compiles | Every Gradle job in `.github/workflows/ci.yml` |
+| Android Lint, with security and accessibility checks fatal (the `lint { fatal += ... }` list in `app/build.gradle.kts`) | `lint lintGithubDebug lintFdroidDebug` in `ci-unit`; `lintVitalRelease` in `ci-release-build` |
+| No exported activity, service, receiver or provider outside the allowlist in `app/build.gradle.kts` | `checkExportedComponents{Play,Github,Fdroid}Debug` in `ci-unit` |
+| Every dependency artifact pinned by checksum | `gradle/verification-metadata.xml`, and the `dependency verification metadata is unchanged` steps |
+| No signing secrets or built artifacts in the tree | `checkSigningSecretsAreNotInTheTree` and `no signing material or built artifacts are tracked` in `ci-unit` |
+| Common vulnerability patterns | CodeQL (`.github/workflows/codeql.yml`) |
+
+Lint errors, including everything on the fatal list, fail the build (`abortOnError = true`); lint
+warnings are reported but do not. No formatter runs in
+CI, so layout and naming are a review matter: match the file you are editing.
 
 ## Every PR Must Pass Hostile AI Code Review
 

@@ -77,4 +77,4 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 
 ## README and topic guides
 
-Keep `README.md` as the concise product overview and navigation. Detailed procedures live in `docs/CONNECTIONS.md`, `docs/DEVELOPMENT.md`. Update the owning topic guide and preserve README links when a procedure changes. Commands in these guides run from the repository root.
+Keep `README.md` as the concise product overview and navigation. Detailed procedures live in `docs/CONNECTIONS.md`, `docs/DEVELOPMENT.md`, `docs/VERIFYING-RELEASES.md`. `docs/ASSURANCE-CASE.md` is the security argument: a change that moves a trust boundary or security requirement updates it in the same PR. Update the owning topic guide and preserve README links when a procedure changes. Commands in these guides run from the repository root.
