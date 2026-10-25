@@ -67,9 +67,8 @@ jobs:
         uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           languages: ${{ matrix.language }}
+          queries: security-and-quality
           build-mode: manual
-          # No queries: input runs the default suite. Uncomment to widen:
-          # queries: security-extended
 
       - name: Build for CodeQL
         run: ./gradlew assembleDebug --stacktrace
