@@ -371,6 +371,7 @@
     <string name="push_pairing_result_missing_server">Pairing QR is missing a server URL.</string>
     <string name="push_pairing_result_paired">Device paired and token synced.</string>
     <string name="push_pairing_result_failed">Pairing failed: %1$s</string>
+    <string name="push_pairing_blocked_wipe">Restart KyPost to finish erasing this device before pairing again.</string>
     <string name="push_pairing_result_failed_rescan">Pairing failed: %1$s — rescan the pairing QR code.</string>
     <string name="push_pairing_latest_title">Latest push preview</string>
     <string name="push_pairing_history_title">Notification history</string>

@@ -65,6 +65,7 @@ class PairingRegistrationCredentialTest {
                 },
             ),
             wipeOnIncompletePurge = {},
+            wipeOwed = { false },
             fetchRegistrationCredential = { credential },
         )
         runBlocking { coordinator.attemptPairing(pairing) }

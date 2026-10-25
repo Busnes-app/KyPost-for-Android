@@ -47,6 +47,8 @@ class PushGraph(context: Context) {
             android.util.Log.e("PushGraph", "Wiping: account replacement could not purge $residue")
             org.kysecurity.mail.security.SecurityWipe.wipeAndResetApp(appContext)
         },
+        // Refuse a new pairing while an interrupted wipe is owed its resume, or that resume erases it.
+        wipeOwed = { org.kysecurity.mail.security.SecurityWipe.wipeInterrupted(appContext) },
     )
     val mfaResponseClient = MfaResponseClient(callFactory = pinnedOrFallbackCallFactory)
 

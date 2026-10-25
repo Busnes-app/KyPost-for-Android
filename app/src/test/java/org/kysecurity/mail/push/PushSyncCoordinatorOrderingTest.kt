@@ -56,10 +56,12 @@ class PushSyncCoordinatorOrderingTest {
         // These tests are about registration ordering, not about which transport a build uses;
         // the credential wrapper keeps them expressed in the token they actually care about.
         onWipe: suspend (List<String>) -> Unit = {},
+        wipeOwed: () -> Boolean = { false },
     ) = PushSyncCoordinator(
         repository = store,
         registrationClient = NativeRegistrationClient(callFactory = FakeCallFactory(responder)),
         wipeOnIncompletePurge = onWipe,
+        wipeOwed = wipeOwed,
         fetchRegistrationCredential = { token()?.let { PushRegistrationCredential(token = it) } },
     )
 
@@ -239,6 +241,26 @@ class PushSyncCoordinatorOrderingTest {
         assertTrue("clearPairing" !in store.events)
         assertEquals("secret-again", store.currentPairing()?.deviceSecret)
         assertNull(store.reconnectMarker)
+    }
+
+    /** An interrupted wipe is owed a resume that erases whatever is paired at the next cold start.
+     *  A pairing attempted while one is owed must be refused before anything is registered or
+     *  persisted, leaving the existing account untouched (issue #250). */
+    @Test
+    fun aPairingIsRefusedWhileAWipeIsOwed() = runBlocking {
+        val store = FakePushStore(pairing = existing)
+        val coordinator = coordinator(
+            store,
+            { _ -> throw AssertionError("registration must not be attempted while a wipe is owed") },
+            wipeOwed = { true },
+        )
+
+        val result = coordinator.attemptPairing(replacement)
+
+        assertTrue(result is NativeRegistrationResult.Error)
+        assertTrue((result as NativeRegistrationResult.Error).wipeOwed)
+        assertEquals(emptyList<String>(), store.events)
+        assertEquals(existing, store.currentPairing())
     }
 
     /** The marker must not be able to strand a fresh install: nothing stored, nothing purged. */
