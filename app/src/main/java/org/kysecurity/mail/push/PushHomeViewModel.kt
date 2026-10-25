@@ -113,14 +113,18 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
                 localMessage.value = when (result) {
                     is NativeRegistrationResult.Success ->
                         string(org.kysecurity.mail.R.string.push_pairing_result_paired)
-                    is NativeRegistrationResult.Error -> string(
-                        if (result.expiredPairingToken) {
-                            org.kysecurity.mail.R.string.push_pairing_result_failed_rescan
-                        } else {
-                            org.kysecurity.mail.R.string.push_pairing_result_failed
-                        },
-                        result.message,
-                    )
+                    is NativeRegistrationResult.Error -> if (result.wipeOwed) {
+                        string(org.kysecurity.mail.R.string.push_pairing_blocked_wipe)
+                    } else {
+                        string(
+                            if (result.expiredPairingToken) {
+                                org.kysecurity.mail.R.string.push_pairing_result_failed_rescan
+                            } else {
+                                org.kysecurity.mail.R.string.push_pairing_result_failed
+                            },
+                            result.message,
+                        )
+                    }
                 }
                 isWorking.value = false
             }

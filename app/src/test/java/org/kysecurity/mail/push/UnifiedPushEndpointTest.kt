@@ -42,6 +42,7 @@ class UnifiedPushEndpointTest {
             repository = store,
             registrationClient = NativeRegistrationClient(callFactory = calls),
             wipeOnIncompletePurge = {},
+            wipeOwed = { false },
             fetchRegistrationCredential = { fcmFetches++; PushRegistrationCredential(token = "fcm-token") },
             eventScope = events,
         )

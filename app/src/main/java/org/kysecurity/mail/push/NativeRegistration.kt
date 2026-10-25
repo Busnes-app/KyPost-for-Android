@@ -107,7 +107,7 @@ sealed class NativeRegistrationResult {
         /** Redacted: carries a freshly minted device secret. Enforced by `SourceRulesTest`. */
         override fun toString(): String = "Success(redacted)"
     }
-    data class Error(val message: String, val expiredPairingToken: Boolean = false) : NativeRegistrationResult()
+    data class Error(val message: String, val expiredPairingToken: Boolean = false, val wipeOwed: Boolean = false) : NativeRegistrationResult()
 }
 
 class NativeRegistrationClient(

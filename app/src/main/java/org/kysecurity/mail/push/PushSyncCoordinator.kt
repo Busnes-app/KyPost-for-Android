@@ -20,6 +20,11 @@ class PushSyncCoordinator(
      *  [attemptPairing]. Injected rather than called directly so the refusal is testable and so
      *  this class keeps needing no `Context`. */
     private val wipeOnIncompletePurge: suspend (List<String>) -> Unit,
+    /** True when a security wipe started but has not finished (SecurityWipe.wipeInterrupted). A new
+     *  pairing accepted in that state is erased by the wipe's resume at the next cold start, so
+     *  attemptPairing refuses while it is true. A lambda, not a Context, so this class stays
+     *  Context-free and the refusal is testable (mirrors wipeOnIncompletePurge). */
+    private val wipeOwed: () -> Boolean,
     /** This build's push credential, or null when it cannot be obtained.
      *
      *  No default: it used to fall back to `FirebaseMessaging.getInstance()`, which named a
@@ -66,6 +71,16 @@ class PushSyncCoordinator(
     )
 
     suspend fun attemptPairing(pairing: PairingData): NativeRegistrationResult = registrationGate.withLock {
+        // A security wipe that started but did not finish is owed a resume at the next cold start
+        // (SecurityWipe.enforceTripwire). Accepting a pairing now means that resume silently erases
+        // it: the device reads as paired, then unpairs itself on relaunch. Refuse until the wipe
+        // finishes, and tell the user to restart so it can.
+        if (wipeOwed()) {
+            return@withLock NativeRegistrationResult.Error(
+                "A security wipe must finish before this device can pair again.",
+                wipeOwed = true,
+            )
+        }
         // Read INSIDE the gate: a registration that finished while this one queued may have
         // changed which account is current, and so whether this is a replacement at all.
         val existing = repository.state.first().pairing
