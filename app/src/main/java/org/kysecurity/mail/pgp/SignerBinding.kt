@@ -16,7 +16,11 @@ internal data class SignerKey(
 )
 
 /** A ring is dropped whole when its primary is revoked or expired; the only expiry gate. */
-internal fun signerKeyIdsOf(armoredPublicKey: String, now: Date = Date()): Set<Long> = runCatching {
+internal fun signerKeyIdsOf(
+    armoredPublicKey: String,
+    now: Date = Date(),
+    requireStrong: Boolean = true,
+): Set<Long> = runCatching {
     val rings = PGPPublicKeyRingCollection(
         PGPUtil.getDecoderStream(armoredPublicKey.byteInputStream(Charsets.UTF_8)),
         BcKeyFingerprintCalculator(),
@@ -28,7 +32,10 @@ internal fun signerKeyIdsOf(armoredPublicKey: String, now: Date = Date()): Set<L
             ring.publicKeys.asSequence()
                 .filter { it.isUsableAt(now) }
                 // A subkey counts only if the PRIMARY vouches for it; BC does not check bindings.
-                .filter { it.isMasterKey || hasValidBindingSignature(primary, it) }
+                .filter { key ->
+                    if (requireStrong) PgpStrengthPolicy.memberAllowed(primary, key)
+                    else key.isMasterKey || hasValidBindingSignature(primary, key, requireStrongDigest = false)
+                }
                 // And it must be a key that may sign at all. A signature verifying under an
                 // encryption-only subkey is not a signature from that identity.
                 .filter { it.canSign(primary) }
@@ -96,7 +103,9 @@ internal fun signatureStateFor(
     if (!signature.present) return PgpSignatureState.NONE
 
     if (localKeys.isNotEmpty()) {
-        val signedBy = localKeys.filter { signature.signerKeyId in signerKeyIdsOf(it.publicKey) }
+        val signedBy = localKeys.filter {
+            signature.signerKeyId in signerKeyIdsOf(it.publicKey, requireStrong = signature !is RawSignature.Unchecked)
+        }
         // We hold a key for this sender and the message was not signed with it. Not
         // SIGNER_UNKNOWN: "we have no opinion" is false here, we have one and it disagrees.
         if (signedBy.isEmpty()) return PgpSignatureState.KEY_CHANGED
@@ -105,6 +114,7 @@ internal fun signatureStateFor(
 
     // A conflict outranks a good key: two entries for one address means one of them changed.
     if (serverKeys.any { it.conflict }) return PgpSignatureState.KEY_CHANGED
+    if (signature is RawSignature.Unchecked) return PgpSignatureState.UNCHECKED
 
     val signedByRelayKey = serverKeys.any { signature.signerKeyId in signerKeyIdsOf(it.publicKey) }
     val bad = signature is RawSignature.Checked && !signature.verified
@@ -116,6 +126,7 @@ private fun verdictFor(signature: RawSignature, confirmed: Boolean): PgpSignatur
     when (signature) {
         is RawSignature.Absent -> PgpSignatureState.NONE
         is RawSignature.NoSuchKey -> PgpSignatureState.SIGNER_UNKNOWN
+        is RawSignature.Unchecked -> PgpSignatureState.UNCHECKED
         is RawSignature.Checked -> when {
             !signature.verified -> PgpSignatureState.INVALID
             signature.forAnotherRecipient -> PgpSignatureState.FOR_ANOTHER_RECIPIENT

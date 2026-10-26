@@ -24,7 +24,7 @@ internal const val MAX_DECRYPTED_PLAINTEXT_BYTES = org.kysecurity.mail.MemoryBud
  *  messages use one; anything past a handful is a decompression bomb, not a mail. */
 internal const val MAX_COMPRESSION_DEPTH = 4
 
-/** Three states, not two booleans: "signed by a key we were not given" is not "failed to verify". */
+/** Keeps absent, unknown-key, policy-disabled and checked signatures distinct. */
 internal sealed class RawSignature {
     object Absent : RawSignature()
 
@@ -32,18 +32,22 @@ internal sealed class RawSignature {
      *  an accusation; see [PgpSignatureState.SIGNER_UNKNOWN]. */
     data class NoSuchKey(val keyId: Long) : RawSignature()
 
+    /** A retained key or signature uses a policy-disabled algorithm; no validity claim. */
+    data class Unchecked(val keyId: Long) : RawSignature()
+
     /** [forAnotherRecipient]: the signature names its intended recipients (RFC 9580 subpacket 35)
      *  and none is the key this device decrypted with (detached: any key it holds). */
     data class Checked(val keyId: Long, val verified: Boolean, val forAnotherRecipient: Boolean = false) : RawSignature()
 
     val present: Boolean get() = this !is Absent
 
-    /** False for [NoSuchKey]: a signature nothing checked is not a good signature. */
+    /** Only a checked signature can be valid. */
     val valid: Boolean get() = (this as? Checked)?.verified == true
 
     val signerKeyId: Long get() = when (this) {
         is Absent -> 0L
         is NoSuchKey -> keyId
+        is Unchecked -> keyId
         is Checked -> keyId
     }
 }
@@ -176,13 +180,13 @@ internal object PgpDecryptor {
                 ?.get(0)
         }.getOrNull() ?: return absent
 
-        // From here on a signature exists, so every remaining failure is INVALID, never ABSENT.
-        val key = runCatching {
-            PGPPublicKeyRingCollection(
-                PGPUtil.getDecoderStream(armoredPublicKey.byteInputStream(Charsets.UTF_8)),
-                BcKeyFingerprintCalculator(),
-            ).getPublicKey(signature.keyID)
-        }.getOrNull() ?: return RawSignature.NoSuchKey(signature.keyID)
+        // Keep a declared signature present even when its key is unknown or policy-disabled.
+        val (primary, key) = signerKeyOf(armoredPublicKey, signature.keyID)
+            ?: return RawSignature.NoSuchKey(signature.keyID)
+
+        if (!PgpStrengthPolicy.memberAllowed(primary, key) || !PgpStrengthPolicy.digestAllowed(signature.hashAlgorithm)) {
+            return RawSignature.Unchecked(signature.keyID)
+        }
 
         val valid = runCatching {
             signature.init(BcPGPContentVerifierBuilderProvider(), key)
@@ -192,6 +196,15 @@ internal object PgpDecryptor {
 
         return RawSignature.Checked(signature.keyID, valid, forAnotherRecipient = namesOnlyOthers(signature, heldKeys))
     }
+
+    private fun signerKeyOf(armored: String, keyId: Long): Pair<org.bouncycastle.openpgp.PGPPublicKey, org.bouncycastle.openpgp.PGPPublicKey>? =
+        runCatching {
+            val ring = PGPPublicKeyRingCollection(
+                PGPUtil.getDecoderStream(armored.byteInputStream(Charsets.UTF_8)),
+                BcKeyFingerprintCalculator(),
+            ).getPublicKeyRing(keyId) ?: return null
+            ring.publicKey to (ring.getPublicKey(keyId) ?: return null)
+        }.getOrNull()
 
     /** Every key, primary and subkey, of every ring this device holds. */
     fun heldKeyFingerprints(secretKeys: PGPSecretKeyRingCollection): List<ByteArray> =
@@ -286,19 +299,19 @@ internal object PgpDecryptor {
             .firstOrNull()
             ?: return RawSignature.NoSuchKey(onePass.keyID)
 
-        val key = signerPublicKeys.asSequence()
-            .mapNotNull { armored ->
-                runCatching {
-                    PGPPublicKeyRingCollection(
-                        PGPUtil.getDecoderStream(armored.byteInputStream(Charsets.UTF_8)),
-                        BcKeyFingerprintCalculator(),
-                    ).getPublicKey(onePass.keyID)
-                }.getOrNull()
-            }
+        val (primary, key) = signerPublicKeys.asSequence()
+            .mapNotNull { armored -> signerKeyOf(armored, onePass.keyID) }
             .firstOrNull()
             ?: return RawSignature.NoSuchKey(onePass.keyID)
 
-        val valid = runCatching {
+        if (!PgpStrengthPolicy.memberAllowed(primary, key) ||
+            !PgpStrengthPolicy.digestAllowed(onePass.hashAlgorithm) ||
+            !PgpStrengthPolicy.digestAllowed(tail[0].hashAlgorithm)
+        ) return RawSignature.Unchecked(onePass.keyID)
+
+        val metadataMatches = onePass.hashAlgorithm == tail[0].hashAlgorithm &&
+            onePass.keyAlgorithm == tail[0].keyAlgorithm && onePass.keyID == tail[0].keyID
+        val valid = metadataMatches && runCatching {
             onePass.init(BcPGPContentVerifierBuilderProvider(), key)
             onePass.update(body)
             onePass.verify(tail[0])

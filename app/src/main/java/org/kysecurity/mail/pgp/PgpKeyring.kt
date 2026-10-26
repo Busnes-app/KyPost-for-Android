@@ -142,7 +142,7 @@ private fun parseMember(o: JsonObject): PgpKeyringMember? {
         // Checked before any extraction so a passphrase-protected packet never reaches an S2K.
         if (secret.isPrivateKeyEmpty || secret.keyEncryptionAlgorithm != SymmetricKeyAlgorithmTags.NULL) return null
         secret.extractPrivateKey(null) ?: return null
-        if (!secret.isMasterKey && !hasValidBindingSignature(ring.publicKey, secret.publicKey)) return null
+        if (!secret.isMasterKey && !hasValidBindingSignature(ring.publicKey, secret.publicKey, requireStrongDigest = false)) return null
     }
     return PgpKeyringMember(declared, ring, armor, revocation)
 }

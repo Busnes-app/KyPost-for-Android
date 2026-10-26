@@ -105,6 +105,10 @@ this one install normally.
 
 ## Test coverage
 
+- OpenPGP new-use policy and archive compatibility (`PgpStrengthPolicyTest`); run with
+  `./gradlew testPlayDebugUnitTest --tests '*PgpStrengthPolicyTest'`. Key/digest changes must
+  retain historical decryption, exact keyring bytes, revocation processing and local key-change
+  alarms. See [strength and migration guidance](../SECURITY.md#openpgp-strength-and-existing-keys).
 - Deep-link parser tests (`NativePairingDeepLinkParserTest`)
 - Pairing validation tests (`PairingValidatorTest`)
 - Native registration endpoint resolution tests (`NativeRegistrationEndpointResolverTest`)

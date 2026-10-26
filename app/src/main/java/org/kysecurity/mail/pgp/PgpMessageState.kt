@@ -56,7 +56,7 @@ enum class PgpSignatureState {
      *  [EncryptedMessageReader] produces it; the inbox flags cannot tell it from [NONE]. */
     UNSIGNED,
 
-    /** A MIME signature was declared but not checked, including malformed declarations. */
+    /** A signature was not checked, including malformed MIME declarations or policy-disabled algorithms. */
     UNCHECKED,
 
     /** Signed by a key bound to the sender, and the user confirmed that key out of band — by

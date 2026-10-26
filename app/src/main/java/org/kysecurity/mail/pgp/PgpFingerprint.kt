@@ -20,7 +20,7 @@ object PgpFingerprint {
         val primary = ring.publicKey
         val subkeysAllBound = ring.publicKeys.asSequence()
             .filter { !it.isMasterKey }
-            .all { subkey -> hasValidBindingSignature(primary, subkey) }
+            .all { subkey -> hasValidBindingSignature(primary, subkey, requireStrongDigest = false) }
         if (!subkeysAllBound) return@runCatching null
 
         format(primary.fingerprint)
@@ -37,6 +37,7 @@ object PgpFingerprint {
 internal fun hasValidBindingSignature(
     primary: org.bouncycastle.openpgp.PGPPublicKey,
     subkey: org.bouncycastle.openpgp.PGPPublicKey,
+    requireStrongDigest: Boolean,
 ): Boolean {
     val verifierProvider = org.bouncycastle.openpgp.operator.bc
         .BcPGPContentVerifierBuilderProvider()
@@ -45,6 +46,7 @@ internal fun hasValidBindingSignature(
     )
     while (signatures.hasNext()) {
         val signature = signatures.next()
+        if (requireStrongDigest && !PgpStrengthPolicy.digestAllowed(signature.hashAlgorithm)) continue
         val verified = runCatching {
             signature.init(verifierProvider, primary)
             signature.verifyCertification(primary, subkey)
