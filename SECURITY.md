@@ -179,9 +179,9 @@ is minted by the server at registration and returned exactly once.
 
 - **A signature's "confirmed" badge comes from this device, never from the relay.** The
   signer key is resolved out of the local contact store, whose fingerprints are computed
-  here from the key's own bytes (`pgp/PgpFingerprint.kt`). A key the relay supplies can
-  still support the weaker *continuity* badge for a first-contact message, but it is capped
-  there: the relay's own `verified` flag is not read at all, and a signature that does not
+  here from the key's own bytes (`pgp/PgpFingerprint.kt`). Both the confirmed and continuity
+  badges require a key this device holds; a relay-only key earns neither. The relay's own
+  `verified` flag is not read at all, and a signature that does not
   match a key this device already holds for the sender reports **key changed** rather than
   a badge (`pgp/SignerBinding.kt`). Previously the key, the address it was bound to and the
   `verified` flag all arrived in the same response as the ciphertext, so a compromised relay
@@ -202,6 +202,41 @@ is minted by the server at registration and returned exactly once.
   encrypts by default: the organizer's calendar server cannot read a PGP-wrapped reply, and
   the relay refuses to combine the two. The reply carries the user's answer, address and the
   event's UID. The app states this in the confirmation before each RSVP.
+#### OpenPGP strength and existing keys
+
+New encryption, signing and positive signature badges require RSA keys of at least
+2048 bits, or ECDH/ECDSA/EdDSA/X25519/X448/Ed25519/Ed448 keys of at least 224 bits.
+Other public-key algorithms, including DSA and ElGamal, are refused for those operations.
+Both the primary and selected subkey must meet the policy, and a subkey must carry a
+verified binding made with an allowed digest. Allowed signature and binding digests are
+SHA-256, SHA-384, SHA-512, SHA3-256 and SHA3-512. Outgoing signatures use SHA-256 and new
+message encryption uses AES-256 with integrity protection (`pgp/PgpStrengthPolicy.kt`).
+
+A recipient with no usable key refuses the whole encrypted send; the app does not drop
+that recipient. An unusable active signing identity refuses the send rather than signing
+with a historical identity or sending unsigned. The same rule applies to encrypted draft
+and Sent copies, which use the account's own key.
+
+Existing keys and ciphertext are retained. Old mail can still decrypt with a short or
+retired key; a signature using a disabled key, digest or binding remains **Signature not
+checked**, with no confirmed or continuity badge. An existing key-change or revocation
+alarm still takes precedence. Historical fingerprints and keyring import continue to
+verify old bindings for identification and lossless retention, and verified historical
+revocations still remove trust. These compatibility operations never authorize new mail
+or a positive signature badge.
+
+If an encrypted send or draft is refused after upgrading, ask the recipient to rotate
+their obsolete key, or rotate your own active identity on the server as appropriate.
+Compare the new fingerprint out of band and deliberately update the local contact pin;
+contact sync alone cannot replace it. Keep the old private keys and vault for old mail.
+Enroll the new identity only through a path that preserves that history. The current v3
+keyring importer refuses an incomparable replacement: do not remove the old vault or
+unpair to force a rotation. A separately enrolled device can use the new identity while
+the old device retains its archive pending a supported keyring migration.
+
+This policy covers local OpenPGP operations. It does not establish the strength of every
+Android TLS provider, the relay's cryptography or the product as a whole.
+
 #### Device enrollment
 
 - The sealed envelope that makes on-device decryption possible is accepted **gated behind

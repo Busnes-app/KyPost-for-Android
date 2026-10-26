@@ -122,20 +122,24 @@ internal class EncryptedMessageReader(
                 runCatching { PgpDecryptor.heldKeyFingerprints(it()) }.getOrDefault(emptyList())
             } ?: return ReadOutcome.NeedsUnlock
 
+            var unchecked: RawSignature.Unchecked? = null
             val raw = offeredKeys.firstNotNullOfOrNull { armored ->
-                PgpDecryptor.verifyDetached(
+                val checked = PgpDecryptor.verifyDetached(
                     armoredPublicKey = armored,
                     body = signedPart,
                     armoredSignature = payload.signaturePayload,
                     heldKeys = heldKeys,
-                ).takeIf { it.valid }
-            } ?: PgpDecryptor.verifyDetached(
-                // Not the binding decision: this only yields a non-null RawSignature so the verdict can run.
-                armoredPublicKey = offeredKeys.firstOrNull().orEmpty(),
-                body = signedPart,
-                armoredSignature = payload.signaturePayload,
-                heldKeys = heldKeys,
-            )
+                )
+                if (checked is RawSignature.Unchecked && unchecked == null) unchecked = checked
+                checked.takeIf { it.valid }
+            } ?: unchecked
+                ?: PgpDecryptor.verifyDetached(
+                    // Preserve a declared signature when no offered key could verify it.
+                    armoredPublicKey = offeredKeys.firstOrNull().orEmpty(),
+                    body = signedPart,
+                    armoredSignature = payload.signaturePayload,
+                    heldKeys = heldKeys,
+                )
             // Rendered from the SAME bytes that were verified. Rendering `body` beside a verdict
             // computed from `signedPart` would show one message and vouch for another.
             //

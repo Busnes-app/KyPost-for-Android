@@ -10,6 +10,10 @@ Owns JVM unit tests for app logic that can run without device/emulator.
 
 - Cover non-trivial logic changes with one focused regression test.
 - Keep tests deterministic and fast.
+- `PgpStrengthPolicyTest` uses independently generated keys and packets to cover new-use
+  key/digest refusal, strong controls, primary/subkey binding, and the reader's UNCHECKED
+  handling. Preserve old-mail decryption, exact historical keyring bytes, and key-change and
+  revocation precedence; archive fixtures must not be produced through the new-use encryptor.
 - Encrypted-draft tests decrypt and verify a self-encrypted MIME message, pin the exact two-field
   wire shape, and prove no upload on pre-encryption failure. Custody routing must fail closed and
   re-probe enrollment after cached bootstrap reads.

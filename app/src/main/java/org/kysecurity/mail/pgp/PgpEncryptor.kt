@@ -141,6 +141,7 @@ internal object PgpEncryptor {
         ).keyRings.asSequence()
             .flatMap { ring -> ring.publicKeys.asSequence().map { ring.publicKey to it } }
             .filter { (_, key) -> key.isEncryptionKey && !key.hasRevocation() && !key.hasExpired() }
+            .filter { (primary, key) -> PgpStrengthPolicy.memberAllowed(primary, key) }
             // Newest, not "last in the serialisation": a ring may carry a rotated-away subkey.
             .maxByOrNull { it.second.creationTime.time }
     }.getOrNull()
@@ -162,6 +163,8 @@ internal object PgpEncryptor {
         val secretKey = ring.secretKeys.asSequence()
             .firstOrNull { it.isSigningKey && !it.publicKey.hasRevocation() && !it.publicKey.hasExpired() }
             ?: return null
+
+        if (!PgpStrengthPolicy.memberAllowed(ring.publicKey, secretKey.publicKey)) return null
 
         val privateKey = secretKey.extractPrivateKey(
             BcPBESecretKeyDecryptorBuilder(BcPGPDigestCalculatorProvider()).build(CharArray(0)),

@@ -25,6 +25,9 @@ after deliberate enrollment, their PGP key. Its security requirements, from the
 5. **PGP trust comes from this device,** not from the relay.
 6. **No silent fallbacks.** A missing pin, key or setting fails closed. KyPost never archives,
    deletes or moves mail on its own.
+7. **New OpenPGP operations meet the local strength policy.** A short key, disabled algorithm
+   or weak subkey binding cannot authorize encryption, signing or a positive signature badge.
+   Archive decryption and exact historical key retention remain available.
 
 ## Threat model
 
@@ -99,6 +102,7 @@ they leave the app.
 | Local file access from mail | `allowFileAccess = false`, `allowContentAccess = false` | `EmailDetailActivity.kt` |
 | Navigation and scheme abuse | Navigation needs a tap; only `http`, `https`, `mailto` and `tel`; web links confirmed | `EmailDetailActivity.kt` (`SAFE_LINK_SCHEMES`) |
 | Forged PGP signature badge | Signer keys resolved from the local contact store; fingerprints computed on the device; the relay's `verified` flag is parsed but nothing that decides a verdict reads it | `pgp/SignerBinding.kt`, `pgp/PgpFingerprint.kt` |
+| Obsolete OpenPGP keys or digests used for new trust | RSA >=2048 bits; supported elliptic keys >=224 bits; strong primary/subkey and binding required; only SHA-256/384/512 and SHA3-256/512 signatures can earn a badge | `pgp/PgpStrengthPolicy.kt`, `pgp/PgpEncryptor.kt`, `pgp/PgpDecryptor.kt`, `pgp/SignerBinding.kt` |
 | Exported component abuse | Every exported component checked against an allowlist by `checkExportedComponents*`; lint's `ExportedService`, `ExportedReceiver` and `ExportedContentProvider` fatal | `app/build.gradle.kts` |
 | Secrets at rest | SQLCipher database with a random 32-byte key; device secret AES-256-GCM wrapped under a PIN-derived, Keystore-peppered key | `security/DatabaseKey.kt`, `security/CredentialCipher.kt` |
 | PIN guessing | PBKDF2-HMAC-SHA-256 with 150,000 iterations and a Keystore HMAC pepper (StrongBox first), so guessing stays on the device wherever the Keystore is hardware-backed; a software-only pepper is logged as an error; attempts 1–2 free, then 30 s rising to an hour; wipe after 30 failures by default (10, 20 or 30, or off) | `security/PinHasher.kt`, `security/CredentialCipher.kt`, `security/LockoutPolicy.kt` |
@@ -114,6 +118,10 @@ they leave the app.
 The full list, with costs, is in [SECURITY.md](../SECURITY.md). The largest:
 
 - TOFU pinning cannot detect an attacker who is present at pairing.
+- Historical OpenPGP keys and weak bindings remain parseable for archive decryption and identity
+  lookup, never new use or positive trust; valid old revocations still remove trust. Existing v3
+  keyring replacement limits remain; [migration guidance](../SECURITY.md#openpgp-strength-and-existing-keys)
+  explains how to retain archives. The OpenPGP policy does not qualify native TLS or relay crypto.
 - FCM payloads are readable by the push relay and Google; with Content Preview on, they include
   the sender and subject.
 - The QR scanner on Play and GitHub builds is Google Play Services code.
@@ -129,7 +137,7 @@ The full list, with costs, is in [SECURITY.md](../SECURITY.md). The largest:
 
 ## Evidence
 
-- **Tests:** 190 JVM unit-test files and 132 instrumented test files. CI runs the unit tests and
+- **Tests:** JVM unit tests and instrumented device suites. CI runs the unit tests and
   lint for all three flavors, a release build with R8 and manifest checks, emulator suites per
   flavor, and release smoke tests of the minified Play and F-Droid builds on every pull request
   (`.github/workflows/ci.yml`, `release-smoke.yml`).
@@ -137,6 +145,10 @@ The full list, with costs, is in [SECURITY.md](../SECURITY.md). The largest:
   (`.github/workflows/codeql.yml`). Android Lint with a security-focused fatal list. OpenSSF
   Scorecard.
 - **Dynamic analysis:** the instrumented and release-smoke suites on emulators. There is no fuzzing.
+- **OpenPGP policy:** `PgpStrengthPolicyTest` independently generates RSA-1024/2047/2048,
+  short and supported EC keys, DSA and digest/binding fixtures. It covers both signature formats,
+  complete-send refusal, positive controls, retained archive bytes, old-mail decryption and
+  key-change/revocation precedence.
 - **Review:** every pull request needs green CI and an adversarial review pass
   ([CONTRIBUTING.md](../CONTRIBUTING.md#every-pr-must-pass-hostile-ai-code-review)).
 - **Releases:** signed APK, signer checked before publishing ([VERIFYING-RELEASES.md](VERIFYING-RELEASES.md)).

@@ -320,6 +320,12 @@ Owns production Android app code and resources.
   `withKeyring`. There is no raw accessor, so a keyring can never reach the armor parser.
   `PgpDecryptor` tries every encryption-capable key for a hidden (zero) recipient key id;
   `PgpEncryptor` signs only with the given ring's own unrevoked, unexpired signing key.
+  `PgpStrengthPolicy` gates new encryption/signing and positive signature trust: RSA >=2048 bits,
+  supported elliptic keys >=224 bits, both primary and selected subkey, with a verified strong
+  subkey binding. Allowed signature/binding hashes are SHA-256/384/512 and SHA3-256/512.
+  Disabled material yields UNCHECKED, while existing key-change/revocation alarms retain priority.
+  Fingerprinting, historical keyring parsing and archive decryption retain old keys/bindings;
+  verified old revocations still remove trust. Never tighten those parsers to authorize new use.
   Its signature names every recipient primary key in hashed, non-critical RFC 9580 Intended Recipient
   Fingerprint subpackets (`IntendedRecipientTest`).
   `importKeyring` is the local v3 import, pure and transport-free: validate the whole ring against
@@ -405,7 +411,8 @@ Owns production Android app code and resources.
   consumed by `pgp/EncryptedMessageReader`). Root and nested `multipart/signed` wrappers with
   `protocol=application/pgp-signature` suppress UNSIGNED. They are detected, not verified: without
   a packet signature the verdict is UNCHECKED ("Signature not checked"), including malformed
-  signature contents. This message-level notice remains visible even without a resolved sender.
+  signature contents. Policy-disabled packet signatures also yield UNCHECKED, never a badge.
+  This message-level notice remains visible even without a resolved sender.
   Existing sender-bound packet verification remains authoritative when present.
   `EncryptedMessageReaderTest` covers real encrypted root/nested signatures and invalid declarations.
   Do not reintroduce a client-side `From` parser to "wire up" that narrowing yourself — a second parser deciding the same binding is exactly the defect that
