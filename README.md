@@ -1,5 +1,7 @@
 # KyPost for Android
 
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15928/badge)](https://www.bestpractices.dev/projects/15928)
+
 KyPost is an Android email client for a self-hosted KyPost server. Read and send mail,
 organize keyword-based inbox tabs, exchange PGP keys and synchronize contacts in both
 directions. Pairing creates per-device credentials; the phone does not need the mailbox’s
