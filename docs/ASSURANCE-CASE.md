@@ -28,6 +28,10 @@ after deliberate enrollment, their PGP key. Its security requirements, from the
 7. **New OpenPGP operations meet the local strength policy.** A short key, disabled algorithm
    or weak subkey binding cannot authorize encryption, signing or a positive signature badge.
    Archive decryption and exact historical key retention remain available.
+8. **Every connection meets the TLS floor.** TLS 1.2+ with forward-secret AEAD suites, and RSA
+   >= 2048 / EC >= 256 keys with SHA-2 signatures across the validated path. "Refuse legacy
+   encryption" closes the remaining archive-read exception
+   ([STRONG-CRYPTO.md](STRONG-CRYPTO.md)).
 
 ## Threat model
 
@@ -51,7 +55,10 @@ they leave the app.
    redirect, and it caps response bodies (8 MiB for JSON by default). After pairing, the client
    pins the server's leaf SPKI (`push/PinnedCallFactory.kt`). A request to any other host is
    refused, and a pin that existed and is gone fails closed (`TlsPinState.Lost`). Cleartext is
-   off app-wide (`app/src/main/res/xml/network_security_config.xml`).
+   off app-wide (`app/src/main/res/xml/network_security_config.xml`). The same client offers only
+   TLS 1.2+ ECDHE AEAD suites, and `security/StrongTls.kt` refuses a platform-validated path with a
+   key below RSA-2048/EC-256 (anchor included) or a non-SHA-2 signature. `SourceRulesTest` keeps
+   every other client and raw socket out of the code.
 2. **Pairing link → app.** Pairing is trust-on-first-use. A pin carried in the pairing link
    narrows the TOFU window to one key; a pin that does not parse fails the pairing
    (`normalizeSpkiPin`). The registration URL must be same-origin with the server
@@ -103,6 +110,8 @@ they leave the app.
 | Local file access from mail | `allowFileAccess = false`, `allowContentAccess = false` | `EmailDetailActivity.kt` |
 | Navigation and scheme abuse | Navigation needs a tap; only `http`, `https`, `mailto` and `tel`; web links confirmed | `EmailDetailActivity.kt` (`SAFE_LINK_SCHEMES`) |
 | Forged PGP signature badge | Signer keys resolved from the local contact store; fingerprints computed on the device; the relay's `verified` flag is parsed but nothing that decides a verdict reads it | `pgp/SignerBinding.kt`, `pgp/PgpFingerprint.kt` |
+| Weak TLS keys, signatures or suites | `RESTRICTED_TLS` only; chain-wide RSA >= 2048 / EC >= 256 and SHA-2 signatures on the validated path, checked after platform trust | `PairingAuthHeaders.kt`, `security/StrongTls.kt` |
+| Broken ciphers in received OpenPGP mail | Plaintext, single DES, SAFER and unknown session ciphers refused before decryption; integrity mandatory; "Refuse legacy encryption" also refuses short keys and 64-bit-block ciphers | `pgp/PgpDecryptor.kt`, `pgp/PgpStrengthPolicy.kt`, `security/CryptoPolicySettings.kt` |
 | Obsolete OpenPGP keys or digests used for new trust | RSA >=2048 bits; supported elliptic keys >=224 bits; strong primary/subkey and binding required; only SHA-256/384/512 and SHA3-256/512 signatures can earn a badge | `pgp/PgpStrengthPolicy.kt`, `pgp/PgpEncryptor.kt`, `pgp/PgpDecryptor.kt`, `pgp/SignerBinding.kt` |
 | PGP key delivered to the wrong device, or the device's enrollment key exposed | Envelope opened only against the server's delivery record; device ID, fingerprint and version bound as HPKE `info` (v4/v5) or GCM AAD (v2/v3), built from local values; the P-256 agreement key is non-exportable in the Keystore and HPKE runs over its ECDH output (CFRG vector, browser-sealed and Keystore tests) | `pgp/EnrollmentCeremony.kt`, `pgp/HpkeRecipient.kt`, `pgp/DeviceEnvelope.kt`, `pgp/EnrollmentKeyStore.kt` |
 | Exported component abuse | Every exported component checked against an allowlist by `checkExportedComponents*`; lint's `ExportedService`, `ExportedReceiver` and `ExportedContentProvider` fatal | `app/build.gradle.kts` |
@@ -123,7 +132,10 @@ The full list, with costs, is in [SECURITY.md](../SECURITY.md). The largest:
 - Historical OpenPGP keys and weak bindings remain parseable for archive decryption and identity
   lookup, never new use or positive trust; valid old revocations still remove trust. Existing v3
   keyring replacement limits remain; [migration guidance](../SECURITY.md#openpgp-strength-and-existing-keys)
-  explains how to retain archives. The OpenPGP policy does not qualify native TLS or relay crypto.
+  explains how to retain archives. By default old mail still decrypts with short keys and
+  64-bit-block ciphers; [STRONG-CRYPTO.md](STRONG-CRYPTO.md) states the risk, and "Refuse legacy
+  encryption" closes it. New messages use SEIPD v1 (SHA-1 MDC, CFB) because recipients do not yet
+  read SEIPD v2. TLS 1.2 handshake signature algorithms are Conscrypt's, not the app's.
 - FCM payloads are readable by the push relay and Google; with Content Preview on, they include
   the sender and subject.
 - The QR scanner on Play and GitHub builds is Google Play Services code.
@@ -150,7 +162,10 @@ The full list, with costs, is in [SECURITY.md](../SECURITY.md). The largest:
 - **OpenPGP policy:** `PgpStrengthPolicyTest` independently generates RSA-1024/2047/2048,
   short and supported EC keys, DSA and digest/binding fixtures. It covers both signature formats,
   complete-send refusal, positive controls, retained archive bytes, old-mail decryption and
-  key-change/revocation precedence.
+  key-change/revocation precedence, plus session-cipher refusal and the strict setting.
+- **TLS and cipher floor:** `StrongTlsTest` (real fixture paths), `StrongTlsDeviceTest` (real
+  Android handshakes on loopback, each weak case first shown to pass the platform alone) and
+  `scripts/strong-crypto-negative-controls.sh`, which removes each guard and requires a failure.
 - **Review:** every pull request needs green CI and an adversarial review pass
   ([CONTRIBUTING.md](../CONTRIBUTING.md#every-pr-must-pass-hostile-ai-code-review)).
 - **Releases:** signed APK, signer checked before publishing ([VERIFYING-RELEASES.md](VERIFYING-RELEASES.md)).
