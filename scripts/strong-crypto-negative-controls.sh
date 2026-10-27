@@ -14,7 +14,7 @@ mutations=(
   "RSA floor 1024|$main/security/StrongTls.kt|s/bitLength() >= 2048/bitLength() >= 1024/"
   "SHA-1 signatures accepted|$main/security/StrongTls.kt|s/if (trusted.dropLast(1).any { !signedStrongly(it.sigAlgOID) })/if (false)/"
   "empty path accepted|$main/security/StrongTls.kt|s/trusted.isEmpty() || //"
-  "session cipher unchecked|$main/pgp/PgpDecryptor.kt|s/if (!PgpStrengthPolicy.archiveCipherAllowed(cipher, strict = refuseLegacy))/if (false)/"
+  "session cipher unchecked|$main/pgp/PgpDecryptor.kt|s/if (!PgpStrengthPolicy.archiveCipherAllowed(pked.getSymmetricAlgorithm(factory), strict = refuseLegacy))/if (false)/"
   "strict ignores key size|$main/pgp/PgpDecryptor.kt|s/if (refuseLegacy \&\& !(PgpStrengthPolicy/if (false \&\& !(PgpStrengthPolicy/"
   "strict keeps 64-bit ciphers|$main/pgp/PgpStrengthPolicy.kt|s/-> !strict/-> true/"
 )
