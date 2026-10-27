@@ -5,7 +5,7 @@ import org.junit.Test
 import java.security.MessageDigest
 
 /** The shared fixtures are copied, never edited: these are the checksums recorded in
- *  `src/test/resources/kypost-server/PROVENANCE.md` at KyPost-Server `dc2a70eb`. */
+ *  `src/test/resources/kypost-server/PROVENANCE.md`. */
 class FixtureProvenanceTest {
 
     @Test
@@ -17,6 +17,10 @@ class FixtureProvenanceTest {
         assertEquals(
             "bba7d8fde4206be91e57a4953b3b56ff915ecb24f9a0f581b7098bdc6dfcb7cc",
             sha256(SharedFixtures.bytes("pgp-keyring-v1.json")),
+        )
+        assertEquals(
+            "a9d0c155b22d18e647f790594a9494e62ac8999f3b0b0f219f0e31f6085b865a",
+            sha256(SharedFixtures.bytes("hpke-cfrg-p256-aes256.json")),
         )
     }
 

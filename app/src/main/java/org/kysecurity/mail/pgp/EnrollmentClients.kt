@@ -16,10 +16,6 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 private val JSON_MEDIA_TYPE = "application/json".toMediaType()
 
-/** Versions this build can open. 3 is advertised only because #112/#115/#116 passed the native
- *  complete-ring persistence checks, which is the server's condition for the claim. */
-private val SUPPORTED_ENVELOPE_VERSIONS = listOf(ENVELOPE_VERSION_LEGACY, ENVELOPE_VERSION_KEYRING)
-
 @Serializable
 private data class PublishEnrollmentKeyRequest(
     @SerialName("publicKey") val publicKey: String,
@@ -70,8 +66,9 @@ internal sealed class EnrollmentReport {
     /** The bare boolean, meaning "opens a v2 envelope". A converted account refuses it. */
     object Legacy : EnrollmentReport()
 
-    /** Confirms the v3 delivery the server recorded for this device, and nothing else. */
-    data class Keyring(val materialGeneration: Long, val fingerprint: String) : EnrollmentReport()
+    /** Confirms the v3/v5 delivery the server recorded for this device, and nothing else. The
+     *  server matches [envelopeVersion] against the version it delivered. */
+    data class Keyring(val materialGeneration: Long, val fingerprint: String, val envelopeVersion: Int) : EnrollmentReport()
 }
 
 internal sealed class EnrollmentCallResult {
@@ -102,7 +99,7 @@ internal class EnrollmentClients(
         deviceSecret: String,
         encodedPublicKey: String,
     ): EnrollmentCallResult {
-        val body = json.encodeToString(PublishEnrollmentKeyRequest(encodedPublicKey, SUPPORTED_ENVELOPE_VERSIONS))
+        val body = json.encodeToString(PublishEnrollmentKeyRequest(encodedPublicKey, OPENABLE_ENVELOPE_VERSIONS))
         return call(serverUrl, "/api/pgp/device/enrollment-key", deviceId, deviceSecret, body) {
             EnrollmentCallResult.Ok
         }
@@ -146,7 +143,7 @@ internal class EnrollmentClients(
             EnrollmentReport.NotEnrolled -> EnrollmentStateRequest(false)
             EnrollmentReport.Legacy -> EnrollmentStateRequest(true)
             is EnrollmentReport.Keyring -> EnrollmentStateRequest(
-                true, ENVELOPE_VERSION_KEYRING, report.materialGeneration, report.fingerprint,
+                true, report.envelopeVersion, report.materialGeneration, report.fingerprint,
             )
         }
         val body = json.encodeToString(request)

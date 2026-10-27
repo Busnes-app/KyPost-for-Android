@@ -69,6 +69,9 @@ internal class FakeEnrollmentKeys(
     private val keyByte: Byte = 0x11,
     private val publishedByte: Byte = 0x22,
     private val minting: Boolean = true,
+    /** A real P-256 point and software ECDH, standing in for the Keystore key in HPKE tests. */
+    point: ByteArray? = null,
+    private val agree: ((ByteArray) -> ByteArray?)? = null,
 ) : EnrollmentKeys {
     var newKeyPairCalls = 0
         private set
@@ -84,7 +87,7 @@ internal class FakeEnrollmentKeys(
     var encodingFails = false
 
     /** The point the code must be derived from. */
-    val keystorePoint: ByteArray = ByteArray(65).also { it[0] = 0x04; for (i in 1..64) it[i] = keyByte }
+    val keystorePoint: ByteArray = point ?: ByteArray(65).also { it[0] = 0x04; for (i in 1..64) it[i] = keyByte }
 
     /** A *different* point, standing in for "whatever was published". Nothing correct derives the
      *  code from this. */
@@ -103,7 +106,7 @@ internal class FakeEnrollmentKeys(
         publishedPoint.takeIf { exists && !vanished && !encodingFails }
             ?.let { java.util.Base64.getEncoder().encodeToString(it) }
 
-    override fun sharedSecret(epk: ByteArray): ByteArray? = sharedSecretResult
+    override fun sharedSecret(epk: ByteArray): ByteArray? = if (agree != null) agree(epk) else sharedSecretResult
 
     override fun deleteKeyPair(): Boolean {
         deleteCalls++
@@ -232,9 +235,9 @@ internal class FakePorts(
     /** A keystore that refuses to mint — StrongBox and the TEE fallback both failing. */
     minting: Boolean = true,
     val previousVault: VaultOpener = FakeVaultOpener(outcome = OpenOutcome.NotEnrolled),
+    val keys: FakeEnrollmentKeys = FakeEnrollmentKeys(minting = minting),
 ) {
     val identity = FakeIdentitySource(identityResult)
-    val keys = FakeEnrollmentKeys(minting = minting)
     val transport = FakeEnrollmentTransport(
         deviceId = deviceIdValue,
         publishResult = publishResult,

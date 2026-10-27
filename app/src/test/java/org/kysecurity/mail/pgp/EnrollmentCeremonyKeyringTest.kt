@@ -55,7 +55,7 @@ class EnrollmentCeremonyKeyringTest {
         assertEquals(EnrollmentUiState.Enrolled, ports.states.last())
         assertEquals(listOf(VaultRecordKind.KEYRING), ports.sealer.kinds)
         assertArrayEquals("the original bytes are sealed", ringJson.toByteArray(Charsets.UTF_8), ports.sealer.received.single())
-        val ack = EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = active)
+        val ack = EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = active, envelopeVersion = ENVELOPE_VERSION_KEYRING)
         assertEquals("stored beside the record for the worker", listOf(ack), ports.sealer.acks)
         assertEquals("acknowledged with the delivery's values, never the bare boolean", listOf(ack), ports.transport.reported)
         assertEquals(1, ports.mailCache.clearCalls)

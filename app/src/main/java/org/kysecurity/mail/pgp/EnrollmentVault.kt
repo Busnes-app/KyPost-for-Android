@@ -29,6 +29,7 @@ private const val KEY_IV = "envelope_iv"
 private const val KEY_CT = "envelope_ct"
 private const val ACK_GENERATION = "ack_generation"
 private const val ACK_FINGERPRINT = "ack_fingerprint"
+private const val ACK_VERSION = "ack_version"
 private const val TEARDOWN_REPORT = "teardown_report"
 
 /** Same shape as the encrypted-prefs opener: three reads in all before absence counts. */
@@ -229,19 +230,22 @@ internal class EnrollmentVault(
     /** Stored after the keyring record it describes, so the worker can restate the acknowledgement
      *  without opening the vault. */
     fun storeKeyringAck(ack: EnrollmentReport.Keyring): Boolean =
-        ackPrefs.edit().putLong(ACK_GENERATION, ack.materialGeneration).putString(ACK_FINGERPRINT, ack.fingerprint).commit()
+        ackPrefs.edit().putLong(ACK_GENERATION, ack.materialGeneration).putString(ACK_FINGERPRINT, ack.fingerprint)
+            .putInt(ACK_VERSION, ack.envelopeVersion).commit()
 
     fun keyringAck(): EnrollmentReport.Keyring? {
         val fingerprint = ackPrefs.getString(ACK_FINGERPRINT, null) ?: return null
         if (!ackPrefs.contains(ACK_GENERATION)) return null
-        return EnrollmentReport.Keyring(ackPrefs.getLong(ACK_GENERATION, 0L), fingerprint)
+        // Acknowledgements stored before v5 existed carry no version and were all v3.
+        val version = ackPrefs.getInt(ACK_VERSION, ENVELOPE_VERSION_KEYRING)
+        return EnrollmentReport.Keyring(ackPrefs.getLong(ACK_GENERATION, 0L), fingerprint, version)
     }
 
     /** Only the acknowledgement keys, never the whole store: the teardown marker shares the file
      *  and must survive [destroy] and key regeneration. False on a failed write, which `commit()`
      *  reports without throwing. */
     private fun clearKeyringAck(): Boolean =
-        ackPrefs.edit().remove(ACK_GENERATION).remove(ACK_FINGERPRINT).commit()
+        ackPrefs.edit().remove(ACK_GENERATION).remove(ACK_FINGERPRINT).remove(ACK_VERSION).commit()
 
     /** Set by `EnrollmentTeardown` after [destroy], read by the worker. [store] clears it: a new
      *  record is a new enrollment and the old teardown no longer describes the device. Dropping

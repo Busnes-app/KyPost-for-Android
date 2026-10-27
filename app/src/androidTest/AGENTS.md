@@ -19,6 +19,11 @@ Owns Android instrumentation tests executed on emulator/device.
   then assert the replacement regains window focus. Request registration alone precedes window
   attachment; API 31 SystemUI can strand a window if cancelled during that interval.
 
+- `HpkeEnrollmentKeyStoreTest` opens v4/v5 sealed by Bouncy Castle's HPKE through the real
+  Keystore agreement key and the production `hpkeOpenBase`, asserts the key is non-exportable,
+  and refuses relabeled versions, other device/fingerprint/info, tampered ciphertext and a
+  previous ceremony's key.
+
 # Work Guidance
 
 - Add instrumentation coverage only when JVM tests cannot validate the behavior.
