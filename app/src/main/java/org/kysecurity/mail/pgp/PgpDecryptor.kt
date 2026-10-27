@@ -141,19 +141,15 @@ internal object PgpDecryptor {
                     BcPBESecretKeyDecryptorBuilder(BcPGPDigestCalculatorProvider()).build(CharArray(0)),
                 )
                 val factory = BcPublicKeyDataDecryptorFactory(privateKey)
-                // Checked before any ciphertext is decrypted. A wrong hidden-recipient key throws here.
-                val cipher = if (hidden) {
-                    runCatching { pked.getSymmetricAlgorithm(factory) }.getOrNull() ?: continue
-                } else {
-                    pked.getSymmetricAlgorithm(factory)
-                }
-                if (!PgpStrengthPolicy.archiveCipherAllowed(cipher, strict = refuseLegacy)) {
-                    return DecryptResult.Failed(REFUSED_CIPHER)
-                }
                 val stream = if (hidden) {
                     runCatching { pked.getDataStream(factory) }.getOrNull() ?: continue
                 } else {
                     pked.getDataStream(factory)
+                }
+                // The session key is now known to be ours; refuse its cipher before reading a byte.
+                if (!PgpStrengthPolicy.archiveCipherAllowed(pked.getSymmetricAlgorithm(factory), strict = refuseLegacy)) {
+                    runCatching { stream.close() }
+                    return DecryptResult.Failed(REFUSED_CIPHER)
                 }
                 clear = stream
                 encrypted = pked
