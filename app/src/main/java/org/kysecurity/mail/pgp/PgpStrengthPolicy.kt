@@ -1,12 +1,12 @@
 package org.kysecurity.mail.pgp
 
-import org.bouncycastle.bcpg.ECDHPublicBCPGKey
 import org.bouncycastle.bcpg.HashAlgorithmTags
 import org.bouncycastle.bcpg.PublicKeyAlgorithmTags
 import org.bouncycastle.bcpg.SymmetricKeyAlgorithmTags
 import org.bouncycastle.openpgp.PGPPublicKey
 
-/** Policy for new encryption, signing and positive signature trust, not archival decryption. */
+/** Policy for new encryption, signing and positive signature trust. Archival decryption is looser:
+ *  only [archiveCipherAllowed] applies, plus [keyAllowed] when the user refuses legacy encryption. */
 internal object PgpStrengthPolicy {
     // Existing v4 RSA role tags remain readable; the policy does not generate those tags.
     @Suppress("DEPRECATION")
@@ -16,12 +16,9 @@ internal object PgpStrengthPolicy {
         PublicKeyAlgorithmTags.RSA_SIGN,
         -> key.bitStrength >= 2048
 
-        // An ECDH key also names the KDF hash and key-wrap cipher every message to it uses.
-        PublicKeyAlgorithmTags.ECDH -> key.bitStrength >= 224 &&
-            (key.publicKeyPacket.key as? ECDHPublicBCPGKey)?.let {
-                digestAllowed(it.hashAlgorithm.toInt()) && it.symmetricKeyAlgorithm.toInt() in AES
-            } == true
-
+        // Bouncy Castle refuses to parse an ECDH key whose KDF is below SHA-256 or whose key wrap
+        // is not AES/Camellia, so no KDF check is needed here.
+        PublicKeyAlgorithmTags.ECDH,
         PublicKeyAlgorithmTags.ECDSA,
         PublicKeyAlgorithmTags.EDDSA_LEGACY,
         PublicKeyAlgorithmTags.X25519,
@@ -47,8 +44,6 @@ internal object PgpStrengthPolicy {
 
         else -> false
     }
-
-    private val AES = setOf(SymmetricKeyAlgorithmTags.AES_128, SymmetricKeyAlgorithmTags.AES_192, SymmetricKeyAlgorithmTags.AES_256)
 
     /** Session ciphers an already-received message may use. Plaintext (NULL), single DES, SAFER
      *  and unknown ids never open; [strict] also refuses the 64-bit-block legacy ciphers. */
