@@ -284,7 +284,7 @@ class SecuritySettingsActivity : LockedActivity() {
         refuseLegacySwitch.setOnCheckedChangeListener { _, checked ->
             if (suppressRefuseLegacyListener) return@setOnCheckedChangeListener
             // Turning it off weakens, so it takes the PIN whenever there is one.
-            confirmWithPinIf(!checked && lockSwitch.isChecked, onRefused = { revertRefuseLegacySwitch(!checked) }) {
+            confirmWithPinIf(!checked, onRefused = { revertRefuseLegacySwitch(!checked) }) {
                 lifecycleScope.launch {
                     withContext(SecurityWork) { CryptoPolicySettings(this@SecuritySettingsActivity).refuseLegacy = checked }
                 }
@@ -306,7 +306,7 @@ class SecuritySettingsActivity : LockedActivity() {
             // On is weaker, so it takes the PIN, which also seals the keys.
             promptForPin(R.string.security_confirm_change_title, onCancelled = { revertBiometricSwitch(false) }) { entered ->
                 lifecycleScope.launch {
-                    if (!resolvePinAttempt(entered.usePin { appLockManager.enableBiometric(it) })) {
+                    if (!holdingControls { resolvePinAttempt(entered.usePin { appLockManager.enableBiometric(it) }) }) {
                         revertBiometricSwitch(false)
                     }
                 }
@@ -794,13 +794,7 @@ class SecuritySettingsActivity : LockedActivity() {
                             appLockStore.enableLock()
                         }
                     }
-                    changePinButton.visibility = View.VISIBLE
-                    lockGraceButton.isEnabled = true
-                    wipeThresholdButton.isEnabled = true
-                    biometricSwitch.isEnabled = true
-                    hostileLocationSwitch.isEnabled = true
-                    hostileLocationIntro.text = getString(R.string.security_hostile_location_intro)
-                    credentialGateSwitch.isEnabled = true
+                    renderLockState(lockEnabled = true)
                 }
             },
             onCancelled = { revertLockSwitch(false) },
@@ -814,7 +808,7 @@ class SecuritySettingsActivity : LockedActivity() {
             lifecycleScope.launch {
                 val appLockManager = SecurityRuntime.graph(this@SecuritySettingsActivity).appLockManager
                 // resolvePinAttempt, not `is Success`: this runs the same wipe threshold.
-                val ok = resolvePinAttempt(appLockManager.verifyPinThrottled(entered))
+                val ok = holdingControls { resolvePinAttempt(appLockManager.verifyPinThrottled(entered)) }
                 if (ok) {
                     promptEnterAndConfirmPin(
                         onConfirmed = { newPin ->
@@ -912,8 +906,11 @@ class SecuritySettingsActivity : LockedActivity() {
         ) { entered ->
             lifecycleScope.launch {
                 val appLockManager = SecurityRuntime.graph(this@SecuritySettingsActivity).appLockManager
-                val ok = resolvePinAttempt(entered.usePin { appLockManager.deriveAndCacheCredentialKeys(it) })
-                if (ok) disableLock() else revertLockSwitch(true)
+                val verify = disableLockVerifierForTest ?: appLockManager::deriveAndCacheCredentialKeys
+                // The switch already reads off; until this resolves the stored lock is still on.
+                holdingControls {
+                    if (resolvePinAttempt(entered.usePin { verify(it) })) disableLock()
+                }
             }
         }
     }
@@ -967,14 +964,39 @@ class SecuritySettingsActivity : LockedActivity() {
             return
         }
 
-        changePinButton.visibility = View.GONE
-        lockGraceButton.isEnabled = false
-        wipeThresholdButton.isEnabled = false
         biometricSwitch.isChecked = false
-        biometricSwitch.isEnabled = false
-        hostileLocationSwitch.isEnabled = false
-        hostileLocationIntro.text = getString(R.string.security_hostile_location_requires_lock)
-        credentialGateSwitch.isEnabled = false
+    }
+
+    /** Controls follow the stored lock, never [lockSwitch]: it flips before its PIN check. */
+    private fun renderLockState(lockEnabled: Boolean) {
+        revertLockSwitch(lockEnabled)
+        lockSwitch.isEnabled = true
+        refuseLegacySwitch.isEnabled = true
+        changePinButton.isEnabled = true
+        changePinButton.visibility = if (lockEnabled) View.VISIBLE else View.GONE
+        for (control in listOf(lockGraceButton, wipeThresholdButton, biometricSwitch, hostileLocationSwitch, credentialGateSwitch)) {
+            control.isEnabled = lockEnabled
+        }
+        hostileLocationIntro.text = getString(
+            if (lockEnabled) R.string.security_hostile_location_intro else R.string.security_hostile_location_requires_lock,
+        )
+    }
+
+    private suspend fun storedLockEnabled(): Boolean = withContext(SecurityWork) { appLockStore.isLockEnabled() }
+
+    /** Runs [block] with every control disabled, then re-renders them from the stored lock. */
+    private suspend fun <T> holdingControls(block: suspend () -> T): T {
+        for (control in listOf(
+            lockSwitch, changePinButton, lockGraceButton, wipeThresholdButton, biometricSwitch,
+            hostileLocationSwitch, credentialGateSwitch, refuseLegacySwitch,
+        )) {
+            control.isEnabled = false
+        }
+        try {
+            return block()
+        } finally {
+            renderLockState(storedLockEnabled())
+        }
     }
 
     private fun confirmEnableCredentialGate() {
@@ -1000,7 +1022,7 @@ class SecuritySettingsActivity : LockedActivity() {
         ) { entered ->
             lifecycleScope.launch {
                 val appLockManager = SecurityRuntime.graph(this@SecuritySettingsActivity).appLockManager
-                if (!resolvePinAttempt(entered.usePin { appLockManager.deriveAndCacheCredentialKeys(it) })) {
+                if (!holdingControls { resolvePinAttempt(entered.usePin { appLockManager.deriveAndCacheCredentialKeys(it) }) }) {
                     revertCredentialGateSwitch(!enabling)
                     return@launch
                 }
@@ -1050,19 +1072,25 @@ class SecuritySettingsActivity : LockedActivity() {
     }
 
     /** Every change that weakens protection runs [apply] only after the same throttled PIN check
-     *  as disabling the lock; a strengthening change applies at once. */
+     *  as disabling the lock, whenever the stored lock is on; a strengthening change applies at once. */
     private fun confirmWithPinIf(weakens: Boolean, onRefused: () -> Unit = {}, apply: () -> Unit) {
         if (!weakens) {
             apply()
             return
         }
-        promptForPin(R.string.security_confirm_change_title, onCancelled = onRefused) { entered ->
-            lifecycleScope.launch {
-                val appLockManager = SecurityRuntime.graph(this@SecuritySettingsActivity).appLockManager
-                if (resolvePinAttempt(entered.usePin { appLockManager.verifyPinThrottled(it) })) {
-                    apply()
-                } else {
-                    onRefused()
+        lifecycleScope.launch {
+            if (!holdingControls { storedLockEnabled() }) {
+                apply()
+                return@launch
+            }
+            promptForPin(R.string.security_confirm_change_title, onCancelled = onRefused) { entered ->
+                lifecycleScope.launch {
+                    val appLockManager = SecurityRuntime.graph(this@SecuritySettingsActivity).appLockManager
+                    if (holdingControls { resolvePinAttempt(entered.usePin { appLockManager.verifyPinThrottled(it) }) }) {
+                        apply()
+                    } else {
+                        onRefused()
+                    }
                 }
             }
         }
@@ -1084,5 +1112,12 @@ class SecuritySettingsActivity : LockedActivity() {
             // See [promptEnterAndConfirmPin] and [showSecurely].
             .create()
             .showSecurely()
+    }
+
+    companion object {
+        /** Null in production. Replaces the disable-lock PIN check so a test can hold it pending. */
+        @androidx.annotation.VisibleForTesting
+        @Volatile
+        internal var disableLockVerifierForTest: (suspend (CharArray) -> UnlockAttemptResult)? = null
     }
 }
