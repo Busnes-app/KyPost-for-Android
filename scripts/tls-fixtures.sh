@@ -18,7 +18,7 @@ root() { # name
   openssl req -x509 -new -key "$1.pem" -sha256 -days "$days" -subj "/CN=KyPost TLS fixture $1" \
     -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign -out "$1.crt"
 }
-issue() { # name issuer is-ca
+issue() { # name issuer is-ca [digest]
   local ext="$work/$1.ext"
   if [ "$3" = ca ]; then
     printf 'basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n' >"$ext"
@@ -26,7 +26,7 @@ issue() { # name issuer is-ca
     printf 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=IP:127.0.0.1\n' >"$ext"
   fi
   openssl req -new -key "$1.pem" -subj "/CN=KyPost TLS fixture $1" -out "$1.csr"
-  openssl x509 -req -in "$1.csr" -CA "$2.crt" -CAkey "$2.pem" -CAcreateserial -sha256 -days "$days" \
+  openssl x509 -req -in "$1.csr" -CA "$2.crt" -CAkey "$2.pem" -CAcreateserial "-${4:-sha256}" -days "$days" \
     -extfile "$ext" -out "$1.crt"
 }
 
@@ -39,6 +39,11 @@ key leaf_p256 -algorithm EC -pkeyopt ec_paramgen_curve:P-256; issue leaf_p256 ro
 rsa leaf_rsa1024 1024; issue leaf_rsa1024 root_rsa2048 leaf
 rsa leaf_under_weak_root 2048; issue leaf_under_weak_root root_rsa2047 leaf
 rsa leaf_under_weak_intermediate 2048; issue leaf_under_weak_intermediate intermediate_rsa2047 leaf
+rsa leaf_sha1 2048; issue leaf_sha1 root_rsa2048 leaf sha1
 
 for c in *.crt; do cp "$c" "$out/$c"; done
 rm -f "$out"/root_*.key.der "$out"/intermediate_*.key.der  # only served leaves need keys
+# StrongTlsTest checks the same certificates on the JVM; it needs no keys.
+jvm="$(dirname "$out")/../../test/resources/tls"
+mkdir -p "$jvm"
+cp "$out"/*.crt "$jvm/"

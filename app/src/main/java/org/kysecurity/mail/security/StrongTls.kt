@@ -15,8 +15,9 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509ExtendedTrustManager
 
-/** The TLS key floor for every connection this app opens: RSA >= 2048 or EC >= 256 bits on every
- *  certificate of the platform-validated chain, anchor included. Per client, never process-wide. */
+/** The TLS floor for every connection this app opens: RSA >= 2048 or EC >= 256 bits on every
+ *  certificate of the platform-validated chain, anchor included, and SHA-2 signatures below the
+ *  anchor. Per client, never process-wide. */
 internal object StrongTls {
     fun platformTrustManager(): X509ExtendedTrustManager =
         TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply {
@@ -32,10 +33,22 @@ internal object StrongTls {
         else -> false
     }
 
-    /** Throws unless [trusted] is non-empty and every key meets [meetsFloor]. */
+    /** PKCS#1 RSA and ECDSA with SHA-256/384/512. SHA-1, MD5 and RSASSA-PSS are refused. */
+    private val STRONG_SIGNATURES = setOf(
+        "1.2.840.113549.1.1.11", "1.2.840.113549.1.1.12", "1.2.840.113549.1.1.13",
+        "1.2.840.10045.4.3.2", "1.2.840.10045.4.3.3", "1.2.840.10045.4.3.4",
+    )
+
+    fun signedStrongly(signatureOid: String): Boolean = signatureOid in STRONG_SIGNATURES
+
+    /** Throws unless [trusted] is non-empty, every key meets [meetsFloor], and every signature
+     *  the path relies on is strong. The anchor is trusted as stored, so its own signature is not. */
     fun requireStrongChain(trusted: List<X509Certificate>) {
         if (trusted.isEmpty() || trusted.any { !meetsFloor(it.publicKey) }) {
             throw CertificateException("TLS certificate key is below KyPost's strength requirement")
+        }
+        if (trusted.dropLast(1).any { !signedStrongly(it.sigAlgOID) }) {
+            throw CertificateException("TLS certificate signature is below KyPost's strength requirement")
         }
     }
 

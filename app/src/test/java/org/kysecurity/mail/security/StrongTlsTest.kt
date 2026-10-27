@@ -52,6 +52,33 @@ class StrongTlsTest {
         }))
     }
 
+    @Test fun onlySha2CertificateSignaturesPass() {
+        for (oid in listOf("1.2.840.113549.1.1.11", "1.2.840.113549.1.1.12", "1.2.840.113549.1.1.13",
+            "1.2.840.10045.4.3.2", "1.2.840.10045.4.3.3", "1.2.840.10045.4.3.4")) assertTrue(oid, StrongTls.signedStrongly(oid))
+        // sha1WithRSA, md5WithRSA, ecdsa-with-SHA1, RSASSA-PSS, Ed25519
+        for (oid in listOf("1.2.840.113549.1.1.5", "1.2.840.113549.1.1.4", "1.2.840.10045.4.1", "1.2.840.113549.1.1.10", "1.3.101.112")) {
+            assertFalse(oid, StrongTls.signedStrongly(oid))
+        }
+    }
+
+    private fun cert(name: String) = java.security.cert.CertificateFactory.getInstance("X.509").generateCertificate(
+        requireNotNull(javaClass.classLoader!!.getResourceAsStream("tls/$name.crt")),
+    ) as java.security.cert.X509Certificate
+
+    /** Real fixture paths as the platform returns them: leaf first, anchor last. */
+    @Test fun validatedPathsAreJudgedWhole() {
+        StrongTls.requireStrongChain(listOf(cert("leaf_rsa2048"), cert("root_rsa2048")))
+        StrongTls.requireStrongChain(listOf(cert("leaf_p256"), cert("root_rsa2048")))
+        for (path in listOf(
+            listOf("leaf_rsa1024", "root_rsa2048"),
+            listOf("leaf_under_weak_intermediate", "intermediate_rsa2047", "root_rsa2048"),
+            listOf("leaf_under_weak_root", "root_rsa2047"),
+            listOf("leaf_sha1", "root_rsa2048"),
+        )) {
+            assertTrue(path.toString(), runCatching { StrongTls.requireStrongChain(path.map(::cert)) }.isFailure)
+        }
+    }
+
     @Test(expected = CertificateException::class)
     fun anEmptyValidatedPathFailsClosed() = StrongTls.requireStrongChain(emptyList())
 

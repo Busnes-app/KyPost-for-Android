@@ -12,6 +12,7 @@ mutations=(
   "client keeps platform TLS|$main/PairingAuthHeaders.kt|/\.sslSocketFactory(StrongTls.context(trust).socketFactory, trust)/d"
   "client offers legacy suites|$main/PairingAuthHeaders.kt|s/ConnectionSpec.RESTRICTED_TLS/ConnectionSpec.MODERN_TLS/"
   "RSA floor 1024|$main/security/StrongTls.kt|s/bitLength() >= 2048/bitLength() >= 1024/"
+  "SHA-1 signatures accepted|$main/security/StrongTls.kt|s/if (trusted.dropLast(1).any { !signedStrongly(it.sigAlgOID) })/if (false)/"
   "empty path accepted|$main/security/StrongTls.kt|s/trusted.isEmpty() || //"
   "session cipher unchecked|$main/pgp/PgpDecryptor.kt|s/if (!PgpStrengthPolicy.archiveCipherAllowed(cipher, strict = refuseLegacy))/if (false)/"
   "strict ignores key size|$main/pgp/PgpDecryptor.kt|s/if (refuseLegacy \&\& !(PgpStrengthPolicy/if (false \&\& !(PgpStrengthPolicy/"
@@ -28,7 +29,7 @@ for m in "${mutations[@]}"; do
   if ./gradlew -q "$@" :app:testPlayDebugUnitTest --tests '*StrongTlsTest*' --tests '*PgpStrengthPolicyTest*' > /dev/null 2>&1; then
     echo "SURVIVED: $name"; failed=1
   elif grep -q '<failure' "$results"/TEST-*.xml 2>/dev/null; then
-    echo "killed: $name ($(grep -c '<failure' "$results"/TEST-*.xml | paste -sd' '))"
+    echo "killed: $name ($(grep -c '<failure' "$results"/TEST-*.xml | sed 's|.*TEST-org.kysecurity.mail.||; s|.xml:| |' | paste -sd' '))"
   else
     echo "BUILD ERROR, not a test failure: $name"; failed=1
   fi

@@ -47,6 +47,19 @@ class StrongTlsDeviceTest {
         }
     }
 
+    /** The platform may already refuse SHA-1; either way the guarded client must. */
+    @Test fun sha1SignedLeavesAreRefused() {
+        val peer = Peer("leaf_sha1", listOf("leaf_sha1"))
+        serve(peer) { url, _ ->
+            val platform = runCatching { call(platformOnly(peer), url) }
+            android.util.Log.i("StrongTlsDeviceTest", "platform alone on SHA-1 leaf: $platform")
+        }
+        serve(peer) { url, served ->
+            assertTrue(runCatching { call(guarded(peer), url) }.isFailure)
+            assertEquals(0, served.get())
+        }
+    }
+
     @Test fun weakKeysAnywhereInTheChainAreRefusedBeforeAnyRequest() {
         for (peer in weak) {
             serve(peer) { url, served ->
