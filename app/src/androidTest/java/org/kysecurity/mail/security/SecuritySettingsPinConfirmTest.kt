@@ -60,6 +60,7 @@ class SecuritySettingsPinConfirmTest {
     fun restore() {
         try {
             graph.hostileLocationSettings.setEnabled(false)
+            CryptoPolicySettings(context).refuseLegacy = false
             graph.appLockSettings.setGraceMillis(graceBefore)
             graph.biometricUnlockVault.destroy()
         } finally {
@@ -126,6 +127,23 @@ class SecuritySettingsPinConfirmTest {
 
             cancelThePinPrompt()
             assertTrue(graph.hostileLocationSettings.isEnabled())
+        }
+    }
+
+    @Test
+    fun refusingLegacyEncryptionNeedsNoPin() = launch {
+        awaitThenClick(withText(R.string.security_refuse_legacy_title))
+        assertTrue("a strengthening change must apply at once", awaitCondition { CryptoPolicySettings(context).refuseLegacy })
+    }
+
+    @Test
+    fun allowingLegacyEncryptionAgainAsksForThePin() {
+        CryptoPolicySettings(context).refuseLegacy = true
+        launch {
+            awaitThenClick(withText(R.string.security_refuse_legacy_title))
+
+            cancelThePinPrompt()
+            assertTrue(CryptoPolicySettings(context).refuseLegacy)
         }
     }
 

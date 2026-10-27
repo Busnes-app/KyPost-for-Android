@@ -73,6 +73,7 @@ class SecuritySettingsActivity : LockedActivity() {
     private lateinit var hostileLocationSwitch: SwitchCompat
     private lateinit var hostileLocationIntro: TextView
     private lateinit var credentialGateSwitch: SwitchCompat
+    private lateinit var refuseLegacySwitch: SwitchCompat
     private lateinit var encryptionSectionLabel: TextView
     private lateinit var encryptionCard: LinearLayout
 
@@ -85,6 +86,7 @@ class SecuritySettingsActivity : LockedActivity() {
     private var suppressCredentialGateListener = false
     private var suppressHostileLocationListener = false
     private var suppressBiometricListener = false
+    private var suppressRefuseLegacyListener = false
 
     /** Read once, off the main thread: most of these come from the Keystore-backed store. */
     private data class SettingsSnapshot(
@@ -92,6 +94,7 @@ class SecuritySettingsActivity : LockedActivity() {
         val biometricEnabled: Boolean,
         val credentialGateEnabled: Boolean,
         val hostileLocationEnabled: Boolean,
+        val refuseLegacyCrypto: Boolean,
         val graceMillis: Long,
         val wipeAfterAttempts: Int?,
 
@@ -112,6 +115,7 @@ class SecuritySettingsActivity : LockedActivity() {
                     biometricEnabled = appLockStore.isBiometricEnabled(),
                     credentialGateEnabled = appLockStore.isCredentialPinGateEnabled(),
                     hostileLocationEnabled = graph.hostileLocationSettings.isEnabled(),
+                    refuseLegacyCrypto = CryptoPolicySettings(this@SecuritySettingsActivity).refuseLegacy,
                     graceMillis = graph.appLockSettings.graceMillis(),
                     wipeAfterAttempts = graph.appLockStore.wipeAfterAttempts(),
                     // Keystore I/O, so it belongs in this off-main block with the rest.
@@ -268,6 +272,23 @@ class SecuritySettingsActivity : LockedActivity() {
         credentialGateSwitch.setOnCheckedChangeListener { _, checked ->
             if (suppressCredentialGateListener) return@setOnCheckedChangeListener
             if (checked) confirmEnableCredentialGate() else confirmDisableCredentialGate()
+        }
+
+        val cryptoCard = container.addSection(R.string.security_section_crypto)
+        refuseLegacySwitch = SwitchCompat(this).apply {
+            text = getString(R.string.security_refuse_legacy_title)
+            isChecked = snapshot.refuseLegacyCrypto
+        }
+        cryptoCard.addViewSpaced(refuseLegacySwitch, bottomDp = 4)
+        cryptoCard.addViewSpaced(caption(getString(R.string.security_refuse_legacy_intro)), bottomDp = 0)
+        refuseLegacySwitch.setOnCheckedChangeListener { _, checked ->
+            if (suppressRefuseLegacyListener) return@setOnCheckedChangeListener
+            // Turning it off weakens, so it takes the PIN whenever there is one.
+            confirmWithPinIf(!checked && lockSwitch.isChecked, onRefused = { revertRefuseLegacySwitch(!checked) }) {
+                lifecycleScope.launch {
+                    withContext(SecurityWork) { CryptoPolicySettings(this@SecuritySettingsActivity).refuseLegacy = checked }
+                }
+            }
         }
 
         lockSwitch.setOnCheckedChangeListener { _, checked ->
@@ -527,6 +548,12 @@ class SecuritySettingsActivity : LockedActivity() {
     }
 
     /** Same re-entrancy hazard as [revertLockSwitch], guarded the same way. */
+    private fun revertRefuseLegacySwitch(checked: Boolean) {
+        suppressRefuseLegacyListener = true
+        refuseLegacySwitch.isChecked = checked
+        suppressRefuseLegacyListener = false
+    }
+
     private fun revertHostileLocationSwitch(checked: Boolean) {
         suppressHostileLocationListener = true
         hostileLocationSwitch.isChecked = checked

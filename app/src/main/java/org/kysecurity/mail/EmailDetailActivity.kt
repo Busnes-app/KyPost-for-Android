@@ -690,6 +690,7 @@ class EmailDetailActivity : LockedActivity() {
             },
             // Load-bearing: without it the signature verdict is only whatever the relay says it is.
             localSignerKeys = org.kysecurity.mail.pgp.RoomLocalSignerKeys(applicationContext),
+            refuseLegacy = org.kysecurity.mail.security.CryptoPolicySettings(applicationContext)::refuseLegacy,
         )
     }
 
