@@ -66,7 +66,7 @@ class EnrollmentKeyringRecordTest {
     @Test
     fun theAcknowledgementIsStoredWithTheRecordAndClearedWithIt() {
         assertTrue("the emulator needs a secure lock screen", vault.ensureKey())
-        val ack = EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = "5F117951610CAF01500FA059CDE63F0EBEC934A2")
+        val ack = EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = "5F117951610CAF01500FA059CDE63F0EBEC934A2", envelopeVersion = ENVELOPE_VERSION_KEYRING)
 
         vault.store(ByteArray(12) { 7 }, ByteArray(48) { 9 }, VaultRecordKind.KEYRING)
         assertNull("a bare store carries no acknowledgement", vault.keyringAck())

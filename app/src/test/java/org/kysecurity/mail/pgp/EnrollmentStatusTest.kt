@@ -23,7 +23,7 @@ class EnrollmentStatusTest {
      *  on any account it would claim v2 enrollment that does not exist. */
     @Test
     fun theReportFollowsTheRecordKind() {
-        val ack = EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = "5F117951610CAF01500FA059CDE63F0EBEC934A2")
+        val ack = EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = "5F117951610CAF01500FA059CDE63F0EBEC934A2", envelopeVersion = ENVELOPE_VERSION_KEYRING)
         assertEquals(EnrollmentReport.Legacy, enrollmentReportFor(EnrollmentStatus.ENROLLED, ack = null))
         assertEquals(ack, enrollmentReportFor(EnrollmentStatus.ENROLLED_KEYRING, ack))
         assertEquals(EnrollmentReport.NotEnrolled, enrollmentReportFor(EnrollmentStatus.KEY_INVALIDATED, ack))

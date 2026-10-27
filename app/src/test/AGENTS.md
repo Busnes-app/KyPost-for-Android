@@ -40,6 +40,14 @@ Owns JVM unit tests for app logic that can run without device/emulator.
   inventory differ, `ENVELOPE_MALFORMED` without a v3 delivery record, no durable retry after 409,
   and the untouched legacy path. `EnrollmentClientsTest` pins the wire bodies: `envelopeVersions`
   on publish, delivery metadata on fetch, and the three acknowledgement shapes.
+- `HpkeRecipientTest` checks `HpkeRecipient.kt` byte for byte against the CFRG vector for mode 0 /
+  KEM 0x0010 / KDF 0x0001 / AEAD 0x0002 (`kypost-server/hpke-cfrg-p256-aes256.json`, provenance in
+  its `PROVENANCE.md`): shared_secret, key, base_nonce, exporter_secret and encryptions[0], with
+  software ECDH standing in for the Keystore. `EnrollmentCeremonyHpkeTest` opens v4/v5 envelopes
+  that KyPost-Server's real browser sealer produced (`resources/hpke/`, regenerated with
+  `seal-with-kypost-server.mjs` against a server checkout) and drives them through the ceremony's
+  delivery checks and acknowledgements. `scripts/hpke-negative-controls.sh` mutates the adapter
+  (info, mode, labels, suite ID, kem_context) and requires those tests to fail.
 - `CalendarInviteTest` builds invites inline and covers zones (IANA, Mozilla path, Windows
   table, unknown), all-day, DST-nominal durations, RRULE, CANCEL/update, folding, VALARM
   scoping, the size and event caps, and malformed input. `CalendarHandoffTest` pins the

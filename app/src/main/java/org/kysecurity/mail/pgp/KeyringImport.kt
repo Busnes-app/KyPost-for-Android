@@ -35,6 +35,8 @@ internal sealed class KeyringImportOutcome {
 internal suspend fun importKeyring(
     plaintext: ByteArray,
     expectedActiveFingerprint: String,
+    /** The delivered version (3 or 5), which the acknowledgement must repeat to the server. */
+    envelopeVersion: Int,
     previousVault: VaultOpener,
     /** The kind of the record on disk right now, read without authentication, or null when there
      *  is none. A held session is not proof of a sealed record: teardown and key invalidation
@@ -75,7 +77,7 @@ internal suspend fun importKeyring(
         }
     }
 
-    val ack = EnrollmentReport.Keyring(ring.materialGeneration, ring.activeFingerprint)
+    val ack = EnrollmentReport.Keyring(ring.materialGeneration, ring.activeFingerprint, envelopeVersion)
     return when (val sealed = sealer.seal(ring.original, VaultRecordKind.KEYRING, ack)) {
         SealOutcome.Sealed -> {
             EnrollmentSession.putKeyring(ring)

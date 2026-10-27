@@ -28,15 +28,15 @@ class EnrollmentClientsTest {
 
     /** Omitting the list resets the claim to [2], after which the browser refuses to seal v3.
      *  Server E2E_PGP.md: "Only advertise v3 after native complete-ring persistence checks pass",
-     *  which #112, #115 and #116 did. */
+     *  which #112, #115 and #116 did. 4/5 are the HPKE forms, which the server prefers when listed. */
     @Test
-    fun publishKey_advertisesVersions2And3() = runBlocking {
+    fun publishKey_advertisesVersions2Through5() = runBlocking {
         val factory = FakeCallFactory { req -> response(req, """{"ok":true}""", 200) }
 
         EnrollmentClients(callFactory = factory).publishKey("https://relay.example.com", "d", "s", "K")
 
         val body = okio.Buffer().also { factory.requests.single().body!!.writeTo(it) }.readUtf8()
-        assertTrue(body, body.contains("\"envelopeVersions\":[2,3]"))
+        assertTrue(body, body.contains("\"envelopeVersions\":[2,3,4,5]"))
     }
 
     /** The delivery metadata the server records beside the envelope; the ceremony validates the
@@ -89,7 +89,7 @@ class EnrollmentClientsTest {
 
         EnrollmentClients(callFactory = factory).reportState(
             "https://relay.example.com", "d", "s",
-            EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = "5F117951610CAF01500FA059CDE63F0EBEC934A2"),
+            EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = "5F117951610CAF01500FA059CDE63F0EBEC934A2", envelopeVersion = ENVELOPE_VERSION_KEYRING),
         )
 
         val body = okio.Buffer().also { factory.requests.single().body!!.writeTo(it) }.readUtf8()
@@ -97,6 +97,20 @@ class EnrollmentClientsTest {
             """{"encryptionEnrolled":true,"envelopeVersion":3,"materialGeneration":2,"fingerprint":"5F117951610CAF01500FA059CDE63F0EBEC934A2"}""",
             body,
         )
+    }
+
+    /** The server confirms only the version it delivered, so a v5 import must not say 3. */
+    @Test
+    fun reportState_v5AcknowledgementNamesVersion5() = runBlocking {
+        val factory = FakeCallFactory { req -> response(req, """{"ok":true}""", 200) }
+
+        EnrollmentClients(callFactory = factory).reportState(
+            "https://relay.example.com", "d", "s",
+            EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = "5F117951610CAF01500FA059CDE63F0EBEC934A2", envelopeVersion = ENVELOPE_VERSION_HPKE_KEYRING),
+        )
+
+        val body = okio.Buffer().also { factory.requests.single().body!!.writeTo(it) }.readUtf8()
+        assertTrue(body, body.contains("\"envelopeVersion\":5,"))
     }
 
     /** A bare true is what a legacy account accepts; a converted one refuses it with 409. The

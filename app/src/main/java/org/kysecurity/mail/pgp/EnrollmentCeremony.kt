@@ -198,7 +198,7 @@ internal class EnrollmentCeremony(
     private suspend fun openAndSeal(envelopeJson: String, delivery: DeliveryMetadata?) {
         emit(EnrollmentUiState.Opening)
 
-        val fields = parseDeviceEnvelope(envelopeJson, setOf(ENVELOPE_VERSION_LEGACY, ENVELOPE_VERSION_KEYRING))
+        val fields = parseDeviceEnvelope(envelopeJson, OPENABLE_ENVELOPE_VERSIONS.toSet())
         // Every envelope is validated against the delivery the server recorded (KyPost-Server #210):
         // this version, for this identity. Without that record it is not opened at all.
         if (fields == null || delivery == null || delivery.version != fields.version ||
@@ -208,7 +208,7 @@ internal class EnrollmentCeremony(
             return
         }
 
-        val expected = if (fields.version == ENVELOPE_VERSION_KEYRING) {
+        val expected = if (isKeyringVersion(fields.version)) {
             keyringDelivery(delivery) ?: run { failAndDestroy(FailureReason.ENVELOPE_MALFORMED); return }
         } else {
             null
@@ -229,21 +229,21 @@ internal class EnrollmentCeremony(
             return
         }
 
-        val sharedSecret = keys.sharedSecret(fields.epk)
-        if (sharedSecret == null) {
-            // The ECDH itself failed — a malformed peer point that got past the parse, or a key the
-            // Keystore will no longer agree with. Indistinguishable from a hostile envelope from
-            // here, and treated the same: no retry.
-            failAndDestroy(FailureReason.COULD_NOT_OPEN)
-            return
-        }
-
-        val plaintext = try {
-            // ownPoint is the HKDF salt — this device's own point, not the ephemeral one in the
-            // envelope.
-            openDeviceEnvelope(sharedSecret, ownPoint, fields, aad)
-        } finally {
-            sharedSecret.fill(0)
+        // A failed ECDH (a malformed peer point that got past the parse, or a key the Keystore will
+        // no longer agree with) is indistinguishable from a hostile envelope, and treated the same.
+        val plaintext = if (fields.version >= ENVELOPE_VERSION_HPKE) {
+            // RFC 9180: the binding is HPKE info, and DH(skR, pkE) is the Keystore agreement.
+            hpkeOpenBase(fields.epk, ownPoint, aad, fields.ct, keys::sharedSecret)
+        } else {
+            keys.sharedSecret(fields.epk)?.let { sharedSecret ->
+                try {
+                    // ownPoint is the HKDF salt — this device's own point, not the ephemeral one in
+                    // the envelope.
+                    openDeviceEnvelope(sharedSecret, ownPoint, fields, aad)
+                } finally {
+                    sharedSecret.fill(0)
+                }
+            }
         }
         if (plaintext == null) {
             failAndDestroy(FailureReason.COULD_NOT_OPEN)
@@ -252,7 +252,7 @@ internal class EnrollmentCeremony(
 
         try {
             when {
-                expected != null -> importAndReport(plaintext, expected)
+                expected != null -> importAndReport(plaintext, expected, fields.version)
                 legacyKeyMatches(plaintext) -> sealAndReport(plaintext)
                 else -> failAndDestroy(FailureReason.KEYRING_REJECTED)
             }
@@ -264,7 +264,7 @@ internal class EnrollmentCeremony(
         }
     }
 
-    /** A v2 plaintext is the account's one private key, and its primary must be the recorded identity. */
+    /** A v2/v4 plaintext is the account's one private key, and its primary must be the recorded identity. */
     private fun legacyKeyMatches(plaintext: ByteArray): Boolean {
         val ring = orderedSecretKeyRings(plaintext.inputStream())?.singleOrNull() ?: return false
         return ring.publicKey.fingerprint.joinToString("") { "%02X".format(it) } == fingerprint
@@ -350,7 +350,7 @@ internal class EnrollmentCeremony(
         return KeyringDelivery(generation, members.map { it.uppercase() }.toSet(), inventory.map { it.uppercase() }.toSet())
     }
 
-    private suspend fun importAndReport(plaintext: ByteArray, expected: KeyringDelivery) {
+    private suspend fun importAndReport(plaintext: ByteArray, expected: KeyringDelivery, envelopeVersion: Int) {
         emit(EnrollmentUiState.AwaitingAuth)
         if (!hasSecureLockScreen()) {
             failAndDestroy(FailureReason.NO_SECURE_LOCK_SCREEN)
@@ -362,6 +362,7 @@ internal class EnrollmentCeremony(
                 importKeyring(
                     plaintext = plaintext,
                     expectedActiveFingerprint = requireNotNull(fingerprint),
+                    envelopeVersion = envelopeVersion,
                     previousVault = previousVault,
                     sealedKind = { previousVault.sealedKind() },
                     sealer = sealer,
@@ -382,7 +383,7 @@ internal class EnrollmentCeremony(
             KeyringImportOutcome.Imported, KeyringImportOutcome.Replayed -> {
                 plaintext.fill(0)
                 mailCache.clearServerDecryptedBodies()
-                val ack = EnrollmentSession.withKeyring { EnrollmentReport.Keyring(it.materialGeneration, it.activeFingerprint) }
+                val ack = EnrollmentSession.withKeyring { EnrollmentReport.Keyring(it.materialGeneration, it.activeFingerprint, envelopeVersion) }
                 if (ack == null) failAndDestroy(FailureReason.SEAL_FAILED) else report(ack)
             }
             KeyringImportOutcome.InvalidRing, KeyringImportOutcome.RefusedIncomparable ->

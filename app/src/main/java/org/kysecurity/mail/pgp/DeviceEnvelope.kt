@@ -16,14 +16,31 @@ import javax.crypto.spec.SecretKeySpec
 /** HKDF info and AAD prefix, per version. Changing either strands every device on that version. */
 private const val ENVELOPE_DOMAIN_PREFIX = "kypost-device-envelope/v"
 private const val ENVELOPE_ALG = "ECDH-P256+HKDF-SHA256+A256GCM"
+private const val HPKE_ENVELOPE_ALG = "HPKE-Base-P256-SHA256-A256GCM"
 private const val GCM_TAG_BITS = 128
 private const val TAG = "DeviceEnvelope"
 
-/** One armored private key, sealed by the browser's legacy path. Live enrollment accepts only this. */
+/** One armored private key, sealed by the browser's legacy path. */
 internal const val ENVELOPE_VERSION_LEGACY = 2
 
-/** The complete `kypost-pgp-keyring-v1` ring. Framing is prepared here; nothing dispatches it yet. */
+/** The complete `kypost-pgp-keyring-v1` ring. */
 internal const val ENVELOPE_VERSION_KEYRING = 3
+
+/** v2's plaintext and v3's ring, sealed with RFC 9180 HPKE (`HpkeRecipient.kt`); the binding is HPKE info. */
+internal const val ENVELOPE_VERSION_HPKE = 4
+internal const val ENVELOPE_VERSION_HPKE_KEYRING = 5
+
+/** What this build opens, advertised on publish. The server prefers 4/5 when they are listed. */
+internal val OPENABLE_ENVELOPE_VERSIONS = listOf(
+    ENVELOPE_VERSION_LEGACY, ENVELOPE_VERSION_KEYRING, ENVELOPE_VERSION_HPKE, ENVELOPE_VERSION_HPKE_KEYRING,
+)
+
+/** Odd versions carry the complete ring, even ones one armored key. */
+internal fun isKeyringVersion(version: Int): Boolean =
+    version == ENVELOPE_VERSION_KEYRING || version == ENVELOPE_VERSION_HPKE_KEYRING
+
+private fun envelopeCap(version: Int): Int =
+    if (isKeyringVersion(version)) MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES else MemoryBudget.PGP_DEVICE_ENVELOPE_LEGACY_BYTES
 
 internal fun envelopeDomain(version: Int): String = "$ENVELOPE_DOMAIN_PREFIX$version"
 
@@ -57,37 +74,36 @@ internal fun hkdfSha256(ikm: ByteArray, salt: ByteArray, info: ByteArray, length
 
 /** Not a `data class`: generated equals over [ByteArray] would be identity, not structural. The
  *  version is parsed once and travels with the fields, so the opener cannot be pointed at a
- *  different domain than the one the envelope declared. */
+ *  different domain than the one the envelope declared. For v4/v5 [epk] is HPKE `enc` and [iv]
+ *  is empty: the nonce comes from the key schedule. */
 internal class DeviceEnvelopeFields(val version: Int, val epk: ByteArray, val iv: ByteArray, val ct: ByteArray)
 
 /**
  * Null for anything malformed or unsupported; the caller re-runs the ceremony, never retries.
- * [allowedVersions] is the caller's dispatch policy: live enrollment passes only the legacy
- * version, so a v3 envelope is rejected there rather than opened under the wrong domain.
+ * [allowedVersions] is the caller's dispatch policy: a version outside it is rejected rather than
+ * opened under the wrong domain.
  */
 internal fun parseDeviceEnvelope(json: String, allowedVersions: Set<Int>): DeviceEnvelopeFields? = runCatching {
     // A String's UTF-8 length is at least its char count, so this bounds the parse without
     // measuring, at the largest cap among the versions this caller admits; a v3-only caller never
     // hands the parser more than the v3 cap. The exact v3 limit is re-applied below once the
     // version is known, for callers that admit both.
-    val parseBound = allowedVersions.maxOf {
-        if (it == ENVELOPE_VERSION_KEYRING) MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES
-        else MemoryBudget.PGP_DEVICE_ENVELOPE_LEGACY_BYTES
-    }
+    val parseBound = allowedVersions.maxOf(::envelopeCap)
     if (json.length > parseBound) return null
     val o = Json.parseToJsonElement(json).jsonObject
     val v = o["v"]?.jsonPrimitive ?: return null
     val version = when {
         // The legacy parser compared content only, so a quoted "2" has always opened; kept.
         v.content == ENVELOPE_VERSION_LEGACY.toString() -> ENVELOPE_VERSION_LEGACY
-        !v.isString && v.content == ENVELOPE_VERSION_KEYRING.toString() -> ENVELOPE_VERSION_KEYRING
+        !v.isString && v.content in STRICT_VERSIONS -> v.content.toInt()
         else -> return null
     }
     if (version !in allowedVersions) return null
+    if (version >= ENVELOPE_VERSION_HPKE) return parseHpkeFields(json, o, version)
     if (o["alg"]?.jsonPrimitive?.content != ENVELOPE_ALG) return null
     if (version == ENVELOPE_VERSION_KEYRING) {
         if (o.keys != ENVELOPE_KEYS) return null
-        if (utf8Length(json) > MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES) return null
+        if (utf8Length(json) > envelopeCap(version)) return null
     }
     val epk = strictBase64(o.getValue("epk").jsonPrimitive.let { if (it.isString) it.content else return null })
     val iv = strictBase64(o.getValue("iv").jsonPrimitive.let { if (it.isString) it.content else return null })
@@ -104,6 +120,20 @@ internal fun parseDeviceEnvelope(json: String, allowedVersions: Set<Int>): Devic
 }.getOrNull()
 
 private val ENVELOPE_KEYS = setOf("v", "alg", "epk", "iv", "ct")
+private val HPKE_ENVELOPE_KEYS = setOf("v", "alg", "enc", "ct")
+private val STRICT_VERSIONS = setOf("3", "4", "5")
+
+/** v4/v5 framing, as strict as v3 and the server's `ParseDeviceEnvelopeVersion`: exactly
+ *  `{v, alg, enc, ct}`, canonical base64, `enc` a P-256 point, a ciphertext longer than its tag. */
+private fun parseHpkeFields(json: String, o: kotlinx.serialization.json.JsonObject, version: Int): DeviceEnvelopeFields? {
+    if (o.keys != HPKE_ENVELOPE_KEYS || o.getValue("alg").jsonPrimitive.content != HPKE_ENVELOPE_ALG) return null
+    if (utf8Length(json) > envelopeCap(version)) return null
+    val enc = o.getValue("enc").jsonPrimitive.takeIf { it.isString }?.let { strictBase64(it.content) }
+    val ct = o.getValue("ct").jsonPrimitive.takeIf { it.isString }?.let { strictBase64(it.content) }
+    if (enc == null || enc.size != 65 || enc[0] != 0x04.toByte() || !isP256Point(enc)) return null
+    if (ct == null || ct.size <= GCM_TAG_BITS / 8) return null
+    return DeviceEnvelopeFields(version = version, epk = enc, iv = ByteArray(0), ct = ct)
+}
 
 /** Standard alphabet, padded, canonical: `java.util.Base64` alone accepts missing padding and
  *  non-zero trailing bits, both of which let two encodings name one ciphertext. */
@@ -113,7 +143,7 @@ internal fun strictBase64(text: String): ByteArray? {
     return bytes.takeIf { Base64.getEncoder().encodeToString(it) == text }
 }
 
-private fun isP256Point(encoded: ByteArray): Boolean = runCatching {
+internal fun isP256Point(encoded: ByteArray): Boolean = runCatching {
     val point = ECNamedCurveTable.getByName("secp256r1").curve.decodePoint(encoded)
     !point.isInfinity && point.isValid
 }.getOrDefault(false)
@@ -137,18 +167,19 @@ internal fun utf8Length(text: String): Long {
 
 /** `domain || uint16BE(len(deviceId)) || deviceId || uint16BE(len(fingerprint)) || fingerprint`
  *
- *  The device ID goes in unchanged: no trimming, normalization or case folding. The fingerprint
- *  is uppercase hex without whitespace; v3 additionally requires a full 40- or 64-digit
- *  fingerprint, the only lengths a validated active key can have. */
+ *  GCM AAD for v2/v3, HPKE info for v4/v5. The device ID goes in unchanged: no trimming,
+ *  normalization or case folding. The fingerprint is uppercase hex without whitespace; ring
+ *  versions additionally require a full 40- or 64-digit fingerprint, the only lengths a validated
+ *  active key can have. */
 internal fun deviceEnvelopeAad(version: Int, deviceId: String, pgpFingerprint: String): ByteArray {
-    require(version == ENVELOPE_VERSION_LEGACY || version == ENVELOPE_VERSION_KEYRING) { "unsupported envelope version" }
+    require(version in OPENABLE_ENVELOPE_VERSIONS) { "unsupported envelope version" }
     require(deviceId.isNotEmpty()) { "deviceId must not be empty" }
     val fingerprint = pgpFingerprint.uppercase().filterNot { it.isWhitespace() }
     require(fingerprint.isNotEmpty() && fingerprint.all { it in "0123456789ABCDEF" }) {
         "pgpFingerprint must be hex; got '${pgpFingerprint.take(24)}'"
     }
-    if (version == ENVELOPE_VERSION_KEYRING) {
-        require(fingerprint.length == 40 || fingerprint.length == 64) { "a v3 fingerprint is 40 or 64 hex digits" }
+    if (isKeyringVersion(version)) {
+        require(fingerprint.length == 40 || fingerprint.length == 64) { "a ring fingerprint is 40 or 64 hex digits" }
     }
     val info = envelopeDomain(version).toByteArray(Charsets.UTF_8)
     val id = deviceId.toByteArray(Charsets.UTF_8)
