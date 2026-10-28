@@ -51,7 +51,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-          cache: gradle
+      # Gradle User Home, including the build cache (org.gradle.caching). Only this job saves it, and
+      # only on main: one cache key per build-file hash, and the debug compile it holds is what the
+      # emulator legs reuse. Every other job restores it read-only. `basic` is the MIT provider; the
+      # default `enhanced` one is proprietary and needs Gradle's terms of use accepted.
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
 
       - uses: ./.github/actions/placeholder-google-services
 
@@ -135,7 +141,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-          cache: gradle
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
 
       - uses: ./.github/actions/placeholder-google-services
 
@@ -265,6 +274,26 @@ jobs:
       - name: dependency verification metadata is unchanged
         run: git diff --exit-code -- gradle/verification-metadata.xml
 
+      # The smoke jobs below install these instead of building the same APKs a second time.
+      - name: upload the play release build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-play
+          path: |
+            app/build/outputs/apk/play/release/app-play-release.apk
+            app/build/outputs/mapping/playRelease/mapping.txt
+          if-no-files-found: error
+          retention-days: 7
+      - name: upload the fdroid release build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-fdroid
+          path: |
+            app/build/outputs/apk/fdroid/release/app-fdroid-release.apk
+            app/build/outputs/mapping/fdroidRelease/mapping.txt
+          if-no-files-found: error
+          retention-days: 7
+
       - name: lint vital report
         if: failure()
         run: |
@@ -346,9 +375,18 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-          cache: gradle
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          cache-read-only: true
 
       - uses: ./.github/actions/placeholder-google-services
+
+      # Builds both APKs while the emulator image downloads and boots; the connected task below
+      # waits for it and then finds them up to date. Same tasks it would run itself.
+      - name: assemble the test APKs in the background
+        run: |
+          nohup sh -c './gradlew assemble${{ matrix.flavor }}Debug assemble${{ matrix.flavor }}DebugAndroidTest > /tmp/assemble.log 2>&1; echo $? > /tmp/assemble.rc' > /dev/null 2>&1 &
 
       # Hardware acceleration for the emulator. Without it the AVD falls back to software
       # and a 45-minute timeout is not enough.
@@ -491,6 +529,11 @@ jobs:
             chmod +x /tmp/kgwatch.sh
             nohup /tmp/kgwatch.sh > /tmp/keyguard-watch.txt 2>&1 &
 
+            # The background assemble: wait, show it, and stop here if it failed.
+            while [ ! -f /tmp/assemble.rc ]; do sleep 5; done
+            cat /tmp/assemble.log
+            if [ "$(cat /tmp/assemble.rc)" != 0 ]; then echo "assembling the test APKs failed" >&2; exit 1; fi
+
             # `|| echo` rather than letting gradle fail the line: each line here is its own sh -c,
             # so a bare non-zero exit ends the script and the dump never runs. The marker file
             # re-raises the failure at the end, so nothing is silenced.
@@ -541,6 +584,38 @@ jobs:
             echo "=== $f ==="
             cat "$f"
           done || true
+
+      # Every run, not only failures: per-test timings, and the whole logcat that the excerpts
+      # above cut short.
+      - name: upload the instrumented test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: androidTest-results-${{ matrix.api-level }}-${{ matrix.flavor }}
+          path: |
+            app/build/outputs/androidTest-results/
+            /tmp/logcat.txt
+            /tmp/keyguard-watch.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Installs release-build's minified APKs on an emulator; see release-smoke.yml. The job names
+  # keep the checks reporting as "ci-play-release / smoke" and "ci-fdroid-release / smoke".
+  play-release:
+    name: ci-play-release
+    needs: release-build
+    uses: ./.github/workflows/release-smoke.yml
+    with:
+      flavor: play
+      package: org.kysecurity.mail
+
+  fdroid-release:
+    name: ci-fdroid-release
+    needs: release-build
+    uses: ./.github/workflows/release-smoke.yml
+    with:
+      flavor: fdroid
+      package: org.kysecurity.mail.fdroid
 
   # The context main's ruleset requires, supplied by a job with NO matrix so its check name is
   # exactly "ci-instrumented". `needs.<job>.result` on a matrix job is the aggregate: "success"

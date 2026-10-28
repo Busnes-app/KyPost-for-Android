@@ -20,7 +20,11 @@ Owns Android instrumentation tests executed on emulator/device.
   attachment; API 31 SystemUI can strand a window if cancelled during that interval.
 - A test that taps into a launched Activity calls `afterSplash()` (`SplashWindow.kt`) on the
   scenario first. The system splash is not focusable, so Espresso taps under it, and
-  `LockedActivity`'s overlay protection drops the obscured tap.
+  `LockedActivity`'s overlay protection drops the obscured tap. Debug builds log each obscured
+  touch under the `LockedActivity` tag.
+- `ActivityScenario.close()` waits 45s whenever androidx.test's EmptyActivity is already on top.
+  A test that ends in `CREATED` moves back to `RESUMED` first; a for-result launch whose screen
+  finished calls `awaitDestroyed()` (`ScenarioClose.kt`) after its last assertion.
 - Inbox tests that seed rows with `setEmailsForTest` use a folder no launch refresh targets, as
   `InboxNewMailTest` and `InboxUndoTest` do; the launch refresh repaints INBOX whenever it lands.
 

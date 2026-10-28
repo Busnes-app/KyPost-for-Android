@@ -20,6 +20,7 @@ import org.kysecurity.mail.EmailDetailActivity
 import org.kysecurity.mail.InboxActivity
 import org.kysecurity.mail.KeywordTabs
 import org.kysecurity.mail.R
+import org.kysecurity.mail.awaitDestroyed
 import org.kysecurity.mail.mail.MailAction
 import org.kysecurity.mail.mail.MailActionOutcome
 import org.kysecurity.mail.mail.MailOutcome
@@ -79,6 +80,7 @@ class MarkUnreadActionsTest {
             assertEquals(ID, scenario.result.resultData.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_ID))
             assertEquals(INBOX, scenario.result.resultData.getStringExtra(EmailDetailActivity.EXTRA_MARKED_UNREAD_FOLDER))
             assertEquals(listOf(MailAction.READ, MailAction.UNREAD), source.completed.toList())
+            scenario.awaitDestroyed()
         }
     }
 

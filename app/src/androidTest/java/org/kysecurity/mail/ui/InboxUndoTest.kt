@@ -69,6 +69,7 @@ class InboxUndoTest {
 
             assertTrue("the held delete never ran", ran.await(3, TimeUnit.SECONDS))
             scenario.onActivity { it.rowActionObserverForTest = null }
+            scenario.moveToState(Lifecycle.State.RESUMED) // See awaitDestroyed: close() from CREATED costs 45s.
         }
     }
 

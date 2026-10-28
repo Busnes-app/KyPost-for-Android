@@ -26,6 +26,7 @@ import org.junit.runner.RunWith
 import org.kysecurity.mail.FoldersActivity
 import org.kysecurity.mail.R
 import org.kysecurity.mail.afterSplash
+import org.kysecurity.mail.awaitDestroyed
 import org.kysecurity.mail.mail.FolderInfo
 import org.kysecurity.mail.mail.FolderListResult
 import org.kysecurity.mail.mail.MailOutcome
@@ -81,6 +82,7 @@ class FoldersActivityTest {
 
             assertEquals(Activity.RESULT_OK, scenario.result.resultCode)
             assertEquals("Work", scenario.result.resultData.getStringExtra(FoldersActivity.EXTRA_FOLDER))
+            scenario.awaitDestroyed()
         }
     }
 
@@ -130,6 +132,7 @@ class FoldersActivityTest {
 
             assertEquals(Activity.RESULT_OK, scenario.result.resultCode)
             assertEquals("Archive/Older", scenario.result.resultData.getStringExtra(FoldersActivity.EXTRA_FOLDER))
+            scenario.awaitDestroyed()
         }
     }
 

@@ -1,13 +1,13 @@
 name: release-smoke
 
 # Installs one flavor's minified release build on an emulator and runs scripts/release-smoke.sh
-# against it. Called by ci-play-release.yml and ci-fdroid-release.yml, so each flavor reports as
-# its own check. ci.yml's emulator legs only ever run debug, and a missing R8 keep rule only shows
-# on the release build, at launch.
+# against it. Called twice by ci.yml, so each flavor reports as its own check. ci.yml's emulator
+# legs only ever run debug, and a missing R8 keep rule only shows on the release build, at launch.
 #
-# No secrets, on purpose: the callers run on pull_request. The release key lives on release.yml's
-# protected environment, which this workflow never names. The build is signed with a key generated
-# for this run (the same throwaway as ci-release-build) and the APK is never published.
+# No secrets, on purpose: the caller runs on pull_request. The release key lives on release.yml's
+# protected environment, which this workflow never names. The APK is ci-release-build's, signed with
+# that job's throwaway key, and is never published. Its R8 mapping, for retracing a stall report,
+# is in the same release-<flavor> artifact.
 on:
   workflow_call:
     inputs:
@@ -32,34 +32,15 @@ jobs:
       FLAVOR: ${{ inputs.flavor }}
       PACKAGE: ${{ inputs.package }}
     steps:
+      # For scripts/release-smoke.sh only; nothing here builds.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          distribution: temurin
-          java-version: '25'
-          cache: gradle
-
-      - uses: ./.github/actions/placeholder-google-services
-
-      - name: throwaway signing key
-        run: |
-          keytool -genkeypair -keystore "$RUNNER_TEMP/ci-throwaway.jks" -alias ci \
-            -keyalg RSA -keysize 4096 -validity 30 \
-            -storepass ci-throwaway -keypass ci-throwaway \
-            -dname "CN=KyPost CI, O=Verification Only, C=US"
-          {
-            echo "KYPOST_KEYSTORE=$RUNNER_TEMP/ci-throwaway.jks"
-            echo "KYPOST_STORE_PASSWORD=ci-throwaway"
-            echo "KYPOST_KEY_ALIAS=ci"
-            echo "KYPOST_KEY_PASSWORD=ci-throwaway"
-          } >> "$GITHUB_ENV"
-
-      # Built before the emulator boots, so a build failure does not cost an emulator start.
-      - name: build the release APK
-        run: |
-          ./gradlew ":app:assemble${FLAVOR^}Release"
-          cp "app/build/outputs/apk/$FLAVOR/release/app-$FLAVOR-release.apk" "$RUNNER_TEMP/smoke.apk"
+          name: release-${{ inputs.flavor }}
+          path: ${{ runner.temp }}/release
+      - name: the release APK
+        run: cp "$RUNNER_TEMP/release/apk/$FLAVOR/release/app-$FLAVOR-release.apk" "$RUNNER_TEMP/smoke.apk"
 
       # Same emulator setup as ci.yml's instrumented job, minus the lock-screen PIN: nothing here
       # needs a secure keyguard, and that PIN is what made the keyguard hard to dismiss there.
@@ -84,12 +65,3 @@ jobs:
             adb shell input keyevent 224
             adb shell wm dismiss-keyguard
             sh scripts/release-smoke.sh "$RUNNER_TEMP/smoke.apk" "$PACKAGE"
-
-      # Retraces the stall report's R8-obfuscated stacks. The mapping is build metadata, no secret.
-      - name: upload the R8 mapping
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: mapping-${{ inputs.flavor }}
-          path: app/build/outputs/mapping/${{ inputs.flavor }}Release/mapping.txt
-          retention-days: 7
