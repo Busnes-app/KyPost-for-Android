@@ -72,12 +72,12 @@ internal object MemoryBudget {
             2 * PGP_SECRET_KEY_OUTPUT_BYTES +
             PGP_SECRET_KEY_STREAM_BUFFER_BYTES
 
-    /** A legacy (v2) device envelope, serialized: one armored key at [PGP_SECRET_KEY_INPUT_BYTES]
+    /** A one-key (v4) device envelope, serialized: one armored key at [PGP_SECRET_KEY_INPUT_BYTES]
      *  plus its GCM tag, base64-expanded, plus JSON framing. Derived so raising the key cap moves
      *  this with it rather than silently shrinking what enrollment admits. */
     const val PGP_DEVICE_ENVELOPE_LEGACY_BYTES = (PGP_SECRET_KEY_INPUT_BYTES + 16 + 2) / 3 * 4 + 1024
 
-    /** A v3 device envelope, serialized: the server's 128 KiB cap on the UTF-8 form, applied
+    /** A keyring (v5) device envelope, serialized: the server's 128 KiB cap on the UTF-8 form, applied
      *  before any base64 work. */
     const val PGP_DEVICE_ENVELOPE_V3_BYTES = 128 * 1024
 
@@ -90,7 +90,7 @@ internal object MemoryBudget {
     const val PGP_KEYRING_PRIMARY_COUNT = 16
     const val PGP_KEYRING_FINGERPRINT_COUNT = 256
 
-    /** Importing a v3 ring, at peak: the serialized envelope as a String (two bytes per char) and
+    /** Importing a v5 ring, at peak: the serialized envelope as a String (two bytes per char) and
      *  its decoded ciphertext; the plaintext bytes, their String copy, and the JSON element tree
      *  charged at another String; the per-member armor copies handed to the OpenPGP parser and
      *  the parsed packets, each charged at the plaintext cap; and the previous sealed bundle held

@@ -198,7 +198,13 @@ internal class EnrollmentCeremony(
     private suspend fun openAndSeal(envelopeJson: String, delivery: DeliveryMetadata?) {
         emit(EnrollmentUiState.Opening)
 
-        val fields = parseDeviceEnvelope(envelopeJson, OPENABLE_ENVELOPE_VERSIONS.toSet())
+        // A retired v2/v3 delivery is the server's to fix: refused before parsing, nothing opened.
+        if (delivery?.version in RETIRED_ENVELOPE_VERSIONS) {
+            failAndDestroy(FailureReason.RETIRED_ENVELOPE)
+            return
+        }
+
+        val fields = parseDeviceEnvelope(envelopeJson)
         // Every envelope is validated against the delivery the server recorded (KyPost-Server #210):
         // this version, for this identity. Without that record it is not opened at all.
         if (fields == null || delivery == null || delivery.version != fields.version ||
@@ -214,11 +220,11 @@ internal class EnrollmentCeremony(
             null
         }
 
-        // The AAD comes from this device's id and the checked fingerprint — never from the envelope.
-        val aad = runCatching {
+        // The HPKE info comes from this device's id and the checked fingerprint — never from the envelope.
+        val info = runCatching {
             deviceEnvelopeAad(fields.version, requireNotNull(deviceId), requireNotNull(fingerprint))
         }.getOrNull()
-        if (aad == null) {
+        if (info == null) {
             failAndDestroy(FailureReason.ENVELOPE_MALFORMED)
             return
         }
@@ -229,22 +235,9 @@ internal class EnrollmentCeremony(
             return
         }
 
-        // A failed ECDH (a malformed peer point that got past the parse, or a key the Keystore will
+        // RFC 9180: DH(skR, pkE) is the Keystore agreement. A failed one (a key the Keystore will
         // no longer agree with) is indistinguishable from a hostile envelope, and treated the same.
-        val plaintext = if (fields.version >= ENVELOPE_VERSION_HPKE) {
-            // RFC 9180: the binding is HPKE info, and DH(skR, pkE) is the Keystore agreement.
-            hpkeOpenBase(fields.epk, ownPoint, aad, fields.ct, keys::sharedSecret)
-        } else {
-            keys.sharedSecret(fields.epk)?.let { sharedSecret ->
-                try {
-                    // ownPoint is the HKDF salt — this device's own point, not the ephemeral one in
-                    // the envelope.
-                    openDeviceEnvelope(sharedSecret, ownPoint, fields, aad)
-                } finally {
-                    sharedSecret.fill(0)
-                }
-            }
-        }
+        val plaintext = hpkeOpenBase(fields.epk, ownPoint, info, fields.ct, keys::sharedSecret)
         if (plaintext == null) {
             failAndDestroy(FailureReason.COULD_NOT_OPEN)
             return
@@ -264,7 +257,7 @@ internal class EnrollmentCeremony(
         }
     }
 
-    /** A v2/v4 plaintext is the account's one private key, and its primary must be the recorded identity. */
+    /** A v4 plaintext is the account's one private key, and its primary must be the recorded identity. */
     private fun legacyKeyMatches(plaintext: ByteArray): Boolean {
         val ring = orderedSecretKeyRings(plaintext.inputStream())?.singleOrNull() ?: return false
         return ring.publicKey.fingerprint.joinToString("") { "%02X".format(it) } == fingerprint

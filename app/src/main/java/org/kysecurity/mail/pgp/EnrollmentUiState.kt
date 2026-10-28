@@ -25,7 +25,10 @@ internal enum class FailureReason {
     /** The envelope did not parse, or its fields were the wrong size. Never a retry. */
     ENVELOPE_MALFORMED,
 
-    /** GCM authentication failed. The copy **describes rather than accuses**; never a retry. */
+    /** The server delivered a retired v2/v3 envelope. Nothing was opened; the server needs updating. */
+    RETIRED_ENVELOPE,
+
+    /** HPKE authentication failed. The copy **describes rather than accuses**; never a retry. */
     COULD_NOT_OPEN,
 
     /** Discovered at the seal rather than the gate — the lock screen was removed mid-ceremony. */

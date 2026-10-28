@@ -8,132 +8,63 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.bouncycastle.asn1.x9.ECNamedCurveTable
 import org.kysecurity.mail.MemoryBudget
 import java.util.Base64
-import javax.crypto.Cipher
-import javax.crypto.Mac
-import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.SecretKeySpec
 
-/** HKDF info and AAD prefix, per version. Changing either strands every device on that version. */
+/** HPKE info prefix, per version. Changing it strands every device on that version. */
 private const val ENVELOPE_DOMAIN_PREFIX = "kypost-device-envelope/v"
-private const val ENVELOPE_ALG = "ECDH-P256+HKDF-SHA256+A256GCM"
 private const val HPKE_ENVELOPE_ALG = "HPKE-Base-P256-SHA256-A256GCM"
-private const val GCM_TAG_BITS = 128
-private const val TAG = "DeviceEnvelope"
+private const val GCM_TAG_BYTES = 16
 
-/** One armored private key, sealed by the browser's legacy path. */
-internal const val ENVELOPE_VERSION_LEGACY = 2
+/** Retired custom formats (ECDH + HKDF + AES-GCM, not a published construction): one armored key
+ *  and the complete ring. Never opened; only named so a delivery of one gets its own refusal. */
+internal val RETIRED_ENVELOPE_VERSIONS = setOf(2, 3)
 
-/** The complete `kypost-pgp-keyring-v1` ring. */
+/** The acknowledgement version of a keyring record stored before v5 existed (`EnrollmentVault`). */
 internal const val ENVELOPE_VERSION_KEYRING = 3
 
-/** v2's plaintext and v3's ring, sealed with RFC 9180 HPKE (`HpkeRecipient.kt`); the binding is HPKE info. */
+/** One armored key (v4) and the complete `kypost-pgp-keyring-v1` ring (v5), sealed with RFC 9180
+ *  HPKE (`HpkeRecipient.kt`); the binding is HPKE info. */
 internal const val ENVELOPE_VERSION_HPKE = 4
 internal const val ENVELOPE_VERSION_HPKE_KEYRING = 5
 
-/** What this build opens, advertised on publish. The server prefers 4/5 when they are listed. */
-internal val OPENABLE_ENVELOPE_VERSIONS = listOf(
-    ENVELOPE_VERSION_LEGACY, ENVELOPE_VERSION_KEYRING, ENVELOPE_VERSION_HPKE, ENVELOPE_VERSION_HPKE_KEYRING,
-)
+/** What this build opens, advertised on publish. */
+internal val OPENABLE_ENVELOPE_VERSIONS = listOf(ENVELOPE_VERSION_HPKE, ENVELOPE_VERSION_HPKE_KEYRING)
 
-/** Odd versions carry the complete ring, even ones one armored key. */
-internal fun isKeyringVersion(version: Int): Boolean =
-    version == ENVELOPE_VERSION_KEYRING || version == ENVELOPE_VERSION_HPKE_KEYRING
+internal fun isKeyringVersion(version: Int): Boolean = version == ENVELOPE_VERSION_HPKE_KEYRING
 
 private fun envelopeCap(version: Int): Int =
     if (isKeyringVersion(version)) MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES else MemoryBudget.PGP_DEVICE_ENVELOPE_LEGACY_BYTES
 
 internal fun envelopeDomain(version: Int): String = "$ENVELOPE_DOMAIN_PREFIX$version"
 
-/** HKDF-SHA256 (RFC 5869), extract-then-expand. Built from [Mac] rather than pulled in as a
- *  dependency: this app adds none for crypto. */
-internal fun hkdfSha256(ikm: ByteArray, salt: ByteArray, info: ByteArray, length: Int): ByteArray {
-    // RFC 5869's own ceiling. The counter is written as ONE byte, so past 255 blocks it wraps to
-    // zero and round 256 reproduces round 1's output — a silent key collision rather than an error.
-    require(length in 1..(255 * 32)) { "HKDF-SHA256 cannot expand to $length bytes" }
-    val mac = Mac.getInstance("HmacSHA256")
-    mac.init(SecretKeySpec(salt, "HmacSHA256"))
-    val prk = mac.doFinal(ikm)
-
-    val out = ByteArray(length)
-    var previous = ByteArray(0)
-    var written = 0
-    var counter = 1
-    while (written < length) {
-        mac.init(SecretKeySpec(prk, "HmacSHA256"))
-        mac.update(previous)
-        mac.update(info)
-        mac.update(counter.toByte())
-        previous = mac.doFinal()
-        val take = minOf(previous.size, length - written)
-        previous.copyInto(out, written, 0, take)
-        written += take
-        counter++
-    }
-    return out
-}
-
 /** Not a `data class`: generated equals over [ByteArray] would be identity, not structural. The
  *  version is parsed once and travels with the fields, so the opener cannot be pointed at a
- *  different domain than the one the envelope declared. For v4/v5 [epk] is HPKE `enc` and [iv]
- *  is empty: the nonce comes from the key schedule. */
-internal class DeviceEnvelopeFields(val version: Int, val epk: ByteArray, val iv: ByteArray, val ct: ByteArray)
+ *  different binding than the one the envelope declared. [epk] is HPKE `enc`. */
+internal class DeviceEnvelopeFields(val version: Int, val epk: ByteArray, val ct: ByteArray)
+
+private val HPKE_ENVELOPE_KEYS = setOf("v", "alg", "enc", "ct")
 
 /**
- * Null for anything malformed or unsupported; the caller re-runs the ceremony, never retries.
- * [allowedVersions] is the caller's dispatch policy: a version outside it is rejected rather than
- * opened under the wrong domain.
+ * v4/v5 framing, as strict as the server's `ParseDeviceEnvelopeVersion`: exactly
+ * `{v, alg, enc, ct}`, numeric `v`, canonical base64, `enc` a P-256 point, a ciphertext longer
+ * than its tag. Null for anything else, v2/v3 included; the caller re-runs the ceremony, never retries.
  */
-internal fun parseDeviceEnvelope(json: String, allowedVersions: Set<Int>): DeviceEnvelopeFields? = runCatching {
+internal fun parseDeviceEnvelope(json: String): DeviceEnvelopeFields? = runCatching {
     // A String's UTF-8 length is at least its char count, so this bounds the parse without
-    // measuring, at the largest cap among the versions this caller admits; a v3-only caller never
-    // hands the parser more than the v3 cap. The exact v3 limit is re-applied below once the
-    // version is known, for callers that admit both.
-    val parseBound = allowedVersions.maxOf(::envelopeCap)
-    if (json.length > parseBound) return null
+    // measuring; the exact per-version cap is applied once the version is known.
+    if (json.length > OPENABLE_ENVELOPE_VERSIONS.maxOf(::envelopeCap)) return null
     val o = Json.parseToJsonElement(json).jsonObject
     val v = o["v"]?.jsonPrimitive ?: return null
-    val version = when {
-        // The legacy parser compared content only, so a quoted "2" has always opened; kept.
-        v.content == ENVELOPE_VERSION_LEGACY.toString() -> ENVELOPE_VERSION_LEGACY
-        !v.isString && v.content in STRICT_VERSIONS -> v.content.toInt()
-        else -> return null
-    }
-    if (version !in allowedVersions) return null
-    if (version >= ENVELOPE_VERSION_HPKE) return parseHpkeFields(json, o, version)
-    if (o["alg"]?.jsonPrimitive?.content != ENVELOPE_ALG) return null
-    if (version == ENVELOPE_VERSION_KEYRING) {
-        if (o.keys != ENVELOPE_KEYS) return null
-        if (utf8Length(json) > envelopeCap(version)) return null
-    }
-    val epk = strictBase64(o.getValue("epk").jsonPrimitive.let { if (it.isString) it.content else return null })
-    val iv = strictBase64(o.getValue("iv").jsonPrimitive.let { if (it.isString) it.content else return null })
-    val ct = strictBase64(o.getValue("ct").jsonPrimitive.let { if (it.isString) it.content else return null })
-    // Match the browser, which requires exactly 65 bytes with an 0x04 prefix before it will import
-    // the point. For the legacy version the Keystore agreement (`EnrollmentKeyStore.isOnCurve`)
-    // is where an off-curve point dies; v3 is checked here as well, so the framing stands on its
-    // own before any ECDH layer sees the point.
-    if (epk == null || epk.size != 65 || epk[0] != 0x04.toByte()) return null
-    if (version == ENVELOPE_VERSION_KEYRING && !isP256Point(epk)) return null
-    if (iv == null || iv.size != 12) return null
-    if (ct == null || ct.size <= GCM_TAG_BITS / 8) return null
-    DeviceEnvelopeFields(version = version, epk = epk, iv = iv, ct = ct)
-}.getOrNull()
-
-private val ENVELOPE_KEYS = setOf("v", "alg", "epk", "iv", "ct")
-private val HPKE_ENVELOPE_KEYS = setOf("v", "alg", "enc", "ct")
-private val STRICT_VERSIONS = setOf("3", "4", "5")
-
-/** v4/v5 framing, as strict as v3 and the server's `ParseDeviceEnvelopeVersion`: exactly
- *  `{v, alg, enc, ct}`, canonical base64, `enc` a P-256 point, a ciphertext longer than its tag. */
-private fun parseHpkeFields(json: String, o: kotlinx.serialization.json.JsonObject, version: Int): DeviceEnvelopeFields? {
+    // Exact token match: no quoted "4", no 4.0 or 04.
+    if (v.isString) return null
+    val version = OPENABLE_ENVELOPE_VERSIONS.firstOrNull { it.toString() == v.content } ?: return null
     if (o.keys != HPKE_ENVELOPE_KEYS || o.getValue("alg").jsonPrimitive.content != HPKE_ENVELOPE_ALG) return null
     if (utf8Length(json) > envelopeCap(version)) return null
     val enc = o.getValue("enc").jsonPrimitive.takeIf { it.isString }?.let { strictBase64(it.content) }
     val ct = o.getValue("ct").jsonPrimitive.takeIf { it.isString }?.let { strictBase64(it.content) }
     if (enc == null || enc.size != 65 || enc[0] != 0x04.toByte() || !isP256Point(enc)) return null
-    if (ct == null || ct.size <= GCM_TAG_BITS / 8) return null
-    return DeviceEnvelopeFields(version = version, epk = enc, iv = ByteArray(0), ct = ct)
-}
+    if (ct == null || ct.size <= GCM_TAG_BYTES) return null
+    DeviceEnvelopeFields(version = version, epk = enc, ct = ct)
+}.getOrNull()
 
 /** Standard alphabet, padded, canonical: `java.util.Base64` alone accepts missing padding and
  *  non-zero trailing bits, both of which let two encodings name one ciphertext. */
@@ -167,10 +98,9 @@ internal fun utf8Length(text: String): Long {
 
 /** `domain || uint16BE(len(deviceId)) || deviceId || uint16BE(len(fingerprint)) || fingerprint`
  *
- *  GCM AAD for v2/v3, HPKE info for v4/v5. The device ID goes in unchanged: no trimming,
- *  normalization or case folding. The fingerprint is uppercase hex without whitespace; ring
- *  versions additionally require a full 40- or 64-digit fingerprint, the only lengths a validated
- *  active key can have. */
+ *  The HPKE info. The device ID goes in unchanged: no trimming, normalization or case folding.
+ *  The fingerprint is uppercase hex without whitespace; v5 additionally requires a full 40- or
+ *  64-digit fingerprint, the only lengths a validated active key can have. */
 internal fun deviceEnvelopeAad(version: Int, deviceId: String, pgpFingerprint: String): ByteArray {
     require(version in OPENABLE_ENVELOPE_VERSIONS) { "unsupported envelope version" }
     require(deviceId.isNotEmpty()) { "deviceId must not be empty" }
@@ -193,33 +123,4 @@ internal fun deviceEnvelopeAad(version: Int, deviceId: String, pgpFingerprint: S
         .putShort(fp.size.toShort())
         .put(fp)
         .array()
-}
-
-/** Null means hostile or stale, never a retry. [ownRawPublicKey] is the HKDF salt. The domain
- *  comes from the parsed version: a v3 envelope is never reopened as v2. */
-internal fun openDeviceEnvelope(
-    sharedSecret: ByteArray,
-    ownRawPublicKey: ByteArray,
-    fields: DeviceEnvelopeFields,
-    aad: ByteArray,
-): ByteArray? {
-    var key: ByteArray? = null
-    return try {
-        key = hkdfSha256(sharedSecret, ownRawPublicKey, envelopeDomain(fields.version).toByteArray(Charsets.UTF_8), 32)
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS, fields.iv))
-        cipher.updateAAD(aad)
-        cipher.doFinal(fields.ct)
-    } catch (e: javax.crypto.AEADBadTagException) {
-        // The expected negative. Says nothing about this device being broken: the envelope was
-        // minted for someone else, or under an identity the account no longer advertises.
-        android.util.Log.w(TAG, "Device envelope failed authentication; it was not sealed for this device")
-        null
-    } catch (e: java.security.GeneralSecurityException) {
-        android.util.Log.e(TAG, "Device envelope could not be opened", e)
-        null
-    } finally {
-        // The derived key opens the account's PGP private key; do not leave it resident for GC.
-        key?.fill(0)
-    }
 }

@@ -285,28 +285,28 @@ Owns production Android app code and resources.
   absence, or a store that cannot be read, fails closed while a record exists: only "Remove from
   this device" may discard it. The one unavoidable loss is a legacy preference keyset `openEncryptedPrefs` proves
   unrecoverable; that record was already unopenable.
-  Device envelopes carry an explicit version that `parseDeviceEnvelope` reads once and threads
-  through `DeviceEnvelopeFields`: the HKDF info and AAD prefix are both `kypost-device-envelope/v<n>`
-  from that field, so a v3 envelope can never be reopened under the v2 domain. Callers pass the
-  versions they admit; `EnrollmentCeremony` admits `OPENABLE_ENVELOPE_VERSIONS` (2-5), and every
-  envelope is opened only against the delivery record the server returned beside it.
-  **v4/v5 (RFC 9180 HPKE)** carry v2's plaintext and v3's ring respectively: exactly
-  `{v, alg: "HPKE-Base-P256-SHA256-A256GCM", enc, ct}`, numeric `v`, canonical base64, `enc` a
-  65-byte P-256 point, at the v2/v3 size caps. The length-prefixed binding (domain
+  **Enrollment is HPKE only (v4/v5).** `OPENABLE_ENVELOPE_VERSIONS` is `[4, 5]`, advertised on
+  publish and the only versions `parseDeviceEnvelope` returns. The custom v2/v3 formats (ECDH +
+  HKDF salted with the device point + AES-GCM, not a published construction) are retired: no
+  parser, no opener. `EnrollmentCeremony` refuses a delivery record naming 2 or 3
+  (`RETIRED_ENVELOPE_VERSIONS`) as `RETIRED_ENVELOPE` ("update your KyPost server") before parsing,
+  so no key agreement runs and nothing is saved or acknowledged. Do not reintroduce them: the
+  agreement key lives for one ceremony and the vault holds opened material, never an envelope, so
+  no stored data needs a v2/v3 opener. The parsed version travels in `DeviceEnvelopeFields`, and
+  every envelope is opened only against the delivery record the server returned beside it.
+  v4 carries one armored key and v5 the `kypost-pgp-keyring-v1` ring: exactly
+  `{v, alg: "HPKE-Base-P256-SHA256-A256GCM", enc, ct}`, numeric `v` (exact token), canonical
+  base64, `enc` a 65-byte P-256 point, v4 at `PGP_DEVICE_ENVELOPE_LEGACY_BYTES` and v5 at
+  `PGP_DEVICE_ENVELOPE_V3_BYTES` (128 KiB) of UTF-8. The length-prefixed binding (domain
   `kypost-device-envelope/v4|v5`) is HPKE `info`; HPKE `aad` is empty. `pgp/HpkeRecipient.kt` is
   the recipient side only, for mode_base / DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-256-GCM,
   with `DH(skR, pkE)` from the Keystore's `KeyAgreement` through `EnrollmentKeys.sharedSecret`.
   Never replace it with a library that needs the raw private key, and never add an exportable
-  key branch to fit one: the enrollment key stays a non-exportable Keystore key. v2 parsing is byte-compatible with what shipped
-  (a quoted version string still opens; the on-curve check stays with the Keystore agreement).
-  The pre-parse bound is the largest cap among the versions the caller admits, so a v3-only
-  caller never hands the JSON parser more than the v3 cap. v3 is checked before any key work:
-  the serialized envelope is at most
-  `MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES` of UTF-8 (measured without copying), exactly the
-  five fields, canonical padded standard base64, a 65-byte uncompressed point that is on P-256 and
-  not the identity, a 12-byte IV, and a ciphertext longer than its 16-byte tag. The v3 AAD binds
-  the device ID unchanged (nonempty, at most 65,535 UTF-8 bytes, lengths in bytes) and a
-  40- or 64-digit uppercase fingerprint supplied by the caller, never read from the envelope.
+  key branch to fit one: the enrollment key stays a non-exportable Keystore key. The binding
+  (`deviceEnvelopeAad`) takes only 4 or 5, the device ID unchanged (nonempty, at most 65,535 UTF-8
+  bytes, lengths in bytes) and the caller's fingerprint, normalised to bare uppercase hex (40 or
+  64 digits for v5), never read from the envelope. `hkdfSha256` now serves only password pairing
+  and lives in `push/PasswordPairingClient.kt`.
   `pgp/PgpKeyring.kt` parses `kypost-pgp-keyring-v1` plaintext into a validated holder without
   touching the vault or session: at most `PGP_KEYRING_JSON_BYTES`, strict UTF-8, no duplicate JSON
   keys (kotlinx keeps the last silently, so `jsonHasDuplicateKeys` scans first), exactly the five
@@ -350,7 +350,7 @@ Owns production Android app code and resources.
   it. `docs/STRONG-CRYPTO.md` documents the default-on legacy-read exception; keep them in step.
   Its signature names every recipient primary key in hashed, non-critical RFC 9580 Intended Recipient
   Fingerprint subpackets (`IntendedRecipientTest`).
-  `importKeyring` is the local v3 import, pure and transport-free: validate the whole ring against
+  `importKeyring` is the local keyring (v5) import, pure and transport-free: validate the whole ring against
   the AAD's active fingerprint, then open the previous vault to establish replacement safety,
   then seal the original bytes as a KEYRING record, then install the session from those committed
   bytes, then `onLocalComplete`; any acknowledgement caller hangs off that callback and nothing
@@ -365,20 +365,19 @@ Owns production Android app code and resources.
   legacy ceremony over a held keyring refuses the merge (`withLegacyArmor` is null) and leaves the
   record. `probeEnrollment` reports a keyring record as `ENROLLED_KEYRING`: `isEnrolled()` for this
   device's own reading, signing and settings row.
-  **Live v3 (KyPost-Server #201, #210, #212).** `EnrollmentClients.publishKey` advertises
-  `envelopeVersions: [2, 3, 4, 5]`; the browser seals v4/v5 whenever they are listed. Omitting the
-  list resets the server's claim to `[2]` and the browser then refuses to seal v3, so never drop
-  it. v2/v3 opening stays until the server stops sealing them for new enrollments. The envelope fetch carries `DeliveryMetadata`
+  **Live keyring delivery (KyPost-Server #201, #210, #212, #492).** `EnrollmentClients.publishKey`
+  advertises `envelopeVersions: [4, 5]`. Since #492 the server seals only v4/v5 and an omitted
+  list is no claim, so never drop it. The envelope fetch carries `DeliveryMetadata`
   (`version`, `fingerprint`, `materialGeneration`, the keyring's `primaryFingerprints` and
   `keyFingerprints`), absent only from a server older than #210. The ceremony opens any envelope
   only with a delivery record of the same version whose fingerprint is the checked identity
-  (`ENVELOPE_MALFORMED` otherwise). A v2 plaintext must be exactly one secret key ring whose
+  (`ENVELOPE_MALFORMED` otherwise). A v4 plaintext must be exactly one secret key ring whose
   primary is that identity, and `importKeyring`'s `validate` rejects a ring whose generation,
   member set or inventory differs from the record (both `KEYRING_REJECTED`, nothing sealed). Every acknowledgement is an `EnrollmentReport`:
   `NotEnrolled` (which also makes the server forget its delivery record), `Legacy` (the bare
   boolean; a converted account refuses it with 409), or `Keyring(materialGeneration, fingerprint)`
-  sent with the delivered `envelopeVersion` (3 or 5; the stored acknowledgement keeps it, and one
-  stored before v5 existed reads as 3). A v4 delivery is acknowledged as `Legacy`. The server matches a keyring acknowledgement against the
+  sent with the delivered `envelopeVersion` (5; the stored acknowledgement keeps it, and one
+  stored before v5 existed reads as 3, `ENVELOPE_VERSION_KEYRING`, and is restated unchanged). A v4 delivery is acknowledged as `Legacy`. The server matches a keyring acknowledgement against the
   delivery it recorded for this device, so a bare boolean is never sent for a keyring record and
   a 409 (`EnrollmentCallResult.Conflict`) is never retried. The sealer stores the acknowledgement
   beside a keyring record (`EnrollmentVault.storeKeyringAck`, plain preferences: both values are

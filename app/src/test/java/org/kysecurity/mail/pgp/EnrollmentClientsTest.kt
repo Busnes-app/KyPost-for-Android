@@ -3,6 +3,11 @@ package org.kysecurity.mail.pgp
 import org.kysecurity.mail.testing.FakeCallFactory
 import org.kysecurity.mail.testing.response
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -26,17 +31,17 @@ class EnrollmentClientsTest {
         assertTrue("the key must actually be sent: $body", body.contains("\"publicKey\":\"BASE64KEY\""))
     }
 
-    /** Omitting the list resets the claim to [2], after which the browser refuses to seal v3.
-     *  Server E2E_PGP.md: "Only advertise v3 after native complete-ring persistence checks pass",
-     *  which #112, #115 and #116 did. 4/5 are the HPKE forms, which the server prefers when listed. */
+    /** Exactly the RFC 9180 HPKE forms. The retired v2/v3 are never claimed, and omitting the
+     *  list is no claim at all (KyPost-Server #492), so the browser would seal nothing. */
     @Test
-    fun publishKey_advertisesVersions2Through5() = runBlocking {
+    fun publishKey_advertisesOnlyHpkeVersions() = runBlocking {
         val factory = FakeCallFactory { req -> response(req, """{"ok":true}""", 200) }
 
         EnrollmentClients(callFactory = factory).publishKey("https://relay.example.com", "d", "s", "K")
 
         val body = okio.Buffer().also { factory.requests.single().body!!.writeTo(it) }.readUtf8()
-        assertTrue(body, body.contains("\"envelopeVersions\":[2,3,4,5]"))
+        val versions = Json.parseToJsonElement(body).jsonObject["envelopeVersions"]!!.jsonArray.map { it.jsonPrimitive.int }
+        assertEquals(body, listOf(4, 5), versions)
     }
 
     /** The delivery metadata the server records beside the envelope; the ceremony validates the

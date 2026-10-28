@@ -34,7 +34,7 @@ class HpkeEnrollmentKeyStoreTest {
 
     /** The production open: framing, info from this device's own values, Keystore ECDH. */
     private fun open(envelope: String, version: Int = -1, deviceId: String = this.deviceId, fingerprint: String = this.fingerprint): ByteArray? {
-        val fields = parseDeviceEnvelope(envelope, OPENABLE_ENVELOPE_VERSIONS.toSet()) ?: return null
+        val fields = parseDeviceEnvelope(envelope) ?: return null
         val info = deviceEnvelopeAad(if (version == -1) fields.version else version, deviceId, fingerprint)
         return hpkeOpenBase(fields.epk, requireNotNull(EnrollmentKeyStore.rawPublicKey()), info, fields.ct, EnrollmentKeyStore::sharedSecret)
     }
@@ -60,7 +60,7 @@ class HpkeEnrollmentKeyStoreTest {
         assertNull("v5 info", open(v4, version = ENVELOPE_VERSION_HPKE_KEYRING))
         assertNull("other device", open(v4, deviceId = "dev-1"))
         assertNull("other fingerprint", open(v4, fingerprint = "A".repeat(40)))
-        val fields = requireNotNull(parseDeviceEnvelope(v4, OPENABLE_ENVELOPE_VERSIONS.toSet()))
+        val fields = requireNotNull(parseDeviceEnvelope(v4))
         assertNull("no info", hpkeOpenBase(fields.epk, point, ByteArray(0), fields.ct, EnrollmentKeyStore::sharedSecret))
         val ct = Regex("\"ct\":\"([^\"]+)\"").find(v4)!!.groupValues[1]
         val tampered = Base64.getDecoder().decode(ct).also { it[it.size - 1] = (it[it.size - 1] + 1).toByte() }
