@@ -2,12 +2,14 @@ package org.kysecurity.mail.security
 
 import android.content.Intent
 import android.os.Bundle
+import android.view.MotionEvent
 import android.view.View
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
+import org.kysecurity.mail.BuildConfig
 
 /** The one-shot latch behind a startup notice is spent when the dialog is *built*, so a screen
  *  that cannot show one must not ask: the dialog dies with the Activity while the latch stays set
@@ -58,6 +60,16 @@ abstract class LockedActivity : AppCompatActivity() {
         reportCredentialResets()
         reportStrandedDownloads()
         onCreateUnlocked(savedInstanceState)
+    }
+
+    /** Debug only: CI taps that silently did nothing have no other trace of whether this was why. */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (BuildConfig.DEBUG && ev.actionMasked == MotionEvent.ACTION_DOWN &&
+            (ev.flags and MotionEvent.FLAG_WINDOW_IS_OBSCURED) != 0
+        ) {
+            android.util.Log.w("LockedActivity", "Obscured touch at ${ev.x},${ev.y}; overlay protection drops it")
+        }
+        return super.dispatchTouchEvent(ev)
     }
 
     /** Blocks until [SecurityWipe.enforceTripwire] has ruled; false means do nothing at all. */

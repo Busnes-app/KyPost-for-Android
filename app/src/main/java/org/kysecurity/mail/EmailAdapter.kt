@@ -152,8 +152,9 @@ class EmailAdapter(
 
     fun currentEmails(): List<Email> = emails
     fun setSelection(ids: Set<String>) {
+        val before = selectedIds
         selectedIds = ids.toSet()
-        notifyItemRangeChanged(0, itemCount)
+        dispatchSelectionUpdate(emails, before, selectedIds, AdapterListUpdateCallback(this))
     }
 
     /** The day the date labels were formatted for: after midnight "today" shows a time it no longer means. */
@@ -208,6 +209,12 @@ internal fun inboxRowDate(atUtc: String?, now: ZonedDateTime, locale: Locale): S
         DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
     }
     return formatter.withLocale(locale).format(local)
+}
+
+/** Only the rows whose selection flipped. A whole-list change per toggle made RecyclerView's
+ *  pending-update pass quadratic: 500 toggles before one layout took 80-170s on the CI emulator. */
+internal fun dispatchSelectionUpdate(emails: List<Email>, before: Set<String>, after: Set<String>, callback: ListUpdateCallback) {
+    emails.forEachIndexed { i, email -> if ((email.id in before) != (email.id in after)) callback.onChanged(i, 1, null) }
 }
 
 /** Not notifyDataSetChanged(): NO_POSITION holders strand ItemTouchHelper's swipe animation. */

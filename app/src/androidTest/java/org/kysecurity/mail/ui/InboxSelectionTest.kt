@@ -82,6 +82,7 @@ class InboxSelectionTest {
             scenario.onActivity { activity ->
                 assertEquals(emptyList<String>(), activity.allEmailsForTest().map { it.id })
             }
+            scenario.moveToState(Lifecycle.State.RESUMED) // See awaitDestroyed: close() from CREATED costs 45s.
         }
     }
 

@@ -540,6 +540,9 @@ tasks.withType<Test>().configureEach {
     inputs.files(fileTree("src/main/java") { include("**/*.kt") })
         .withPropertyName("mainKotlinSources")
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    // org.gradle.caching restores compile outputs, never a test verdict: the next test to read an
+    // undeclared file would pass from the cache without running.
+    outputs.doNotCacheIf("test verdicts always come from a real run") { true }
 }
 
 dependencies {

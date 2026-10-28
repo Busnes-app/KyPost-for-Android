@@ -69,4 +69,12 @@ class EmailAdapterUpdateTest {
 
         assertEquals(listOf("insert(0,1)"), updates(before, after))
     }
+
+    @Test
+    fun aSelectionChangeRebindsOnlyTheRowsThatFlipped() {
+        val rows = listOf(email("a"), email("b"), email("c"))
+        val ops = RecordingUpdates().also { dispatchSelectionUpdate(rows, setOf("a", "b"), setOf("b", "c"), it) }.ops
+
+        assertEquals(listOf("change(0,1)", "change(2,1)"), ops)
+    }
 }
