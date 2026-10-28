@@ -63,11 +63,12 @@ internal sealed class EnrollmentReport {
     /** Clears the marker and the server's delivery record: a fresh delivery is needed afterwards. */
     object NotEnrolled : EnrollmentReport()
 
-    /** The bare boolean, meaning "opens a v2 envelope". A converted account refuses it. */
+    /** The bare boolean, for a one-key (v4) delivery. A converted account refuses it. */
     object Legacy : EnrollmentReport()
 
-    /** Confirms the v3/v5 delivery the server recorded for this device, and nothing else. The
-     *  server matches [envelopeVersion] against the version it delivered. */
+    /** Confirms the keyring delivery the server recorded for this device, and nothing else. The
+     *  server matches [envelopeVersion] against the version it delivered: 5, or 3 restated from a
+     *  record stored before v5 existed. */
     data class Keyring(val materialGeneration: Long, val fingerprint: String, val envelopeVersion: Int) : EnrollmentReport()
 }
 

@@ -254,6 +254,8 @@ scope are in [docs/STRONG-CRYPTO.md](docs/STRONG-CRYPTO.md).
   `docs/superpowers/specs/2026-07-29-on-device-pgp-decryption-design.md`.
 - The envelope is unwrapped under a Keystore key that requires the device's secure lock
   screen. A device with no lock screen cannot enrol at all.
+- The key reaches the device only as an RFC 9180 HPKE envelope (v4/v5). A server that still
+  sends the retired v2/v3 format is refused with "update your KyPost server".
 - A security wipe destroys the envelope. If it cannot, the wipe reports itself incomplete
   and the app fails closed — see **App lock** above.
 

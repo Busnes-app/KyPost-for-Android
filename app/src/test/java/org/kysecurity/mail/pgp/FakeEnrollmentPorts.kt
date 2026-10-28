@@ -4,52 +4,44 @@ package org.kysecurity.mail.pgp
 /** The fingerprint the fake identity reports, and so the one a valid envelope's AAD must bind. */
 internal const val FAKE_FINGERPRINT = "B30ACD64E04B8E1B0379A3201D6BDF093FAD1D11"
 
-/** [FAKE_FINGERPRINT]'s private key: a v2 plaintext must be the identity's own key. */
+/** [FAKE_FINGERPRINT]'s private key: a v4 plaintext must be the identity's own key. */
 internal val FAKE_PLAINTEXT = TestPgpPrivateKey.ARMORED_PRIVATE
 
-/** The record a current server returns beside a v2 envelope. */
+/** The record a current server returns beside a one-key (v4) envelope. */
 internal fun legacyDelivery(fingerprint: String = FAKE_FINGERPRINT) =
-    DeliveryMetadata(ENVELOPE_VERSION_LEGACY, fingerprint, null, null, null)
+    DeliveryMetadata(ENVELOPE_VERSION_HPKE, fingerprint, null, null, null)
 
-/** Seals a real envelope the fake ports can open; the ECDH is covered by `EnrollmentKeyStoreTest`. */
+/** `kypost-device-envelope/v<version>` then the length-prefixed device ID and bare uppercase
+ *  fingerprint, built here rather than by `deviceEnvelopeAad` so a retired version can be bound too. */
+internal fun testBinding(version: Int, deviceId: String, fingerprint: String): ByteArray {
+    fun prefixed(bytes: ByteArray) = byteArrayOf((bytes.size shr 8).toByte(), bytes.size.toByte()) + bytes
+    val fp = fingerprint.uppercase().filterNot { it.isWhitespace() }
+    return "kypost-device-envelope/v$version".toByteArray() + prefixed(deviceId.toByteArray()) + prefixed(fp.toByteArray())
+}
+
+/**
+ * An HPKE envelope the fake ports open: the fake keys' fixed DH output through the real key
+ * schedule. `HpkeRecipientTest` pins that schedule to the CFRG vector and `EnrollmentCeremonyHpkeTest`
+ * to the browser's sealer; this only has to agree with the opener. `enc` is a real point (the
+ * generator) because the framing rejects an off-curve one; the fake keys ignore it.
+ */
 internal fun sealEnvelope(
     keys: FakeEnrollmentKeys,
     deviceId: String = "dev-1",
     aadFingerprint: String = FAKE_FINGERPRINT,
     plaintext: String = FAKE_PLAINTEXT,
-    version: Int = ENVELOPE_VERSION_LEGACY,
+    version: Int = ENVELOPE_VERSION_HPKE,
 ): String {
     val sharedSecret = requireNotNull(keys.sharedSecretResult)
-    // v3 framing rejects an off-curve point before any ECDH runs, so the ephemeral point is a
-    // real one (the generator); the fake keys ignore it when deriving the shared secret.
-    val ephemeral = if (version == ENVELOPE_VERSION_KEYRING) {
-        org.bouncycastle.asn1.x9.ECNamedCurveTable.getByName("secp256r1").g.getEncoded(false)
-    } else {
-        ByteArray(65).also { it[0] = 0x04; for (i in 1..64) it[i] = 0x44 }
+    val enc = org.bouncycastle.asn1.x9.ECNamedCurveTable.getByName("secp256r1").g.getEncoded(false)
+    val context = requireNotNull(hpkeSetupBaseR(enc, keys.keystorePoint, testBinding(version, deviceId, aadFingerprint)) { sharedSecret.copyOf() })
+    val ct = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding").run {
+        init(javax.crypto.Cipher.ENCRYPT_MODE, javax.crypto.spec.SecretKeySpec(context.key, "AES"), javax.crypto.spec.GCMParameterSpec(128, context.baseNonce))
+        doFinal(plaintext.toByteArray(Charsets.UTF_8))
     }
-    val key = hkdfSha256(
-        ikm = sharedSecret,
-        salt = keys.keystorePoint,
-        info = envelopeDomain(version).toByteArray(Charsets.UTF_8),
-        length = 32,
-    )
-    val iv = ByteArray(12) { 0x55 }
-    val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding").apply {
-        init(
-            javax.crypto.Cipher.ENCRYPT_MODE,
-            javax.crypto.spec.SecretKeySpec(key, "AES"),
-            javax.crypto.spec.GCMParameterSpec(128, iv),
-        )
-        updateAAD(deviceEnvelopeAad(version, deviceId, aadFingerprint))
-    }
-    val ct = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+    context.wipe()
     val b64 = java.util.Base64.getEncoder()
-    return """
-        {"v":${if (version == ENVELOPE_VERSION_LEGACY) "\"2\"" else "$version"},"alg":"ECDH-P256+HKDF-SHA256+A256GCM",
-         "epk":"${b64.encodeToString(ephemeral)}",
-         "iv":"${b64.encodeToString(iv)}",
-         "ct":"${b64.encodeToString(ct)}"}
-    """.trimIndent().replace("\n", "")
+    return """{"v":$version,"alg":"HPKE-Base-P256-SHA256-A256GCM","enc":"${b64.encodeToString(enc)}","ct":"${b64.encodeToString(ct)}"}"""
 }
 
 internal fun ringCount(armored: ByteArray): Int = orderedSecretKeyRings(armored.inputStream())!!.size
@@ -74,6 +66,8 @@ internal class FakeEnrollmentKeys(
     private val agree: ((ByteArray) -> ByteArray?)? = null,
 ) : EnrollmentKeys {
     var newKeyPairCalls = 0
+        private set
+    var sharedSecretCalls = 0
         private set
     var deleteCalls = 0
         private set
@@ -106,7 +100,11 @@ internal class FakeEnrollmentKeys(
         publishedPoint.takeIf { exists && !vanished && !encodingFails }
             ?.let { java.util.Base64.getEncoder().encodeToString(it) }
 
-    override fun sharedSecret(epk: ByteArray): ByteArray? = if (agree != null) agree(epk) else sharedSecretResult
+    // A copy: the opener zeroes what it is handed.
+    override fun sharedSecret(epk: ByteArray): ByteArray? {
+        sharedSecretCalls++
+        return if (agree != null) agree(epk) else sharedSecretResult?.copyOf()
+    }
 
     override fun deleteKeyPair(): Boolean {
         deleteCalls++

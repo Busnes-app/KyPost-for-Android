@@ -43,14 +43,14 @@ class EnrollmentCeremonyHpkeTest {
     @After fun cleanup() = EnrollmentSession.clear()
 
     private fun open(envelope: String, version: Int, deviceId: String = this.deviceId, fingerprint: String = this.fingerprint): ByteArray? {
-        val fields = parseDeviceEnvelope(envelope, OPENABLE_ENVELOPE_VERSIONS.toSet()) ?: return null
+        val fields = parseDeviceEnvelope(envelope) ?: return null
         return hpkeOpenBase(fields.epk, pkR, deviceEnvelopeAad(version, deviceId, fingerprint), fields.ct, softwareDh(skR))
     }
 
     @Test
     fun browserSealedEnvelopesOpen() {
         for (version in listOf(ENVELOPE_VERSION_HPKE, ENVELOPE_VERSION_HPKE_KEYRING)) {
-            assertEquals(version, parseDeviceEnvelope(envelope(version), OPENABLE_ENVELOPE_VERSIONS.toSet())?.version)
+            assertEquals(version, parseDeviceEnvelope(envelope(version))?.version)
             assertArrayEquals("v$version", plaintext(version), open(envelope(version), version))
         }
     }
@@ -64,23 +64,21 @@ class EnrollmentCeremonyHpkeTest {
             assertNull("relabeled", open(env.replace("\"v\":$version", "\"v\":$relabeled"), relabeled))
             assertNull("other device", open(env, version, deviceId = "dev-1"))
             assertNull("other fingerprint", open(env, version, fingerprint = other))
-            val fields = parseDeviceEnvelope(env, OPENABLE_ENVELOPE_VERSIONS.toSet())!!
+            val fields = parseDeviceEnvelope(env)!!
             assertNull("no info", hpkeOpenBase(fields.epk, pkR, ByteArray(0), fields.ct, softwareDh(skR)))
-            assertNull("v2/v3-only caller", parseDeviceEnvelope(env, setOf(ENVELOPE_VERSION_LEGACY, ENVELOPE_VERSION_KEYRING)))
         }
     }
 
     @Test
     fun hpkeFramingIsStrict() {
         val good = envelope(ENVELOPE_VERSION_HPKE)
-        val all = OPENABLE_ENVELOPE_VERSIONS.toSet()
-        assertNull("quoted version", parseDeviceEnvelope(good.replace("\"v\":4", "\"v\":\"4\""), all))
-        assertNull("legacy alg", parseDeviceEnvelope(good.replace("HPKE-Base-P256-SHA256-A256GCM", "ECDH-P256+HKDF-SHA256+A256GCM"), all))
-        assertNull("extra field", parseDeviceEnvelope(good.replace("{\"v\":4,", "{\"v\":4,\"iv\":\"AAAAAAAAAAAAAAAA\","), all))
-        assertNull("unpadded enc", parseDeviceEnvelope(good.replace("=\",\"ct\"", "\",\"ct\""), all))
+        assertNull("quoted version", parseDeviceEnvelope(good.replace("\"v\":4", "\"v\":\"4\"")))
+        assertNull("legacy alg", parseDeviceEnvelope(good.replace("HPKE-Base-P256-SHA256-A256GCM", "ECDH-P256+HKDF-SHA256+A256GCM")))
+        assertNull("extra field", parseDeviceEnvelope(good.replace("{\"v\":4,", "{\"v\":4,\"iv\":\"AAAAAAAAAAAAAAAA\",")))
+        assertNull("unpadded enc", parseDeviceEnvelope(good.replace("=\",\"ct\"", "\",\"ct\"")))
         val offCurve = Base64.getEncoder().encodeToString(ByteArray(65).also { it[0] = 4; it[64] = 1 })
         val enc = Regex("\"enc\":\"([^\"]+)\"").find(good)!!.groupValues[1]
-        assertNull("off-curve enc", parseDeviceEnvelope(good.replace(enc, offCurve), all))
+        assertNull("off-curve enc", parseDeviceEnvelope(good.replace(enc, offCurve)))
     }
 
     private fun ports(envelope: String, delivery: DeliveryMetadata?, deviceId: String = this.deviceId, identity: String = fingerprint) = FakePorts(
@@ -122,7 +120,8 @@ class EnrollmentCeremonyHpkeTest {
         val v5 = envelope(ENVELOPE_VERSION_HPKE_KEYRING)
         val cases = listOf(
             ports(v5, null) to FailureReason.ENVELOPE_MALFORMED,
-            ports(v5, v5Delivery.copy(version = ENVELOPE_VERSION_KEYRING)) to FailureReason.ENVELOPE_MALFORMED,
+            ports(v5, v5Delivery.copy(version = ENVELOPE_VERSION_HPKE)) to FailureReason.ENVELOPE_MALFORMED,
+            ports(v5, v5Delivery.copy(version = ENVELOPE_VERSION_KEYRING)) to FailureReason.RETIRED_ENVELOPE,
             ports(envelope(ENVELOPE_VERSION_HPKE), v5Delivery) to FailureReason.ENVELOPE_MALFORMED,
             ports(v5, v5Delivery.copy(materialGeneration = null)) to FailureReason.ENVELOPE_MALFORMED,
             ports(v5, v5Delivery.copy(materialGeneration = 3L)) to FailureReason.KEYRING_REJECTED,

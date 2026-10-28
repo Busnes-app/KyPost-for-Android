@@ -92,8 +92,9 @@ they leave the app.
 - **Separation of privilege.** On-device decryption needs both a deliberate enrollment and HLP
   off, and the envelope's key needs the device's secure lock screen.
 - **Open design.** Only published algorithms: TLS, AES-256-GCM, RSA-OAEP, HMAC-SHA-256,
-  PBKDF2-HMAC-SHA-256, SQLCipher and OpenPGP. Device enrollment opens RFC 9180 HPKE (v4/v5); the
-  older v2/v3 ECDH+HKDF+AES-GCM composition is still opened until the server stops sealing it.
+  PBKDF2-HMAC-SHA-256, SQLCipher and OpenPGP. Device enrollment advertises and opens only RFC
+  9180 HPKE (v4/v5); the retired v2/v3 ECDH+HKDF+AES-GCM composition is refused before any key
+  work (KyPost-Server #492 no longer seals it).
 - **Psychological acceptability.** Every trade-off is written where the user reads it: TOFU
   pinning, Play Services in the QR path, FCM payload visibility, RSVPs sent unencrypted
   ([SECURITY.md](../SECURITY.md), [CONTRIBUTING.md](../CONTRIBUTING.md#security-trade-offs-and-when-a-feature-gets-rejected)).
@@ -113,7 +114,7 @@ they leave the app.
 | Weak TLS keys, signatures or suites | `RESTRICTED_TLS` only; chain-wide RSA >= 2048 / EC >= 256 and SHA-2 signatures on the validated path, checked after platform trust | `PairingAuthHeaders.kt`, `security/StrongTls.kt` |
 | Broken ciphers in received OpenPGP mail | Plaintext, single DES, SAFER and unknown session ciphers refused before decryption; integrity mandatory; "Refuse legacy encryption" also refuses short keys and 64-bit-block ciphers | `pgp/PgpDecryptor.kt`, `pgp/PgpStrengthPolicy.kt`, `security/CryptoPolicySettings.kt` |
 | Obsolete OpenPGP keys or digests used for new trust | RSA >=2048 bits; supported elliptic keys >=224 bits; strong primary/subkey and binding required; only SHA-256/384/512 and SHA3-256/512 signatures can earn a badge | `pgp/PgpStrengthPolicy.kt`, `pgp/PgpEncryptor.kt`, `pgp/PgpDecryptor.kt`, `pgp/SignerBinding.kt` |
-| PGP key delivered to the wrong device, or the device's enrollment key exposed | Envelope opened only against the server's delivery record; device ID, fingerprint and version bound as HPKE `info` (v4/v5) or GCM AAD (v2/v3), built from local values; the P-256 agreement key is non-exportable in the Keystore and HPKE runs over its ECDH output (CFRG vector, browser-sealed and Keystore tests) | `pgp/EnrollmentCeremony.kt`, `pgp/HpkeRecipient.kt`, `pgp/DeviceEnvelope.kt`, `pgp/EnrollmentKeyStore.kt` |
+| PGP key delivered to the wrong device, or the device's enrollment key exposed | Envelope opened only against the server's delivery record; only v4/v5 (RFC 9180 HPKE) advertised and opened, a v2/v3 delivery refused unopened; device ID, fingerprint and version bound as HPKE `info`, built from local values; the P-256 agreement key is non-exportable in the Keystore and HPKE runs over its ECDH output (CFRG vector, browser-sealed and Keystore tests) | `pgp/EnrollmentCeremony.kt`, `pgp/HpkeRecipient.kt`, `pgp/DeviceEnvelope.kt`, `pgp/EnrollmentKeyStore.kt` |
 | Exported component abuse | Every exported component checked against an allowlist by `checkExportedComponents*`; lint's `ExportedService`, `ExportedReceiver` and `ExportedContentProvider` fatal | `app/build.gradle.kts` |
 | Secrets at rest | SQLCipher database with a random 32-byte key; device secret AES-256-GCM wrapped under a PIN-derived, Keystore-peppered key | `security/DatabaseKey.kt`, `security/CredentialCipher.kt` |
 | PIN guessing | PBKDF2-HMAC-SHA-256 with 150,000 iterations and a Keystore HMAC pepper (StrongBox first), so guessing stays on the device wherever the Keystore is hardware-backed; a software-only pepper is logged as an error; attempts 1–2 free, then 30 s rising to an hour; wipe after 30 failures by default (10, 20 or 30, or off) | `security/PinHasher.kt`, `security/CredentialCipher.kt`, `security/LockoutPolicy.kt` |

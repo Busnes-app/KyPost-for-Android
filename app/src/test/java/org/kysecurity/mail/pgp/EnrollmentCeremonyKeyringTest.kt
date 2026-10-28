@@ -10,7 +10,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Live v3 enrollment: a keyring envelope is opened under the v3 domain, validated against the
+ * Live keyring enrollment: a v5 envelope is opened under the v5 binding, validated against the
  * delivery the server recorded, imported through [importKeyring], and acknowledged with the
  * generation and fingerprint. Contract: KyPost-Server #210 (`36cc6d6`), #212 (`c9c1e5e`).
  */
@@ -23,7 +23,7 @@ class EnrollmentCeremonyKeyringTest {
     private val inventory = members + listOf("F8FF743DD85DDE3D427E8BA25CA9134FFE0FF9F4", "3C85B240C5591A07008A3665F96FF568D839A072")
 
     private val delivery = DeliveryMetadata(
-        version = ENVELOPE_VERSION_KEYRING,
+        version = ENVELOPE_VERSION_HPKE_KEYRING,
         fingerprint = active,
         materialGeneration = 2L,
         primaryFingerprints = members,
@@ -38,7 +38,7 @@ class EnrollmentCeremonyKeyringTest {
         identity: String = active,
     ): FakePorts {
         val probe = FakeEnrollmentKeys()
-        val envelope = sealEnvelope(probe, aadFingerprint = identity, plaintext = ringJson, version = ENVELOPE_VERSION_KEYRING)
+        val envelope = sealEnvelope(probe, aadFingerprint = identity, plaintext = ringJson, version = ENVELOPE_VERSION_HPKE_KEYRING)
         return FakePorts(
             identityResult = IdentityCheck.ClientProtected(identity),
             fetchResults = mutableListOf(EnrollmentCallResult.Envelope(envelope, delivery)),
@@ -55,7 +55,7 @@ class EnrollmentCeremonyKeyringTest {
         assertEquals(EnrollmentUiState.Enrolled, ports.states.last())
         assertEquals(listOf(VaultRecordKind.KEYRING), ports.sealer.kinds)
         assertArrayEquals("the original bytes are sealed", ringJson.toByteArray(Charsets.UTF_8), ports.sealer.received.single())
-        val ack = EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = active, envelopeVersion = ENVELOPE_VERSION_KEYRING)
+        val ack = EnrollmentReport.Keyring(materialGeneration = 2L, fingerprint = active, envelopeVersion = ENVELOPE_VERSION_HPKE_KEYRING)
         assertEquals("stored beside the record for the worker", listOf(ack), ports.sealer.acks)
         assertEquals("acknowledged with the delivery's values, never the bare boolean", listOf(ack), ports.transport.reported)
         assertEquals(1, ports.mailCache.clearCalls)
@@ -123,7 +123,7 @@ class EnrollmentCeremonyKeyringTest {
         assertEquals(listOf(VaultRecordKind.KEYRING), ports.sealer.kinds)
     }
 
-    /** A v3 envelope from a server that recorded no delivery cannot be validated, so it is not
+    /** A v5 envelope from a server that recorded no delivery cannot be validated, so it is not
      *  opened as anything. */
     @Test
     fun aKeyringEnvelopeWithoutDeliveryMetadataIsMalformed() = runBlocking {
@@ -135,10 +135,10 @@ class EnrollmentCeremonyKeyringTest {
         assertTrue(ports.sealer.kinds.isEmpty())
     }
 
-    /** A legacy delivery record beside a v3 envelope is a server the client does not understand. */
+    /** A one-key delivery record beside a v5 envelope is a server the client does not understand. */
     @Test
     fun aKeyringEnvelopeWithALegacyDeliveryRecordIsMalformed() = runBlocking {
-        val ports = ports(delivery = delivery.copy(version = ENVELOPE_VERSION_LEGACY, materialGeneration = null))
+        val ports = ports(delivery = delivery.copy(version = ENVELOPE_VERSION_HPKE, materialGeneration = null))
 
         ports.ceremony().run()
 
@@ -171,7 +171,7 @@ class EnrollmentCeremonyKeyringTest {
         assertEquals(1, ports.transport.durableReports)
     }
 
-    /** A v2 envelope still takes the legacy path and the bare boolean, untouched by any of this. */
+    /** A v4 envelope still takes the legacy path and the bare boolean, untouched by any of this. */
     @Test
     fun aLegacyEnvelopeStillSealsArmorAndReportsTheBoolean() = runBlocking {
         val probe = FakeEnrollmentKeys()
@@ -179,7 +179,7 @@ class EnrollmentCeremonyKeyringTest {
             fetchResults = mutableListOf(
                 EnrollmentCallResult.Envelope(
                     sealEnvelope(probe, plaintext = TestPgpPrivateKey.ARMORED_PRIVATE),
-                    DeliveryMetadata(ENVELOPE_VERSION_LEGACY, FAKE_FINGERPRINT, null, null, null),
+                    legacyDelivery(),
                 ),
             ),
         )

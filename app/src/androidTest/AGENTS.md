@@ -28,7 +28,8 @@ Owns Android instrumentation tests executed on emulator/device.
 - `HpkeEnrollmentKeyStoreTest` opens v4/v5 sealed by Bouncy Castle's HPKE through the real
   Keystore agreement key and the production `hpkeOpenBase`, asserts the key is non-exportable,
   and refuses relabeled versions, other device/fingerprint/info, tampered ciphertext and a
-  previous ceremony's key.
+  previous ceremony's key. `EnrollmentEnvelopeRoundTripTest` keeps only the agreement-key rotation
+  and vault lifecycle; its v2 Keystore round trips went with the v2 opener.
 
 # Work Guidance
 

@@ -14,6 +14,7 @@ import org.kysecurity.mail.testing.BodyRecordingCallFactory
 import org.kysecurity.mail.testing.response
 import java.security.MessageDigest
 import java.util.Base64
+import kotlin.test.assertFailsWith
 
 class PasswordPairingClientTest {
     private val server = "https://mail.example.com"
@@ -137,5 +138,34 @@ class PasswordPairingClientTest {
         }
         val r = PasswordPairingClient(factory).mint(server, "u", password) as PairingParseResult.Error
         assertEquals("The security check failed. Try again", r.reason)
+    }
+
+    /** RFC 5869 Test Case 1 — an independent vector, so this confirms the HKDF agrees with the
+     *  standard rather than merely round-tripping through itself. */
+    @Test
+    fun hkdf_matchesRfc5869TestCase1() {
+        val okm = hkdfSha256(
+            ikm = ByteArray(22) { 0x0b },
+            salt = byteArrayOf(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12),
+            info = byteArrayOf(
+                0xf0.toByte(), 0xf1.toByte(), 0xf2.toByte(), 0xf3.toByte(), 0xf4.toByte(),
+                0xf5.toByte(), 0xf6.toByte(), 0xf7.toByte(), 0xf8.toByte(), 0xf9.toByte(),
+            ),
+            length = 42,
+        )
+
+        assertEquals(
+            "3cb25f25faacd57a90434f64d0362f2a2d2d0a90cf1a5a4c5db02d56ecc4c5bf34007208d5b887185865",
+            okm.joinToString("") { "%02x".format(it) },
+        )
+    }
+
+    /** RFC 5869's ceiling: the block counter is ONE byte, so at 256 blocks it would wrap and
+     *  repeat round 1's output. */
+    @Test
+    fun hkdfRefusesLengthsPastTheOneByteCounter() {
+        assertFailsWith<IllegalArgumentException> { hkdfSha256(ByteArray(32), ByteArray(32), ByteArray(4), 255 * 32 + 1) }
+        assertFailsWith<IllegalArgumentException> { hkdfSha256(ByteArray(32), ByteArray(32), ByteArray(4), 0) }
+        assertEquals(255 * 32, hkdfSha256(ByteArray(32), ByteArray(32), ByteArray(4), 255 * 32).size)
     }
 }
