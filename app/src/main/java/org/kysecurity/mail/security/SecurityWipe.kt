@@ -35,6 +35,7 @@ private val PREFS_NAMES_RETAINED = setOf(
     "org.kysecurity.mail.wipe_state",
     "unifiedpush.connector",
     DownloadedAttachmentLedger.PREFS_NAME,
+    CryptoPolicySettings.PREFS_NAME,
 )
 
 /** Plaintext mail metadata, no credentials; shared by the full wipe and the HLP enable path. */
@@ -49,7 +50,7 @@ private const val KEY_WIPE_ATTEMPTS = "wipe_attempts"
 /** The files that may outlive the wipe, and the ONLY ones: destruction that is still owed, and
  *  the posture the wipe re-asserts.
  *
- *  All three are PLAIN prefs, which is what makes retaining them free — none holds a secret,
+ *  All four are PLAIN prefs, which is what makes retaining them free — none holds a secret,
  *  none is account-scoped, and none needs the master key the final step destroys.
  *
  *  [DownloadedAttachmentLedger] is not optional and is the trap here. It is the only record of
@@ -63,11 +64,14 @@ private const val KEY_WIPE_ATTEMPTS = "wipe_attempts"
  *  `restoreHostileLocationProtection` below. Without it here this sweep deleted that restore,
  *  and the posture read ENABLED afterwards only because a missing marker fails towards
  *  tampering — a permanent false alarm standing in for the flag.
- *  `WipeResurrectionTest.wipe_persistsTheRestoredHostileLocationFlag` is the guard. */
+ *  `WipeResurrectionTest.wipe_persistsTheRestoredHostileLocationFlag` is the guard.
+ *
+ *  [CryptoPolicySettings] is one boolean the user chose to tighten; a wipe must not loosen it. */
 private val PREFS_NAMES_RETAINED_FINAL = setOf(
     WIPE_STATE_PREFS,
     DownloadedAttachmentLedger.PREFS_NAME,
     HostileLocationSettings.PREFS_NAME,
+    CryptoPolicySettings.PREFS_NAME,
 )
 
 /** Set when the wipe gives up. Must NOT clear [KEY_WIPE_IN_PROGRESS]; that marker outlives it. */

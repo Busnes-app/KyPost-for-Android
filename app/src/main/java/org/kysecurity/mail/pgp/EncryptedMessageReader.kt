@@ -55,6 +55,8 @@ internal class EncryptedMessageReader(
     private val payloads: PayloadSource,
     /** This device's own answer to "whose key is this". Empty by default: the verdict caps lower. */
     private val localSignerKeys: LocalSignerKeyLookup = LocalSignerKeyLookup { emptyList() },
+    /** The user's "Refuse legacy encryption" setting, read per message; see [PgpDecryptor.decrypt]. */
+    private val refuseLegacy: () -> Boolean = { false },
 ) {
 
     suspend fun read(
@@ -169,7 +171,7 @@ internal class EncryptedMessageReader(
         // means the app locked between the check above and here, which is NeedsUnlock, not a
         // decryption failure.
         val result = EnrollmentSession.withDecryptionKeys { key ->
-            PgpDecryptor.decrypt(key, payload.encryptedPayload, offeredKeys)
+            PgpDecryptor.decrypt(key, payload.encryptedPayload, offeredKeys, refuseLegacy())
         } ?: return ReadOutcome.NeedsUnlock
 
         val decrypted = when (result) {

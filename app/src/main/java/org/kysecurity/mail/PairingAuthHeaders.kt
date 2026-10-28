@@ -1,6 +1,7 @@
 package org.kysecurity.mail
 
 import okhttp3.CertificatePinner
+import okhttp3.ConnectionSpec
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -10,6 +11,7 @@ import okio.Buffer
 import okio.BufferedSource
 import okio.ForwardingSource
 import okio.buffer
+import org.kysecurity.mail.security.StrongTls
 import java.io.IOException
 
 /** Credentialed clients take an injected `Call.Factory` with no default, so none skips pinning. */
@@ -49,9 +51,14 @@ fun normalizeSpkiPin(raw: String): String? {
     return "sha256/" + body
 }
 
-/** Redirects disabled: OkHttp does not strip our custom credential headers cross-host. */
+/** Redirects disabled: OkHttp does not strip our custom credential headers cross-host.
+ *  Every app-owned connection is built here, so this is where the TLS policy lives: TLS 1.2+
+ *  with forward-secret AEAD suites only, and [StrongTls]'s key floor on the validated chain. */
 private val basePairingClient: OkHttpClient by lazy {
+    val trust = StrongTls.StrongTrustManager(StrongTls.platformTrustManager())
     OkHttpClient.Builder()
+        .sslSocketFactory(StrongTls.context(trust).socketFactory, trust)
+        .connectionSpecs(listOf(ConnectionSpec.RESTRICTED_TLS))
         .followRedirects(false)
         .followSslRedirects(false)
         .addInterceptor(BodySizeLimitInterceptor())

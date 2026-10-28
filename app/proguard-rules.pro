@@ -62,3 +62,9 @@
 # original paths are not embedded in the APK.
 -keepattributes SourceFile,LineNumberTable
 -renamesourcefileattribute SourceFile
+
+# X509TrustManagerExtensions finds this by reflection; OkHttp's Android chain cleaner, and so the
+# leaf pin, run through it. Renamed, OkHttp silently falls back to its basic cleaner.
+-keepclassmembers class org.kysecurity.mail.security.StrongTls$StrongTrustManager {
+    public java.util.List checkServerTrusted(java.security.cert.X509Certificate[], java.lang.String, java.lang.String);
+}

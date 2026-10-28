@@ -67,6 +67,8 @@ internal sealed class DecryptResult {
 
 /** Bc* operators, never Jce*: Android's stripped "BC" JCE provider makes the Jce path differ. */
 internal object PgpDecryptor {
+    internal const val REFUSED_CIPHER = "this message uses a cipher KyPost refuses"
+    internal const val REFUSED_KEY = "this message is encrypted to a key below KyPost's strength requirement"
 
     fun decrypt(
         /** The enrolled key as a [CharArray], never a `String`: [EnrollmentSession] holds it in a
@@ -75,6 +77,7 @@ internal object PgpDecryptor {
         armoredMessage: String,
         /** From the address book, never the key inside the message; empty means unverifiable. */
         signerPublicKeys: List<String>,
+        refuseLegacy: Boolean = false,
     ): DecryptResult = decrypt(
         {
             armoredPrivateKey.useArmoredStream { keyStream ->
@@ -83,14 +86,19 @@ internal object PgpDecryptor {
         },
         armoredMessage,
         signerPublicKeys,
+        refuseLegacy,
     )
 
     /** Every private key that may decrypt, from a keyring's members or parsed legacy armor. The
-     *  provider runs inside this call's failure handling, so an unparseable key is a [DecryptResult.Failed]. */
+     *  provider runs inside this call's failure handling, so an unparseable key is a [DecryptResult.Failed].
+     *
+     *  [refuseLegacy] is the user's strict setting: no decryption with a key below
+     *  [PgpStrengthPolicy.keyAllowed], and no 64-bit-block session cipher. */
     fun decrypt(
         secretKeys: () -> PGPSecretKeyRingCollection,
         armoredMessage: String,
         signerPublicKeys: List<String>,
+        refuseLegacy: Boolean = false,
     ): DecryptResult = runCatching {
         val secretKeys = secretKeys()
 
@@ -107,6 +115,7 @@ internal object PgpDecryptor {
         var clear: InputStream? = null
         var encrypted: PGPPublicKeyEncryptedData? = null
         var ours: List<ByteArray> = emptyList()
+        var refused = false
         for (item in encryptedList.encryptedDataObjects) {
             val pked = item as? PGPPublicKeyEncryptedData ?: continue
             // PGPSecretKeyRingCollection has no KeyIdentifier overload, so the id is routed through
@@ -122,15 +131,25 @@ internal object PgpDecryptor {
                 listOfNotNull(secretKeys.getSecretKeyRing(keyId)?.let { ring -> ring.getSecretKey(keyId)?.let { ring to it } })
             }
             for ((ring, secretKey) in candidates) {
+                if (refuseLegacy && !(PgpStrengthPolicy.keyAllowed(ring.publicKey) && PgpStrengthPolicy.keyAllowed(secretKey.publicKey))) {
+                    refused = true
+                    continue
+                }
                 // Empty passphrase: the armored key came out of the device envelope already
                 // unwrapped. A key that still needs one is not a key this device can use.
                 val privateKey = secretKey.extractPrivateKey(
                     BcPBESecretKeyDecryptorBuilder(BcPGPDigestCalculatorProvider()).build(CharArray(0)),
                 )
+                val factory = BcPublicKeyDataDecryptorFactory(privateKey)
                 val stream = if (hidden) {
-                    runCatching { pked.getDataStream(BcPublicKeyDataDecryptorFactory(privateKey)) }.getOrNull() ?: continue
+                    runCatching { pked.getDataStream(factory) }.getOrNull() ?: continue
                 } else {
-                    pked.getDataStream(BcPublicKeyDataDecryptorFactory(privateKey))
+                    pked.getDataStream(factory)
+                }
+                // The session key is now known to be ours; refuse its cipher before reading a byte.
+                if (!PgpStrengthPolicy.archiveCipherAllowed(pked.getSymmetricAlgorithm(factory), strict = refuseLegacy)) {
+                    runCatching { stream.close() }
+                    return DecryptResult.Failed(REFUSED_CIPHER)
                 }
                 clear = stream
                 encrypted = pked
@@ -141,7 +160,7 @@ internal object PgpDecryptor {
             if (clear != null) break
         }
         if (clear == null || encrypted == null) {
-            return DecryptResult.Failed("this message is not encrypted to a key on this device")
+            return DecryptResult.Failed(if (refused) REFUSED_KEY else "this message is not encrypted to a key on this device")
         }
 
         val literal = readLiteral(clear, signerPublicKeys, ours)

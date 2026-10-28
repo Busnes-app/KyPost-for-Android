@@ -839,6 +839,9 @@
     <string name="security_section_app_lock">App lock</string>
     <string name="security_section_location">This location</string>
     <string name="security_section_notifications">Notifications</string>
+    <string name="security_section_crypto">Encryption strength</string>
+    <string name="security_refuse_legacy_title">Refuse legacy encryption</string>
+    <string name="security_refuse_legacy_intro">Off by default. New mail is always sent with strong encryption. When on, KyPost also refuses to open received mail that needs a key below RSA-2048 or 224-bit elliptic curve, or an old 64-bit cipher (3DES, CAST5, IDEA, Blowfish). Nothing is deleted; turn this off to read such mail again.</string>
     <string name="security_encryption_section">Encrypted mail</string>
     <string name="security_encryption_hostile_location">Not available while Hostile Location Protection is on.</string>
     <string name="security_encryption_no_lock_screen">Set a screen lock before this device can hold a key for your encrypted mail.</string>

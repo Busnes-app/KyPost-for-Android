@@ -14,6 +14,10 @@ Owns JVM unit tests for app logic that can run without device/emulator.
   key/digest refusal, strong controls, primary/subkey binding, and the reader's UNCHECKED
   handling. Preserve old-mail decryption, exact historical keyring bytes, and key-change and
   revocation precedence; archive fixtures must not be produced through the new-use encryptor.
+- `StrongTlsTest` judges real certificate paths from `src/test/resources/tls/` (copies of the
+  androidTest fixtures, written together by `scripts/tls-fixtures.sh`) and pins that every app
+  client carries the TLS policy. `scripts/strong-crypto-negative-controls.sh` removes each TLS and
+  archive-cipher guard and requires `StrongTlsTest`/`PgpStrengthPolicyTest` to fail.
 - Encrypted-draft tests decrypt and verify a self-encrypted MIME message, pin the exact two-field
   wire shape, and prove no upload on pre-encryption failure. Custody routing must fail closed and
   re-probe enrollment after cached bootstrap reads.

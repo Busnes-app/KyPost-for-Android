@@ -114,6 +114,7 @@ class SecurityWipeTest {
             "org.kysecurity.mail.wipe_state",
             "org.kysecurity.mail.downloaded_attachments",
             HostileLocationSettings.PREFS_NAME,
+            CryptoPolicySettings.PREFS_NAME,
         )
         assertTrue(
             "only destruction still owed may outlive a wipe, but shared_prefs held $survivors",

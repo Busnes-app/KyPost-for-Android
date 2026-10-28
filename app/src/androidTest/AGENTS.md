@@ -19,6 +19,12 @@ Owns Android instrumentation tests executed on emulator/device.
   then assert the replacement regains window focus. Request registration alone precedes window
   attachment; API 31 SystemUI can strand a window if cancelled during that interval.
 
+- `StrongTlsDeviceTest` serves `resources/tls/` fixtures (public, throwaway, from
+  `scripts/tls-fixtures.sh`) on a loopback `SSLServerSocket` and calls through the production
+  `pairingHttpClient` with trust scoped to the fixture anchor. Every weak key case must first pass
+  the platform alone; refusals must reach no request handler. Leaf pins and hostname checks are
+  re-proved on the guarded path.
+
 - `HpkeEnrollmentKeyStoreTest` opens v4/v5 sealed by Bouncy Castle's HPKE through the real
   Keystore agreement key and the production `hpkeOpenBase`, asserts the key is non-exportable,
   and refuses relabeled versions, other device/fingerprint/info, tampered ciphertext and a

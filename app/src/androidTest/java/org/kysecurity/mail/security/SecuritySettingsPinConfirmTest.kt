@@ -12,10 +12,13 @@ import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.RootMatchers.isDialog
 import androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom
+import androidx.test.espresso.matcher.ViewMatchers.isChecked
+import androidx.test.espresso.matcher.ViewMatchers.isEnabled
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import org.hamcrest.Matcher
 import org.junit.After
@@ -58,8 +61,10 @@ class SecuritySettingsPinConfirmTest {
 
     @After
     fun restore() {
+        SecuritySettingsActivity.disableLockVerifierForTest = null
         try {
             graph.hostileLocationSettings.setEnabled(false)
+            CryptoPolicySettings(context).refuseLegacy = false
             graph.appLockSettings.setGraceMillis(graceBefore)
             graph.biometricUnlockVault.destroy()
         } finally {
@@ -129,6 +134,61 @@ class SecuritySettingsPinConfirmTest {
         }
     }
 
+    @Test
+    fun refusingLegacyEncryptionNeedsNoPin() = launch {
+        awaitThenClick(withText(R.string.security_refuse_legacy_title))
+        assertTrue("a strengthening change must apply at once", awaitCondition { CryptoPolicySettings(context).refuseLegacy })
+    }
+
+    @Test
+    fun allowingLegacyEncryptionAgainAsksForThePin() {
+        CryptoPolicySettings(context).refuseLegacy = true
+        launch {
+            awaitThenClick(withText(R.string.security_refuse_legacy_title))
+
+            cancelThePinPrompt()
+            assertTrue(CryptoPolicySettings(context).refuseLegacy)
+        }
+    }
+
+    /** The lock switch reads off while its PIN check is pending; the stored lock is still on. */
+    @Test
+    fun legacyRefusalStaysPinGatedWhileDisablingTheLockIsPending() {
+        CryptoPolicySettings(context).refuseLegacy = true
+        val started = CompletableDeferred<Unit>()
+        val verdict = CompletableDeferred<UnlockAttemptResult>()
+        SecuritySettingsActivity.disableLockVerifierForTest = { pin ->
+            pin.fill(' ')
+            started.complete(Unit)
+            verdict.await()
+        }
+        launch {
+            awaitThenClick(withText(R.string.security_require_unlock_title))
+            awaitDisplayed { onView(withText(R.string.security_confirm_disable_title)).inRoot(isDialog()) }
+            onView(isAssignableFrom(EditText::class.java)).inRoot(isDialog()).perform(replaceText(TEST_PIN))
+            onView(withText(R.string.security_set_pin_confirm)).inRoot(isDialog()).perform(click())
+            assertTrue("the disable-lock check never started", awaitCondition { started.isCompleted })
+
+            awaitThenClick(withText(R.string.security_refuse_legacy_title))
+            assertFalse(
+                "legacy refusal was turned off without a PIN while the lock was still on",
+                awaitCondition(SETTLE_MS) { !CryptoPolicySettings(context).refuseLegacy },
+            )
+
+            verdict.complete(UnlockAttemptResult.Rejected(0L))
+            assertTrue("the lock switch was not restored", awaitMatch(withText(R.string.security_require_unlock_title), isChecked()))
+            assertTrue("legacy refusal stayed disabled", awaitMatch(withText(R.string.security_refuse_legacy_title), isEnabled()))
+            assertTrue(appLockStore.isLockEnabled())
+            assertTrue(CryptoPolicySettings(context).refuseLegacy)
+
+            // And once it is resolved, turning it off still asks.
+            awaitThenClick(withText(R.string.security_refuse_legacy_title))
+            cancelThePinPrompt()
+            assertTrue(appLockStore.isLockEnabled())
+            assertTrue(CryptoPolicySettings(context).refuseLegacy)
+        }
+    }
+
     private fun launch(body: () -> Unit) {
         ActivityScenario.launch(SecuritySettingsActivity::class.java).use { body() }
     }
@@ -162,8 +222,13 @@ class SecuritySettingsPinConfirmTest {
         }
     }
 
-    private fun awaitCondition(condition: () -> Boolean): Boolean {
-        val deadline = SystemClock.uptimeMillis() + TIMEOUT_MS
+    /** State, not visibility: scrolling back to the top-padded first row leaves it clipped. */
+    private fun awaitMatch(view: Matcher<View>, state: Matcher<View>) = awaitCondition {
+        runCatching { onView(view).check(matches(state)) }.isSuccess
+    }
+
+    private fun awaitCondition(timeoutMs: Long = TIMEOUT_MS, condition: () -> Boolean): Boolean {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < deadline) {
             if (condition()) return true
             SystemClock.sleep(POLL_MS)
@@ -182,5 +247,6 @@ class SecuritySettingsPinConfirmTest {
         const val TEST_PIN = "482913"
         const val TIMEOUT_MS = 10_000L
         const val POLL_MS = 100L
+        const val SETTLE_MS = 2_000L
     }
 }

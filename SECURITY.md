@@ -158,6 +158,11 @@ connection (`security/SpkiPinner.kt`, `push/PinnedCallFactory.kt`).
 cannot detect an attacker who is already in position *at* pairing. Pair over a network
 you trust.
 
+Every connection, pinned or not, also requires TLS 1.2 or 1.3 with an ECDHE AEAD suite,
+RSA >= 2048 or EC >= 256 keys on every certificate of the validated path (the trust anchor
+included) and SHA-2 certificate signatures (`security/StrongTls.kt`). A server that does not
+meet that fails to connect.
+
 ### Pairing credentials
 
 The app authenticates to the server with a device id and a per-device secret
@@ -234,8 +239,11 @@ keyring importer refuses an incomparable replacement: do not remove the old vaul
 unpair to force a rotation. A separately enrolled device can use the new identity while
 the old device retains its archive pending a supported keyring migration.
 
-This policy covers local OpenPGP operations. It does not establish the strength of every
-Android TLS provider, the relay's cryptography or the product as a whole.
+Received mail that names plaintext, single DES or an unknown session cipher is refused.
+Old mail encrypted to a short historical key or with IDEA, 3DES, CAST5 or Blowfish still
+opens by default; **Security → Encryption strength → Refuse legacy encryption** refuses it
+too, without deleting anything. The full table, the exception's risks and what is out of
+scope are in [docs/STRONG-CRYPTO.md](docs/STRONG-CRYPTO.md).
 
 #### Device enrollment
 

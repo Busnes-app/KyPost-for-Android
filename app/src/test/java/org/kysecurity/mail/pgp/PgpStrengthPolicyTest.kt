@@ -252,6 +252,87 @@ class PgpStrengthPolicyTest {
         assertTrue(signerKeyIdsOf(armor).isEmpty())
     }
 
+    @Test
+    fun archiveCiphersOpenByDefaultExceptBrokenOnes() {
+        for (cipher in strongCiphers + legacyCiphers) {
+            val result = PgpDecryptor.decrypt(strong.privateArmor,
+                encrypted(strong, HashAlgorithmTags.SHA256, cipher = cipher), listOf(strong.publicArmor))
+            assertArrayEquals("cipher $cipher", body, (result as DecryptResult.Ok).plaintext)
+        }
+        val des = PgpDecryptor.decrypt(strong.privateArmor,
+            encrypted(strong, HashAlgorithmTags.SHA256, cipher = SymmetricKeyAlgorithmTags.DES), listOf(strong.publicArmor))
+        assertEquals(DecryptResult.Failed(PgpDecryptor.REFUSED_CIPHER), des)
+    }
+
+    @Test
+    fun refusingLegacyClosesSixtyFourBitCiphersAndKeepsStrongOnes() {
+        for (cipher in legacyCiphers) {
+            val result = PgpDecryptor.decrypt(strong.privateArmor,
+                encrypted(strong, HashAlgorithmTags.SHA256, cipher = cipher), listOf(strong.publicArmor), refuseLegacy = true)
+            assertEquals("cipher $cipher", DecryptResult.Failed(PgpDecryptor.REFUSED_CIPHER), result)
+        }
+        for (cipher in strongCiphers) {
+            val result = PgpDecryptor.decrypt(strong.privateArmor,
+                encrypted(strong, HashAlgorithmTags.SHA256, cipher = cipher), listOf(strong.publicArmor), refuseLegacy = true)
+            assertArrayEquals("cipher $cipher", body, (result as DecryptResult.Ok).plaintext)
+        }
+    }
+
+    @Test
+    fun refusingLegacyClosesShortDecryptionKeysWithoutTouchingThem() {
+        for (key in weak) {
+            val privateArmor = key.privateArmor
+            val privateBefore = privateArmor.copyOf()
+            val result = PgpDecryptor.decrypt(privateArmor,
+                encrypted(strong, HashAlgorithmTags.SHA256, recipient = key), listOf(strong.publicArmor), refuseLegacy = true)
+            assertEquals(DecryptResult.Failed(PgpDecryptor.REFUSED_KEY), result)
+            assertArrayEquals(privateBefore, privateArmor)
+        }
+    }
+
+    /** What every new message is made of, read back with plain Bouncy Castle. */
+    @Test
+    fun newMessagesUseAes256IntegrityAndSha256() {
+        val sent = PgpEncryptor.encrypt(body, listOf(strong.publicArmor), strong.ring) as EncryptResult.Ok
+        val list = org.bouncycastle.openpgp.jcajce.JcaPGPObjectFactory(
+            org.bouncycastle.openpgp.PGPUtil.getDecoderStream(sent.armored.byteInputStream()),
+        ).nextObject() as org.bouncycastle.openpgp.PGPEncryptedDataList
+        val pked = list.encryptedDataObjects.next() as org.bouncycastle.openpgp.PGPPublicKeyEncryptedData
+        val privateKey = strong.ring.secretKey.extractPrivateKey(
+            org.bouncycastle.openpgp.operator.bc.BcPBESecretKeyDecryptorBuilder(BcPGPDigestCalculatorProvider()).build(CharArray(0)),
+        )
+        val factory = org.bouncycastle.openpgp.operator.bc.BcPublicKeyDataDecryptorFactory(privateKey)
+        assertEquals(SymmetricKeyAlgorithmTags.AES_256, pked.getSymmetricAlgorithm(factory))
+        assertTrue(pked.isIntegrityProtected)
+        val hashes = hashesIn(org.bouncycastle.openpgp.jcajce.JcaPGPObjectFactory(pked.getDataStream(factory)))
+        assertTrue(pked.verify())
+        assertEquals(listOf(HashAlgorithmTags.SHA256, HashAlgorithmTags.SHA256), hashes)
+    }
+
+    private fun hashesIn(objects: org.bouncycastle.openpgp.jcajce.JcaPGPObjectFactory): List<Int> =
+        generateSequence { objects.nextObject() }.flatMap { item ->
+            when (item) {
+                is org.bouncycastle.openpgp.PGPCompressedData ->
+                    hashesIn(org.bouncycastle.openpgp.jcajce.JcaPGPObjectFactory(item.dataStream)).asSequence()
+                is org.bouncycastle.openpgp.PGPOnePassSignatureList -> sequenceOf(item[0].hashAlgorithm)
+                is org.bouncycastle.openpgp.PGPSignatureList -> sequenceOf(item[0].hashAlgorithm)
+                is PGPLiteralData -> emptySequence<Int>().also { item.inputStream.readBytes() }
+                else -> emptySequence()
+            }
+        }.toList()
+
+    @Test
+    fun archiveCipherPredicate() {
+        for (cipher in listOf(SymmetricKeyAlgorithmTags.NULL, SymmetricKeyAlgorithmTags.DES, SymmetricKeyAlgorithmTags.SAFER, 99)) {
+            assertFalse("$cipher", PgpStrengthPolicy.archiveCipherAllowed(cipher, strict = false))
+        }
+        for (cipher in legacyCiphers) {
+            assertTrue(PgpStrengthPolicy.archiveCipherAllowed(cipher, strict = false))
+            assertFalse(PgpStrengthPolicy.archiveCipherAllowed(cipher, strict = true))
+        }
+        for (cipher in strongCiphers) assertTrue(PgpStrengthPolicy.archiveCipherAllowed(cipher, strict = true))
+    }
+
     private fun state(raw: RawSignature, key: Fixture): PgpSignatureState =
         signatureStateFor(raw, emptyList(), listOf(LocalSignerKey(key.publicArmor, confirmed = true)))
 
@@ -275,8 +356,9 @@ class PgpStrengthPolicyTest {
         recipient: Fixture = strong,
         recipientSubkey: Boolean = false,
         tailHash: Int = hash,
+        cipher: Int = SymmetricKeyAlgorithmTags.AES_256,
     ): String = armor { out ->
-        val generator = PGPEncryptedDataGenerator(BcPGPDataEncryptorBuilder(SymmetricKeyAlgorithmTags.AES_256)
+        val generator = PGPEncryptedDataGenerator(BcPGPDataEncryptorBuilder(cipher)
             .setWithIntegrityPacket(true).setSecureRandom(SecureRandom()))
         val recipientKey = if (recipientSubkey) recipient.ring.getPublicKey(requireNotNull(recipient.subkey).keyID) else recipient.ring.publicKey
         generator.addMethod(BcPublicKeyKeyEncryptionMethodGenerator(recipientKey))
@@ -311,6 +393,11 @@ class PgpStrengthPolicyTest {
         private val body = "Public OpenPGP policy fixture".toByteArray()
         private val obsoleteDigests = listOf(HashAlgorithmTags.MD5, HashAlgorithmTags.SHA1, HashAlgorithmTags.RIPEMD160)
         private val strongDigests = listOf(HashAlgorithmTags.SHA256, HashAlgorithmTags.SHA384, HashAlgorithmTags.SHA512, HashAlgorithmTags.SHA3_256, HashAlgorithmTags.SHA3_512)
+        private val strongCiphers = listOf(SymmetricKeyAlgorithmTags.AES_128, SymmetricKeyAlgorithmTags.AES_192,
+            SymmetricKeyAlgorithmTags.AES_256, SymmetricKeyAlgorithmTags.TWOFISH, SymmetricKeyAlgorithmTags.CAMELLIA_128,
+            SymmetricKeyAlgorithmTags.CAMELLIA_192, SymmetricKeyAlgorithmTags.CAMELLIA_256)
+        private val legacyCiphers = listOf(SymmetricKeyAlgorithmTags.IDEA, SymmetricKeyAlgorithmTags.TRIPLE_DES,
+            SymmetricKeyAlgorithmTags.CAST5, SymmetricKeyAlgorithmTags.BLOWFISH)
         private val strong by lazy { rsaFixture() }
         private val weak by lazy { listOf(rsaFixture(1024), rsaFixture(2047)) }
 

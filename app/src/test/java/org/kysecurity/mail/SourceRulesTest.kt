@@ -141,6 +141,18 @@ class SourceRulesTest {
         )
     }
 
+    /** docs/STRONG-CRYPTO.md's TLS row holds only while every connection descends from
+     *  `basePairingClient`. A second client or a raw socket would skip the key floor. */
+    @Test
+    fun everyNetworkClientIsBuiltInOnePlace() {
+        val transports = Regex("""OkHttpClient\.Builder\(|OkHttpClient\(\)|HttpURLConnection|openConnection\(|openStream\(|SSLSocketFactory\.getDefault|SocketFactory\.getDefault|\bSocket\(|SSLContext\.getInstance""")
+        val offenders = mainSources()
+            .filter { it.relativePath !in setOf("org/kysecurity/mail/PairingAuthHeaders.kt", "org/kysecurity/mail/security/StrongTls.kt") }
+            .filter { transports.containsMatchIn(it.readText()) }
+            .map { it.path }
+        assertEquals(emptyList(), offenders, "Build clients with pairingHttpClient(), never directly.")
+    }
+
     /** `deriveKeys` throws when the Keystore pepper cannot be read, and every PIN path has to abort
      *  on that rather than die: a Keystore fault is not a wrong PIN. `changePin` was the one caller
      *  that skipped it, so an unreadable Keystore killed the process in the middle of the staged
