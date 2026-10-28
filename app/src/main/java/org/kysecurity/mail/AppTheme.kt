@@ -599,13 +599,14 @@ private fun applyThemeToViewTree(view: View, palette: ThemePalette) {
             val padV = (12 * density).toInt()
             view.setPadding(padH, maxOf(padV, view.paddingTop), padH, maxOf(padV, view.paddingBottom))
         }
+        // Before Button, which CheckBox extends.
+        is CheckBox -> {
+            applyCheckBoxTheme(view.context, view)
+        }
         is Button -> {
             view.setTextColor(readableOn(accent))
             view.background = buttonBackground(palette)
             applyButtonPadding(view)
-        }
-        is CheckBox -> {
-            applyCheckBoxTheme(view.context, view)
         }
         // Otherwise the FAB keeps the XML theme's static colorSecondary.
         is FloatingActionButton -> {
