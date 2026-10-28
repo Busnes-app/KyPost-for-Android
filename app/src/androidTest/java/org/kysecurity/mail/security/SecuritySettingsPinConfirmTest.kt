@@ -176,8 +176,8 @@ class SecuritySettingsPinConfirmTest {
             )
 
             verdict.complete(UnlockAttemptResult.Rejected(0L))
-            awaitDisplayed { onView(withText(R.string.security_require_unlock_title)).perform(scrollTo()).check(matches(isChecked())) }
-            awaitDisplayed { onView(withText(R.string.security_refuse_legacy_title)).perform(scrollTo()).check(matches(isEnabled())) }
+            assertTrue("the lock switch was not restored", awaitMatch(withText(R.string.security_require_unlock_title), isChecked()))
+            assertTrue("legacy refusal stayed disabled", awaitMatch(withText(R.string.security_refuse_legacy_title), isEnabled()))
             assertTrue(appLockStore.isLockEnabled())
             assertTrue(CryptoPolicySettings(context).refuseLegacy)
 
@@ -220,6 +220,11 @@ class SecuritySettingsPinConfirmTest {
                 SystemClock.sleep(POLL_MS)
             }
         }
+    }
+
+    /** State, not visibility: scrolling back to the top-padded first row leaves it clipped. */
+    private fun awaitMatch(view: Matcher<View>, state: Matcher<View>) = awaitCondition {
+        runCatching { onView(view).check(matches(state)) }.isSuccess
     }
 
     private fun awaitCondition(timeoutMs: Long = TIMEOUT_MS, condition: () -> Boolean): Boolean {
