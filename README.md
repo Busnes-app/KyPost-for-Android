@@ -46,6 +46,12 @@ The Google/Firebase dependency details below apply to Play/GitHub variants. F-Dr
 - Firebase Analytics is not included. The build pulls `firebase-messaging`, `firebase-installations`, and their support artifacts. FCM identifies the device with the Firebase installation id, not with an advertising id.
 - The device identifiers the app does hold are the FCM token and the pairing material described in **Push notification pairing**. Both go only to the paired KyPost relay.
 
+## License
+
+KyPost for Android is released under the [MIT License](LICENSE.txt).
+
+[![OctoCounts](https://api.octocounts.com/badge/Busnes-app/KyPost-for-Android/branch/main)](https://octocounts.com/github/Busnes-app/KyPost-for-Android/tree/main)
+
 ## Documentation
 
 - [Connections](docs/CONNECTIONS.md) — Push notification pairing, Pull mode (FCM and relay bypass), Notification permission behavior (Android 13 and later), Pairing from a desktop QR code, and related procedures. <a id="push-notification-pairing"></a><a id="pull-mode-fcm-and-relay-bypass"></a><a id="notification-permission-behavior-android-13-and-later"></a><a id="pairing-from-a-desktop-qr-code"></a><a id="troubleshooting-checklist"></a>
