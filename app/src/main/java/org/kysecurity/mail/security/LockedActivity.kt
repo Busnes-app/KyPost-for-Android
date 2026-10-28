@@ -65,7 +65,7 @@ abstract class LockedActivity : AppCompatActivity() {
     /** Debug only: CI taps that silently did nothing have no other trace of whether this was why. */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (BuildConfig.DEBUG && ev.actionMasked == MotionEvent.ACTION_DOWN &&
-            ev.flags and MotionEvent.FLAG_WINDOW_IS_OBSCURED != 0
+            (ev.flags and MotionEvent.FLAG_WINDOW_IS_OBSCURED) != 0
         ) {
             android.util.Log.w("LockedActivity", "Obscured touch at ${ev.x},${ev.y}; overlay protection drops it")
         }
