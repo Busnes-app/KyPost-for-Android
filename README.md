@@ -2,6 +2,7 @@
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15928/badge)](https://www.bestpractices.dev/projects/15928)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Busnes-app/KyPost-for-Android/badge)](https://scorecard.dev/viewer/?uri=github.com/Busnes-app/KyPost-for-Android)
+[![OctoCounts](https://api.octocounts.com/badge/Busnes-app/KyPost-for-Android/branch/main)](https://octocounts.com/github/Busnes-app/KyPost-for-Android/tree/main)
 
 KyPost is an Android email client for a self-hosted KyPost server. Read and send mail,
 organize keyword-based inbox tabs, exchange PGP keys and synchronize contacts in both
