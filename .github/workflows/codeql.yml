@@ -17,12 +17,11 @@ on:
 permissions:
   contents: read
 
-# Supersede an in-flight CodeQL run when the same ref is pushed again.
-# main is excluded from cancellation so the security scan for that commit
-# is not lost — same policy as ci.yml.
+# A new push to a PR supersedes its in-flight scan; every other run is its
+# own group, so no main scan is ever cancelled — same policy as ci.yml.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Every action below is pinned to a commit SHA rather than a tag. A tag is a
 # mutable pointer: whoever controls it controls a job running in this
@@ -41,7 +40,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [java-kotlin]
+        # Only java-kotlin builds. The others are read from source: the workflows themselves,
+        # the .mjs fixtures and store-screenshot helpers, and the Python beside them.
+        include:
+          - language: java-kotlin
+            build-mode: manual
+          - language: actions
+            build-mode: none
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,31 +61,36 @@ jobs:
       # Gradle publishes for every release. Must come before any ./gradlew
       # invocation (including the autobuild step below).
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        if: matrix.build-mode == 'manual'
 
       # Temurin 25: same JDK as ci.yml. Gradle 9.6 officially supports 25;
       # CodeQL's autobuild invokes Gradle, so the toolchain must match.
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        if: matrix.build-mode == 'manual'
         with:
           distribution: temurin
           java-version: "25"
       # ci.yml's Gradle User Home cache, read-only; see the note there.
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        if: matrix.build-mode == 'manual'
         with:
           cache-provider: basic
           cache-read-only: true
 
       - uses: ./.github/actions/placeholder-google-services
+        if: matrix.build-mode == 'manual'
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
         with:
           languages: ${{ matrix.language }}
           queries: security-and-quality
-          build-mode: manual
+          build-mode: ${{ matrix.build-mode }}
 
       # --no-build-cache: CodeQL extracts what the compiler runs, and a task restored from the
       # build cache compiles nothing.
       - name: Build for CodeQL
+        if: matrix.build-mode == 'manual'
         run: ./gradlew assembleDebug --no-build-cache --stacktrace
 
       - name: Perform CodeQL Analysis
