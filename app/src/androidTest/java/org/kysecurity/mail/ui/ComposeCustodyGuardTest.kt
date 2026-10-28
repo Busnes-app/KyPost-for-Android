@@ -28,6 +28,7 @@ import org.kysecurity.mail.pgp.PgpBootstrapClient
 import org.kysecurity.mail.pgp.PgpComposeState
 import org.kysecurity.mail.pgp.RecipientKeyClient
 import org.kysecurity.mail.push.PairingData
+import org.kysecurity.mail.afterSplash
 
 /** Every way to Send obeys the account's custody, including a confirmation answered after
  *  custody turned out to be webmail-only. */
@@ -64,7 +65,7 @@ class ComposeCustodyGuardTest {
             .putExtra(ComposeActivity.EXTRA_TO, "alice@example.com")
             .putExtra(ComposeActivity.EXTRA_SUBJECT, "hi")
             .putExtra(ComposeActivity.EXTRA_BODY, "hello")
-        ActivityScenario.launch<ComposeActivity>(intent).use { scenario ->
+        ActivityScenario.launch<ComposeActivity>(intent).afterSplash().use { scenario ->
             waitUntil(scenario) { it.custodySettledForTest() && it.sendEnabledForTest() != null }
             assertTrue("bootstrap was never attempted", bootstrapCalls.get() > 0)
 
@@ -102,7 +103,7 @@ class ComposeCustodyGuardTest {
         val intent = ComposeActivity.internalIntent(instrumentation.targetContext)
             .putExtra(ComposeActivity.EXTRA_TO, "alice@example.com")
             .putExtra(ComposeActivity.EXTRA_BODY, "hello")
-        ActivityScenario.launch<ComposeActivity>(intent).use { scenario ->
+        ActivityScenario.launch<ComposeActivity>(intent).afterSplash().use { scenario ->
             scenario.onActivity {
                 it.sendObserverForTest = { sends.incrementAndGet() }
                 // The editor's own report comes from its page, which CI emulators never finish.
@@ -127,7 +128,7 @@ class ComposeCustodyGuardTest {
      *  is offered it: never one whose key the server holds, nor one still being looked up. */
     @Test
     fun scheduleAndSaveDraftAreOfferedOnlyWhereThisDeviceHoldsTheKey() {
-        ActivityScenario.launch<ComposeActivity>(ComposeActivity.internalIntent(instrumentation.targetContext)).use { scenario ->
+        ActivityScenario.launch<ComposeActivity>(ComposeActivity.internalIntent(instrumentation.targetContext)).afterSplash().use { scenario ->
             scenario.onActivity { assertFalse("offered before custody is known", it.scheduleOfferedForTest()) }
             scenario.onActivity {
                 it.applyPgpComposeStateForTest(PgpComposeState(canEncrypt = true, canSign = true, handoffToWebmail = false))

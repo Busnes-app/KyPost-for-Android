@@ -20,6 +20,7 @@ import org.kysecurity.mail.KeywordTabs
 import org.kysecurity.mail.R
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRuntime
+import org.kysecurity.mail.afterSplash
 
 /** Search results replace the folder list only while their query, in their folder, is on screen. */
 @RunWith(AndroidJUnit4::class)
@@ -34,7 +35,7 @@ class InboxSearchTest {
         Email(id = id, subject = "Subject $id", sender = "sender@example.com", preview = "", folder = folder)
 
     private fun withInbox(block: (InboxActivity) -> Unit) {
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { activity ->
                 activity.setFolderForTest("INBOX", KeywordTabs.ALL)
                 activity.setEmailsForTest(listOf(email("1"), email("2")))
@@ -93,7 +94,7 @@ class InboxSearchTest {
 
     @Test
     fun keywordChipsHideAsSoonAsASearchIsSubmitted() {
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { activity ->
                 activity.setFolderForTest("INBOX", KeywordTabs.ALL)
                 activity.setEmailsForTest(listOf(email("1"), email("2")))
@@ -107,7 +108,7 @@ class InboxSearchTest {
 
     @Test
     fun editingTheQueryDropsTheSubmittedSearchesResults() {
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { activity ->
                 activity.setFolderForTest("INBOX", KeywordTabs.ALL)
                 activity.setEmailsForTest(listOf(email("1"), email("2")))

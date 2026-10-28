@@ -18,6 +18,11 @@ Owns Android instrumentation tests executed on emulator/device.
 - Prompt lifecycle tests must await the visible system prompt before recreating its Activity,
   then assert the replacement regains window focus. Request registration alone precedes window
   attachment; API 31 SystemUI can strand a window if cancelled during that interval.
+- A test that taps into a launched Activity calls `afterSplash()` (`SplashWindow.kt`) on the
+  scenario first. The system splash is not focusable, so Espresso taps under it, and
+  `LockedActivity`'s overlay protection drops the obscured tap.
+- Inbox tests that seed rows with `setEmailsForTest` use a folder no launch refresh targets, as
+  `InboxNewMailTest` and `InboxUndoTest` do; the launch refresh repaints INBOX whenever it lands.
 
 - `HpkeEnrollmentKeyStoreTest` opens v4/v5 sealed by Bouncy Castle's HPKE through the real
   Keystore agreement key and the production `hpkeOpenBase`, asserts the key is non-exportable,

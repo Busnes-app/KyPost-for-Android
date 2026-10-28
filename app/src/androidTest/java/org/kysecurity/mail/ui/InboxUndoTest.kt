@@ -15,6 +15,7 @@ import org.junit.runner.RunWith
 import org.kysecurity.mail.Email
 import org.kysecurity.mail.InboxActivity
 import org.kysecurity.mail.KeywordTabs
+import org.kysecurity.mail.afterSplash
 import org.kysecurity.mail.mail.MailRuntime
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -29,15 +30,15 @@ class InboxUndoTest {
     }
 
     private fun email(id: String) =
-        Email(id = id, subject = "Subject $id", sender = "sender@example.com", preview = "", folder = "INBOX")
+        Email(id = id, subject = "Subject $id", sender = "sender@example.com", preview = "", folder = FOLDER)
 
     @Test
     fun undoBringsTheRowBackAndNothingIsSent() {
         val ran = CountDownLatch(1)
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { activity ->
                 activity.rowActionObserverForTest = { _, _ -> ran.countDown() }
-                activity.setFolderForTest("INBOX", KeywordTabs.ALL)
+                activity.setFolderForTest(FOLDER, KeywordTabs.ALL)
                 activity.setEmailsForTest(listOf(email("1"), email("2")))
                 activity.submitDeleteForTest(email("1"))
                 assertEquals(listOf("2"), activity.shownEmailsForTest().map { it.id })
@@ -56,10 +57,10 @@ class InboxUndoTest {
     @Test
     fun leavingTheScreenSendsWhatIsStillHeld() {
         val ran = CountDownLatch(1)
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { activity ->
                 activity.rowActionObserverForTest = { _, _ -> ran.countDown() }
-                activity.setFolderForTest("INBOX", KeywordTabs.ALL)
+                activity.setFolderForTest(FOLDER, KeywordTabs.ALL)
                 activity.setEmailsForTest(listOf(email("1")))
                 activity.submitDeleteForTest(email("1"))
             }
@@ -75,10 +76,10 @@ class InboxUndoTest {
     @Test
     fun undoTakesBackEveryActionStillHeld() {
         val ran = CountDownLatch(1)
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { activity ->
                 activity.rowActionObserverForTest = { _, _ -> ran.countDown() }
-                activity.setFolderForTest("INBOX", KeywordTabs.ALL)
+                activity.setFolderForTest(FOLDER, KeywordTabs.ALL)
                 activity.setEmailsForTest(listOf(email("1"), email("2"), email("3")))
                 activity.submitDeleteForTest(email("1"))
                 activity.submitDeleteForTest(email("2"))
@@ -99,10 +100,10 @@ class InboxUndoTest {
     @Test
     fun aReplacedBarsLateTimeoutDoesNotSendTheNewerAction() {
         val ran = CountDownLatch(1)
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { activity ->
                 activity.rowActionObserverForTest = { _, _ -> ran.countDown() }
-                activity.setFolderForTest("INBOX", KeywordTabs.ALL)
+                activity.setFolderForTest(FOLDER, KeywordTabs.ALL)
                 activity.setEmailsForTest(listOf(email("1"), email("2")))
                 activity.submitDeleteForTest(email("1"))
                 val barA = activity.undoBarForTest()
@@ -122,5 +123,11 @@ class InboxUndoTest {
             assertFalse("a stale dismissal sent the held deletes", ran.await(2, TimeUnit.SECONDS))
             scenario.onActivity { it.rowActionObserverForTest = null }
         }
+    }
+
+    private companion object {
+        /** No launch refresh targets it: that refresh repaints INBOX from an empty cache whenever
+         *  it lands, which can be after the rows are seeded. */
+        const val FOLDER = "Archive/UndoTest"
     }
 }

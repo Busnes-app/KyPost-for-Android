@@ -26,6 +26,7 @@ import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRuntime
 import org.kysecurity.mail.mail.ScheduledSend
 import java.time.Instant
+import org.kysecurity.mail.afterSplash
 
 /** The scheduled list against a relay the test controls: only a waiting send can be canceled, and
  *  only after the user confirms. */
@@ -56,7 +57,7 @@ class ScheduledActivityTest {
         MailRuntime.invalidate()
     }
 
-    private fun launch() = ActivityScenario.launch<ScheduledActivity>(Intent(context, ScheduledActivity::class.java))
+    private fun launch() = ActivityScenario.launch<ScheduledActivity>(Intent(context, ScheduledActivity::class.java)).afterSplash()
 
     @Test
     fun aWaitingSendIsCanceledOnlyAfterConfirming() {

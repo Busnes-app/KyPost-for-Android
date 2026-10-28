@@ -24,6 +24,7 @@ import org.kysecurity.mail.EmailDetailActivity
 import org.kysecurity.mail.R
 import org.kysecurity.mail.getStoredThemePalette
 import org.kysecurity.mail.mail.MailRuntime
+import org.kysecurity.mail.afterSplash
 
 /** A tapped web link leaves the app only after the user confirmed the host it really goes to,
  *  and then exactly that parsed address. */
@@ -56,11 +57,11 @@ class EmailDetailLinkConfirmTest {
     }
 
     private fun launch(suspicious: Boolean = false): ActivityScenario<EmailDetailActivity> =
-        ActivityScenario.launch(
+        ActivityScenario.launch<EmailDetailActivity>(
             Intent(instrumentation.targetContext, EmailDetailActivity::class.java)
                 .putExtra("email_preview", "body")
                 .putExtra("email_suspicious", suspicious),
-        )
+        ).afterSplash()
 
     private val raw = "https://bank.example@evil.example/a b"
 

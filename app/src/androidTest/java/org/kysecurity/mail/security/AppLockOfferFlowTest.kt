@@ -22,6 +22,7 @@ import org.junit.runner.RunWith
 import org.kysecurity.mail.R
 import org.kysecurity.mail.SettingsActivity
 import org.kysecurity.mail.getStoredThemePalette
+import org.kysecurity.mail.afterSplash
 
 /** The offer is made once per install, never repeated, and answered "Not now" for good. Runs on
  *  the CI device, which has no app lock (every Activity test requires an unlocked app). */
@@ -38,7 +39,7 @@ class AppLockOfferFlowTest {
 
     @Test
     fun declinedOnceItIsNotAskedAgainAfterRecreation() {
-        ActivityScenario.launch(SettingsActivity::class.java).use { scenario ->
+        ActivityScenario.launch(SettingsActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { assertTrue(AppLockOffer.showIfDue(it)) }
             onView(withText(R.string.app_lock_offer_title)).inRoot(isDialog()).check(matches(isDisplayed()))
             onView(withText(R.string.app_lock_offer_decline)).inRoot(isDialog()).perform(click())
@@ -53,7 +54,7 @@ class AppLockOfferFlowTest {
 
     @Test
     fun theOfferUsesTheActivePalette() {
-        ActivityScenario.launch(SettingsActivity::class.java).use { scenario ->
+        ActivityScenario.launch(SettingsActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { AppLockOffer.showIfDue(it) }
             onView(withId(androidx.appcompat.R.id.alertTitle)).inRoot(isDialog()).check { view, _ ->
                 val expected = Color.parseColor(getStoredThemePalette(view.context).inkStrong)
