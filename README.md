@@ -2,7 +2,6 @@
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15928/badge)](https://www.bestpractices.dev/projects/15928)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Busnes-app/KyPost-for-Android/badge)](https://scorecard.dev/viewer/?uri=github.com/Busnes-app/KyPost-for-Android)
-[![OctoCounts](https://api.octocounts.com/badge/Busnes-app/KyPost-for-Android/branch/main)](https://octocounts.com/github/Busnes-app/KyPost-for-Android/tree/main)
 
 KyPost is an Android email client for a self-hosted KyPost server. Read and send mail,
 organize keyword-based inbox tabs, exchange PGP keys and synchronize contacts in both
@@ -46,6 +45,12 @@ The Google/Firebase dependency details below apply to Play/GitHub variants. F-Dr
 - No advertising or attribution library is in the dependency graph. The resolved Google Play services artifacts are `play-services-base`, `-basement`, `-cloud-messaging`, `-code-scanner`, `-stats`, and `-tasks`. Neither `play-services-ads-identifier` nor `play-services-appset` is present.
 - Firebase Analytics is not included. The build pulls `firebase-messaging`, `firebase-installations`, and their support artifacts. FCM identifies the device with the Firebase installation id, not with an advertising id.
 - The device identifiers the app does hold are the FCM token and the pairing material described in **Push notification pairing**. Both go only to the paired KyPost relay.
+
+## License
+
+KyPost for Android is released under the [MIT License](LICENSE.txt).
+
+[![OctoCounts](https://api.octocounts.com/badge/Busnes-app/KyPost-for-Android/branch/main)](https://octocounts.com/github/Busnes-app/KyPost-for-Android/tree/main)
 
 ## Documentation
 
