@@ -19,12 +19,12 @@ on:
 permissions:
   contents: read
 
-# Supersede an in-flight run when the same ref is pushed again. main is excluded from
-# cancellation: a green tick against a specific main commit is the record of whether that
-# commit built, and cancelling it destroys that record.
+# A new push to a PR supersedes its in-flight run. Every other run is its own group: a green
+# tick against a specific main commit is the record of whether that commit built, and a
+# per-ref group let the next merge cancel a main run still pending in the queue.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Every action below is pinned to a commit SHA rather than a tag. A tag is a mutable
 # pointer: whoever controls it controls a job running in this repository. The sibling
