@@ -17,6 +17,7 @@ import org.kysecurity.mail.InboxActivity
 import org.kysecurity.mail.KeywordTabs
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRuntime
+import org.kysecurity.mail.afterSplash
 
 @RunWith(AndroidJUnit4::class)
 class InboxSelectionTest {
@@ -30,7 +31,7 @@ class InboxSelectionTest {
         Email(id = id, subject = "Subject $id", sender = "sender@example.com", preview = "", folder = "INBOX")
 
     private fun withInbox(block: (InboxActivity) -> Unit) {
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { activity ->
                 activity.setFolderForTest("INBOX", KeywordTabs.ALL)
                 activity.setEmailsForTest(listOf(email("1"), email("2"), email("3")))
@@ -65,7 +66,7 @@ class InboxSelectionTest {
     fun aBulkActionCoversRowsSelectedInOtherTabs() {
         val work = Email(id = "w", subject = "w", sender = "a@example.com", preview = "", folder = "INBOX", keywords = setOf("Work"))
         val home = Email(id = "h", subject = "h", sender = "a@example.com", preview = "", folder = "INBOX", keywords = setOf("Home"))
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { activity ->
                 activity.setFolderForTest("INBOX", "Work")
                 activity.setEmailsForTest(listOf(work, home))
@@ -102,7 +103,7 @@ class InboxSelectionTest {
     @Test
     fun selectionStopsAtTheRelaysBatchLimit() {
         val rows = (1..501).map { email("$it") }
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { activity ->
                 activity.setFolderForTest("INBOX", KeywordTabs.ALL)
                 activity.setEmailsForTest(rows)
@@ -119,7 +120,7 @@ class InboxSelectionTest {
         val inbox42 = Email(id = "42", subject = "inbox", sender = "a@example.com", preview = "", folder = "INBOX")
         val junk42 = Email(id = "42", subject = "junk", sender = "b@example.com", preview = "", folder = "Junk")
         var answer: ((String) -> Unit)? = null
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { activity ->
                 activity.moveTargetPickerForTest = { _, then -> answer = then }
                 activity.setFolderForTest("INBOX", KeywordTabs.ALL)

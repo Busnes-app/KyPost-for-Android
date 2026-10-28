@@ -29,6 +29,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.kysecurity.mail.R
+import org.kysecurity.mail.afterSplash
 import org.kysecurity.mail.contacts.ContactsRuntime
 import org.kysecurity.mail.contacts.device.DeviceContactsRuntime
 import org.kysecurity.mail.mail.MailRuntime
@@ -190,7 +191,7 @@ class SecuritySettingsPinConfirmTest {
     }
 
     private fun launch(body: () -> Unit) {
-        ActivityScenario.launch(SecuritySettingsActivity::class.java).use { body() }
+        ActivityScenario.launch(SecuritySettingsActivity::class.java).afterSplash().use { body() }
     }
 
     private fun awaitPinPrompt() {

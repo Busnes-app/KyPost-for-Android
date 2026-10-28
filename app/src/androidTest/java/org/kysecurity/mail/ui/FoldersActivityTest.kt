@@ -2,7 +2,6 @@ package org.kysecurity.mail.ui
 
 import android.app.Activity
 import android.content.Intent
-import android.os.ParcelFileDescriptor
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onIdle
 import androidx.test.espresso.Espresso.onView
@@ -20,13 +19,13 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.kysecurity.mail.FoldersActivity
 import org.kysecurity.mail.R
+import org.kysecurity.mail.afterSplash
 import org.kysecurity.mail.mail.FolderInfo
 import org.kysecurity.mail.mail.FolderListResult
 import org.kysecurity.mail.mail.MailOutcome
@@ -65,7 +64,7 @@ class FoldersActivityTest {
 
     @Test
     fun aTopLevelFolderOffersNoRenameOrDelete() {
-        ActivityScenario.launch<FoldersActivity>(FoldersActivity.intentFor(context)).use {
+        launch(FoldersActivity.intentFor(context)).use {
             eventually { onView(withText("Archive")).check(matches(isDisplayed())) }
             onView(withContentDescription("More options for Work")).perform(click())
 
@@ -87,7 +86,7 @@ class FoldersActivityTest {
 
     @Test
     fun aTopLevelFolderIsCreatedOnlyAfterTheWarningAndAValidName() {
-        ActivityScenario.launch<FoldersActivity>(FoldersActivity.intentFor(context)).use {
+        launch(FoldersActivity.intentFor(context)).use {
             eventually { onView(withText("Work")).check(matches(isDisplayed())) }
             onView(withId(R.id.foldersNew)).perform(click())
             onView(withText(R.string.folders_top_level_note)).inRoot(isDialog()).check(matches(isDisplayed()))
@@ -106,7 +105,7 @@ class FoldersActivityTest {
 
     @Test
     fun renameSendsTheNewLeaf() {
-        ActivityScenario.launch<FoldersActivity>(FoldersActivity.intentFor(context, "Archive")).use {
+        launch(FoldersActivity.intentFor(context, "Archive")).use {
             eventually { onView(withContentDescription("More options for Old")).perform(click()) }
             onView(withText(R.string.folders_rename)).inRoot(isPlatformPopup()).perform(click())
             onView(withId(R.id.foldersNameInput)).perform(replaceText("Older"))
@@ -136,7 +135,7 @@ class FoldersActivityTest {
 
     @Test
     fun deleteSaysWhereTheMailGoesBeforeDeleting() {
-        ActivityScenario.launch<FoldersActivity>(FoldersActivity.intentFor(context, "Archive")).use {
+        launch(FoldersActivity.intentFor(context, "Archive")).use {
             eventually { onView(withContentDescription("More options for Old")).perform(click()) }
             onView(withText(R.string.folders_delete)).inRoot(isPlatformPopup()).perform(click())
 
@@ -149,16 +148,11 @@ class FoldersActivityTest {
         }
     }
 
-    /** Launched for a result, the screen comes up under a splash window that outlives its window
-     *  focus. LockedActivity drops taps made under another app's window, so wait it out. */
-    private fun launchForResult(intent: Intent): ActivityScenario<FoldersActivity> =
-        ActivityScenario.launchActivityForResult<FoldersActivity>(intent).also {
-            eventually { assertFalse(shell("dumpsys input").contains("Splash Screen ${context.packageName}")) }
-        }
+    private fun launch(intent: Intent): ActivityScenario<FoldersActivity> =
+        ActivityScenario.launch<FoldersActivity>(intent).afterSplash()
 
-    private fun shell(command: String): String =
-        ParcelFileDescriptor.AutoCloseInputStream(InstrumentationRegistry.getInstrumentation().uiAutomation.executeShellCommand(command))
-            .bufferedReader().use { it.readText() }
+    private fun launchForResult(intent: Intent): ActivityScenario<FoldersActivity> =
+        ActivityScenario.launchActivityForResult<FoldersActivity>(intent).afterSplash()
 
     private fun awaitCall(call: List<String>): Boolean {
         val deadline = System.nanoTime() + 10_000_000_000L

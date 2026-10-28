@@ -16,6 +16,7 @@ import org.kysecurity.mail.Email
 import org.kysecurity.mail.InboxActivity
 import org.kysecurity.mail.KeywordTabs
 import org.kysecurity.mail.R
+import org.kysecurity.mail.afterSplash
 
 /** #131: a refresh that lands mail above the visible rows must not leave it unseen off-screen. */
 @RunWith(AndroidJUnit4::class)
@@ -43,7 +44,7 @@ class InboxNewMailTest {
 
     @Test
     fun atTheTopNewMailIsScrolledIntoView() {
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity { it.setFolderForTest(FOLDER, KeywordTabs.ALL) }
             scenario.paint(older)
             idle()
@@ -60,7 +61,7 @@ class InboxNewMailTest {
 
     @Test
     fun scrolledAwayNewMailShowsACountingPillThatScrollsUp() {
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             scenario.onActivity {
                 it.setFolderForTest(FOLDER, KeywordTabs.ALL)
                 it.setPendingScrollPositionForTest(30)
@@ -84,7 +85,7 @@ class InboxNewMailTest {
 
     @Test
     fun aFirstPaintOfAFolderAnnouncesNothing() {
-        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+        ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
             // Another folder's rows, scrolled away from the top, still on screen after a switch.
             val elsewhere = rows((1..40).map { "elsewhere$it" })
             scenario.onActivity {

@@ -21,6 +21,7 @@ import org.junit.runner.RunWith
 import org.kysecurity.mail.ComposeActivity
 import org.kysecurity.mail.ComposeDraftCache
 import org.kysecurity.mail.R
+import org.kysecurity.mail.afterSplash
 
 /** Issue #113: back used to finish the composer and, with it, silently drop whatever was typed. */
 @RunWith(AndroidJUnit4::class)
@@ -34,7 +35,7 @@ class ComposeDiscardConfirmTest {
     /** No wait for the editor: back lands before its first export, and the mirror must decide. */
     @Test
     fun backWithTypedMailAsksFirst_andKeepEditingStays() {
-        ActivityScenario.launch<ComposeActivity>(composeIntent().putExtra(ComposeActivity.EXTRA_BODY, BODY)).use { scenario ->
+        ActivityScenario.launch<ComposeActivity>(composeIntent().putExtra(ComposeActivity.EXTRA_BODY, BODY)).afterSplash().use { scenario ->
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
 
             awaitDialog()
@@ -47,7 +48,7 @@ class ComposeDiscardConfirmTest {
 
     @Test
     fun discardFinishesTheComposer() {
-        ActivityScenario.launch<ComposeActivity>(composeIntent().putExtra(ComposeActivity.EXTRA_SUBJECT, "Quarterly numbers")).use { scenario ->
+        ActivityScenario.launch<ComposeActivity>(composeIntent().putExtra(ComposeActivity.EXTRA_SUBJECT, "Quarterly numbers")).afterSplash().use { scenario ->
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
 
             awaitDialog()
@@ -60,7 +61,7 @@ class ComposeDiscardConfirmTest {
     /** Two presses inside the export window must raise one prompt, and Discard must still work. */
     @Test
     fun aDoubleBackPressRaisesOnePromptAndDiscardStillFinishes() {
-        ActivityScenario.launch<ComposeActivity>(composeIntent().putExtra(ComposeActivity.EXTRA_BODY, BODY)).use { scenario ->
+        ActivityScenario.launch<ComposeActivity>(composeIntent().putExtra(ComposeActivity.EXTRA_BODY, BODY)).afterSplash().use { scenario ->
             scenario.onActivity {
                 it.onBackPressedDispatcher.onBackPressed()
                 it.onBackPressedDispatcher.onBackPressed()
@@ -76,7 +77,7 @@ class ComposeDiscardConfirmTest {
 
     @Test
     fun backOnAnUntouchedComposerJustLeaves() {
-        ActivityScenario.launch<ComposeActivity>(composeIntent()).use { scenario ->
+        ActivityScenario.launch<ComposeActivity>(composeIntent()).afterSplash().use { scenario ->
             scenario.onActivity { it.onBackPressedDispatcher.onBackPressed() }
 
             awaitState(scenario, Lifecycle.State.DESTROYED)

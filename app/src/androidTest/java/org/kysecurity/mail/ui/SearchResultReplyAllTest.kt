@@ -23,6 +23,7 @@ import org.kysecurity.mail.KeywordTabs
 import org.kysecurity.mail.R
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRuntime
+import org.kysecurity.mail.afterSplash
 
 /** Search results are never written to Room, so the row's own To/Cc are the only copy there is.
  *  Opening one must keep them, or Reply All answers the sender alone. */
@@ -65,7 +66,7 @@ class SearchResultReplyAllTest {
         val detail = instrumentation.addMonitor(EmailDetailActivity::class.java.name, null, false)
         val compose = ComposeLaunches().also { instrumentation.addMonitor(it) }
         try {
-            ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+            ActivityScenario.launch(InboxActivity::class.java).afterSplash().use { scenario ->
                 scenario.onActivity { inbox ->
                     inbox.setFolderForTest("INBOX", KeywordTabs.ALL)
                     inbox.beginSearchForTest("numbers")
