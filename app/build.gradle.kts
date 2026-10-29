@@ -81,8 +81,8 @@ android {
         applicationId = "org.kysecurity.mail"
         minSdk = 31
         targetSdk = 36
-        versionCode = 29
-        versionName = "0.5.1.1"
+        versionCode = 30
+        versionName = "0.5.1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
