@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1.2 — 2026-10-29
+
+### Dependencies
+
+- Firebase BoM 34.2.0 → 35.1.0, DataStore Preferences 1.1.7 → 1.3.0, kotlinx.serialization
+  1.11.0 → 1.12.0, Android Gradle Plugin 9.4.1 → 9.5.0, with their verified checksums.
+
 ## 0.5.1.1 — 2026-10-28
 
 ### Security
