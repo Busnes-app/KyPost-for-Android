@@ -493,9 +493,8 @@ class EmailDetailActivity : LockedActivity() {
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                var droppedForBudget = 0
-                fetched.forEach { (index, downloaded) ->
-                    if (downloaded != null && !rememberForForwarding(index, downloaded)) droppedForBudget++
+                val droppedForBudget = fetched.count { (index, downloaded) ->
+                    downloaded != null && !rememberForForwarding(index, downloaded)
                 }
                 val failed = fetched.count { it.second == null }
                 if (failed > 0) {

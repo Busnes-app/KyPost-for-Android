@@ -2,6 +2,7 @@ package org.kysecurity.mail.pgp
 
 import org.bouncycastle.openpgp.PGPCompressedData
 import org.bouncycastle.openpgp.PGPEncryptedDataList
+import org.bouncycastle.openpgp.PGPKeyPair
 import org.bouncycastle.openpgp.PGPLiteralData
 import org.bouncycastle.openpgp.PGPOnePassSignatureList
 import org.bouncycastle.openpgp.PGPPublicKeyEncryptedData
@@ -140,7 +141,7 @@ internal object PgpDecryptor {
                 val privateKey = secretKey.extractPrivateKey(
                     BcPBESecretKeyDecryptorBuilder(BcPGPDigestCalculatorProvider()).build(CharArray(0)),
                 )
-                val factory = BcPublicKeyDataDecryptorFactory(privateKey)
+                val factory = BcPublicKeyDataDecryptorFactory(PGPKeyPair(secretKey.publicKey, privateKey))
                 val stream = if (hidden) {
                     runCatching { pked.getDataStream(factory) }.getOrNull() ?: continue
                 } else {
