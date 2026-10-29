@@ -313,3 +313,39 @@ jobs:
         if: always()
         run: |
           shred -u "${RUNNER_TEMP}/release.jks" 2>/dev/null || true
+
+  # Its own job, so a failed upload re-runs alone instead of re-creating the draft release.
+  # The same `release` environment, so it pauses for the same approval.
+  play:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    permissions: {}
+    # Job-level `if` cannot read secrets, so each step checks this instead.
+    env:
+      PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+    steps:
+      - if: env.PLAY_JSON == ''
+        env:
+          TAG: ${{ github.ref_name }}
+        run: echo "::warning::PLAY_SERVICE_ACCOUNT_JSON is unset; upload the bundle-${TAG} artifact by hand."
+      - if: env.PLAY_JSON != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bundle-${{ github.ref_name }}
+      - if: env.PLAY_JSON != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: mapping-${{ github.ref_name }}
+          path: mapping
+      # Internal testing only: promote to closed testing or production in Play Console.
+      - if: env.PLAY_JSON != ''
+        uses: r0adkll/upload-google-play@e738b9dd8f2476ea806d921b64aacd24f34515a5 # v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ env.PLAY_JSON }}
+          packageName: org.kysecurity.mail
+          releaseFiles: kypost-${{ github.ref_name }}.aab
+          mappingFile: mapping/playRelease/mapping.txt
+          tracks: internal
+          status: completed
