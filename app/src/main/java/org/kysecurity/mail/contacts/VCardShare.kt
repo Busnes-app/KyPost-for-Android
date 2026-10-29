@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
+import androidx.core.content.IntentCompat
 import org.kysecurity.mail.R
 import org.kysecurity.mail.security.EphemeralAttachmentBytes
 import org.kysecurity.mail.security.SecurityRuntime
@@ -58,8 +59,7 @@ private fun launchShare(activity: Activity, contacts: List<ContactDto>, which: I
     val chooser = Intent.createChooser(send, activity.getString(R.string.contacts_vcard_share_title))
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     runCatching { activity.startActivity(chooser) }.onFailure {
-        @Suppress("DEPRECATION")
-        val uri = send.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+        val uri = IntentCompat.getParcelableExtra(send, Intent.EXTRA_STREAM, android.net.Uri::class.java)
         EphemeralAttachmentBytes.revoke(uri?.lastPathSegment.orEmpty())
         Toast.makeText(activity, R.string.contacts_vcard_share_failed, Toast.LENGTH_LONG).show()
     }

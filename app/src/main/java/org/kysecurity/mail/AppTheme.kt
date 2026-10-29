@@ -120,7 +120,7 @@ fun getStoredThemePalette(context: Context): ThemePalette {
 }
 
 fun isSystemDark(context: Context): Boolean =
-    context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+    (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 
 /** The palette [themeName] paints with; unknown names fall back to [DEFAULT_THEME]. */
 fun themePaletteFor(themeName: String, systemDark: Boolean): ThemePalette {
@@ -744,7 +744,7 @@ private fun styledTitle(title: String, color: Int): SpannableString {
 
 /** Returns black or white — whichever reads more legibly on the given background color. */
 internal fun readableOn(backgroundColor: Int): Int {
-    val darkness = 1 - (0.299 * Color.red(backgroundColor) + 0.587 * Color.green(backgroundColor) + 0.114 * Color.blue(backgroundColor)) / 255
+    val darkness = 1 - ((0.299 * Color.red(backgroundColor)) + (0.587 * Color.green(backgroundColor)) + (0.114 * Color.blue(backgroundColor))) / 255
     return if (darkness >= 0.45) Color.WHITE else Color.BLACK
 }
 
