@@ -6,6 +6,8 @@ import android.view.View
 import android.widget.EditText
 import androidx.test.core.app.ActivityScenario
 import androidx.test.espresso.Espresso.onView
+import androidx.test.espresso.UiController
+import androidx.test.espresso.ViewAction
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.action.ViewActions.scrollTo
@@ -207,7 +209,22 @@ class SecuritySettingsPinConfirmTest {
     /** The screen builds its views after an off-main read, so the first lookup may come early. */
     private fun awaitThenClick(matcher: Matcher<View>) {
         awaitDisplayed { onView(matcher).perform(scrollTo()) }
-        onView(matcher).perform(click())
+        onView(matcher).perform(performClick())
+    }
+
+    /**
+     * What a tap ends in: the view's own click, or nothing on a disabled view. An injected tap
+     * on the slow API 31 emulator sometimes never toggled the lock switch (no dialog, every
+     * check timing out), a flake main hit too; the code under test is the click handler, not
+     * touch dispatch.
+     */
+    private fun performClick() = object : ViewAction {
+        override fun getConstraints(): Matcher<View> = isDisplayed()
+        override fun getDescription() = "performClick()"
+        override fun perform(uiController: UiController, view: View) {
+            if (view.isEnabled) view.performClick()
+            uiController.loopMainThreadUntilIdle()
+        }
     }
 
     private fun awaitDisplayed(find: () -> androidx.test.espresso.ViewInteraction) {
