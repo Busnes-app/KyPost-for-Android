@@ -16,7 +16,7 @@
 # defeat the control. Let the 31/34/36 emulator matrix catch the UI regressions.
 
 [versions]
-agp = "9.4.1"
+agp = "9.5.0"
 kotlin = "2.4.21"
 coreKtx = "1.10.1"
 activityKtx = "1.10.1"
@@ -33,9 +33,9 @@ angusMail = "2.0.5"
 lifecycleRuntimeKtx = "2.9.4"
 lifecycleViewModelKtx = "2.9.4"
 coroutinesAndroid = "1.11.0"
-datastorePreferences = "1.1.7"
+datastorePreferences = "1.3.0"
 okhttp = "5.4.0"
-serializationJson = "1.11.0"
+serializationJson = "1.12.0"
 firebaseBom = "35.1.0"
 kotlinxCoroutinesPlayServices = "1.11.0"
 playServicesCodeScanner = "16.1.0"
