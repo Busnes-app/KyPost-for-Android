@@ -31,9 +31,10 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
 
     val uiState: StateFlow<PushHomeUiState> = combine(
         graph.repository.state,
+        graph.repository.everPaired,
         isWorking,
         localMessage,
-    ) { repo, working, local ->
+    ) { repo, everPaired, working, local ->
         PushHomeUiState(
             pairing = repo.pairing,
             lastTokenSyncAtEpochMs = repo.lastTokenSyncAtEpochMs,
@@ -42,6 +43,7 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
             history = repo.history,
             deliveryMode = repo.deliveryMode,
             transport = repo.transport,
+            everPaired = everPaired,
             isWorking = working,
             localMessage = local,
         )
@@ -210,6 +212,8 @@ data class PushHomeUiState(
     val history: List<PushPayload> = emptyList(),
     val deliveryMode: DeliveryMode = DeliveryMode.PUSH,
     val transport: PushTransport? = null,
+    // True until the store answers, so the review login cannot be reached on a paired install.
+    val everPaired: Boolean = true,
     val isWorking: Boolean = false,
     val localMessage: String? = null,
 )

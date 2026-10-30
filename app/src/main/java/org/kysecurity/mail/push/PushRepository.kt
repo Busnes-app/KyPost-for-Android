@@ -18,6 +18,7 @@ import org.kysecurity.mail.security.SecurityRuntime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.emitAll
@@ -113,6 +114,9 @@ class PushRepository(
         securePairingStore.pairing,
         inMemoryHistory,
     ) { prefs, secure, pairing, volatileHistory -> toState(prefs, secure, pairing, volatileHistory) }
+
+    /** Whether this install has ever paired; unpairing does not reset it. */
+    val everPaired: StateFlow<Boolean> get() = securePairingStore.everPaired
 
     /** Whether a pairing exists right now, read straight from the store — for cold-path callers. */
     fun isPairedNow(): Boolean = securePairingStore.pairing.value != null
