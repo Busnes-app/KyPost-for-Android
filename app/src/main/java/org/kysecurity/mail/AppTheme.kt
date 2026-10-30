@@ -221,12 +221,24 @@ fun applyKyPostTopBar(activity: Activity, subtitle: CharSequence) {
     }
 }
 
+/** The system-bar bottom inset the keyboard does not already cover. Android 14 (seen on a moto
+ *  g play 2024) reports systemBars().bottom as the whole keyboard height while it is up; padding
+ *  by that on top of [applyTopInsetWithHeader]'s IME padding stretched the bottom bar to twice
+ *  the keyboard and squeezed Compose to a sliver. */
+fun barBottomInset(insets: WindowInsetsCompat): Int = barBottomInset(
+    insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom,
+    insets.getInsets(WindowInsetsCompat.Type.ime()).bottom,
+)
+
+internal fun barBottomInset(systemBarsBottom: Int, imeBottom: Int): Int =
+    (systemBarsBottom - imeBottom).coerceAtLeast(0)
+
 /** Pads the view's bottom by the system navigation-bar inset so edge-to-edge content (e.g. the
  *  bottom navigation bar) clears the gesture/nav area. */
 fun applyBottomInset(view: View) {
     val basePaddingBottom = view.paddingBottom
     ViewCompat.setOnApplyWindowInsetsListener(view) { v, insets ->
-        val bottomInset = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom
+        val bottomInset = barBottomInset(insets)
         v.setPadding(v.paddingLeft, v.paddingTop, v.paddingRight, basePaddingBottom + bottomInset)
         insets
     }
@@ -246,7 +258,7 @@ fun applyRailInsets(activity: Activity, view: View) {
             v.paddingStart,
             basePaddingTop + bars.top + actionBarSize(activity),
             basePaddingEnd + endInset,
-            basePaddingBottom + bars.bottom,
+            basePaddingBottom + barBottomInset(insets),
         )
         insets
     }
