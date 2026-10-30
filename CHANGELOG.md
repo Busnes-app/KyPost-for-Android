@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1.3 — 2026-10-30
+
+### Fixed
+
+- With the keyboard up, the bottom bar sits on top of the keyboard instead of leaving a
+  keyboard-sized gap above it that squeezed the compose fields (#283). The side rail on wide
+  screens and foldables gets the same fix.
+
 ## 0.5.1.2 — 2026-10-29
 
 ### Dependencies
