@@ -2,9 +2,10 @@
 
 [Product overview](../README.md) · [Security](../SECURITY.md) · [Development](DEVELOPMENT.md)
 
-A KyPost GitHub release carries one APK, `kypost-vX.Y.Z.apk`, and its checksum,
-`kypost-vX.Y.Z.apk.sha256`. The APK is the `github` channel (`org.kysecurity.mail.github`), built
-for ARM phones only. This page shows how to check that an APK was signed with KyPost's release key
+A KyPost GitHub release carries two APKs, each with a `.sha256` checksum. `kypost-vX.Y.Z.apk` is
+the `github` channel (`org.kysecurity.mail.github`), built for ARM phones only. Install this one.
+`kypost-fdroid-vX.Y.Z.apk` is the `fdroid` channel (`org.kysecurity.mail.fdroid`). It is published
+for F-Droid's reproducible-build check, described below. This page shows how to check that an APK was signed with KyPost's release key
 and which commit it says it was built from. It also explains why a rebuild from source does not
 give the same bytes today.
 
@@ -34,9 +35,8 @@ release that the Releases page shows as published.
   attestation would be.
 - **The `.sha256` file** is not signed. It catches a damaged download and nothing more.
 - **Google Play** builds (`org.kysecurity.mail`) are re-signed by Google under Play App Signing and
-  carry a different certificate. **F-Droid** (`org.kysecurity.mail.fdroid`) is not published yet;
-  when it is, F-Droid builds it and signs it with its own key. Nothing on this page applies to
-  either.
+  carry a different certificate. Nothing on this page applies to them. **F-Droid**
+  (`org.kysecurity.mail.fdroid`) builds carry the KyPost release key above, not an F-Droid key.
 
 ## Verify a downloaded APK
 
@@ -68,8 +68,15 @@ For v0.5.0 the three steps print the digest above, `org.kysecurity.mail.github` 
 
 ## Rebuilding from source
 
-A rebuild of the published APK does **not** give the same bytes today, and this page offers no
-rebuild check. The reasons:
+The `fdroid` APK is a reproducible build. It has no Firebase and no secret inputs. F-Droid
+rebuilds it from the tagged source, copies our signature onto its rebuild, and publishes it only
+if the result verifies. An unsigned `assembleFdroidRelease` built in F-Droid's buildserver image
+(Debian OpenJDK 21) matched one built with Temurin 21, apart from
+`META-INF/version-control-info.textproto`. That file differed only because the second build ran in
+a git worktree, where the plugin cannot read the commit.
+
+The `github` APK does **not** rebuild to the same bytes, and this page offers no rebuild check for
+it. The reasons:
 
 - The release build embeds the production Firebase configuration from the `GOOGLE_SERVICES_JSON`
   secret (`app/google-services.json` is gitignored). A rebuild from the public tree has different
@@ -78,9 +85,6 @@ rebuild check. The reasons:
   entry against the published APK. That works only if every other input matches: the same JDK,
   Android SDK and `-PkypostArmOnlyApk` flag, and even the zlib library that compresses the ART
   baseline profiles. A KyAuth rebuild differed from its release in exactly those profiles.
-
-The `fdroid` flavor has no Firebase and no secret inputs, so it is the one F-Droid can rebuild.
-Whether two builds of it are identical has not been tested.
 
 ## What this does not prove
 

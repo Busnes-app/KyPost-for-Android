@@ -19,7 +19,7 @@ Three product flavors on the `channel` dimension, in `app/build.gradle.kts`:
 | --- | --- | --- |
 | `play` | `org.kysecurity.mail` | Play bundle, `bundlePlayRelease` |
 | `github` | `org.kysecurity.mail.github` | sideload APK, `assembleGithubRelease` |
-| `fdroid` | `org.kysecurity.mail.fdroid` | built by F-Droid from source |
+| `fdroid` | `org.kysecurity.mail.fdroid` | signed APK, `assembleFdroidRelease`; F-Droid rebuilds it from source and publishes ours only if the bytes match |
 
 `play` must keep `org.kysecurity.mail`; it is the id in the Play listing, and Play App
 Signing is scoped to it. `play` is the default variant because it sets `isDefault = true`

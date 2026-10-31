@@ -1,6 +1,6 @@
 name: release
 
-# Publishes a signed APK to a GitHub Release when a version tag is pushed.
+# Publishes the signed github and fdroid APKs to a GitHub Release when a version tag is pushed.
 #
 # Deliberately a separate file from ci.yml. This workflow is the only thing in the repository
 # that touches the real signing key and the real Firebase config, and it must never share a
@@ -158,12 +158,12 @@ jobs:
       - name: assemble release
         run: |
           set -euo pipefail
-          # play only: the bundle is the Play upload artifact, and Play is the only channel that
-          # takes one. github/fdroid ship APKs.
-          ./gradlew checkSigningSecretsAreNotInTheTree :app:bundlePlayRelease
+          # play: the bundle is the Play upload artifact, and Play is the only channel that takes
+          # one. fdroid: full-ABI, because F-Droid rebuilds it from source without the flag and
+          # publishes this signed APK only if its rebuild matches (reproducible build).
+          ./gradlew checkSigningSecretsAreNotInTheTree :app:bundlePlayRelease :app:assembleFdroidRelease
           # github only, arm-only: this is the sideload APK. The Play bundle above must NOT carry
           # the flag, so Play keeps every ABI and x86_64 Chromebooks still get served.
-          # fdroid is built by F-Droid's own infrastructure from source, never here.
           ./gradlew -PkypostArmOnlyApk :app:assembleGithubRelease
 
       - name: dependency verification metadata is unchanged
@@ -183,19 +183,21 @@ jobs:
           GATED_VERSION_CODE: ${{ steps.gate.outputs.version_code }}
         run: |
           set -euo pipefail
-          metadata=app/build/outputs/apk/github/release/output-metadata.json
-          version_name=$(jq -r '.elements[0].versionName' "$metadata")
-          version_code=$(jq -r '.elements[0].versionCode' "$metadata")
-          echo "tag=${TAG} versionName=${version_name} versionCode=${version_code}"
-          if [ "${TAG#v}" != "${version_name}" ]; then
-            echo "Tag ${TAG} does not match versionName ${version_name} in app/build.gradle.kts." >&2
-            exit 1
-          fi
-          # The gate parsed the source; this proves the APK carries what it checked.
-          if [ "${version_code}" != "${GATED_VERSION_CODE}" ]; then
-            echo "APK versionCode ${version_code} is not the gated ${GATED_VERSION_CODE}." >&2
-            exit 1
-          fi
+          for flavor in github fdroid; do
+            metadata=app/build/outputs/apk/${flavor}/release/output-metadata.json
+            version_name=$(jq -r '.elements[0].versionName' "$metadata")
+            version_code=$(jq -r '.elements[0].versionCode' "$metadata")
+            echo "${flavor}: tag=${TAG} versionName=${version_name} versionCode=${version_code}"
+            if [ "${TAG#v}" != "${version_name}" ]; then
+              echo "Tag ${TAG} does not match versionName ${version_name} in app/build.gradle.kts." >&2
+              exit 1
+            fi
+            # The gate parsed the source; this proves the APK carries what it checked.
+            if [ "${version_code}" != "${GATED_VERSION_CODE}" ]; then
+              echo "${flavor} APK versionCode ${version_code} is not the gated ${GATED_VERSION_CODE}." >&2
+              exit 1
+            fi
+          done
 
       # Proves the artifact carries the key we think it does, before it reaches anyone. A
       # swapped or regenerated keystore secret produces a perfectly valid APK signed by the
@@ -208,7 +210,6 @@ jobs:
           EXPECTED_SHA256: ${{ secrets.RELEASE_KEY_SHA256 }}
         run: |
           set -euo pipefail
-          apk=app/build/outputs/apk/github/release/app-github-release.apk
           apksigner=$(find "${ANDROID_HOME}/build-tools" -name apksigner | sort -V | tail -1)
 
           expected=$(printf '%s' "${EXPECTED_SHA256}" | tr -d ':' | tr '[:upper:]' '[:lower:]')
@@ -217,25 +218,29 @@ jobs:
             exit 1
           fi
 
-          # The signature is valid at all — separate from, and prior to, asking whose it is.
-          "$apksigner" verify "$apk"
+          for flavor in github fdroid; do
+            apk=app/build/outputs/apk/${flavor}/release/app-${flavor}-release.apk
 
-          # Matched on the part of the label that is stable across build-tools versions.
-          # build-tools 36 prints "Signer #1 certificate SHA-256 digest: <hex>" and 37 prints
-          # "V2 Signer: certificate SHA-256 digest: <hex>"; anchoring on the older wording
-          # yielded an empty string on 37, which reads downstream as a key mismatch rather
-          # than as the parse failure it is.
-          actual=$("$apksigner" verify --print-certs "$apk" \
-            | sed -n 's/.*certificate SHA-256 digest: *//p' | head -1)
-          if [ -z "$actual" ]; then
-            echo "Could not read a signer digest out of ${apksigner}; parsing needs updating." >&2
-            exit 1
-          fi
-          if [ "$actual" != "$expected" ]; then
-            echo "APK is signed by ${actual}, expected ${expected}. Refusing to publish." >&2
-            exit 1
-          fi
-          echo "Signer verified: ${actual}"
+            # The signature is valid at all — separate from, and prior to, asking whose it is.
+            "$apksigner" verify "$apk"
+
+            # Matched on the part of the label that is stable across build-tools versions.
+            # build-tools 36 prints "Signer #1 certificate SHA-256 digest: <hex>" and 37 prints
+            # "V2 Signer: certificate SHA-256 digest: <hex>"; anchoring on the older wording
+            # yielded an empty string on 37, which reads downstream as a key mismatch rather
+            # than as the parse failure it is.
+            actual=$("$apksigner" verify --print-certs "$apk" \
+              | sed -n 's/.*certificate SHA-256 digest: *//p' | head -1)
+            if [ -z "$actual" ]; then
+              echo "Could not read a signer digest out of ${apksigner}; parsing needs updating." >&2
+              exit 1
+            fi
+            if [ "$actual" != "$expected" ]; then
+              echo "${flavor} APK is signed by ${actual}, expected ${expected}. Refusing to publish." >&2
+              exit 1
+            fi
+            echo "${flavor} signer verified: ${actual}"
+          done
 
       - name: name the artifact
         env:
@@ -245,6 +250,11 @@ jobs:
           cp app/build/outputs/apk/github/release/app-github-release.apk "${RUNNER_TEMP}/kypost-${TAG}.apk"
           sha256sum "${RUNNER_TEMP}/kypost-${TAG}.apk" \
             | sed "s|${RUNNER_TEMP}/||" > "${RUNNER_TEMP}/kypost-${TAG}.apk.sha256"
+
+          # The fdroid metadata's Binaries: URL names this file; renaming it breaks F-Droid updates.
+          cp app/build/outputs/apk/fdroid/release/app-fdroid-release.apk "${RUNNER_TEMP}/kypost-fdroid-${TAG}.apk"
+          sha256sum "${RUNNER_TEMP}/kypost-fdroid-${TAG}.apk" \
+            | sed "s|${RUNNER_TEMP}/||" > "${RUNNER_TEMP}/kypost-fdroid-${TAG}.apk.sha256"
 
           # App Bundle for Google Play
           cp app/build/outputs/bundle/playRelease/app-play-release.aab "${RUNNER_TEMP}/kypost-${TAG}.aab"
@@ -256,14 +266,15 @@ jobs:
       # published alongside the APK they also hand an analyst a full symbol table for a
       # security-sensitive binary. Retained long enough to outlive the release they belong to.
       #
-      # Checked explicitly before uploading: if-no-files-found: error only fires when NEITHER
-      # path matches, so losing just the github mapping (or just the play one) would otherwise
-      # upload the other silently and nothing would say a mapping file went missing.
-      - name: both R8 mapping files exist
+      # Checked explicitly before uploading: if-no-files-found: error only fires when NO path
+      # matches, so losing one flavor's mapping would otherwise upload the rest silently and
+      # nothing would say a mapping file went missing.
+      - name: every R8 mapping file exists
         run: |
           set -euo pipefail
           test -f app/build/outputs/mapping/playRelease/mapping.txt
           test -f app/build/outputs/mapping/githubRelease/mapping.txt
+          test -f app/build/outputs/mapping/fdroidRelease/mapping.txt
 
       - name: retain the R8 mapping
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -272,6 +283,7 @@ jobs:
           path: |
             app/build/outputs/mapping/playRelease/mapping.txt
             app/build/outputs/mapping/githubRelease/mapping.txt
+            app/build/outputs/mapping/fdroidRelease/mapping.txt
           retention-days: 90
           if-no-files-found: error
 
@@ -307,7 +319,9 @@ jobs:
             --title "${TAG}" \
             --generate-notes \
             "${RUNNER_TEMP}/kypost-${TAG}.apk" \
-            "${RUNNER_TEMP}/kypost-${TAG}.apk.sha256"
+            "${RUNNER_TEMP}/kypost-${TAG}.apk.sha256" \
+            "${RUNNER_TEMP}/kypost-fdroid-${TAG}.apk" \
+            "${RUNNER_TEMP}/kypost-fdroid-${TAG}.apk.sha256"
 
       - name: destroy signing material
         if: always()
