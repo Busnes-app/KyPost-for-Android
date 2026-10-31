@@ -60,7 +60,8 @@ and live provider receipt remain separate checks.
 ### Release builds
 
 Use channel-specific tasks: `assembleGithubRelease`, `bundlePlayRelease`, or
-`assembleFdroidRelease`. Release packaging **fails without signing material** by design.
+`assembleFdroidRelease`. Release packaging **fails without signing material** by design,
+except `fdroid`: F-Droid builds that flavor from source and signs the unsigned APK itself.
 Keep only the keystore path and alias in a gitignored `keystore.properties`:
 
 ```properties

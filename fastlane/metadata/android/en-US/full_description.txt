@@ -1,0 +1,8 @@
+KyPost is the Android client for KyPost, a self-hosted email server that sits between your existing IMAP and SMTP mailbox and your devices. KyPost needs a KyPost server to work.
+
+• Read, search and send mail, with keyword-based inbox tabs sorted on your server.
+• Pair with a QR code or link from the KyPost web app. Each phone gets its own credential in the Android keystore and never sees your mailbox password; lose the phone, revoke it.
+• Exchange OpenPGP keys and read end-to-end encrypted mail.
+• Synchronize contacts in both directions.
+
+The F-Droid build contains no Google code. It checks the server for new mail instead of receiving Firebase push notifications, and pairs by QR code or link only: sign-in through KyAuth is available in the Play build.
