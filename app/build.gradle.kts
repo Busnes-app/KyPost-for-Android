@@ -116,11 +116,11 @@ android {
         }
     }
 
-    // Android identifies an app by applicationId AND signature, and the three channels sign with
-    // three different keys: Play re-signs under Play App Signing, the GitHub APK carries the upload
-    // key, F-Droid signs with its own. One applicationId across all three means a user who
-    // installed from one cannot update from another without uninstalling, which destroys local
-    // data. Distinct ids dissolve that: each is a separate app, and they install side by side.
+    // Android identifies an app by applicationId AND signature, and Play re-signs under Play App
+    // Signing while the GitHub and F-Droid APKs carry the upload key (F-Droid publishes ours as a
+    // reproducible build). One applicationId across all three means a user who installed from one
+    // cannot update from another without uninstalling, which destroys local data. Distinct ids
+    // dissolve that: each is a separate app, and they install side by side.
     flavorDimensions += "channel"
     productFlavors {
         // Declared first for readability, but declaration order is NOT what AGP uses to pick the
@@ -264,6 +264,15 @@ android {
             excludes += "META-INF/NOTICE.md"
             excludes += "META-INF/LICENSE.md"
         }
+        // Every bundled .so ships pre-stripped. AGP re-strips only where an NDK is installed
+        // (GitHub runners, not F-Droid's buildserver), which rewrites .shstrtab and breaks the
+        // reproducible F-Droid build.
+        jniLibs.keepDebugSymbols += "**/*.so"
+    }
+    // An opaque blob encrypted to Google, carried in the signing block that F-Droid copies onto
+    // its own build of our APK. Only Play reads it, and Play still gets it through the bundle.
+    dependenciesInfo {
+        includeInApk = false
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -332,9 +341,9 @@ androidComponents.onVariants { variant ->
         // Resolved at configuration time and captured below as a plain Boolean. Referencing
         // `keystorePropertiesFile` from inside doFirst instead makes the action hold a reference to the
         // build script, which the configuration cache cannot serialize.
-        // fdroid is exempt: F-Droid builds it from source with no key and signs the unsigned APK
-        // itself, so refusing there failed the only build that channel ever gets. The secrets check
-        // above still runs for it.
+        // fdroid is exempt: F-Droid builds it from source with no key, then checks the unsigned APK
+        // against release.yml's signed one, so refusing there failed F-Droid's build. The secrets
+        // check above still runs for it.
         val signingMaterialPresent = signingMaterial != null || variant.flavorName == "fdroid"
         doFirst {
             if (!signingMaterialPresent) {
