@@ -332,7 +332,10 @@ androidComponents.onVariants { variant ->
         // Resolved at configuration time and captured below as a plain Boolean. Referencing
         // `keystorePropertiesFile` from inside doFirst instead makes the action hold a reference to the
         // build script, which the configuration cache cannot serialize.
-        val signingMaterialPresent = signingMaterial != null
+        // fdroid is exempt: F-Droid builds it from source with no key and signs the unsigned APK
+        // itself, so refusing there failed the only build that channel ever gets. The secrets check
+        // above still runs for it.
+        val signingMaterialPresent = signingMaterial != null || variant.flavorName == "fdroid"
         doFirst {
             if (!signingMaterialPresent) {
                 throw GradleException(
