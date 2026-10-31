@@ -6,6 +6,8 @@
 
 - `assembleFdroidRelease` builds an unsigned APK when no signing material is set, as F-Droid
   needs, instead of refusing. Play and GitHub release packaging still refuses without it.
+- Store listing title, summary and description in `fastlane/metadata/android/en-US`, which
+  F-Droid reads for its listing.
 
 ## 0.5.1.3 — 2026-10-30
 
