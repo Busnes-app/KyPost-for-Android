@@ -90,8 +90,11 @@ Owns production Android app code and resources.
   returned deep link through the ordinary parser, confirmation, registration, TLS-pin, and
   credential-storage flow. The relay exposes that endpoint only when its
   `REVIEW_PAIRING_USERNAME` flag names one disposable account (exact match). This is not a
-  second mobile auth mode. Normal builds hide its entry button; build the Play
-  review artifact with `-PenableReviewPairing=true` to expose it.
+  second mobile auth mode. Normal builds hide its entry button; `-PenableReviewPairing=true`
+  shows it (screenshot and test builds). The live Play build reaches it through
+  `ReviewLoginTaps`: 10 taps on "Use Firebase" on an install that has never paired
+  (`SecurePairingStore.everPaired`, which unpair and reconnect do not reset). F-Droid and
+  GitHub builds never arm it. Play Console's App access instructions name the sequence.
 - `mail/RelayMailSource` calls relay endpoints over OkHttp with device-id/device-secret headers.
   `mail/MailRepository` writes results into the Room cache (`data/AppDatabase`,
   `EmailDao.replaceFolderSnapshot`) and is what `InboxActivity`/`EmailDetailActivity`/

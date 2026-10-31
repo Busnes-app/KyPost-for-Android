@@ -54,6 +54,10 @@ private const val KEY_TLS_PINS_ARE_LEAVES = "pair_tls_spki_pins_leaf_only"
 internal const val TLS_PIN_TRIPWIRE_PREFS = "push_tls_pin_tripwire"
 private const val KEY_TLS_PIN_EVER_CAPTURED = "tls_pin_ever_captured"
 
+/** Plain companion file; see [SecurePairingStore.everPaired]. */
+internal const val PAIRING_HISTORY_PREFS = "push_pairing_history"
+private const val KEY_EVER_PAIRED = "ever_paired"
+
 /** A TOFU certificate pin together with the host it was actually observed on.
  *
  *  [spkiSha256] holds ONE leaf pin for anything written under the current rule. `CertificatePinner`
@@ -120,9 +124,32 @@ class SecurePairingStore(context: Context) {
     private val tlsPinTripwire =
         context.applicationContext.getSharedPreferences(TLS_PIN_TRIPWIRE_PREFS, Context.MODE_PRIVATE)
 
+    private val pairingHistory =
+        context.applicationContext.getSharedPreferences(PAIRING_HISTORY_PREFS, Context.MODE_PRIVATE)
+
+    private val _everPaired = MutableStateFlow(false)
+
+    /** True once this install has saved any pairing. Unlike [tlsPinState], unpair and reconnect
+     *  leave it set: it answers "was this device ever paired", not "is there a pin". */
+    val everPaired: StateFlow<Boolean> = _everPaired.asStateFlow()
+
     init {
         _pairing.value = readPairing(credentialKeys = null)
         cachedTlsPin = readTlsPin()
+        _everPaired.value = pairingHistory.getBoolean(KEY_EVER_PAIRED, false)
+        // Installs paired before this marker existed: whatever pairing evidence is left counts.
+        if (hasStoredPairing() || reconnectExpectation() != null ||
+            tlsPinTripwire.getBoolean(KEY_TLS_PIN_EVER_CAPTURED, false)
+        ) {
+            markEverPaired()
+        }
+    }
+
+    private fun markEverPaired() {
+        if (!pairingHistory.getBoolean(KEY_EVER_PAIRED, false)) {
+            pairingHistory.edit().putBoolean(KEY_EVER_PAIRED, true).commit()
+        }
+        _everPaired.value = true
     }
 
     /** Writes the pairing, applying [secret] to the stored `deviceSecret`. */
@@ -160,6 +187,7 @@ class SecurePairingStore(context: Context) {
                     editor.clearWrappedSecret().putString(KEY_DEVICE_SECRET, secret.secret)
             }
             editor.commit()
+            markEverPaired()
         }
         _pairing.value = readPairing(credentialKeys = null)
     }
