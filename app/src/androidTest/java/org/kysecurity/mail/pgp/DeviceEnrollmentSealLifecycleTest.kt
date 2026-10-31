@@ -16,6 +16,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.kysecurity.mail.R
+import org.kysecurity.mail.SystemPromptLifecycle
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
@@ -25,6 +26,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /** The seal prompt before authentication: destruction cancels, and the previous record is kept. */
+@SystemPromptLifecycle
 @RunWith(AndroidJUnit4::class)
 class DeviceEnrollmentSealLifecycleTest {
 
