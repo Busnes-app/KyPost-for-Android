@@ -68,6 +68,10 @@ class PushPairingActivity : LockedActivity() {
     private lateinit var latestKeywordsText: TextView
     private lateinit var historyEmptyText: TextView
 
+    private val reviewLoginTaps = ReviewLoginTaps()
+    private var reviewLoginArmed = false
+    private var renderedUnifiedPush = false
+
     private val dateFormat: DateFormat = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
 
     // Registered here and not in onCreateUnlocked: see QrScannerFactory for why the order of
@@ -124,7 +128,9 @@ class PushPairingActivity : LockedActivity() {
         btnPasswordPairing.setOnClickListener { startActivity(Intent(this, PasswordPairingActivity::class.java)) }
         btnKyIdentitySignOn.setOnClickListener { startActivity(Intent(this, KyIdentitySignOnActivity::class.java)) }
         chipUseUnifiedPush.setOnClickListener { viewModel.switchToUnifiedPush(this) }
-        chipUseFirebase.setOnClickListener { viewModel.switchToFirebase() }
+        chipUseFirebase.setOnClickListener {
+            if (reviewLoginArmed) onReviewLoginTap() else viewModel.switchToFirebase()
+        }
 
         applyThemeToActivity(this)
 
@@ -248,13 +254,24 @@ class PushPairingActivity : LockedActivity() {
         chipUseFirebase.isChecked = !isUnifiedPush
         // Not gated on pairing: the fdroid build cannot pair until a distributor has an endpoint.
         chipUseUnifiedPush.isEnabled = !state.isWorking && !isUnifiedPush
-        chipUseFirebase.isEnabled = !state.isWorking && paired && isUnifiedPush
+        // Before the first pairing there is nothing to switch, so on Play the chip counts taps
+        // toward the review login instead; see ReviewLoginTaps.
+        reviewLoginArmed = ReviewLoginTaps.armed(BuildConfig.FLAVOR, state.everPaired)
+        renderedUnifiedPush = isUnifiedPush
+        chipUseFirebase.isEnabled = !state.isWorking && ((paired && isUnifiedPush) || reviewLoginArmed)
 
         val message = state.localMessage
         if (!message.isNullOrBlank()) {
             Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             viewModel.consumeLocalMessage()
         }
+    }
+
+    private fun onReviewLoginTap() {
+        // The chip group selected this chip on the way in, but nothing switched: put it back.
+        chipUseUnifiedPush.isChecked = renderedUnifiedPush
+        chipUseFirebase.isChecked = !renderedUnifiedPush
+        if (reviewLoginTaps.tap()) startActivity(Intent(this, PasswordPairingActivity::class.java))
     }
 
     private fun requestNotificationPermissionIfNeeded() {
