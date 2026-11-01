@@ -98,7 +98,6 @@
             android:id="@+id/bottomNavigation"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:elevation="12dp"
             app:labelVisibilityMode="labeled"
             app:itemTextAppearanceActive="@style/TextAppearance.KyPost.BottomNavLabel"
             app:itemTextAppearanceInactive="@style/TextAppearance.KyPost.BottomNavLabel"

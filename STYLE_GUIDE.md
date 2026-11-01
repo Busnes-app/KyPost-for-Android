@@ -35,9 +35,11 @@ border near-black on cream. ky-ui's `buttonText` needs no palette field. It is w
 `readableOn(accent)` already returns on every half.
 
 Web's `ThemeVars` has more fields than mobile's `ThemePalette`. Android derives everything from
-`bg/panel/ink/inkStrong/accent/line` plus the status colours, and fakes the avatar gradient with
-two derived stops (`avatarGradientStart/End`). Don't add `accentSoft` unless a second component
-needs a true theme-driven gradient stop it can't otherwise produce.
+`bg/panel/ink/inkStrong/accent/accentSoft/line` plus the status colours, and fakes the avatar
+gradient with two derived stops (`avatarGradientStart/End`). `accentSoft` is ky-ui's value (Nord
+Dark's `rgba()` is composited onto `panel`, like `line`). It paints selection: the active nav pill,
+a selected chip, a selected inbox row and a format-bar button that is on. **Never put accent text
+on `accentSoft`**; it falls below 4.5:1 on several halves. Use `inkStrong`.
 
 **Status colours are per half** (ky-ui 0.8.0), separate from the accent:
 
@@ -82,7 +84,7 @@ Plex Mono family — see [§7](#7-android-gaps).
 
 Reference sizes actually used by iOS/Linux components today (not hard requirements,
 but worth matching when adding new Android views so text density feels consistent):
-button label 15, pill/badge label 12–13, section eyebrow label 11–12 with letter-spacing.
+button label 15, pill/badge label 12–13, section label 13 (sentence case, no letter-spacing).
 
 ## 3. Shape language
 
@@ -116,7 +118,9 @@ the equivalent iOS (`Presentation/Components/`) and Linux (`app/qml/components/`
   `ContactsFabThemeTest`.
 - **Pill filter tabs / segmented toggle** — stadium chips; inactive = opaque `panel` fill
   (not literal transparent — see the code comment on `applyPillChipTheme` for why) + `line`
-  stroke, active = `accent` fill + `readableOn(accent)` text. **Done**, via Material
+  stroke, active = `accentSoft` fill + 1dp `accent` stroke + `inkStrong` text. Selection is
+  never a heavy accent fill; a selected inbox row is `accentSoft` with a 3dp accent bar
+  (`applyCardOutline`). **Done**, via Material
   `Chip`/`ChipGroup` rather than a hand-rolled view (matches iOS's native
   `Capsule`-backed toggle and Linux's `PillTab.qml` — every platform prefers its native
   chip/pill primitive over reimplementing the shape from scratch).
@@ -129,8 +133,13 @@ the equivalent iOS (`Presentation/Components/`) and Linux (`app/qml/components/`
   (`bindAvatar`).
 - **Empty state** — dashed 1dp border in an accent-tinted line color, centered muted
   text, 10dp radius. **Done** (`applyEmptyStateBackground`).
-- **Section eyebrow label** — small uppercase, letter-spaced, ~72%-opacity `inkStrong` —
-  group headers only, not body copy. **Done** (`applySectionEyebrowLabel`).
+- **Section label** — small, bold, sentence case, `ink`, no tracking. Labels are never
+  ALL-CAPS tracked, buttons included (`TextAppearance.KyPost.Button`) — group headers only, not
+  body copy. **Done** (`applySectionEyebrowLabel`).
+- **Button hierarchy** — at most one filled primary per group; the rest are ghost buttons, or
+  text buttons (`applyTextButtonTheme`) for small in-line "Add" actions; destructive actions use
+  the danger button.
+- **Cards** — flat, 1dp `line` edge, no shadow (`applyCardOutline`, `applyPanelBackground`).
 - **Snackbar** — transient messages only: `panel` slab, `inkStrong` text, `accent` action
   (`applySnackbarTheme`). A state that holds until the user acts (Compose's "Send is off") is
   an inline notice in the warning or danger tone instead (`applyWarningNoticeTheme`).

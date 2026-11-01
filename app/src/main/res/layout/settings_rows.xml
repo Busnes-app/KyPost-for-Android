@@ -1,0 +1,256 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Settings as list rows: icon, title over description, chevron, one hairline between rows.
+     The row carries the old button's id and click; SettingsActivity themes it (applyListRowTheme). -->
+<merge xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <LinearLayout
+        android:id="@+id/settingsSecurity"
+        style="@style/Widget.KyPost.ListRow">
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowIcon"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_row_security" />
+
+        <LinearLayout style="@style/Widget.KyPost.ListRowText">
+
+            <TextView
+                style="@style/Widget.KyPost.ListRowTitle"
+                android:text="@string/menu_security" />
+
+            <TextView
+                android:id="@+id/settingsSecurityBody"
+                style="@style/Widget.KyPost.ListRowBody"
+                android:text="@string/settings_security_body" />
+        </LinearLayout>
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowChevron"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
+
+    <View style="@style/Widget.KyPost.ListRowDivider" />
+
+    <LinearLayout
+        android:id="@+id/settingsThemes"
+        style="@style/Widget.KyPost.ListRow">
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowIcon"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_row_themes" />
+
+        <LinearLayout style="@style/Widget.KyPost.ListRowText">
+
+            <TextView
+                style="@style/Widget.KyPost.ListRowTitle"
+                android:text="@string/menu_themes" />
+
+            <TextView
+                android:id="@+id/settingsThemesBody"
+                style="@style/Widget.KyPost.ListRowBody"
+                android:text="@string/settings_themes_body" />
+        </LinearLayout>
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowChevron"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
+
+    <View style="@style/Widget.KyPost.ListRowDivider" />
+
+    <LinearLayout
+        android:id="@+id/settingsKeywords"
+        style="@style/Widget.KyPost.ListRow">
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowIcon"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_row_keywords" />
+
+        <LinearLayout style="@style/Widget.KyPost.ListRowText">
+
+            <TextView
+                style="@style/Widget.KyPost.ListRowTitle"
+                android:text="@string/menu_keywords" />
+
+            <TextView
+                android:id="@+id/settingsKeywordsBody"
+                style="@style/Widget.KyPost.ListRowBody"
+                android:text="@string/settings_keywords_body" />
+        </LinearLayout>
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowChevron"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
+
+    <View style="@style/Widget.KyPost.ListRowDivider" />
+
+    <LinearLayout
+        android:id="@+id/settingsPairing"
+        style="@style/Widget.KyPost.ListRow">
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowIcon"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_row_pairing" />
+
+        <LinearLayout style="@style/Widget.KyPost.ListRowText">
+
+            <TextView
+                style="@style/Widget.KyPost.ListRowTitle"
+                android:text="@string/menu_pairing" />
+
+            <TextView
+                android:id="@+id/settingsPairingBody"
+                style="@style/Widget.KyPost.ListRowBody"
+                android:text="@string/settings_pairing_body" />
+        </LinearLayout>
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowChevron"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
+
+    <View style="@style/Widget.KyPost.ListRowDivider" />
+
+    <LinearLayout
+        android:id="@+id/settingsPgp"
+        style="@style/Widget.KyPost.ListRow">
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowIcon"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_row_key" />
+
+        <LinearLayout style="@style/Widget.KyPost.ListRowText">
+
+            <TextView
+                style="@style/Widget.KyPost.ListRowTitle"
+                android:text="@string/menu_pgp_key" />
+
+            <TextView
+                android:id="@+id/settingsPgpBody"
+                style="@style/Widget.KyPost.ListRowBody"
+                android:text="@string/settings_pgp_body" />
+        </LinearLayout>
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowChevron"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
+
+    <View style="@style/Widget.KyPost.ListRowDivider" />
+
+    <LinearLayout
+        android:id="@+id/settingsSignature"
+        style="@style/Widget.KyPost.ListRow">
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowIcon"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_row_signature" />
+
+        <LinearLayout style="@style/Widget.KyPost.ListRowText">
+
+            <TextView
+                style="@style/Widget.KyPost.ListRowTitle"
+                android:text="@string/settings_signature" />
+
+            <TextView
+                android:id="@+id/settingsSignatureBody"
+                style="@style/Widget.KyPost.ListRowBody"
+                android:text="@string/settings_signature_body" />
+        </LinearLayout>
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowChevron"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
+
+    <View style="@style/Widget.KyPost.ListRowDivider" />
+
+    <LinearLayout
+        android:id="@+id/settingsAbout"
+        style="@style/Widget.KyPost.ListRow">
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowIcon"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_row_about" />
+
+        <LinearLayout style="@style/Widget.KyPost.ListRowText">
+
+            <TextView
+                style="@style/Widget.KyPost.ListRowTitle"
+                android:text="@string/menu_about" />
+
+            <TextView
+                android:id="@+id/settingsAboutBody"
+                style="@style/Widget.KyPost.ListRowBody"
+                android:text="@string/settings_about_body" />
+        </LinearLayout>
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowChevron"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
+
+    <View style="@style/Widget.KyPost.ListRowDivider" />
+
+    <LinearLayout
+        android:id="@+id/settingsPrivacy"
+        style="@style/Widget.KyPost.ListRow">
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowIcon"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_row_privacy" />
+
+        <LinearLayout style="@style/Widget.KyPost.ListRowText">
+
+            <TextView
+                style="@style/Widget.KyPost.ListRowTitle"
+                android:text="@string/settings_privacy" />
+
+            <TextView
+                android:id="@+id/settingsPrivacyBody"
+                style="@style/Widget.KyPost.ListRowBody"
+                android:text="@string/settings_privacy_body" />
+        </LinearLayout>
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowChevron"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
+
+    <View style="@style/Widget.KyPost.ListRowDivider" />
+
+    <LinearLayout
+        android:id="@+id/settingsSupport"
+        style="@style/Widget.KyPost.ListRow">
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowIcon"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_row_support" />
+
+        <LinearLayout style="@style/Widget.KyPost.ListRowText">
+
+            <TextView
+                style="@style/Widget.KyPost.ListRowTitle"
+                android:text="@string/settings_support" />
+
+            <TextView
+                android:id="@+id/settingsSupportBody"
+                style="@style/Widget.KyPost.ListRowBody"
+                android:text="@string/settings_support_body" />
+        </LinearLayout>
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowChevron"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
+
+</merge>

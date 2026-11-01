@@ -58,7 +58,7 @@ class ThemePaletteTableTest {
         THEME_PAIRS.flatMap { listOf(it.name + " light" to it.light, it.name + " dark" to it.dark) }.forEach { (name, palette) ->
             val fields = listOf(
                 palette.bg, palette.panel, palette.ink, palette.inkStrong, palette.accent,
-                palette.line, palette.avatarGradientStart, palette.avatarGradientEnd,
+                palette.accentSoft, palette.line, palette.avatarGradientStart, palette.avatarGradientEnd,
                 palette.avatarBorder, palette.danger, palette.warning, palette.success,
             )
             fields.forEach { value ->

@@ -1007,7 +1007,7 @@ class EmailDetailActivity : LockedActivity() {
     }
 
     private fun applyInviteChrome() {
-        applyOutlinedPanelBackground(this, findViewById(R.id.emailInviteCard))
+        applyPanelBackground(this, findViewById(R.id.emailInviteCard))
         applySectionEyebrowLabel(this, findViewById(R.id.inviteMethod))
         applyWarningCalloutTheme(this, findViewById(R.id.inviteNotice))
         applyPrimaryButtonTheme(this, findViewById(R.id.btnInviteAdd))

@@ -110,8 +110,10 @@ class EmailAdapter(
             }
 
             val panel = Color.parseColor(palette.panel)
-            val background = if (selected) blend(panel, Color.parseColor(palette.accent), 0.3f) else panel
+            // Selection is accentSoft plus a bar, never an accent wash.
+            val background = if (selected) Color.parseColor(palette.accentSoft) else panel
             cardView.setCardBackgroundColor(background)
+            applyCardOutline(itemView.context, cardView, selected)
             contentLayout.setBackgroundColor(background)
             itemView.isActivated = selected
             itemView.stateDescription = if (selected) itemView.context.getString(R.string.selection_selected) else null

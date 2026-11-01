@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The top bar shows the logo and an ink "KyPost", then the page name as its own title. The
+  ALL-CAPS label under the brand is gone, and button labels are sentence case.
+- The bottom bar and the rail use outline icons and mark the open screen with a soft accent pill.
+  They sit flat with a hairline edge. On wide screens the rail's items start at the top.
+- Settings is a list: an icon, the title over its description, and a chevron per row, with
+  hairlines between rows, up to 720dp wide.
+- One filled button per group. Pairing keeps Scan QR code filled; the other actions are outlined,
+  and Unpair stays red. Contact edit's "Add" actions are text buttons.
+- Cards are flat with a thin line, and selected chips and rows use a soft accent tint instead of
+  a solid accent fill.
+
 ## 0.5.1.4 — 2026-10-31
 
 ### Added

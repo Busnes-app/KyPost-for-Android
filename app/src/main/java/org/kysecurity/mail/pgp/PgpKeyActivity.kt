@@ -15,6 +15,7 @@ import androidx.lifecycle.lifecycleScope
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import org.kysecurity.mail.R
+import org.kysecurity.mail.applyGhostButtonTheme
 import org.kysecurity.mail.applyPrimaryButtonTheme
 import org.kysecurity.mail.applyThemeToActivity
 import org.kysecurity.mail.applyTopInsetWithHeader
@@ -99,8 +100,7 @@ class PgpKeyActivity : LockedActivity() {
         super.onResume()
         if (redirectedToUnlock) return
         applyThemeToActivity(this)
-        applyPrimaryButtonTheme(this, scanButton)
-        applyPrimaryButtonTheme(this, confirmButton)
+        applyScanButtonsTheme()
         mintAndRenderOwnQr()
     }
 
@@ -263,6 +263,17 @@ class PgpKeyActivity : LockedActivity() {
         scanAddressesText.visibility = View.VISIBLE
         confirmButton.visibility = View.VISIBLE
         scanButton.setText(R.string.pgp_qr_scan_scan_again_button)
+        applyScanButtonsTheme()
+    }
+
+    /** One filled button: Confirm while it shows, with Scan again secondary; Scan otherwise. */
+    private fun applyScanButtonsTheme() {
+        applyPrimaryButtonTheme(this, confirmButton)
+        if (confirmButton.visibility == View.VISIBLE) {
+            applyGhostButtonTheme(this, scanButton)
+        } else {
+            applyPrimaryButtonTheme(this, scanButton)
+        }
     }
 
     private fun scannedAddresses(key: PgpQrKeyDto): List<String> =
@@ -275,6 +286,7 @@ class PgpKeyActivity : LockedActivity() {
         scanFingerprintText.visibility = View.GONE
         scanAddressesText.visibility = View.GONE
         confirmButton.visibility = View.GONE
+        applyScanButtonsTheme()
     }
 
     private fun onFingerprintConfirmed() {

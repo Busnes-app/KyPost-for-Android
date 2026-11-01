@@ -2,22 +2,22 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
         android:id="@+id/nav_inbox"
-        android:icon="@drawable/ic_inbox"
+        android:icon="@drawable/ic_nav_inbox"
         android:title="@string/nav_inbox" />
     <item
         android:id="@+id/nav_compose"
-        android:icon="@drawable/ic_edit"
+        android:icon="@drawable/ic_nav_compose"
         android:title="@string/nav_compose" />
     <item
         android:id="@+id/nav_lock"
-        android:icon="@drawable/ic_lock"
+        android:icon="@drawable/ic_nav_lock"
         android:title="@string/nav_lock" />
     <item
         android:id="@+id/nav_contacts"
-        android:icon="@drawable/ic_person"
+        android:icon="@drawable/ic_nav_contacts"
         android:title="@string/nav_contacts" />
     <item
         android:id="@+id/nav_settings"
-        android:icon="@drawable/ic_settings"
+        android:icon="@drawable/ic_nav_settings"
         android:title="@string/nav_settings" />
 </menu>

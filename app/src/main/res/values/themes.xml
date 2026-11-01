@@ -18,6 +18,13 @@
              IBM Plex Mono is applied per-view where the guide calls for a monospace field. -->
         <item name="android:fontFamily">@font/space_grotesk</item>
         <item name="fontFamily">@font/space_grotesk</item>
+        <!-- Sentence-case labels everywhere, dialog buttons included; never ALL-CAPS tracked. -->
+        <item name="textAppearanceButton">@style/TextAppearance.KyPost.Button</item>
+    </style>
+
+    <style name="TextAppearance.KyPost.Button" parent="TextAppearance.MaterialComponents.Button">
+        <item name="android:textAllCaps">false</item>
+        <item name="android:letterSpacing">0</item>
     </style>
 
     <!-- Bottom nav has no icons (bottom_nav_menu.xml is label-only), so its default text weight
@@ -47,5 +54,60 @@
         <item name="chipMinHeight">40dp</item>
         <item name="chipStrokeWidth">0dp</item>
         <item name="chipSurfaceColor">@android:color/transparent</item>
+    </style>
+
+    <!-- A navigation list row (Settings): 72dp, icon, title over description, chevron. -->
+    <style name="Widget.KyPost.ListRow" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">72dp</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingStart">16dp</item>
+        <item name="android:paddingEnd">12dp</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingBottom">12dp</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
+    <style name="Widget.KyPost.ListRowIcon" parent="">
+        <item name="android:layout_width">24dp</item>
+        <item name="android:layout_height">24dp</item>
+        <item name="android:layout_marginEnd">20dp</item>
+    </style>
+
+    <style name="Widget.KyPost.ListRowText" parent="">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:orientation">vertical</item>
+    </style>
+
+    <style name="Widget.KyPost.ListRowTitle" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textSize">16sp</item>
+    </style>
+
+    <style name="Widget.KyPost.ListRowBody" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+
+    <style name="Widget.KyPost.ListRowChevron" parent="">
+        <item name="android:layout_width">20dp</item>
+        <item name="android:layout_height">20dp</item>
+        <item name="android:layout_marginStart">8dp</item>
+        <item name="android:src">@drawable/ic_row_chevron</item>
+    </style>
+
+    <!-- Hairline between rows, starting at the title (16 + 24 + 20). -->
+    <style name="Widget.KyPost.ListRowDivider" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">1dp</item>
+        <item name="android:layout_marginStart">60dp</item>
     </style>
 </resources>

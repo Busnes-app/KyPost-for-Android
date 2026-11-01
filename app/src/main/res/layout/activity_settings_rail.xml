@@ -14,133 +14,26 @@
         android:layout_weight="1"
         android:fillViewport="true">
 
-        <LinearLayout
-            android:id="@+id/settingsContent"
+        <!-- Capped at 720dp and centred on a wide window, like Compose's column. -->
+        <FrameLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingStart="24dp"
-            android:paddingTop="16dp"
-            android:paddingEnd="24dp"
-            android:paddingBottom="16dp">
+            android:layout_height="wrap_content">
 
-            <Button
-                android:id="@+id/settingsSecurity"
+            <org.kysecurity.mail.ComposeColumn
+                android:id="@+id/settingsContent"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/menu_security" />
+                android:layout_gravity="center_horizontal"
+                android:orientation="vertical"
+                android:paddingStart="16dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="16dp">
 
-            <TextView
-                android:id="@+id/settingsSecurityBody"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:text="@string/settings_security_body" />
+                <include layout="@layout/settings_rows" />
 
-            <Button
-                android:id="@+id/settingsThemes"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/menu_themes" />
-
-            <TextView
-                android:id="@+id/settingsThemesBody"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:text="@string/settings_themes_body" />
-
-            <Button
-                android:id="@+id/settingsKeywords"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/menu_keywords" />
-
-            <TextView
-                android:id="@+id/settingsKeywordsBody"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:text="@string/settings_keywords_body" />
-
-            <Button
-                android:id="@+id/settingsPairing"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/menu_pairing" />
-
-            <TextView
-                android:id="@+id/settingsPairingBody"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:text="@string/settings_pairing_body" />
-
-            <Button
-                android:id="@+id/settingsPgp"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/menu_pgp_key" />
-
-            <TextView
-                android:id="@+id/settingsPgpBody"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:text="@string/settings_pgp_body" />
-
-            <Button
-                android:id="@+id/settingsSignature"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/settings_signature" />
-
-            <TextView
-                android:id="@+id/settingsSignatureBody"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:text="@string/settings_signature_body" />
-
-            <Button
-                android:id="@+id/settingsAbout"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/menu_about" />
-
-            <TextView
-                android:id="@+id/settingsAboutBody"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:text="@string/settings_about_body" />
-
-            <Button
-                android:id="@+id/settingsPrivacy"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/settings_privacy" />
-
-            <TextView
-                android:id="@+id/settingsPrivacyBody"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:text="@string/settings_privacy_body" />
-
-            <Button
-                android:id="@+id/settingsSupport"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/settings_support" />
-
-            <TextView
-                android:id="@+id/settingsSupportBody"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/settings_support_body" />
-
-        </LinearLayout>
+            </org.kysecurity.mail.ComposeColumn>
+        </FrameLayout>
     </androidx.core.widget.NestedScrollView>
 
     <com.google.android.material.navigationrail.NavigationRailView
