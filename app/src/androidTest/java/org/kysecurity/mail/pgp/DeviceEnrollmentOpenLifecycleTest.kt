@@ -15,6 +15,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.kysecurity.mail.R
+import org.kysecurity.mail.SystemPromptLifecycle
 import org.junit.After
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
@@ -23,6 +24,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
+@SystemPromptLifecycle
 @RunWith(AndroidJUnit4::class)
 class DeviceEnrollmentOpenLifecycleTest {
 

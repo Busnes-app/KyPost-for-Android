@@ -537,7 +537,25 @@ jobs:
             # `|| echo` rather than letting gradle fail the line: each line here is its own sh -c,
             # so a bare non-zero exit ends the script and the dump never runs. The marker file
             # re-raises the failure at the end, so nothing is silenced.
-            ./gradlew connected${{ matrix.flavor }}DebugAndroidTest || echo failed > /tmp/testfail.txt
+            ./gradlew connected${{ matrix.flavor }}DebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notAnnotation=org.kysecurity.mail.SystemPromptLifecycle -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true || echo failed > /tmp/testfail.txt
+
+            # @SystemPromptLifecycle tests run LAST, in their own pass. Recreating under an open
+            # SystemUI prompt has intermittently killed window focus for the rest of the boot
+            # (main run 41237298418 and five legs before it): every later Espresso test then fails
+            # with RootViewWithoutFocusException, 41 red tests for one cause. Run last, a recurrence
+            # costs these tests only. The move keeps the main pass's results from being overwritten.
+            #
+            # The first pass leaves its APKs installed. Uninstalling with a toast still queued
+            # crashes API 31 SystemUI (NPE in SystemUIToast for the missing package); its restart
+            # re-arms the keyguard, and the next prompt test fails behind it (PR #288 run 41253786863).
+            mv app/build/outputs/androidTest-results/connected app/build/outputs/androidTest-results/suite || true
+            ./gradlew connected${{ matrix.flavor }}DebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.annotation=org.kysecurity.mail.SystemPromptLifecycle || echo failed > /tmp/testfail.txt
+
+            # NAME THE WINDOW HOLDING FOCUS. When focus dies, every UI test reports has-window-focus=false
+            # and nothing says who has it. Diagnostic only.
+            echo "===== window and input focus after the suite ====="
+            adb shell dumpsys window displays 2>/dev/null | grep -E "mCurrentFocus|mFocusedApp|mFocusedWindow" || true
+            adb shell dumpsys input 2>/dev/null | grep -A1 -E "^ *Focus(edApplications|edWindows|Requests):" || true
 
             # A coarse regression tripwire, not a benchmark leaderboard. API 34 Play is the one
             # stable representative: running this on all four legs would buy noise, not coverage.
