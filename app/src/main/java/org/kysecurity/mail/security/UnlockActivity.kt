@@ -18,6 +18,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import org.kysecurity.mail.MainActivity
 import org.kysecurity.mail.R
+import org.kysecurity.mail.StatusTone
+import org.kysecurity.mail.applyStatusText
 import org.kysecurity.mail.applyThemeToActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -63,6 +65,7 @@ class UnlockActivity : AppCompatActivity() {
         pinField = findViewById(R.id.unlockPinField)
         pinField.filters = arrayOf(InputFilter.LengthFilter(PinPolicy.MAX_LENGTH))
         errorText = findViewById(R.id.unlockErrorText)
+        applyStatusText(this, errorText, StatusTone.DANGER)
         submitButton = findViewById(R.id.unlockSubmitButton)
         submitButton.setOnClickListener { attemptUnlock() }
 

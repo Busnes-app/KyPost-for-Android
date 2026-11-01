@@ -730,20 +730,27 @@ Owns production Android app code and resources.
   otherwise a "N new messages" pill (`inbox_new_mail` plurals, polite live region) over the list
   counts it and scrolls up on tap. Only a repaint of the folder and tab already painted counts,
   and a pending saved-position restore wins. `InboxNewMailTest` covers both branches.
-- Theme selection is managed in `ThemesActivity` and uses the shared theme name list based on
-  `theme.ts` palettes, led by `Busnes Light`/`Busnes Dark` from `busnes-color-theme-handoff.md`.
-  `AppTheme.DEFAULT_THEME` (`FOLLOW_SYSTEM_THEME`, "Follow system") is the only place the
-  fallback name lives — the stored-name read, the unknown-name fallback and the missing-palette
-  fallback all go through it. "Follow system" heads `THEME_OPTIONS` but has no palette:
-  `themePaletteFor(name, systemDark)` resolves it to `Busnes Light` or `Busnes Dark`, and
-  `getStoredThemePalette` reads `systemDark` from the context's `uiMode`. A night-mode flip
-  recreates the Activity; a screen that declares `uiMode` in `configChanges`
-  (`KyIdentitySignOnActivity`) must repaint in `onConfigurationChanged` instead.
-  `FollowSystemThemeTest` covers both kinds. An install that never picked a theme follows the
-  system; an explicit choice is kept, because `getStoredThemeName` only discards names
-  `THEME_OPTIONS` no longer offers. Palette colors are opaque six-digit hex without exception:
-  `blend()` returns `Color.rgb`, so alpha in `line` survives as a fully opaque near-black in
-  `applyEmptyStateBackground`. `ThemePaletteTableTest` holds both rules.
+- Theme selection is managed in `ThemesActivity`: a System default / Light / Dark radio group
+  (`ThemeMode`) over the six ky-ui pairs (`THEME_PAIRS`: Busnes, Matter, Ocean, Forest, Ky,
+  Nord). Values mirror ky-ui `src/themes.js` and `src/tokens.css` exactly. `DEFAULT_THEME_CHOICE`
+  (Busnes, System) is the only fallback. The pair ID is saved under `kypost-theme` and the mode
+  under `kypost-theme-mode`; `saveThemeChoice` always writes both. `resolveThemeChoice` reads old
+  single-key names: a surviving half (`Busnes Light`, `Dark Matter`, `Ocean`, `Forest`,
+  `Patina Ky`, ...) becomes its pair with that half forced (`LEGACY_THEME_NAMES`). "Follow system"
+  and every removed palette reset to the default. `ThemeMigrationTest` covers both.
+  `themePaletteFor(choice, systemDark)` picks the half; `getStoredThemePalette` reads
+  `systemDark` from the context's `uiMode`. A night-mode flip recreates the Activity; a screen
+  that declares `uiMode` in `configChanges` (`KyIdentitySignOnActivity`) must repaint in
+  `onConfigurationChanged` instead. `FollowSystemThemeTest` covers both kinds. Palette colors are
+  opaque six-digit hex without exception: `blend()` returns `Color.rgb`, so alpha in `line`
+  survives as a fully opaque near-black in `applyEmptyStateBackground`.
+  `ThemePaletteTableTest` holds that rule and pins the ky-ui values.
+- Status colours are per half (`ThemePalette.danger/warning/success`), never the accent. The
+  soft fill is `statusSoft()`, which is ky-ui's 12% `color-mix` over `panel`. Draw states
+  through `StatusTone` and the helpers: `applyStatusBadgeTheme`, `applyStatusText`,
+  `applyWarningCalloutTheme`, `applyDangerButtonTheme` and `applySuccessChipTheme`. A status always
+  carries a word plus a dot or icon. `StatusColourGateTest` ports ky-ui's
+  `check-status-colours.mjs` (180 checks): a new or changed half must pass it.
 - `SettingsActivity` is only a hub for existing settings surfaces: Security, Themes, Keywords,
   Pairing, PGP Key, Signature, and About. Keep settings logic in the destination screens rather
   than duplicating it in the hub; Signature's destination is `showSignatureDialog`.
@@ -756,12 +763,15 @@ Owns production Android app code and resources.
   signature-only body counts as content, so Back on an untouched composer prompts once.
   `ComposeSignatureTest` covers the escaping and the share exclusion.
 - Primary navigation uses `bottom_nav_menu.xml` for both phone bottom navigation and the rail on
-  Inbox, Compose, Contacts, and Settings. The rail shows on `w600dp` windows **and** on `notlong`
-  ones (a Galaxy Fold cover screen, 475x751dp; a long 20:9 phone keeps the bottom bar). Each rail
+  Inbox, Compose, Contacts, and Settings. The rail shows on `w600dp` windows (the Material medium
+  width class: an unfolded book-style foldable, a tablet, a phone turned sideways) **and** on
+  `notlong` ones at least 440dp wide (a squarish 475x751dp book-fold cover screen). A long phone, a
+  tall flip's inner screen, a tall cover screen and a squarish flip cover below 440dp keep the
+  bottom bar. `ui/WindowLayoutRulesTest` resolves these qualifiers at real foldable sizes. Each rail
   layout exists once in `layout/` (`activity_*_rail`, `activity_compose_wide`) and is swapped in by
-  `values-w600dp/layouts.xml` and `values-notlong/layouts.xml` aliases; `nav_is_rail` follows the
+  `values-w600dp/layouts.xml` and `values-w440dp-notlong/layouts.xml` aliases; `nav_is_rail` follows the
   same two qualifiers. Compose has two rail layouts: `activity_compose_wide` (two columns, w600dp)
-  and `activity_compose_rail` (the phone body from `compose_phone_body` beside a rail, for a narrow
+  and `activity_compose_rail` (the phone body from `compose_phone_body` beside a rail, for a 440-600dp
   `notlong` window). `LayoutVariantIdsTest` checks every alias target carries the phone layout's
   ids. The item order is Inbox, Compose, Lock, Contacts,
   Settings; Lock is an action that either locks immediately or opens Security when app lock is
@@ -770,13 +780,25 @@ Owns production Android app code and resources.
   and use the 120ms card-slide animations in `res/anim/nav_card_*`; settings subpages and security
   handoff use normal platform transitions. A screen being left keeps its own item checked so that
   reordering it to the front later cannot reveal the destination it previously launched. The rail
-  sits on the **end** edge (`applyRailInsets` pads the end inset). In the Inbox | message split the
+  sits on the **right** by default; Themes offers Rail position Right / Left (`RailPosition.kt`,
+  the `kypost-rail-position` key in the settings prefs, `RailPositionTest`). The sides are physical,
+  so a right-to-left locale swaps which layout edge they are. Every rail layout declares the rail
+  last; `placeRail` moves it first for Left. A screen resumed after the setting changed recreates
+  (`LockedActivity.onResume`). With the rail on the end edge, in the Inbox | message split the
   message pane (`EmailDetailActivity`, `detailRail`) carries the rail and the inbox pane hides its
-  own navigation, giving List | Message | Rail; `ui/observeSplitPane` decides "in a split" from
+  own navigation, giving List | Message | Rail; with it on the start edge the inbox pane keeps it
+  and the message pane hides its own, giving Rail | List | Message; `ui/observeSplitPane` decides "in a split" from
   embedding plus a pane narrower than the window, because a message kept full width is embedded
   too. Outside a split the message rail follows `nav_is_rail`. Its Inbox item closes the
   message. Compose, Contacts and Settings are `alwaysExpand` in `split_config.xml`, so starting
-  them from that pane fills the window instead of opening beside the list. Rail
+  them from that pane fills the window instead of opening beside the list. A separating vertical fold (a book-style foldable
+  half open) splits along the hinge instead of 40/60 (`SplitInitializer`'s calculator,
+  `splitsAtHinge`); a flat fold keeps 40/60. `applySideInsets` (run by `LockedActivity` after
+  `onCreateUnlocked`) pads the content view by side system bars and short-edge cutouts and hands
+  its children insets without them, so a landscape cutout or 3-button bar never covers content and
+  nothing pads twice. Folding or unfolding recreates the Activity: the inbox saves its scroll and
+  folder, Compose restores its draft through `ComposeDraftCache`, and a scroll view whose position
+  should survive needs an id (`settingsScroll`). Rail
   insets must clear both the status bar and top app
   bar; content top insets must clear both too, because edge-to-edge content otherwise starts under
   the custom ActionBar. Launcher artwork shown inside the app is clipped to the shared 14dp panel

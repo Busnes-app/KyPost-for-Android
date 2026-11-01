@@ -15,9 +15,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.CheckBox
+import android.widget.CompoundButton
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.RadioButton
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
@@ -26,33 +28,10 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 const val THEME_STORAGE_KEY = "kypost-theme"
+const val THEME_MODE_STORAGE_KEY = "kypost-theme-mode"
 
-/** Not a palette: paints Busnes Light or Busnes Dark from the system night mode. */
-const val FOLLOW_SYSTEM_THEME = "Follow system"
-
-/** Fallback when nothing is saved, and when a saved name is no longer offered. */
-const val DEFAULT_THEME = FOLLOW_SYSTEM_THEME
-
-val THEME_OPTIONS = listOf(
-    FOLLOW_SYSTEM_THEME,
-    "Busnes Light",
-    "Busnes Dark",
-    "Dark Matter",
-    "Light Matter",
-    "Tropics",
-    "Tropic Night",
-    "Ocean",
-    "Coffee",
-    "White Cliffs",
-    "Cyber Punk",
-    "Neon Purple",
-    "Space",
-    "Sky",
-    "Forest",
-    "Sun",
-    "Patina Ky",
-    "Polished Ky",
-)
+/** Which half of the pair paints. [SYSTEM] follows the system night mode. */
+enum class ThemeMode(val storageValue: String) { SYSTEM("system"), LIGHT("light"), DARK("dark") }
 
 data class ThemePalette(
     val bg: String,
@@ -65,69 +44,152 @@ data class ThemePalette(
     val avatarGradientStart: String,
     val avatarGradientEnd: String,
     val avatarBorder: String,
+    // Status colours, separate from the accent (ky-ui 0.8.0). Each half pairs them with its own
+    // soft tint, [statusSoft]; ThemePaletteTableTest holds them to ky-ui's status-colour gate.
+    val danger: String,
+    val warning: String,
+    val success: String,
 )
 
-// Semantic colors are theme-invariant on web (fixed literals in styles.css, not per-theme
-// palette fields) — mirrored here as constants rather than ThemePalette fields.
-const val COLOR_DANGER = "#ff5f5f"
-const val COLOR_DANGER_ACTION_BORDER = "#66FFB4AB" // rgba(255,180,171,.4)
-const val COLOR_DANGER_ACTION_FILL = "#1FFFB4AB" // rgba(255,180,171,.12)
-const val COLOR_DANGER_ACTION_TEXT = "#ffd8d3"
-const val COLOR_WARNING = "#ffd64d"
-const val COLOR_WARNING_ACTION_BORDER = "#66FFD64D" // rgba(255,214,77,.4)
-const val COLOR_WARNING_ACTION_FILL = "#1FFFD64D" // rgba(255,214,77,.12)
-const val COLOR_WARNING_ACTION_TEXT = "#fff0b8"
-const val COLOR_SUCCESS_BORDER = "#7bbf7b"
-const val COLOR_SUCCESS_TEXT = "#a5dca5"
+/** A light half and a dark half under one name (ky-ui `THEME_PAIRS`). [id] is what is saved. */
+data class ThemePair(val id: String, val name: String, val light: ThemePalette, val dark: ThemePalette)
 
-internal val themePalettes: Map<String, ThemePalette> = mapOf(
-    // Busnes cream/charcoal, one orange accent (busnes-color-theme-handoff.md). `line` is the
-    // handoff's control border composited onto `panel` — blend() drops alpha, so a translucent
-    // line would paint applyEmptyStateBackground's dashed border near-black on cream.
-    // Avatar stops run accent -> decorative orange; buttonText falls out of readableOn(accent).
-    "Busnes Light" to ThemePalette("#f8f6f0", "#ffffff", "#566461", "#182326", "#bf3f18", "#cccfcf", "#bf3f18", "#e65124", "#bf3f18"),
-    "Busnes Dark" to ThemePalette("#182326", "#1f2b2e", "#b3bcb8", "#f2efe8", "#f5865f", "#525a5b", "#f5865f", "#f26a3d", "#f5865f"),
-    "Dark Matter" to ThemePalette("#1a1a1e", "#252530", "#d4c5e2", "#e8ddf5", "#c29a72", "#404050", "#c29a72", "#9a7450", "#8f6b4a"),
-    "Light Matter" to ThemePalette("#f5efe5", "#fff8ee", "#4c3d32", "#2d1f15", "#c29a72", "#c5b29d", "#c29a72", "#9a7450", "#8f6b4a"),
-    "Tropics" to ThemePalette("#f4f1eb", "#fffaf0", "#43362d", "#241a14", "#9bc400", "#c4b7a3", "#9bc400", "#7ea100", "#78a100"),
-    "Tropic Night" to ThemePalette("#15131a", "#221f2b", "#cdbde0", "#e8ddf5", "#9bc400", "#3c3650", "#9bc400", "#7ea100", "#78a100"),
-    "Ocean" to ThemePalette("#0f1b24", "#152a36", "#b8d8e8", "#e0f2fb", "#5ea9be", "#2f5567", "#74bacd", "#4f91a6", "#4f91a6"),
-    "Coffee" to ThemePalette("#1d1714", "#2a211d", "#d6c0b3", "#f0ded2", "#b47f5c", "#4a3830", "#b47f5c", "#8f5f42", "#8f5f42"),
-    "White Cliffs" to ThemePalette("#f7f9fb", "#ffffff", "#2e4c63", "#163246", "#5ea8d8", "#8fc3df", "#4f9bc8", "#58b65a", "#2f7fb0"),
-    "Cyber Punk" to ThemePalette("#120918", "#1e1028", "#f5d0ff", "#ffe9ff", "#00f5d4", "#5c2d84", "#00f5d4", "#00c9ad", "#00c9ad"),
-    "Neon Purple" to ThemePalette("#130b1d", "#231233", "#e4ccff", "#f2e6ff", "#c86cff", "#63358a", "#c86cff", "#9d45d3", "#9d45d3"),
-    "Space" to ThemePalette("#0b0f1a", "#151c2d", "#c8d5f0", "#e7efff", "#86a8ff", "#34496f", "#86a8ff", "#6788dd", "#6788dd"),
-    "Sky" to ThemePalette("#dff1ff", "#f4fbff", "#2f4f64", "#183142", "#6db3d6", "#93bdd2", "#6db3d6", "#4f93b8", "#4f93b8"),
-    "Forest" to ThemePalette("#142018", "#1f2f24", "#c7dbc7", "#e3f0df", "#8faa74", "#4f694f", "#8faa74", "#6f8d5a", "#6f8d5a"),
-    "Sun" to ThemePalette("#fff3dc", "#fff9ec", "#5a4024", "#392611", "#e0ab4f", "#d4b27a", "#e0ab4f", "#bb8631", "#bb8631"),
-    "Patina Ky" to ThemePalette("#0d0f14", "#161a22", "#64748b", "#e2e8f0", "#4deeea", "#1e293b", "#4deeea", "#10b981", "#0e9668"),
-    "Polished Ky" to ThemePalette("#eef2f6", "#ffffff", "#475569", "#0f172a", "#0891b2", "#cbd5e1", "#0891b2", "#10b981", "#059669"),
+data class ThemeChoice(val pair: ThemePair, val mode: ThemeMode)
+
+// ky-ui tokens.css `--ky-{danger,warning,success}-{light,dark}`: the defaults for a half that
+// names no status colour of its own. Danger is a cool crimson, never the accent.
+private const val DANGER_LIGHT = "#a8174e"
+private const val DANGER_DARK = "#ff8fb1"
+private const val WARNING_LIGHT = "#7a5f00"
+private const val WARNING_DARK = "#ffd25e"
+private const val SUCCESS_LIGHT = "#267442"
+private const val SUCCESS_DARK = "#86efac"
+
+/** `--ky-*-soft`: the status mixed this far into `panel`. */
+internal const val STATUS_SOFT_PERCENT = 12
+
+private fun lightHalf(
+    bg: String, panel: String, ink: String, inkStrong: String, accent: String, line: String,
+    avatarStart: String, avatarEnd: String, avatarBorder: String,
+    danger: String = DANGER_LIGHT, warning: String = WARNING_LIGHT, success: String = SUCCESS_LIGHT,
+) = ThemePalette(bg, panel, ink, inkStrong, accent, line, avatarStart, avatarEnd, avatarBorder, danger, warning, success)
+
+private fun darkHalf(
+    bg: String, panel: String, ink: String, inkStrong: String, accent: String, line: String,
+    avatarStart: String, avatarEnd: String, avatarBorder: String,
+    danger: String = DANGER_DARK, warning: String = WARNING_DARK, success: String = SUCCESS_DARK,
+) = ThemePalette(bg, panel, ink, inkStrong, accent, line, avatarStart, avatarEnd, avatarBorder, danger, warning, success)
+
+// Values are ky-ui src/themes.js THEME_PALETTES and tokens.css (Busnes); keep them identical.
+// Busnes `line` is the handoff's control border composited onto `panel` — blend() drops alpha,
+// so a translucent line would paint applyEmptyStateBackground's dashed border near-black on cream.
+// Avatar stops are Android's own (STYLE_GUIDE.md §1); buttonText falls out of readableOn(accent).
+val THEME_PAIRS = listOf(
+    ThemePair(
+        "busnes-pair", "Busnes",
+        lightHalf("#f8f6f0", "#ffffff", "#566461", "#182326", "#bf3f18", "#cccfcf", "#bf3f18", "#e65124", "#bf3f18"),
+        darkHalf("#182326", "#1f2b2e", "#b3bcb8", "#f2efe8", "#f5865f", "#525a5b", "#f5865f", "#f26a3d", "#f5865f"),
+    ),
+    ThemePair(
+        "matter-pair", "Matter",
+        lightHalf("#f5efe5", "#fff8ee", "#4c3d32", "#2d1f15", "#805a39", "#d4c7b5", "#805a39", "#9a7450", "#805a39"),
+        darkHalf("#1d1b19", "#292725", "#cfc6bb", "#f0e9df", "#c29a72", "#45403a", "#c29a72", "#9a7450", "#8f6b4a"),
+    ),
+    ThemePair(
+        "ocean-pair", "Ocean",
+        lightHalf("#f7f9fb", "#ffffff", "#2e4c63", "#163246", "#1d5fa6", "#c7d6df", "#1d5fa6", "#2f7fb0", "#1d5fa6"),
+        darkHalf("#0f1b24", "#152a36", "#b8d8e8", "#e0f2fb", "#6aa8e8", "#2f5567", "#6aa8e8", "#4f91a6", "#4f91a6"),
+    ),
+    // Teal success: the shared green sits too close to Forest's green accent.
+    ThemePair(
+        "forest-pair", "Forest",
+        lightHalf("#f3f6ef", "#fcfdf9", "#435342", "#203322", "#4b6b37", "#c5d0bc", "#4b6b37", "#6f8d5a", "#4b6b37", success = "#00737a"),
+        darkHalf("#142018", "#1f2f24", "#c7dbc7", "#e3f0df", "#8faa74", "#4f694f", "#8faa74", "#6f8d5a", "#6f8d5a", success = "#6ee0d0"),
+    ),
+    ThemePair(
+        "ky-pair", "Ky",
+        lightHalf("#eef2f6", "#ffffff", "#475569", "#0f172a", "#08758b", "#c2cdd8", "#08758b", "#10b981", "#059669"),
+        darkHalf("#10161e", "#1b2530", "#afbdca", "#e2e8f0", "#6fc9cc", "#34414d", "#6fc9cc", "#10b981", "#0e9668"),
+    ),
+    // Nord Dark keeps its own base danger and success.
+    ThemePair(
+        "nord-pair", "Nord",
+        lightHalf("#eceff4", "#ffffff", "#4c566a", "#2e3440", "#4a6a94", "#c5cdd9", "#4a6a94", "#5e81ac", "#4a6a94"),
+        darkHalf("#2e3440", "#3b4252", "#d8dee9", "#eceff4", "#88c0d0", "#4c566a", "#88c0d0", "#81a1c1", "#5e81ac", danger = "#ecc4c8", success = "#bcd4aa"),
+    ),
 )
 
-fun getStoredThemeName(context: Context): String {
-    val prefs = context.getSharedPreferences("org.kysecurity.mail.settings", Context.MODE_PRIVATE)
-    val saved = prefs.getString(THEME_STORAGE_KEY, DEFAULT_THEME) ?: DEFAULT_THEME
-    return if (THEME_OPTIONS.contains(saved)) saved else DEFAULT_THEME
+/** Fallback when nothing is saved, and when a saved theme is no longer offered. */
+val DEFAULT_THEME_CHOICE = ThemeChoice(THEME_PAIRS.first(), ThemeMode.SYSTEM)
+
+private fun pair(id: String) = THEME_PAIRS.first { it.id == id }
+
+/** Names saved before the pairs. A surviving half keeps the mode its choice fixed; every other
+ *  retired palette (Tropics, Coffee, Sky, ...) is absent and resets to [DEFAULT_THEME_CHOICE]. */
+internal val LEGACY_THEME_NAMES: Map<String, ThemeChoice> = mapOf(
+    "Follow system" to DEFAULT_THEME_CHOICE,
+    "Busnes Light" to ThemeChoice(pair("busnes-pair"), ThemeMode.LIGHT),
+    "Busnes Dark" to ThemeChoice(pair("busnes-pair"), ThemeMode.DARK),
+    "Light Matter" to ThemeChoice(pair("matter-pair"), ThemeMode.LIGHT),
+    "Dark Matter" to ThemeChoice(pair("matter-pair"), ThemeMode.DARK),
+    "White Cliffs" to ThemeChoice(pair("ocean-pair"), ThemeMode.LIGHT),
+    "Ocean" to ThemeChoice(pair("ocean-pair"), ThemeMode.DARK),
+    "Forest" to ThemeChoice(pair("forest-pair"), ThemeMode.DARK),
+    "Polished Ky" to ThemeChoice(pair("ky-pair"), ThemeMode.LIGHT),
+    "Patina Ky" to ThemeChoice(pair("ky-pair"), ThemeMode.DARK),
+)
+
+/** Reads both stored values. A legacy name never had a mode key, so its own mode wins. */
+internal fun resolveThemeChoice(savedTheme: String?, savedMode: String?): ThemeChoice {
+    val pair = THEME_PAIRS.firstOrNull { it.id == savedTheme }
+        ?: return LEGACY_THEME_NAMES[savedTheme] ?: DEFAULT_THEME_CHOICE
+    return ThemeChoice(pair, ThemeMode.values().firstOrNull { it.storageValue == savedMode } ?: ThemeMode.SYSTEM)
 }
 
-fun saveThemeName(context: Context, themeName: String) {
-    val prefs = context.getSharedPreferences("org.kysecurity.mail.settings", Context.MODE_PRIVATE)
-    prefs.edit().putString(THEME_STORAGE_KEY, themeName).apply()
+internal fun settings(context: Context) =
+    context.getSharedPreferences("org.kysecurity.mail.settings", Context.MODE_PRIVATE)
+
+fun getStoredThemeChoice(context: Context): ThemeChoice {
+    val prefs = settings(context)
+    return resolveThemeChoice(prefs.getString(THEME_STORAGE_KEY, null), prefs.getString(THEME_MODE_STORAGE_KEY, null))
+}
+
+/** Always writes both keys, so a legacy name is replaced the first time anything is chosen. */
+fun saveThemeChoice(context: Context, choice: ThemeChoice) {
+    settings(context).edit()
+        .putString(THEME_STORAGE_KEY, choice.pair.id)
+        .putString(THEME_MODE_STORAGE_KEY, choice.mode.storageValue)
+        .apply()
 }
 
 fun getStoredThemePalette(context: Context): ThemePalette {
-    return themePaletteFor(getStoredThemeName(context), isSystemDark(context))
+    return themePaletteFor(getStoredThemeChoice(context), isSystemDark(context))
 }
 
 fun isSystemDark(context: Context): Boolean =
     (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 
-/** The palette [themeName] paints with; unknown names fall back to [DEFAULT_THEME]. */
-fun themePaletteFor(themeName: String, systemDark: Boolean): ThemePalette {
-    val name = if (themeName in themePalettes || themeName == FOLLOW_SYSTEM_THEME) themeName else DEFAULT_THEME
-    if (name != FOLLOW_SYSTEM_THEME) return themePalettes.getValue(name)
-    return themePalettes.getValue(if (systemDark) "Busnes Dark" else "Busnes Light")
+/** The half [choice] paints with; [systemDark] matters only for [ThemeMode.SYSTEM]. */
+fun themePaletteFor(choice: ThemeChoice, systemDark: Boolean): ThemePalette {
+    val dark = when (choice.mode) {
+        ThemeMode.SYSTEM -> systemDark
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    }
+    return if (dark) choice.pair.dark else choice.pair.light
 }
+
+/** CSS `color-mix(in srgb, [color] [percent]%, [base])` on `#rrggbb`; pure, so unit-testable. */
+internal fun mixHex(color: String, percent: Int, base: String): String {
+    fun channel(hex: String, i: Int) = hex.substring(1 + 2 * i, 3 + 2 * i).toInt(16)
+    return "#" + (0..2).joinToString("") { i ->
+        Math.round(channel(color, i) * percent / 100.0 + channel(base, i) * (1 - percent / 100.0)).toInt()
+            .toString(16).padStart(2, '0')
+    }
+}
+
+/** `--ky-{status}-soft` for this half: the pill fill under status-coloured text. */
+internal fun ThemePalette.statusSoft(status: String): String = mixHex(status, STATUS_SOFT_PERCENT, panel)
 
 fun applyThemeToActivity(activity: Activity) {
     val palette = getStoredThemePalette(activity)
@@ -167,7 +229,7 @@ fun applyThemedTitle(activity: Activity, title: CharSequence) {
     }
 }
 
-fun applyCheckBoxTheme(context: Context, checkBox: CheckBox) {
+fun applyCheckBoxTheme(context: Context, checkBox: CompoundButton) {
     val palette = getStoredThemePalette(context)
     checkBox.setTextColor(Color.parseColor(palette.inkStrong))
     checkBox.buttonTintList = ColorStateList.valueOf(Color.parseColor(palette.accent))
@@ -245,24 +307,35 @@ fun applyBottomInset(view: View) {
     ViewCompat.requestApplyInsets(view)
 }
 
-/** Rail equivalent of [applyBottomInset]: a full-height rail on the end edge also needs top and
- *  end insets. */
+/** Rail equivalent of [applyBottomInset]: a full-height rail also needs the top inset. The side
+ *  insets never reach it; [applySideInsets] takes them for the whole content view. */
 fun applyRailInsets(activity: Activity, view: View) {
-    val basePaddingEnd = view.paddingEnd
     val basePaddingTop = view.paddingTop
     val basePaddingBottom = view.paddingBottom
     ViewCompat.setOnApplyWindowInsetsListener(view) { v, insets ->
         val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-        val endInset = if (v.layoutDirection == View.LAYOUT_DIRECTION_RTL) bars.left else bars.right
         v.setPaddingRelative(
             v.paddingStart,
             basePaddingTop + bars.top + actionBarSize(activity),
-            basePaddingEnd + endInset,
+            v.paddingEnd,
             basePaddingBottom + barBottomInset(insets),
         )
         insets
     }
     ViewCompat.requestApplyInsets(view)
+}
+
+/** Keeps every screen clear of a side navigation bar and of a cutout on a short edge (a phone or
+ *  cover screen in landscape): edge-to-edge lays the window under both. The content view pads by
+ *  them once and hands its children insets without them, so no screen pads twice. */
+fun applySideInsets(activity: Activity) {
+    val content = activity.findViewById<View>(android.R.id.content) ?: return
+    ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
+        val side = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        v.setPadding(side.left, v.paddingTop, side.right, v.paddingBottom)
+        insets.inset(side.left, 0, side.right, 0)
+    }
+    ViewCompat.requestApplyInsets(content)
 }
 
 fun applyTopInsetWithHeader(activity: Activity, root: View) {
@@ -330,29 +403,48 @@ fun applyGhostButtonTheme(context: Context, button: Button) {
     applyButtonPadding(button)
 }
 
-/** 1dp stroke + 12% fill of the fixed danger red, mirrors web's `.users-action-danger` /
- *  `.contacts-action-danger`. Use for destructive actions (delete), never theme-accent. */
+/** What a status means. Never shown by colour alone: callers pair it with a word, and a dot or icon. */
+enum class StatusTone { NEUTRAL, SUCCESS, WARNING, DANGER }
+
+/** The active half's status colour for [tone]; [StatusTone.NEUTRAL] is `ink`. */
+internal fun ThemePalette.statusColor(tone: StatusTone): String = when (tone) {
+    StatusTone.NEUTRAL -> ink
+    StatusTone.SUCCESS -> success
+    StatusTone.WARNING -> warning
+    StatusTone.DANGER -> danger
+}
+
+/** 1dp danger stroke over the half's danger-soft fill, danger text — mirrors web's
+ *  `.users-action-danger` / `.contacts-action-danger`. Destructive actions only, never the accent. */
 fun applyDangerButtonTheme(context: Context, button: Button) {
-    val (fill, border, text) = accentAffordanceColors(
-        context,
-        Color.parseColor(COLOR_DANGER),
-        Color.parseColor(COLOR_DANGER_ACTION_TEXT),
-    )
+    val palette = getStoredThemePalette(context)
+    val danger = Color.parseColor(palette.danger)
     button.backgroundTintList = null
-    button.background = dangerButtonBackground(fill, border)
-    button.setTextColor(text)
+    button.background = dangerButtonBackground(Color.parseColor(palette.statusSoft(palette.danger)), danger)
+    button.setTextColor(danger)
     applyButtonPadding(button)
 }
 
-/** Warning-tinted informational callout: the danger-button stroke+fill shape, on a TextView. */
+/** Warning callout: the danger-button stroke+fill shape in the half's warning colours, with a
+ *  leading warning dot so the state never rests on colour alone. */
 fun applyWarningCalloutTheme(context: Context, textView: TextView) {
-    val (fill, border, text) = accentAffordanceColors(
-        context,
-        Color.parseColor(COLOR_WARNING),
-        Color.parseColor(COLOR_WARNING_ACTION_TEXT),
-    )
-    textView.background = warningCalloutBackground(fill, border)
-    textView.setTextColor(text)
+    val palette = getStoredThemePalette(context)
+    val warning = Color.parseColor(palette.warning)
+    textView.background = warningCalloutBackground(Color.parseColor(palette.statusSoft(palette.warning)), warning)
+    textView.setTextColor(warning)
+    setLeadingStatusDot(context, textView, warning)
+}
+
+/** Status text, e.g. an error line: the tone's colour plus a leading dot. */
+fun applyStatusText(context: Context, textView: TextView, tone: StatusTone) {
+    val color = Color.parseColor(getStoredThemePalette(context).statusColor(tone))
+    textView.setTextColor(color)
+    setLeadingStatusDot(context, textView, color)
+}
+
+private fun setLeadingStatusDot(context: Context, textView: TextView, color: Int) {
+    textView.compoundDrawablePadding = dpToPx(8)
+    textView.setCompoundDrawablesRelativeWithIntrinsicBounds(unreadDotDrawable(context, sizeDp = 7, color = color), null, null, null)
 }
 
 /** Success chip state. Pass [animate] only from the tap; per-bind recycled rows stay instant. */
@@ -361,10 +453,10 @@ fun applySuccessChipTheme(
     chip: com.google.android.material.chip.Chip,
     animate: Boolean = false,
 ) {
-    val border = Color.parseColor(COLOR_SUCCESS_BORDER)
-    val toBg = withAlpha(border, 0.12f)
-    val toStroke = border
-    val toText = Color.parseColor(COLOR_SUCCESS_TEXT)
+    val palette = getStoredThemePalette(context)
+    val toBg = Color.parseColor(palette.statusSoft(palette.success))
+    val toStroke = Color.parseColor(palette.success)
+    val toText = toStroke
     chip.chipStrokeWidth = 1f * context.resources.displayMetrics.density
     if (animate) {
         animateChipColorTransition(
@@ -472,20 +564,22 @@ fun unreadDotDrawable(context: Context, sizeDp: Int = 8, color: Int? = null): Gr
     }
 }
 
-/** Status badge + dot: [active] is fixed success green, inactive is theme line/panel/ink. */
-fun applyStatusBadgeTheme(context: Context, chip: com.google.android.material.chip.Chip, active: Boolean) {
+/** Status badge + dot: a status tone paints the half's status colour over its soft tint;
+ *  [StatusTone.NEUTRAL] is theme line/panel/ink. */
+fun applyStatusBadgeTheme(context: Context, chip: com.google.android.material.chip.Chip, tone: StatusTone) {
     val palette = getStoredThemePalette(context)
     val border: Int
     val text: Int
     val fill: Int
-    if (active) {
-        border = Color.parseColor(COLOR_SUCCESS_BORDER)
-        text = Color.parseColor(COLOR_SUCCESS_TEXT)
-        fill = withAlpha(border, 0.12f)
-    } else {
+    if (tone == StatusTone.NEUTRAL) {
         border = Color.parseColor(palette.line)
         text = Color.parseColor(palette.ink)
         fill = Color.parseColor(palette.panel)
+    } else {
+        val status = palette.statusColor(tone)
+        border = Color.parseColor(status)
+        text = border
+        fill = Color.parseColor(palette.statusSoft(status))
     }
     chip.isCheckable = false
     chip.isClickable = false
@@ -611,9 +705,9 @@ private fun applyThemeToViewTree(view: View, palette: ThemePalette) {
             val padV = (12 * density).toInt()
             view.setPadding(padH, maxOf(padV, view.paddingTop), padH, maxOf(padV, view.paddingBottom))
         }
-        // Before Button, which CheckBox extends.
-        is CheckBox -> {
-            applyCheckBoxTheme(view.context, view)
+        // Before Button, which CheckBox and RadioButton extend.
+        is CheckBox, is RadioButton -> {
+            applyCheckBoxTheme(view.context, view as CompoundButton)
         }
         is Button -> {
             view.setTextColor(readableOn(accent))
@@ -725,17 +819,6 @@ private fun dangerButtonBackground(fill: Int, border: Int): GradientDrawable {
         cornerRadius = 10f * density
         setColor(fill)
         setStroke((1 * density).toInt(), border)
-    }
-}
-
-/** §1's pale tints measure ~1.1:1 on light panels, so the hue is driven toward black there. */
-private fun accentAffordanceColors(context: Context, hue: Int, darkThemeText: Int): Triple<Int, Int, Int> {
-    return if (isDarkPalette(getStoredThemePalette(context))) {
-        Triple(withAlpha(hue, 0.12f), withAlpha(hue, 0.40f), darkThemeText)
-    } else {
-        // A heavier fill and stroke because a 12%/40% tint of a bright hue is nearly invisible on a
-        // near-white panel, and text driven most of the way to black so it clears 4.5:1 there.
-        Triple(withAlpha(hue, 0.18f), withAlpha(hue, 0.65f), blend(hue, Color.BLACK, 0.55f))
     }
 }
 

@@ -423,6 +423,9 @@ class EmailDetailActivityTest {
         avatarGradientStart = "#c29a72",
         avatarGradientEnd = "#9a7450",
         avatarBorder = "#8f6b4a",
+        danger = "#ff8fb1",
+        warning = "#ffd25e",
+        success = "#86efac",
     )
 
     private val lightPalette = ThemePalette(
@@ -435,6 +438,9 @@ class EmailDetailActivityTest {
         avatarGradientStart = "#c29a72",
         avatarGradientEnd = "#9a7450",
         avatarBorder = "#8f6b4a",
+        danger = "#a8174e",
+        warning = "#7a5f00",
+        success = "#267442",
     )
 
     /** An email that only sets its own text color (the "black text on the app's default dark

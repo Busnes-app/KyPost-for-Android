@@ -10,6 +10,82 @@
     android:paddingBottom="16dp"
     android:paddingTop="8dp">
 
+    <TextView
+        android:id="@+id/themeModeLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp"
+        android:text="@string/themes_mode_label" />
+
+    <RadioGroup
+        android:id="@+id/themeModeGroup"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:orientation="vertical">
+
+        <RadioButton
+            android:id="@+id/themeModeSystem"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/themes_mode_system" />
+
+        <RadioButton
+            android:id="@+id/themeModeLight"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/themes_mode_light" />
+
+        <RadioButton
+            android:id="@+id/themeModeDark"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="48dp"
+            android:text="@string/themes_mode_dark" />
+
+    </RadioGroup>
+
+    <TextView
+        android:id="@+id/railPositionLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="4dp"
+        android:text="@string/rail_position_label" />
+
+    <RadioGroup
+        android:id="@+id/railPositionGroup"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="16dp"
+        android:orientation="horizontal">
+
+        <RadioButton
+            android:id="@+id/railPositionRight"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:text="@string/rail_position_right" />
+
+        <RadioButton
+            android:id="@+id/railPositionLeft"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:text="@string/rail_position_left" />
+
+    </RadioGroup>
+
+    <TextView
+        android:id="@+id/themePairLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:text="@string/themes_pair_label" />
+
     <ListView
         android:id="@+id/themeList"
         android:layout_width="match_parent"
