@@ -1258,8 +1258,9 @@ class EmailDetailActivity : LockedActivity() {
         }
     }
 
-    /** The inbox's navigation on the end edge: while the inbox list is beside this pane, and
-     *  wherever a full-width screen would show a rail ([R.bool.nav_is_rail]). */
+    /** The inbox's navigation: in a split only when it sits on the end edge (a left-hand rail
+     *  stays with the list), and wherever a full-width screen would show a rail
+     *  ([R.bool.nav_is_rail]). */
     private fun setupSplitRail() {
         val rail = findViewById<NavigationBarView>(R.id.detailRail)
         // Inbox closes the message, so the list takes the window back with its own rail.
@@ -1272,9 +1273,10 @@ class EmailDetailActivity : LockedActivity() {
         )
         intent.getStringExtra(EXTRA_FOLDER_LABEL)?.let { rail.menu.findItem(R.id.nav_inbox)?.title = it }
         applyPrimaryNavigationTheme(this, rail)
-        applyRailInsets(this, rail)
+        placeRail(this, rail)
         val wide = resources.getBoolean(R.bool.nav_is_rail)
-        observeSplitPane(this) { split -> rail.isVisible = split || wide }
+        val railHere = railAtEnd(this)
+        observeSplitPane(this) { split -> rail.isVisible = if (split) railHere else wide }
     }
 
     override fun onResume() {

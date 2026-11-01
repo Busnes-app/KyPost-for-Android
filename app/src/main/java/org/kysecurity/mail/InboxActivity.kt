@@ -183,8 +183,10 @@ class InboxActivity : LockedActivity() {
         setupTabs()
         setupBottomNav()
         setupSwipeGestures()
-        // Beside an open message the rail moves to that pane's end edge (EmailDetailActivity).
-        observeSplitPane(this) { split -> bottomNav.isVisible = !split }
+        // Beside an open message a right-hand rail moves to that pane's end edge
+        // (EmailDetailActivity); a left-hand one stays here, on the window's start edge.
+        val railHere = !railAtEnd(this)
+        observeSplitPane(this) { split -> bottomNav.isVisible = !split || railHere }
 
         // A recreate already consumed the tap; re-reading it reopens the message and resets the folder.
         if (savedInstanceState == null && takeNotificationTarget(intent)) {

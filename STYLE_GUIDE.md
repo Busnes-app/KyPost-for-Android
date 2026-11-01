@@ -156,7 +156,10 @@ sibling app (web, iOS, Linux) you're comparing against.
 
 - **Navigation shape.** Don't build a literal left sidebar (web) or import Linux's
   desktop-rail layout. Android convention is a toolbar + overflow menu (current
-  approach) or bottom navigation; keep whichever the app already uses.
+  approach) or bottom navigation; keep whichever the app already uses. Wide windows
+  (600dp and up, an unfolded book-style foldable) swap the bottom bar for a Material
+  `NavigationRailView`, on the right by default; the user can move it left (Themes →
+  Rail position). Tall foldables and cover screens keep the bottom bar.
 - **Dialogs/sheets.** Don't hand-roll a backdrop+window to mimic a custom web/QML modal.
   Use `AlertDialog` / `BottomSheetDialog`, themed with the active palette — they already
   get back-button handling, gesture dismiss, and TalkBack support for free.

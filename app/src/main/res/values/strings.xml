@@ -122,6 +122,9 @@
     <string name="themes_mode_light">Light</string>
     <string name="themes_mode_dark">Dark</string>
     <string name="themes_pair_label">Palette</string>
+    <string name="rail_position_label">Rail position on wide screens</string>
+    <string name="rail_position_right">Right</string>
+    <string name="rail_position_left">Left</string>
     <string name="themes_pair_description">%1$s, light and dark</string>
 
     <string name="compose_subject">Subject</string>

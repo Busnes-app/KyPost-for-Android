@@ -6,7 +6,9 @@
     android:layout_height="match_parent"
     android:orientation="horizontal">
 
+    <!-- An id so the scroll position survives folding or unfolding (the Activity is rebuilt). -->
     <androidx.core.widget.NestedScrollView
+        android:id="@+id/settingsScroll"
         android:layout_width="0dp"
         android:layout_height="match_parent"
         android:layout_weight="1"

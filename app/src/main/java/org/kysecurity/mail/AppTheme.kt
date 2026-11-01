@@ -146,7 +146,7 @@ internal fun resolveThemeChoice(savedTheme: String?, savedMode: String?): ThemeC
     return ThemeChoice(pair, ThemeMode.values().firstOrNull { it.storageValue == savedMode } ?: ThemeMode.SYSTEM)
 }
 
-private fun settings(context: Context) =
+internal fun settings(context: Context) =
     context.getSharedPreferences("org.kysecurity.mail.settings", Context.MODE_PRIVATE)
 
 fun getStoredThemeChoice(context: Context): ThemeChoice {
@@ -307,24 +307,35 @@ fun applyBottomInset(view: View) {
     ViewCompat.requestApplyInsets(view)
 }
 
-/** Rail equivalent of [applyBottomInset]: a full-height rail on the end edge also needs top and
- *  end insets. */
+/** Rail equivalent of [applyBottomInset]: a full-height rail also needs the top inset. The side
+ *  insets never reach it; [applySideInsets] takes them for the whole content view. */
 fun applyRailInsets(activity: Activity, view: View) {
-    val basePaddingEnd = view.paddingEnd
     val basePaddingTop = view.paddingTop
     val basePaddingBottom = view.paddingBottom
     ViewCompat.setOnApplyWindowInsetsListener(view) { v, insets ->
         val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-        val endInset = if (v.layoutDirection == View.LAYOUT_DIRECTION_RTL) bars.left else bars.right
         v.setPaddingRelative(
             v.paddingStart,
             basePaddingTop + bars.top + actionBarSize(activity),
-            basePaddingEnd + endInset,
+            v.paddingEnd,
             basePaddingBottom + barBottomInset(insets),
         )
         insets
     }
     ViewCompat.requestApplyInsets(view)
+}
+
+/** Keeps every screen clear of a side navigation bar and of a cutout on a short edge (a phone or
+ *  cover screen in landscape): edge-to-edge lays the window under both. The content view pads by
+ *  them once and hands its children insets without them, so no screen pads twice. */
+fun applySideInsets(activity: Activity) {
+    val content = activity.findViewById<View>(android.R.id.content) ?: return
+    ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
+        val side = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        v.setPadding(side.left, v.paddingTop, side.right, v.paddingBottom)
+        insets.inset(side.left, 0, side.right, 0)
+    }
+    ViewCompat.requestApplyInsets(content)
 }
 
 fun applyTopInsetWithHeader(activity: Activity, root: View) {

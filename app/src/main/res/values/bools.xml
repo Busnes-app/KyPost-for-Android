@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- True only where the rail layouts resolve (values-w600dp and values-notlong alias them), so
+    <!-- True only where the rail layouts resolve (values-w600dp and values-w440dp-notlong alias them), so
          code and layout cannot disagree about which navigation widget was inflated. Read it
          instead of recomputing a width or aspect ratio in Kotlin. -->
     <bool name="nav_is_rail">false</bool>
