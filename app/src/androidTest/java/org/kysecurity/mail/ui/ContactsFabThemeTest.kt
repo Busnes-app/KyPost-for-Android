@@ -10,9 +10,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.kysecurity.mail.R
 import org.kysecurity.mail.contacts.ContactsListActivity
-import org.kysecurity.mail.getStoredThemeName
+import org.kysecurity.mail.THEME_PAIRS
+import org.kysecurity.mail.ThemeChoice
+import org.kysecurity.mail.ThemeMode
+import org.kysecurity.mail.getStoredThemeChoice
 import org.kysecurity.mail.readableOn
-import org.kysecurity.mail.saveThemeName
+import org.kysecurity.mail.saveThemeChoice
 import org.kysecurity.mail.themePaletteFor
 
 @RunWith(AndroidJUnit4::class)
@@ -21,11 +24,12 @@ class ContactsFabThemeTest {
     @Test
     fun addButtonFollowsThemeAccent() {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        val previous = getStoredThemeName(context)
+        val previous = getStoredThemeChoice(context)
         // Not the default theme, so a match can't come from the XML colors.
-        saveThemeName(context, "Forest")
+        val forest = ThemeChoice(THEME_PAIRS.single { it.id == "forest-pair" }, ThemeMode.DARK)
+        saveThemeChoice(context, forest)
         try {
-            val accent = Color.parseColor(themePaletteFor("Forest", systemDark = false).accent)
+            val accent = Color.parseColor(themePaletteFor(forest, systemDark = false).accent)
             ActivityScenario.launch(ContactsListActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
                     val fab = activity.findViewById<FloatingActionButton>(R.id.btnAddContact)
@@ -34,7 +38,7 @@ class ContactsFabThemeTest {
                 }
             }
         } finally {
-            saveThemeName(context, previous)
+            saveThemeChoice(context, previous)
         }
     }
 }

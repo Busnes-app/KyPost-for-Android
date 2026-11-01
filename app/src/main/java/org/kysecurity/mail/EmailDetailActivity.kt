@@ -87,7 +87,7 @@ class EmailDetailActivity : LockedActivity() {
     private lateinit var btnOpenInWebmail: Button
     private lateinit var btnDecryptHere: Button
     private lateinit var btnRetryPayload: Button
-    private var lastAppliedThemeName: String = ""
+    private var lastAppliedTheme: ThemeChoice? = null
     private var lastRenderedHtml: String? = null
 
     /** Set when no webmail URL resolved; the notices below all assume a webmail fallback exists. */
@@ -175,7 +175,7 @@ class EmailDetailActivity : LockedActivity() {
         }
         setContentView(R.layout.activity_email_detail)
         applyThemeToActivity(this)
-        lastAppliedThemeName = getStoredThemeName(this)
+        lastAppliedTheme = getStoredThemeChoice(this)
 
         val root = findViewById<android.view.View>(R.id.emailDetailRoot)
         applyTopInsetWithHeader(this, root)
@@ -657,7 +657,11 @@ class EmailDetailActivity : LockedActivity() {
         pgpEncryptedBadge.visibility = if (label == null) View.GONE else View.VISIBLE
         if (label == null) return
         pgpEncryptedBadge.setText(label)
-        applyStatusBadgeTheme(this, pgpEncryptedBadge, active = state != PgpMessageState.DECRYPT_FAILED)
+        applyStatusBadgeTheme(
+            this,
+            pgpEncryptedBadge,
+            if (state == PgpMessageState.DECRYPT_FAILED) StatusTone.DANGER else StatusTone.SUCCESS,
+        )
     }
 
     /** Shared by [renderPgpBar] and [renderReadOutcome] so the wording cannot drift. */
@@ -1254,8 +1258,9 @@ class EmailDetailActivity : LockedActivity() {
         }
     }
 
-    /** The inbox's navigation on the end edge: while the inbox list is beside this pane, and
-     *  wherever a full-width screen would show a rail ([R.bool.nav_is_rail]). */
+    /** The inbox's navigation: in a split only when it sits on the end edge (a left-hand rail
+     *  stays with the list), and wherever a full-width screen would show a rail
+     *  ([R.bool.nav_is_rail]). */
     private fun setupSplitRail() {
         val rail = findViewById<NavigationBarView>(R.id.detailRail)
         // Inbox closes the message, so the list takes the window back with its own rail.
@@ -1268,17 +1273,17 @@ class EmailDetailActivity : LockedActivity() {
         )
         intent.getStringExtra(EXTRA_FOLDER_LABEL)?.let { rail.menu.findItem(R.id.nav_inbox)?.title = it }
         applyPrimaryNavigationTheme(this, rail)
-        applyRailInsets(this, rail)
+        placeRail(this, rail)
         val wide = resources.getBoolean(R.bool.nav_is_rail)
-        observeSplitPane(this) { split -> rail.isVisible = split || wide }
+        val railHere = railAtEnd(this)
+        observeSplitPane(this) { split -> rail.isVisible = if (split) railHere else wide }
     }
 
     override fun onResume() {
         super.onResume()
         if (redirectedToUnlock) return
 
-        val currentTheme = getStoredThemeName(this)
-        if (currentTheme != lastAppliedThemeName) {
+        if (getStoredThemeChoice(this) != lastAppliedTheme) {
             recreate()
             return
         }
@@ -1572,8 +1577,8 @@ internal fun renderableBody(
     isDark: Boolean,
     keepInlineDataImages: Boolean = false,
 ): RenderableBody {
-    val stripped = blockExternalResources(body, keepInlineDataImages = keepInlineDataImages)
-    val keptImages = blockExternalResources(body, keepImages = true, keepInlineDataImages = keepInlineDataImages)
+    val stripped = blockExternalResources(body, keepInlineDataImages = keepInlineDataImages, dangerColor = palette.danger)
+    val keptImages = blockExternalResources(body, keepImages = true, keepInlineDataImages = keepInlineDataImages, dangerColor = palette.danger)
     return RenderableBody(
         stripped = buildEmailBodyHtml(stripped, palette, monoFontFace, isDark),
         // What "Show images" loads: images restored, every OTHER remote resource still stripped.
@@ -1726,6 +1731,8 @@ internal fun blockExternalResources(
     keepImages: Boolean = false,
     // Decrypted mail keeps bounded raster data images in both reader variants.
     keepInlineDataImages: Boolean = false,
+    // The active half's danger, for the mismatched-link marker; a palette value, never sender input.
+    dangerColor: String = DEFAULT_THEME_CHOICE.pair.light.danger,
     /** Injectable so the fail-closed path can be PROVEN rather than assumed: jsoup is too tolerant
      *  to be made to throw from a test fixture, and "it fails closed" is exactly the kind of claim
      *  that must not rest on reading the code. */
@@ -1746,8 +1753,8 @@ internal fun blockExternalResources(
     // tap still goes through the confirm dialog, which shows the real host either way.
     document.select("a[href]").forEach { anchor ->
         val real = org.kysecurity.mail.mail.linkTextMismatch(anchor.text(), anchor.attr("href")) ?: return@forEach
-        anchor.attr("style", anchor.attr("style") + ";outline:2px solid $COLOR_DANGER")
-        anchor.after(org.jsoup.nodes.Element("span").attr("style", "color:$COLOR_DANGER").text(" \u26A0 $real"))
+        anchor.attr("style", anchor.attr("style") + ";outline:2px solid $dangerColor")
+        anchor.after(org.jsoup.nodes.Element("span").attr("style", "color:$dangerColor").text(" \u26A0 $real"))
     }
     // `track` fetches over the network exactly like its sibling `source`, and never as an image.
     val resourceTags = if (keepImages && !keepInlineDataImages) "video, audio, source, track, embed, object" else "img, video, audio, source, track, embed, object"

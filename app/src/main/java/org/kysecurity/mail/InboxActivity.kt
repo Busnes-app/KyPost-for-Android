@@ -99,7 +99,7 @@ class InboxActivity : LockedActivity() {
 
     /** The account the rows on screen were read under; row actions carry it to the request. */
     @Volatile private var shownAccount: MailAccount? = null
-    private var lastAppliedThemeName: String = ""
+    private var lastAppliedTheme: ThemeChoice? = null
     private var pendingScrollPosition: Int = 0
 
     private var selectedTab = KeywordTabs.ALL
@@ -169,7 +169,7 @@ class InboxActivity : LockedActivity() {
         }
         setContentView(R.layout.activity_inbox)
         applyThemeToActivity(this)
-        lastAppliedThemeName = getStoredThemeName(this)
+        lastAppliedTheme = getStoredThemeChoice(this)
 
         mailRepository = MailRuntime.graph(this).repository
         keywordSettings = KeywordSettings(this)
@@ -183,8 +183,10 @@ class InboxActivity : LockedActivity() {
         setupTabs()
         setupBottomNav()
         setupSwipeGestures()
-        // Beside an open message the rail moves to that pane's end edge (EmailDetailActivity).
-        observeSplitPane(this) { split -> bottomNav.isVisible = !split }
+        // Beside an open message a right-hand rail moves to that pane's end edge
+        // (EmailDetailActivity); a left-hand one stays here, on the window's start edge.
+        val railHere = !railAtEnd(this)
+        observeSplitPane(this) { split -> bottomNav.isVisible = !split || railHere }
 
         // A recreate already consumed the tap; re-reading it reopens the message and resets the folder.
         if (savedInstanceState == null && takeNotificationTarget(intent)) {
@@ -262,8 +264,7 @@ class InboxActivity : LockedActivity() {
         super.onResume()
         if (redirectedToUnlock) return
 
-        val currentTheme = getStoredThemeName(this)
-        if (currentTheme != lastAppliedThemeName) {
+        if (getStoredThemeChoice(this) != lastAppliedTheme) {
             recreate()
             return
         }
@@ -1178,22 +1179,26 @@ class InboxActivity : LockedActivity() {
     }
 
     private fun setupSwipeGestures() {
+        // The active half's status colours; a theme change recreates this screen, so they are current.
+        val palette = getStoredThemePalette(this)
+        val archiveColor = Color.parseColor(palette.warning)
+        val deleteColor = Color.parseColor(palette.danger)
         val iconSize = (24 * resources.displayMetrics.density).toInt()
         val iconMargin = (16 * resources.displayMetrics.density).toInt()
         val archiveIcon = ContextCompat.getDrawable(this, R.drawable.ic_archive)?.mutate()?.apply {
-            setTint(readableOn(SWIPE_ARCHIVE_COLOR))
+            setTint(readableOn(archiveColor))
         }
         val deleteIcon = ContextCompat.getDrawable(this, R.drawable.ic_delete)?.mutate()?.apply {
-            setTint(readableOn(SWIPE_DELETE_COLOR))
+            setTint(readableOn(deleteColor))
         }
         // Rounded on the row's own corners so no sharp corner pokes out from behind the card.
         val cardRadius = resources.getDimension(R.dimen.card_corner_radius)
         val deleteBackground = android.graphics.drawable.GradientDrawable().apply {
-            setColor(SWIPE_DELETE_COLOR)
+            setColor(deleteColor)
             cornerRadii = floatArrayOf(cardRadius, cardRadius, 0f, 0f, 0f, 0f, cardRadius, cardRadius)
         }
         val archiveBackground = android.graphics.drawable.GradientDrawable().apply {
-            setColor(SWIPE_ARCHIVE_COLOR)
+            setColor(archiveColor)
             cornerRadii = floatArrayOf(0f, 0f, cardRadius, cardRadius, cardRadius, cardRadius, 0f, 0f)
         }
 
@@ -1485,8 +1490,6 @@ class InboxActivity : LockedActivity() {
         const val STATE_FOLDER = "inbox_folder"
         const val STATE_TAB = "inbox_tab"
         const val STATE_SCROLL = "inbox_scroll"
-        private val SWIPE_ARCHIVE_COLOR = Color.parseColor(COLOR_WARNING)
-        private val SWIPE_DELETE_COLOR = Color.parseColor(COLOR_DANGER)
     }
 }
 

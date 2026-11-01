@@ -59,7 +59,18 @@ abstract class LockedActivity : AppCompatActivity() {
         // screen bouncing to UnlockActivity takes the dialog down with it while the latch stays set.
         reportCredentialResets()
         reportStrandedDownloads()
+        railPosition = org.kysecurity.mail.getStoredRailPosition(this)
         onCreateUnlocked(savedInstanceState)
+        org.kysecurity.mail.applySideInsets(this)
+    }
+
+    /** The side the rail was laid out for; a screen resumed after the setting changed rebuilds. */
+    private var railPosition: org.kysecurity.mail.RailPosition? = null
+
+    override fun onResume() {
+        super.onResume()
+        val position = railPosition ?: return
+        if (org.kysecurity.mail.getStoredRailPosition(this) != position) recreate()
     }
 
     /** Debug only: CI taps that silently did nothing have no other trace of whether this was why. */

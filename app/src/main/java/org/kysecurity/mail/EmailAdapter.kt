@@ -86,7 +86,7 @@ class EmailAdapter(
             dateTextView.text = inboxRowDate(email.atUtc, ZonedDateTime.now(), Locale.getDefault())
             val woken = email.wokenAt != null
             snoozedBadge.visibility = if (woken) View.VISIBLE else View.GONE
-            if (woken) applyStatusBadgeTheme(context, snoozedBadge, active = false)
+            if (woken) applyStatusBadgeTheme(context, snoozedBadge, StatusTone.NEUTRAL)
             // Plain text into a TextView: the relay already flattened it, and nothing here parses it.
             previewTextView.text = email.preview
             previewTextView.visibility = if (email.preview.isBlank()) View.GONE else View.VISIBLE

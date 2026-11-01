@@ -12,14 +12,14 @@ import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.kysecurity.mail.FOLLOW_SYSTEM_THEME
+import org.kysecurity.mail.DEFAULT_THEME_CHOICE
 import org.kysecurity.mail.ThemesActivity
-import org.kysecurity.mail.getStoredThemeName
-import org.kysecurity.mail.saveThemeName
+import org.kysecurity.mail.getStoredThemeChoice
+import org.kysecurity.mail.saveThemeChoice
 import org.kysecurity.mail.signon.KyIdentitySignOnActivity
 import org.kysecurity.mail.themePaletteFor
 
-/** "Follow system" repaints when the system night mode flips, with no app restart. */
+/** Busnes in System mode repaints when the system night mode flips, with no app restart. */
 @RunWith(AndroidJUnit4::class)
 class FollowSystemThemeTest {
 
@@ -44,10 +44,10 @@ class FollowSystemThemeTest {
 
     private fun <A : Activity> assertFollowsSystem(screen: Class<A>) {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        val previousTheme = getStoredThemeName(context)
+        val previousTheme = getStoredThemeChoice(context)
         // "Night mode: yes|no|auto|custom"
         val previousMode = shell("cmd uimode night").substringAfter(':').trim()
-        saveThemeName(context, FOLLOW_SYSTEM_THEME)
+        saveThemeChoice(context, DEFAULT_THEME_CHOICE)
         try {
             nightMode("no")
             ActivityScenario.launch(screen).use { scenario ->
@@ -57,11 +57,11 @@ class FollowSystemThemeTest {
             }
         } finally {
             nightMode(previousMode)
-            saveThemeName(context, previousTheme)
+            saveThemeChoice(context, previousTheme)
         }
     }
 
-    private fun bg(systemDark: Boolean) = Color.parseColor(themePaletteFor(FOLLOW_SYSTEM_THEME, systemDark).bg)
+    private fun bg(systemDark: Boolean) = Color.parseColor(themePaletteFor(DEFAULT_THEME_CHOICE, systemDark).bg)
 
     /** The night-mode change is posted by the system, so idle sync alone does not cover it. */
     private fun <A : Activity> awaitDecorColor(scenario: ActivityScenario<A>, expected: Int): Int {

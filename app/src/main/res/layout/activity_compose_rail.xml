@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Compose on a notlong window narrower than 600dp (a Fold cover screen): the phone body, with the
-     rail on the end edge. Too narrow for activity_compose_wide's two columns. -->
+<!-- Compose on a 440-600dp notlong window (a Fold cover screen): the phone body, with the
+     rail on the side Settings picks. Too narrow for activity_compose_wide's two columns. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"

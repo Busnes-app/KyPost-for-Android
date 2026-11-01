@@ -10,6 +10,7 @@ import android.widget.TextView
 import com.google.android.material.chip.Chip
 import org.kysecurity.mail.R
 import org.kysecurity.mail.ThemePalette
+import org.kysecurity.mail.StatusTone
 import org.kysecurity.mail.applyStatusBadgeTheme
 import org.kysecurity.mail.bindAvatar
 import org.kysecurity.mail.data.ContactEntity
@@ -49,15 +50,14 @@ class ContactAdapter(
             detailView.setTextColor(Color.parseColor(palette.ink))
 
             val hasKey = contactHasLinkedPgpKey(contact.pgpKey, contact.isSelf, selfHasPgpIdentity)
-            statusBadge.setText(
-                when {
-                    hasKey && contact.pgpKeyNeedsReverification -> R.string.contact_status_key_changed
-                    hasKey && contact.identityNeedsReview -> R.string.contact_status_identity_changed
-                    hasKey -> R.string.contact_status_secure_key
-                    else -> R.string.contact_status_no_key
-                },
-            )
-            applyStatusBadgeTheme(itemView.context, statusBadge, active = hasKey)
+            val (label, tone) = when {
+                hasKey && contact.pgpKeyNeedsReverification -> R.string.contact_status_key_changed to StatusTone.WARNING
+                hasKey && contact.identityNeedsReview -> R.string.contact_status_identity_changed to StatusTone.WARNING
+                hasKey -> R.string.contact_status_secure_key to StatusTone.SUCCESS
+                else -> R.string.contact_status_no_key to StatusTone.NEUTRAL
+            }
+            statusBadge.setText(label)
+            applyStatusBadgeTheme(itemView.context, statusBadge, tone)
 
             itemView.setOnClickListener { onContactClick(contact) }
         }

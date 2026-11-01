@@ -10,8 +10,22 @@
 - On Play, tapping "Use Firebase" 10 times on a device that has never paired opens the review
   login, for Play's reviewers (#285).
 
+### Changed
+
+- Themes are now the six Ky suite light/dark pairs: Busnes (default), Matter, Ocean, Forest, Ky
+  and Nord. Pick a pair plus System default, Light or Dark. A saved surviving half keeps that half;
+  a removed palette resets to Busnes following the system.
+- Danger, warning and success use each half's own status colours instead of fixed ones, with a
+  dot beside the word. This covers delete buttons, warning callouts, status badges, swipe
+  reveals, the unlock error, pairing status and the contact sync banner.
+- Foldables: the navigation rail on wide windows (an unfolded book-style foldable, anything at
+  least 600dp wide) sits on the right by default, and Themes has a new Rail position setting,
+  Right or Left. A half-open book-style foldable splits the inbox and message at the hinge.
+  Squarish flip cover screens narrower than 440dp now keep the phone's bottom bar.
+
 ### Fixed
 
+- In landscape, a display cutout or a side navigation bar no longer covers the edge of a screen.
 - `assembleFdroidRelease` builds an unsigned APK when no signing material is set, as F-Droid
   needs, instead of refusing. Play and GitHub release packaging still refuses without it (#286).
 - Store listing title, summary and description in `fastlane/metadata/android/en-US`, which

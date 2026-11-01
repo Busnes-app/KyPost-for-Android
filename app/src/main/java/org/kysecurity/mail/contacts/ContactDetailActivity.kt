@@ -16,6 +16,7 @@ import android.widget.Toast
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.chip.Chip
 import org.kysecurity.mail.R
+import org.kysecurity.mail.StatusTone
 import org.kysecurity.mail.applyStatusBadgeTheme
 import org.kysecurity.mail.applyThemeToActivity
 import org.kysecurity.mail.applyThemedTitle
@@ -139,7 +140,7 @@ class ContactDetailActivity : LockedActivity() {
         selfBadge.visibility = if (dto.isSelf) View.VISIBLE else View.GONE
         if (dto.isSelf) {
             selfBadge.text = getString(R.string.contact_self_label)
-            applyStatusBadgeTheme(this, selfBadge, active = true)
+            applyStatusBadgeTheme(this, selfBadge, StatusTone.SUCCESS)
         }
 
         val hasKey = contactHasLinkedPgpKey(dto.pgpKey, dto.isSelf, selfHasPgpIdentity)
@@ -151,7 +152,7 @@ class ContactDetailActivity : LockedActivity() {
                 identityNeedsReview -> getString(R.string.contact_status_identity_changed)
                 else -> getString(R.string.contacts_pgp_badge_visible)
             }
-            applyStatusBadgeTheme(this, pgpBadge, active = true)
+            applyStatusBadgeTheme(this, pgpBadge, StatusTone.SUCCESS)
         }
 
         fieldsContainer.removeAllViews()

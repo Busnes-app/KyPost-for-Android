@@ -14,6 +14,7 @@ import com.google.android.material.chip.Chip
 import org.kysecurity.mail.R
 import org.kysecurity.mail.applyDangerButtonTheme
 import org.kysecurity.mail.applyPrimaryButtonTheme
+import org.kysecurity.mail.StatusTone
 import org.kysecurity.mail.applyStatusBadgeTheme
 import org.kysecurity.mail.applyThemeToActivity
 import org.kysecurity.mail.applyTopInsetWithHeader
@@ -418,7 +419,7 @@ class ContactEditActivity : LockedActivity() {
         selfBadge.visibility = if (dto.isSelf) View.VISIBLE else View.GONE
         if (dto.isSelf) {
             selfBadge.text = getString(R.string.contact_self_label)
-            applyStatusBadgeTheme(this@ContactEditActivity, selfBadge, active = true)
+            applyStatusBadgeTheme(this@ContactEditActivity, selfBadge, StatusTone.SUCCESS)
         }
         // Only the self-contact needs the extra (network) identity check — every other
         // contact's badge is fully determined by its own pgpKey field.
@@ -427,7 +428,7 @@ class ContactEditActivity : LockedActivity() {
         pgpBadge.visibility = if (hasKey) View.VISIBLE else View.GONE
         if (hasKey) {
             pgpBadge.text = getString(R.string.contacts_pgp_badge_visible)
-            applyStatusBadgeTheme(this@ContactEditActivity, pgpBadge, active = true)
+            applyStatusBadgeTheme(this@ContactEditActivity, pgpBadge, StatusTone.SUCCESS)
         }
         findViewById<ExpandableSectionView>(R.id.sectionWork).setExpanded(
             dto.org != null || dto.title != null || dto.department != null,

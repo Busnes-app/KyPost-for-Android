@@ -15,53 +15,44 @@ question than "does it look like the web app." Colors, radii, and font choices s
 trace back to the same source values as web, though — nothing below is iOS/Linux
 inventing new design decisions independent of web.
 
-Source of truth for colors: `frontend/src/theme.ts` (web), `AppTheme.swift`
-`AppTheme.palettes` (iOS/macOS), `ThemeManager`/`ThemeController` (Linux, `app/theme/` +
-`core/`), and `AppTheme.kt` `themePalettes` (this app). Existing shared themes must stay
-numerically identical. The September 2026 Busnes Light/Dark rollout reached web and this
-app; iOS/macOS and Linux Mobile still carry the 15 older palettes and `Patina Ky` as their
-default until their own pass. (Swift and QML source code already carry `STYLE_GUIDE.md §N` comments
-pointing back at this file — keep section numbers stable when editing.)
+Source of truth for colors: ky-ui (`src/themes.js` `THEME_PAIRS`, `src/tokens.css`), which the web
+apps consume directly. Android mirrors it in `AppTheme.kt` `THEME_PAIRS`. The October 2026 pairs
+pass reached web and this app first; iOS/macOS and Linux Mobile follow in their own passes. (Swift
+and QML source code already carry `STYLE_GUIDE.md §N` comments pointing back at this file, so keep
+section numbers stable when editing.)
 
 ## 1. Color system (already shared — keep it that way)
 
-All four apps ship the same 15 named themes (`Dark Matter`, `Light Matter`,
-`Tropics`, `Tropic Night`, `Ocean`, `Coffee`, `White Cliffs`, `Cyber Punk`,
-`Neon Purple`, `Space`, `Sky`, `Forest`, `Sun`, `Patina Ky`, `Polished Ky`). Don't fork
-this list per-platform.
+Six light/dark **pairs** replace the old 15 palettes: `Busnes` (default), `Matter`, `Ocean`,
+`Forest`, `Ky` and `Nord`. Each has a light half and a dark half. The user picks a pair plus a mode:
+System default (follow the OS), Light or Dark. Don't fork this list per platform. A saved choice of
+a surviving half keeps that half forced. Every removed palette resets to Busnes following the
+system (`ThemeMigrationTest`).
 
-Ahead of that list, web and Android also offer `Busnes Light` and `Busnes Dark` — the
-cream/charcoal pair with one orange accent from `busnes-color-theme-handoff.md`.
-Android's default is `Follow system` (`AppTheme.DEFAULT_THEME`, the single source for the
-fallback name): not a palette, but a selector that paints `Busnes Light` or `Busnes Dark` from
-the system night mode. It adds no colors, so the palette tables stay identical; web has no
-equivalent yet and should gain one (`prefers-color-scheme`). `Patina Ky` remains the default
-on iOS/macOS and Linux Mobile. Port the pair, and the default, when those platforms take
-their pass. Android's `line` holds the
-handoff's control border **composited onto `panel`**, not its `rgba()` form: `blend()` in
-`AppTheme.kt` drops alpha, so a translucent `line` would paint the empty-state dashed
-border near-black on cream. The handoff's `buttonText` needs no palette field — it is what
-`readableOn(accent)` already returns on both palettes.
+Android's `line` holds the control border **composited onto `panel`**, not its `rgba()` form:
+`blend()` in `AppTheme.kt` drops alpha, so a translucent `line` would paint the empty-state dashed
+border near-black on cream. ky-ui's `buttonText` needs no palette field. It is what
+`readableOn(accent)` already returns on every half.
 
-Web's `ThemeVars` has more fields than mobile's `ThemePalette` (16 vs 6). iOS's
-`ThemePalette` sits in between (7 fields: `bg/panel/ink/inkStrong/accent/accentSoft/line`)
-because its avatar gradient (§4) needs the extra `accentSoft` stop. Android currently
-derives everything from `bg/panel/ink/inkStrong/accent/line` (6 fields, no
-`accentSoft` yet) and fakes the avatar gradient with two derived stops
-(`avatarGradientStart/End`) computed at the palette-table level instead. That's fine —
-don't add `accentSoft` to Android's `ThemePalette` unless a second component needs a
-true theme-driven gradient stop it can't otherwise produce; the avatar already works via
-the derived-stops approach.
+Web's `ThemeVars` has more fields than mobile's `ThemePalette`. Android derives everything from
+`bg/panel/ink/inkStrong/accent/line` plus the status colours, and fakes the avatar gradient with
+two derived stops (`avatarGradientStart/End`). Don't add `accentSoft` unless a second component
+needs a true theme-driven gradient stop it can't otherwise produce.
 
-**Semantic colors are theme-invariant on every platform** (fixed literals, never part of
-the per-theme palette). Keep them as constants, not palette fields.
+**Status colours are per half** (ky-ui 0.8.0), separate from the accent:
 
-| Role | Hex / source |
-|---|---|
-| Danger / delete | `#ff5f5f` (swipe hint), `rgba(255,180,171,.4)` border / `.12` fill (action button) |
-| Warning / archive | `#ffd64d` (swipe hint) |
-| Success / active status | `#7bbf7b` border, `#a5dca5` text |
-| Inactive status | uses `line`/`panel`/`ink` from the active palette, not a fixed color |
+| Role | Light halves | Dark halves | Exceptions |
+|---|---|---|---|
+| Danger / delete / error | `#a8174e` (cool crimson, never the rust accent) | `#ff8fb1` | Nord Dark `#ecc4c8` |
+| Warning / archive | `#7a5f00` | `#ffd25e` | |
+| Success / active status | `#267442` | `#86efac` | Forest teal `#00737a` / `#6ee0d0`; Nord Dark `#bcd4aa` |
+| Soft fill | the status mixed 12% into `panel` (`statusSoft`) | same | |
+| Inactive / neutral status | `line`/`panel`/`ink` from the active half | same | |
+
+A status always shows a word plus a dot or icon, never colour alone. The gate is ky-ui's
+`scripts/check-status-colours.mjs`, ported as `StatusColourGateTest`: text at 4.5:1 or better on
+bg, on panel and on its soft fill; ΔE00 ≥ 20 between accent and danger; and ΔE00 ≥ 10 between any
+two of accent, danger, warning and success.
 
 ## 2. Typography
 
@@ -118,8 +109,8 @@ the equivalent iOS (`Presentation/Components/`) and Linux (`app/qml/components/`
   opacity dip on press — see §6.
 - **Ghost/secondary button** — transparent fill, 1dp `line` stroke, `inkStrong` text.
   **Done** (`applyGhostButtonTheme`).
-- **Danger button** — 1dp stroke + 12% fill of the fixed danger red from §1, not
-  theme-accent. **Done** (`applyDangerButtonTheme`).
+- **Danger button** — 1dp danger stroke over the half's danger soft fill, danger text (§1),
+  never theme-accent. **Done** (`applyDangerButtonTheme`).
 - **Floating action button** — `accent` fill, icon tinted `readableOn(accent)`. **Done**,
   for every FAB in a themed view tree (`applyThemeToViewTree`); pinned by
   `ContactsFabThemeTest`.
@@ -130,7 +121,7 @@ the equivalent iOS (`Presentation/Components/`) and Linux (`app/qml/components/`
   `Capsule`-backed toggle and Linux's `PillTab.qml` — every platform prefers its native
   chip/pill primitive over reimplementing the shape from scratch).
 - **Status badge + dot** — pill outline badge with a small leading circular dot, colored
-  by the §1 success/inactive colors. Used anywhere a contact/user/device shows an
+  by the §1 status colours (`StatusTone`). Used anywhere a contact/user/device shows an
   active-vs-inactive state. iOS has `StatusBadgeView.swift`, Linux has `StatusBadge.qml`.
   **Missing on Android** — see [§7](#7-android-gaps).
 - **Circular gradient avatar with initials** — 34dp (list) / 52dp (detail header) circle,
@@ -165,7 +156,10 @@ sibling app (web, iOS, Linux) you're comparing against.
 
 - **Navigation shape.** Don't build a literal left sidebar (web) or import Linux's
   desktop-rail layout. Android convention is a toolbar + overflow menu (current
-  approach) or bottom navigation; keep whichever the app already uses.
+  approach) or bottom navigation; keep whichever the app already uses. Wide windows
+  (600dp and up, an unfolded book-style foldable) swap the bottom bar for a Material
+  `NavigationRailView`, on the right by default; the user can move it left (Themes →
+  Rail position). Tall foldables and cover screens keep the bottom bar.
 - **Dialogs/sheets.** Don't hand-roll a backdrop+window to mimic a custom web/QML modal.
   Use `AlertDialog` / `BottomSheetDialog`, themed with the active palette — they already
   get back-button handling, gesture dismiss, and TalkBack support for free.
@@ -191,8 +185,8 @@ why, not a to-do list — don't re-verify unless you suspect drift.
    referenced via a `file:///android_asset/` base URL deliberately — that WebView renders
    untrusted email HTML with JS enabled, and switching its base URL from `null` would
    grant that untrusted content `file://` origin access.
-2. **Status badge + dot component — done.** `AppTheme.applyStatusBadgeTheme` (active =
-   fixed success green from §1, inactive = theme-derived `line`/`panel`/`ink`, dot via
+2. **Status badge + dot component — done.** `AppTheme.applyStatusBadgeTheme` (a `StatusTone`
+   paints the half's status colour from §1, neutral = theme-derived `line`/`panel`/`ink`, dot via
    the existing `unreadDotDrawable`) is wired into `ContactAdapter`/`item_contact.xml`,
    keyed off `ContactEntity.pgpKey` presence ("Secure key" / "No key"). The address-book
    picker (`RecipientRowAdapter`) does not show this badge — its `RecipientCandidate`
