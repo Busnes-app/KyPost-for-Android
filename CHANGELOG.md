@@ -1,13 +1,21 @@
 # Changelog
 
-## Unreleased
+## 0.5.1.4 — 2026-10-31
+
+### Added
+
+- Each release also carries `kypost-fdroid-vX.Y.Z.apk`, the `fdroid` build signed with the
+  KyPost release key. F-Droid rebuilds it from source and publishes ours only if the rebuild
+  matches (#287). APKs no longer include Google's encrypted dependency-info block.
+- On Play, tapping "Use Firebase" 10 times on a device that has never paired opens the review
+  login, for Play's reviewers (#285).
 
 ### Fixed
 
 - `assembleFdroidRelease` builds an unsigned APK when no signing material is set, as F-Droid
-  needs, instead of refusing. Play and GitHub release packaging still refuses without it.
+  needs, instead of refusing. Play and GitHub release packaging still refuses without it (#286).
 - Store listing title, summary and description in `fastlane/metadata/android/en-US`, which
-  F-Droid reads for its listing.
+  F-Droid reads for its listing (#286).
 
 ## 0.5.1.3 — 2026-10-30
 
