@@ -521,11 +521,17 @@ jobs:
             # already doomed, so a swipe and a PIN cannot cost a test that was going to pass; on the
             # ordinary run where the keyguard stays down, nothing is typed at all.
             #
+            # The same poll stops another app's "Application Not Responding" dialog. The emulator's
+            # launcher or GMS can hang during boot, and its dialog then holds window focus, so every
+            # later Espresso test fails with RootViewWithoutFocusException (PR #290 runs 41304879516
+            # and 41310491826: mCurrentFocus was the nexuslauncher ANR window). Force-stopping the hung
+            # app closes its dialog. This app is never stopped, so a real ANR here still fails the run.
+            #
             # Bounded rather than killed. 220 polls at 10s is ~37 minutes against a 45-minute job
             # timeout, so it retires on its own and there is no pkill racing the next step for a
             # process name. Output goes to a file, never the step's stdout, so nothing holds the
             # pipe open behind the runner.
-            printf '%s\n' '#!/bin/sh' 'for i in $(seq 1 220); do' '  k=$(adb shell dumpsys activity activities 2>/dev/null | grep -o "mKeyguardShowing=[a-zA-Z]*" | head -1)' '  w=$(adb shell dumpsys power 2>/dev/null | grep -o "mWakefulness=[a-zA-Z][a-zA-Z]*" | head -1)' '  printf "%s %s %s\n" "$(date -u +%H:%M:%S)" "$k" "$w"' '  case "$k" in *=true) printf "%s REPAIRING: keyguard is up, dismissing again\n" "$(date -u +%H:%M:%S)"; adb shell input keyevent 224 >/dev/null 2>&1; adb shell wm dismiss-keyguard >/dev/null 2>&1; adb shell input swipe 540 1600 540 400 >/dev/null 2>&1; adb shell input text 1234 >/dev/null 2>&1; adb shell input keyevent 66 >/dev/null 2>&1 ;; esac' '  sleep 10' 'done' > /tmp/kgwatch.sh
+            printf '%s\n' '#!/bin/sh' 'for i in $(seq 1 220); do' '  k=$(adb shell dumpsys activity activities 2>/dev/null | grep -o "mKeyguardShowing=[a-zA-Z]*" | head -1)' '  w=$(adb shell dumpsys power 2>/dev/null | grep -o "mWakefulness=[a-zA-Z][a-zA-Z]*" | head -1)' '  printf "%s %s %s\n" "$(date -u +%H:%M:%S)" "$k" "$w"' '  case "$k" in *=true) printf "%s REPAIRING: keyguard is up, dismissing again\n" "$(date -u +%H:%M:%S)"; adb shell input keyevent 224 >/dev/null 2>&1; adb shell wm dismiss-keyguard >/dev/null 2>&1; adb shell input swipe 540 1600 540 400 >/dev/null 2>&1; adb shell input text 1234 >/dev/null 2>&1; adb shell input keyevent 66 >/dev/null 2>&1 ;; esac' '  f=$(adb shell dumpsys window displays 2>/dev/null | grep -o "mCurrentFocus=Window{[^}]*Not Responding: [A-Za-z0-9._]*" | head -1)' '  case "$f" in *"Not Responding: "*) p=${f##*Not Responding: }; case "$p" in org.kysecurity.*) ;; *) printf "%s REPAIRING: %s is not responding and holds focus, stopping it\n" "$(date -u +%H:%M:%S)" "$p"; adb shell am force-stop "$p" >/dev/null 2>&1 ;; esac ;; esac' '  sleep 10' 'done' > /tmp/kgwatch.sh
             chmod +x /tmp/kgwatch.sh
             nohup /tmp/kgwatch.sh > /tmp/keyguard-watch.txt 2>&1 &
 
