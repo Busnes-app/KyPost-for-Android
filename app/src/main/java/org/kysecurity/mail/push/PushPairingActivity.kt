@@ -30,6 +30,8 @@ import org.kysecurity.mail.applyEmptyStateBackground
 import org.kysecurity.mail.applyPillChipTheme
 import org.kysecurity.mail.applyPrimaryButtonTheme
 import org.kysecurity.mail.applySectionEyebrowLabel
+import org.kysecurity.mail.StatusTone
+import org.kysecurity.mail.applyStatusText
 import org.kysecurity.mail.applyThemeToActivity
 import org.kysecurity.mail.applyTopInsetWithHeader
 import org.kysecurity.mail.getStoredThemePalette
@@ -214,6 +216,7 @@ class PushPairingActivity : LockedActivity() {
             )
             getString(R.string.push_pairing_status_with_mode, baseStatus, modeLabel)
         }
+        applyStatusText(this, statusText, if (state.pairing == null) StatusTone.NEUTRAL else StatusTone.SUCCESS)
         serverUrlText.text = getString(R.string.push_pairing_server, state.pairing?.serverUrl ?: none)
         subscriberText.text =
             getString(R.string.push_pairing_subscriber, state.pairing?.subscriberId?.let { maskTail(it, 6) } ?: none)
@@ -228,6 +231,7 @@ class PushPairingActivity : LockedActivity() {
         } else {
             syncErrorText.visibility = View.VISIBLE
             syncErrorText.text = getString(R.string.push_pairing_sync_error, state.syncError)
+            applyStatusText(this, syncErrorText, StatusTone.DANGER)
         }
 
         transportText.text = getString(R.string.push_pairing_transport, transportLabel(state.transport))

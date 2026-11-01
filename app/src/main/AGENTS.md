@@ -730,20 +730,27 @@ Owns production Android app code and resources.
   otherwise a "N new messages" pill (`inbox_new_mail` plurals, polite live region) over the list
   counts it and scrolls up on tap. Only a repaint of the folder and tab already painted counts,
   and a pending saved-position restore wins. `InboxNewMailTest` covers both branches.
-- Theme selection is managed in `ThemesActivity` and uses the shared theme name list based on
-  `theme.ts` palettes, led by `Busnes Light`/`Busnes Dark` from `busnes-color-theme-handoff.md`.
-  `AppTheme.DEFAULT_THEME` (`FOLLOW_SYSTEM_THEME`, "Follow system") is the only place the
-  fallback name lives — the stored-name read, the unknown-name fallback and the missing-palette
-  fallback all go through it. "Follow system" heads `THEME_OPTIONS` but has no palette:
-  `themePaletteFor(name, systemDark)` resolves it to `Busnes Light` or `Busnes Dark`, and
-  `getStoredThemePalette` reads `systemDark` from the context's `uiMode`. A night-mode flip
-  recreates the Activity; a screen that declares `uiMode` in `configChanges`
-  (`KyIdentitySignOnActivity`) must repaint in `onConfigurationChanged` instead.
-  `FollowSystemThemeTest` covers both kinds. An install that never picked a theme follows the
-  system; an explicit choice is kept, because `getStoredThemeName` only discards names
-  `THEME_OPTIONS` no longer offers. Palette colors are opaque six-digit hex without exception:
-  `blend()` returns `Color.rgb`, so alpha in `line` survives as a fully opaque near-black in
-  `applyEmptyStateBackground`. `ThemePaletteTableTest` holds both rules.
+- Theme selection is managed in `ThemesActivity`: a System default / Light / Dark radio group
+  (`ThemeMode`) over the six ky-ui pairs (`THEME_PAIRS`: Busnes, Matter, Ocean, Forest, Ky,
+  Nord). Values mirror ky-ui `src/themes.js` and `src/tokens.css` exactly. `DEFAULT_THEME_CHOICE`
+  (Busnes, System) is the only fallback. The pair ID is saved under `kypost-theme` and the mode
+  under `kypost-theme-mode`; `saveThemeChoice` always writes both. `resolveThemeChoice` reads old
+  single-key names: a surviving half (`Busnes Light`, `Dark Matter`, `Ocean`, `Forest`,
+  `Patina Ky`, ...) becomes its pair with that half forced (`LEGACY_THEME_NAMES`). "Follow system"
+  and every removed palette reset to the default. `ThemeMigrationTest` covers both.
+  `themePaletteFor(choice, systemDark)` picks the half; `getStoredThemePalette` reads
+  `systemDark` from the context's `uiMode`. A night-mode flip recreates the Activity; a screen
+  that declares `uiMode` in `configChanges` (`KyIdentitySignOnActivity`) must repaint in
+  `onConfigurationChanged` instead. `FollowSystemThemeTest` covers both kinds. Palette colors are
+  opaque six-digit hex without exception: `blend()` returns `Color.rgb`, so alpha in `line`
+  survives as a fully opaque near-black in `applyEmptyStateBackground`.
+  `ThemePaletteTableTest` holds that rule and pins the ky-ui values.
+- Status colours are per half (`ThemePalette.danger/warning/success`), never the accent. The
+  soft fill is `statusSoft()`, which is ky-ui's 12% `color-mix` over `panel`. Draw states
+  through `StatusTone` and the helpers: `applyStatusBadgeTheme`, `applyStatusText`,
+  `applyWarningCalloutTheme`, `applyDangerButtonTheme` and `applySuccessChipTheme`. A status always
+  carries a word plus a dot or icon. `StatusColourGateTest` ports ky-ui's
+  `check-status-colours.mjs` (180 checks): a new or changed half must pass it.
 - `SettingsActivity` is only a hub for existing settings surfaces: Security, Themes, Keywords,
   Pairing, PGP Key, Signature, and About. Keep settings logic in the destination screens rather
   than duplicating it in the hub; Signature's destination is `showSignatureDialog`.

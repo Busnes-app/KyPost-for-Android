@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed
+
+- Themes are now the six Ky suite light/dark pairs: Busnes (default), Matter, Ocean, Forest, Ky
+  and Nord. Pick a pair plus System default, Light or Dark. A saved surviving half keeps that half;
+  a removed palette resets to Busnes following the system.
+- Danger, warning and success use each half's own status colours instead of fixed ones, with a
+  dot beside the word. This covers delete buttons, warning callouts, status badges, swipe
+  reveals, the unlock error, pairing status and the contact sync banner.
+
 ### Fixed
 
 - `assembleFdroidRelease` builds an unsigned APK when no signing material is set, as F-Droid

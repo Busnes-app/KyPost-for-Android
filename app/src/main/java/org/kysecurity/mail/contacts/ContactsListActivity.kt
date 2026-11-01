@@ -18,10 +18,12 @@ import androidx.work.WorkManager
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.navigation.NavigationBarView
 import org.kysecurity.mail.R
+import org.kysecurity.mail.StatusTone
 import org.kysecurity.mail.applyEmptyStateBackground
 import org.kysecurity.mail.applyKyPostTopBar
 import org.kysecurity.mail.applyPrimaryNavigationInsets
 import org.kysecurity.mail.applyPrimaryNavigationTheme
+import org.kysecurity.mail.applyStatusText
 import org.kysecurity.mail.applyThemeToActivity
 import org.kysecurity.mail.getStoredThemePalette
 import org.kysecurity.mail.applyTopInsetWithHeader
@@ -471,6 +473,7 @@ class ContactsListActivity : LockedActivity() {
     private fun renderSyncStatus(status: ContactSyncStatus) {
         syncBanner.visibility = if (status == ContactSyncStatus.Idle) View.GONE else View.VISIBLE
         syncRetry.visibility = if (status is ContactSyncStatus.Stuck) View.VISIBLE else View.GONE
+        applyStatusText(this, syncStatusText, if (status is ContactSyncStatus.Stuck) StatusTone.WARNING else StatusTone.NEUTRAL)
         syncStatusText.text = when (status) {
             ContactSyncStatus.Idle -> ""
             is ContactSyncStatus.Waiting ->

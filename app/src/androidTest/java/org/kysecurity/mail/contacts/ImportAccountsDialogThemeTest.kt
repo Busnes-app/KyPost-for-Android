@@ -10,8 +10,11 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.kysecurity.mail.contacts.device.DeviceAccount
 import org.kysecurity.mail.contacts.device.DeviceContactsRuntime
-import org.kysecurity.mail.getStoredThemeName
-import org.kysecurity.mail.saveThemeName
+import org.kysecurity.mail.THEME_PAIRS
+import org.kysecurity.mail.ThemeChoice
+import org.kysecurity.mail.ThemeMode
+import org.kysecurity.mail.getStoredThemeChoice
+import org.kysecurity.mail.saveThemeChoice
 import org.kysecurity.mail.security.showSecurely
 import org.kysecurity.mail.themePaletteFor
 import org.junit.After
@@ -25,17 +28,17 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class ImportAccountsDialogThemeTest {
     private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-    private lateinit var savedTheme: String
+    private lateinit var savedTheme: ThemeChoice
 
     @Before
     fun setUp() {
-        savedTheme = getStoredThemeName(context)
-        saveThemeName(context, THEME)
+        savedTheme = getStoredThemeChoice(context)
+        saveThemeChoice(context, THEME)
     }
 
     @After
     fun tearDown() {
-        saveThemeName(context, savedTheme)
+        saveThemeChoice(context, savedTheme)
         DeviceContactsRuntime.invalidate()
         ContactsRuntime.invalidate()
     }
@@ -73,6 +76,6 @@ class ImportAccountsDialogThemeTest {
 
     private companion object {
         // Dark, so a light default surface or text cannot pass by accident.
-        const val THEME = "Space"
+        val THEME = ThemeChoice(THEME_PAIRS.single { it.id == "nord-pair" }, ThemeMode.DARK)
     }
 }
