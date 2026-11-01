@@ -27,9 +27,9 @@ import org.kysecurity.mail.contacts.device.DeviceContactSyncEnabler
 import org.kysecurity.mail.contacts.device.DeviceContactSyncSettings
 import org.kysecurity.mail.contacts.device.DeviceContactsRuntime
 import org.kysecurity.mail.applyDangerButtonTheme
-import org.kysecurity.mail.applyEmptyStateBackground
 import org.kysecurity.mail.applyGhostButtonTheme
 import org.kysecurity.mail.applyKyPostTopBar
+import org.kysecurity.mail.applyPanelBackground
 import org.kysecurity.mail.applyPillChipTheme
 import org.kysecurity.mail.applyPrimaryButtonTheme
 import org.kysecurity.mail.applySectionEyebrowLabel
@@ -165,7 +165,7 @@ class PushPairingActivity : LockedActivity() {
         PendingPairingLink.take()?.let(::confirmAndApplyPairing)
         applyPillChipTheme(this, chipUseUnifiedPush)
         applyPillChipTheme(this, chipUseFirebase)
-        applyEmptyStateBackground(this, historyEmptyText)
+        applyPanelBackground(this, historyEmptyText)
         applySectionEyebrowLabel(this, findViewById(R.id.pushPairingLatestTitle))
         applySectionEyebrowLabel(this, findViewById(R.id.pushPairingHistoryTitle))
     }

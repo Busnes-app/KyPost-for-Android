@@ -240,11 +240,16 @@
             android:divider="@null"
             android:dividerHeight="0dp" />
 
+        <!-- Sits directly under the label at the cards' 12dp margin; the activity gives it the
+             flat panel card (1dp line, no dash). -->
         <TextView
             android:id="@+id/pushPairingHistoryEmpty"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
+            android:layout_gravity="top"
+            android:layout_marginStart="12dp"
+            android:layout_marginEnd="12dp"
+            android:padding="16dp"
             android:gravity="center"
             android:text="@string/push_pairing_history_empty"
             android:textSize="14sp"
