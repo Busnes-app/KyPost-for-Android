@@ -773,7 +773,15 @@ Owns production Android app code and resources.
   same two qualifiers. Compose has two rail layouts: `activity_compose_wide` (two columns, w600dp)
   and `activity_compose_rail` (the phone body from `compose_phone_body` beside a rail, for a 440-600dp
   `notlong` window). `LayoutVariantIdsTest` checks every alias target carries the phone layout's
-  ids. The item order is Inbox, Compose, Lock, Contacts,
+  ids. Both bars follow the suite shell rules (`applyPrimaryNavigationTheme`): `panel` with a
+  1dp `line` hairline toward the content and no shadow, outline icons (`ic_nav_*`), and the
+  active item in an `accentSoft` pill with `inkStrong` icon and label. The rail pads by the
+  status-bar inset only; AppCompat already places it below the action bar. The top bar
+  (`applyKyPostTopBar`) is the brand row, a 28dp logo tile and an `inkStrong` "KyPost" with
+  nothing under it, then the page name as a separate sentence-case title after a hairline.
+  Settings is a list of rows (`settings_rows.xml`, `applyListRowTheme`): icon, title over
+  description, chevron, hairlines between rows, capped at 720dp by `ComposeColumn`. Each row keeps
+  the id and click of the button it replaced. The item order is Inbox, Compose, Lock, Contacts,
   Settings; Lock is an action that either locks immediately or opens Security when app lock is
   disabled, not a selected destination. Keep the destination behavior in `AppNavigation.kt`. Primary
   destination switches reuse existing destination activities with `FLAG_ACTIVITY_REORDER_TO_FRONT`

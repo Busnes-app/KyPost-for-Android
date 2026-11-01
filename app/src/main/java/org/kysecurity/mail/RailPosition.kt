@@ -37,6 +37,6 @@ fun placeRail(activity: Activity, rail: View) {
         parent.removeView(rail)
         parent.addView(rail, slot)
     }
-    applyRailInsets(activity, rail)
+    applyRailInsets(rail)
 }
 

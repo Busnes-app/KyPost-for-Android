@@ -16,6 +16,7 @@ import org.kysecurity.mail.applyDangerButtonTheme
 import org.kysecurity.mail.applyPrimaryButtonTheme
 import org.kysecurity.mail.StatusTone
 import org.kysecurity.mail.applyStatusBadgeTheme
+import org.kysecurity.mail.applyTextButtonTheme
 import org.kysecurity.mail.applyThemeToActivity
 import org.kysecurity.mail.applyTopInsetWithHeader
 import org.kysecurity.mail.bindAvatar
@@ -343,6 +344,7 @@ class ContactEditActivity : LockedActivity() {
 
         applyPrimaryButtonTheme(this, saveButton)
         applyDangerButtonTheme(this, deleteButton)
+        addButtonIds.forEach { applyTextButtonTheme(this, findViewById(it)) }
         bindAvatar(this, avatarView, fnField.text.toString(), sizeDp = 52)
         fnField.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
@@ -368,6 +370,12 @@ class ContactEditActivity : LockedActivity() {
         deleteButton.setOnClickListener { confirmDelete() }
     }
 
+    /** The per-section "Add" actions: secondary to Save, so text buttons, not filled ones. */
+    private val addButtonIds = listOf(
+        R.id.btnAddEmail, R.id.btnAddPhone, R.id.btnAddAddress, R.id.btnAddWebsite,
+        R.id.btnAddIm, R.id.btnAddEvent, R.id.btnAddRelation, R.id.btnAddCustomField,
+    )
+
     override fun onStop() {
         super.onStop()
         // onCreate bailed before assigning any view: there is nothing to stash, and touching the
@@ -387,6 +395,7 @@ class ContactEditActivity : LockedActivity() {
         applyThemeToActivity(this)
         applyPrimaryButtonTheme(this, saveButton)
         applyDangerButtonTheme(this, deleteButton)
+        addButtonIds.forEach { applyTextButtonTheme(this, findViewById(it)) }
         bindAvatar(this, avatarView, fnField.text.toString(), sizeDp = 52)
     }
 

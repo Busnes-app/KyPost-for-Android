@@ -734,12 +734,8 @@ class InboxActivity : LockedActivity() {
             if (hasUnread) {
                 chip.chipIconSize = dotSizePx.toFloat()
                 chip.chipIcon = unreadDotDrawable(this, sizeDp = 7)
-                // ColorStateList, not a flat color: toggling checked never re-runs this loop.
-                val accent = Color.parseColor(getStoredThemePalette(this).accent)
-                val onAccent = readableOn(accent)
-                val checkedState = intArrayOf(android.R.attr.state_checked)
-                val uncheckedState = intArrayOf(-android.R.attr.state_checked)
-                chip.chipIconTint = ColorStateList(arrayOf(checkedState, uncheckedState), intArrayOf(onAccent, accent))
+                // The unread dot stays accent: a selected chip is accentSoft now, not an accent fill.
+                chip.chipIconTint = ColorStateList.valueOf(Color.parseColor(getStoredThemePalette(this).accent))
             } else {
                 chip.chipIcon = null
             }

@@ -8,6 +8,7 @@ import android.widget.TextView
 import androidx.cardview.widget.CardView
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.chip.Chip
+import org.kysecurity.mail.applyCardOutline
 import org.kysecurity.mail.R
 import org.kysecurity.mail.applyPillChipTheme
 import org.kysecurity.mail.applySuccessChipTheme
@@ -42,6 +43,7 @@ class RecipientRowAdapter(
         val candidate = candidates[position]
         val palette = getStoredThemePalette(holder.itemView.context)
         holder.card.setCardBackgroundColor(Color.parseColor(palette.panel))
+        applyCardOutline(holder.card.context, holder.card)
         holder.name.text = candidate.name
         holder.name.setTextColor(Color.parseColor(palette.inkStrong))
         holder.email.text = candidate.email

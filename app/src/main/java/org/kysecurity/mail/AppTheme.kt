@@ -39,6 +39,9 @@ data class ThemePalette(
     val ink: String,
     val inkStrong: String,
     val accent: String,
+    // ky-ui `accentSoft`: the active nav pill and a selected row or chip. Never put accent text on
+    // it (below 4.5:1 on several halves); pair it with inkStrong.
+    val accentSoft: String,
     val line: String,
     // Avatar gradient stops - mirror web's ThemeVars newEmailStart/End/Border.
     val avatarGradientStart: String,
@@ -69,53 +72,54 @@ private const val SUCCESS_DARK = "#86efac"
 internal const val STATUS_SOFT_PERCENT = 12
 
 private fun lightHalf(
-    bg: String, panel: String, ink: String, inkStrong: String, accent: String, line: String,
+    bg: String, panel: String, ink: String, inkStrong: String, accent: String, accentSoft: String, line: String,
     avatarStart: String, avatarEnd: String, avatarBorder: String,
     danger: String = DANGER_LIGHT, warning: String = WARNING_LIGHT, success: String = SUCCESS_LIGHT,
-) = ThemePalette(bg, panel, ink, inkStrong, accent, line, avatarStart, avatarEnd, avatarBorder, danger, warning, success)
+) = ThemePalette(bg, panel, ink, inkStrong, accent, accentSoft, line, avatarStart, avatarEnd, avatarBorder, danger, warning, success)
 
 private fun darkHalf(
-    bg: String, panel: String, ink: String, inkStrong: String, accent: String, line: String,
+    bg: String, panel: String, ink: String, inkStrong: String, accent: String, accentSoft: String, line: String,
     avatarStart: String, avatarEnd: String, avatarBorder: String,
     danger: String = DANGER_DARK, warning: String = WARNING_DARK, success: String = SUCCESS_DARK,
-) = ThemePalette(bg, panel, ink, inkStrong, accent, line, avatarStart, avatarEnd, avatarBorder, danger, warning, success)
+) = ThemePalette(bg, panel, ink, inkStrong, accent, accentSoft, line, avatarStart, avatarEnd, avatarBorder, danger, warning, success)
 
 // Values are ky-ui src/themes.js THEME_PALETTES and tokens.css (Busnes); keep them identical.
 // Busnes `line` is the handoff's control border composited onto `panel` — blend() drops alpha,
 // so a translucent line would paint applyEmptyStateBackground's dashed border near-black on cream.
+// accentSoft is ky-ui's; Nord Dark's rgba(136,192,208,0.2) is composited onto panel, like line.
 // Avatar stops are Android's own (STYLE_GUIDE.md §1); buttonText falls out of readableOn(accent).
 val THEME_PAIRS = listOf(
     ThemePair(
         "busnes-pair", "Busnes",
-        lightHalf("#f8f6f0", "#ffffff", "#566461", "#182326", "#bf3f18", "#cccfcf", "#bf3f18", "#e65124", "#bf3f18"),
-        darkHalf("#182326", "#1f2b2e", "#b3bcb8", "#f2efe8", "#f5865f", "#525a5b", "#f5865f", "#f26a3d", "#f5865f"),
+        lightHalf("#f8f6f0", "#ffffff", "#566461", "#182326", "#bf3f18", "#fbf0ec", "#cccfcf", "#bf3f18", "#e65124", "#bf3f18"),
+        darkHalf("#182326", "#1f2b2e", "#b3bcb8", "#f2efe8", "#f5865f", "#2b2622", "#525a5b", "#f5865f", "#f26a3d", "#f5865f"),
     ),
     ThemePair(
         "matter-pair", "Matter",
-        lightHalf("#f5efe5", "#fff8ee", "#4c3d32", "#2d1f15", "#805a39", "#d4c7b5", "#805a39", "#9a7450", "#805a39"),
-        darkHalf("#1d1b19", "#292725", "#cfc6bb", "#f0e9df", "#c29a72", "#45403a", "#c29a72", "#9a7450", "#8f6b4a"),
+        lightHalf("#f5efe5", "#fff8ee", "#4c3d32", "#2d1f15", "#805a39", "#e2d0b8", "#d4c7b5", "#805a39", "#9a7450", "#805a39"),
+        darkHalf("#1d1b19", "#292725", "#cfc6bb", "#f0e9df", "#c29a72", "#49392c", "#45403a", "#c29a72", "#9a7450", "#8f6b4a"),
     ),
     ThemePair(
         "ocean-pair", "Ocean",
-        lightHalf("#f7f9fb", "#ffffff", "#2e4c63", "#163246", "#1d5fa6", "#c7d6df", "#1d5fa6", "#2f7fb0", "#1d5fa6"),
-        darkHalf("#0f1b24", "#152a36", "#b8d8e8", "#e0f2fb", "#6aa8e8", "#2f5567", "#6aa8e8", "#4f91a6", "#4f91a6"),
+        lightHalf("#f7f9fb", "#ffffff", "#2e4c63", "#163246", "#1d5fa6", "#dde9f7", "#c7d6df", "#1d5fa6", "#2f7fb0", "#1d5fa6"),
+        darkHalf("#0f1b24", "#152a36", "#b8d8e8", "#e0f2fb", "#6aa8e8", "#1f3a55", "#2f5567", "#6aa8e8", "#4f91a6", "#4f91a6"),
     ),
     // Teal success: the shared green sits too close to Forest's green accent.
     ThemePair(
         "forest-pair", "Forest",
-        lightHalf("#f3f6ef", "#fcfdf9", "#435342", "#203322", "#4b6b37", "#c5d0bc", "#4b6b37", "#6f8d5a", "#4b6b37", success = "#00737a"),
-        darkHalf("#142018", "#1f2f24", "#c7dbc7", "#e3f0df", "#8faa74", "#4f694f", "#8faa74", "#6f8d5a", "#6f8d5a", success = "#6ee0d0"),
+        lightHalf("#f3f6ef", "#fcfdf9", "#435342", "#203322", "#4b6b37", "#e2ebda", "#c5d0bc", "#4b6b37", "#6f8d5a", "#4b6b37", success = "#00737a"),
+        darkHalf("#142018", "#1f2f24", "#c7dbc7", "#e3f0df", "#8faa74", "#3a5837", "#4f694f", "#8faa74", "#6f8d5a", "#6f8d5a", success = "#6ee0d0"),
     ),
     ThemePair(
         "ky-pair", "Ky",
-        lightHalf("#eef2f6", "#ffffff", "#475569", "#0f172a", "#08758b", "#c2cdd8", "#08758b", "#10b981", "#059669"),
-        darkHalf("#10161e", "#1b2530", "#afbdca", "#e2e8f0", "#6fc9cc", "#34414d", "#6fc9cc", "#10b981", "#0e9668"),
+        lightHalf("#eef2f6", "#ffffff", "#475569", "#0f172a", "#08758b", "#daf2f4", "#c2cdd8", "#08758b", "#10b981", "#059669"),
+        darkHalf("#10161e", "#1b2530", "#afbdca", "#e2e8f0", "#6fc9cc", "#203d41", "#34414d", "#6fc9cc", "#10b981", "#0e9668"),
     ),
     // Nord Dark keeps its own base danger and success.
     ThemePair(
         "nord-pair", "Nord",
-        lightHalf("#eceff4", "#ffffff", "#4c566a", "#2e3440", "#4a6a94", "#c5cdd9", "#4a6a94", "#5e81ac", "#4a6a94"),
-        darkHalf("#2e3440", "#3b4252", "#d8dee9", "#eceff4", "#88c0d0", "#4c566a", "#88c0d0", "#81a1c1", "#5e81ac", danger = "#ecc4c8", success = "#bcd4aa"),
+        lightHalf("#eceff4", "#ffffff", "#4c566a", "#2e3440", "#4a6a94", "#dbe4ef", "#c5cdd9", "#4a6a94", "#5e81ac", "#4a6a94"),
+        darkHalf("#2e3440", "#3b4252", "#d8dee9", "#eceff4", "#88c0d0", "#4a5b6b", "#4c566a", "#88c0d0", "#81a1c1", "#5e81ac", danger = "#ecc4c8", success = "#bcd4aa"),
     ),
 )
 
@@ -235,15 +239,17 @@ fun applyCheckBoxTheme(context: Context, checkBox: CompoundButton) {
     checkBox.buttonTintList = ColorStateList.valueOf(Color.parseColor(palette.accent))
 }
 
+/** The brand row: logo tile and an `inkStrong` wordmark with nothing under it (ky-ui `.ky-brand`),
+ *  then the page name as its own sentence-case title after a hairline. */
 fun applyKyPostTopBar(activity: Activity, subtitle: CharSequence) {
     applyThemedTitle(activity, activity.getString(R.string.app_name))
     if (activity is AppCompatActivity) {
         val palette = getStoredThemePalette(activity)
         val bg = Color.parseColor(palette.bg)
-        val accent = Color.parseColor(palette.accent)
-        val ink = Color.parseColor(palette.ink)
+        val inkStrong = Color.parseColor(palette.inkStrong)
         activity.supportActionBar?.run {
             setBackgroundDrawable(ColorDrawable(bg))
+            elevation = 0f
             setDisplayShowHomeEnabled(false)
             setDisplayUseLogoEnabled(false)
             setDisplayShowTitleEnabled(false)
@@ -251,33 +257,39 @@ fun applyKyPostTopBar(activity: Activity, subtitle: CharSequence) {
             customView = LinearLayout(activity).apply {
                 gravity = Gravity.CENTER_VERTICAL
                 orientation = LinearLayout.HORIZONTAL
-                setPadding(0, 4 * density.toInt(), 0, 4 * density.toInt())
                 addView(ImageView(activity).apply {
                     setImageResource(R.mipmap.ic_launcher_foreground)
                     setBackgroundResource(R.drawable.rounded_image_clip)
                     clipToOutline = true
                     scaleType = ImageView.ScaleType.CENTER_INSIDE
-                }, LinearLayout.LayoutParams((56 * density).toInt(), (56 * density).toInt()))
-                addView(LinearLayout(activity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding((12 * density).toInt(), 0, 0, 0)
-                    addView(TextView(activity).apply {
-                        text = activity.getString(R.string.app_name)
-                        textSize = 32f
-                        typeface = Typeface.DEFAULT_BOLD
-                        setTextColor(accent)
-                        includeFontPadding = false
-                    })
-                    addView(TextView(activity).apply {
-                        text = subtitle
-                        textSize = 12f
-                        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-                        letterSpacing = 0.18f
-                        setTextColor(ink)
-                        includeFontPadding = false
-                        isAllCaps = true
-                    })
+                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                }, LinearLayout.LayoutParams(dpToPx(52), dpToPx(52)).apply {
+                    // The adaptive-icon foreground pads its tile; this shows a 28dp tile flush left.
+                    marginStart = -dpToPx(12)
+                    marginEnd = -dpToPx(12)
                 })
+                addView(TextView(activity).apply {
+                    text = activity.getString(R.string.app_name)
+                    textSize = 20f
+                    setBold(true)
+                    setTextColor(inkStrong)
+                    includeFontPadding = false
+                    setPadding(dpToPx(10), 0, 0, 0)
+                })
+                addView(View(activity).apply {
+                    setBackgroundColor(Color.parseColor(palette.line))
+                }, LinearLayout.LayoutParams(dpToPx(1), dpToPx(20)).apply {
+                    marginStart = dpToPx(12)
+                    marginEnd = dpToPx(12)
+                })
+                addView(TextView(activity).apply {
+                    text = subtitle
+                    textSize = 18f
+                    setTextColor(inkStrong)
+                    includeFontPadding = false
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
             }
         }
     }
@@ -309,14 +321,15 @@ fun applyBottomInset(view: View) {
 
 /** Rail equivalent of [applyBottomInset]: a full-height rail also needs the top inset. The side
  *  insets never reach it; [applySideInsets] takes them for the whole content view. */
-fun applyRailInsets(activity: Activity, view: View) {
+fun applyRailInsets(view: View) {
     val basePaddingTop = view.paddingTop
     val basePaddingBottom = view.paddingBottom
     ViewCompat.setOnApplyWindowInsetsListener(view) { v, insets ->
         val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
         v.setPaddingRelative(
             v.paddingStart,
-            basePaddingTop + bars.top + actionBarSize(activity),
+            // Not the action bar's height: AppCompat already places the rail below it.
+            basePaddingTop + bars.top,
             v.paddingEnd,
             basePaddingBottom + barBottomInset(insets),
         )
@@ -338,7 +351,10 @@ fun applySideInsets(activity: Activity) {
     ViewCompat.requestApplyInsets(content)
 }
 
-fun applyTopInsetWithHeader(activity: Activity, root: View) {
+/** Pads [root] by the status bar plus the action bar. [withActionBar] false pads by the status bar
+ *  only: AppCompat already places the content under the action bar, so its height again is a gap
+ *  (Compose and Settings; other screens still carry it). */
+fun applyTopInsetWithHeader(activity: Activity, root: View, withActionBar: Boolean = true) {
     val basePaddingLeft = root.paddingLeft
     val basePaddingTop = root.paddingTop
     val basePaddingRight = root.paddingRight
@@ -350,7 +366,7 @@ fun applyTopInsetWithHeader(activity: Activity, root: View) {
         val imeInset = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
         view.setPadding(
             basePaddingLeft,
-            basePaddingTop + topInset + actionBarSize(activity),
+            basePaddingTop + topInset + if (withActionBar) actionBarSize(activity) else 0,
             basePaddingRight,
             basePaddingBottom + imeInset,
         )
@@ -361,23 +377,53 @@ fun applyTopInsetWithHeader(activity: Activity, root: View) {
 
 fun applyPrimaryNavigationTheme(context: Context, nav: com.google.android.material.navigation.NavigationBarView) {
     val palette = getStoredThemePalette(context)
-    val panel = Color.parseColor(palette.panel)
     val ink = Color.parseColor(palette.ink)
     val inkStrong = Color.parseColor(palette.inkStrong)
     val accent = Color.parseColor(palette.accent)
 
     nav.backgroundTintList = null
-    nav.setBackgroundColor(panel)
+    // `panel`, the surface most screens paint, with a hairline toward the content; no shadow.
+    // ponytail: not `bg` - Busnes Light's accentSoft pill all but vanishes on its cream; Inbox and
+    // Compose paint `bg`, so there the rail reads as a white strip behind its hairline.
+    nav.elevation = 0f
+    val edge = Color.parseColor(palette.line)
+    val hairline = dpToPx(1)
+    nav.background = android.graphics.drawable.LayerDrawable(arrayOf(ColorDrawable(edge), ColorDrawable(Color.parseColor(palette.panel)))).apply {
+        val rail = nav is com.google.android.material.navigationrail.NavigationRailView
+        // Right and Left are physical sides, like the layer insets.
+        val lineOnLeft = rail && getStoredRailPosition(context) == RailPosition.RIGHT
+        setLayerInset(1, if (lineOnLeft) hairline else 0, if (rail) 0 else hairline, if (rail && !lineOnLeft) hairline else 0, 0)
+    }
     val states = arrayOf(
         intArrayOf(android.R.attr.state_checked),
         intArrayOf(),
     )
     val colors = intArrayOf(inkStrong, ink)
     val list = ColorStateList(states, colors)
+    // The tree walk paints every ViewGroup inside the bar, which hides the hairline and the item
+    // ripples; clear them so the bar's own background shows. itemRippleColor below rebuilds ripples.
+    clearNestedBackgrounds(nav)
     nav.itemTextColor = list
     nav.itemIconTintList = list
     nav.itemRippleColor = ColorStateList.valueOf(withAlpha(accent, 0.20f))
-    nav.itemActiveIndicatorColor = ColorStateList.valueOf(withAlpha(accent, 0.30f))
+    // Material 2 styles ship no indicator: switch it on and give it the stadium shape.
+    nav.isItemActiveIndicatorEnabled = true
+    nav.itemActiveIndicatorWidth = dpToPx(56)
+    nav.itemActiveIndicatorHeight = dpToPx(32)
+    nav.itemActiveIndicatorShapeAppearance = com.google.android.material.shape.ShapeAppearanceModel.builder()
+        .setAllCornerSizes(com.google.android.material.shape.RelativeCornerSize(0.5f))
+        .build()
+    nav.itemActiveIndicatorColor = ColorStateList.valueOf(Color.parseColor(palette.accentSoft))
+}
+
+private fun clearNestedBackgrounds(group: ViewGroup) {
+    for (index in 0 until group.childCount) {
+        val child = group.getChildAt(index)
+        if (child is ViewGroup) {
+            child.background = null
+            clearNestedBackgrounds(child)
+        }
+    }
 }
 
 fun applyPrimaryButtonTheme(context: Context, button: Button) {
@@ -400,6 +446,19 @@ fun applyGhostButtonTheme(context: Context, button: Button) {
     button.backgroundTintList = null
     button.background = ghostButtonBackground(palette)
     button.setTextColor(Color.parseColor(palette.inkStrong))
+    applyButtonPadding(button)
+}
+
+/** A quiet in-line action ("Add phone"): no fill or stroke, `accent` label, ripple only. The
+ *  tree walk would otherwise fill it like a primary. */
+fun applyTextButtonTheme(context: Context, button: Button) {
+    val palette = getStoredThemePalette(context)
+    val accent = Color.parseColor(palette.accent)
+    button.backgroundTintList = null
+    button.background = android.graphics.drawable.RippleDrawable(
+        ColorStateList.valueOf(withAlpha(accent, 0.16f)), null, buttonBackground(palette),
+    )
+    button.setTextColor(accent)
     applyButtonPadding(button)
 }
 
@@ -467,14 +526,14 @@ fun applyBorderlessFieldTheme(context: Context, field: EditText) {
     field.setPadding(0, dpToPx(14), 0, dpToPx(14))
 }
 
-/** Compose format-bar button: a bare `ink` icon, an `accent` icon on a light accent wash while on. */
+/** Compose format-bar button: a bare `ink` icon, an `inkStrong` icon on `accentSoft` while on. */
 fun applyFormatChipTheme(context: Context, chip: com.google.android.material.chip.Chip) {
     val palette = getStoredThemePalette(context)
     val accent = Color.parseColor(palette.accent)
     val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
-    chip.chipBackgroundColor = ColorStateList(states, intArrayOf(Color.parseColor(mixHex(palette.accent, 16, palette.bg)), Color.TRANSPARENT))
+    chip.chipBackgroundColor = ColorStateList(states, intArrayOf(Color.parseColor(palette.accentSoft), Color.TRANSPARENT))
     chip.chipStrokeWidth = 0f
-    chip.chipIconTint = ColorStateList(states, intArrayOf(accent, Color.parseColor(palette.ink)))
+    chip.chipIconTint = ColorStateList(states, intArrayOf(Color.parseColor(palette.inkStrong), Color.parseColor(palette.ink)))
     chip.rippleColor = ColorStateList.valueOf(withAlpha(accent, 0.22f))
     chip.checkedIcon = null
 }
@@ -548,32 +607,57 @@ fun animateChipColorTransition(
     }
 }
 
-/** Small uppercase section label - group headers only, not body copy or per-field captions. */
-fun applySectionEyebrowLabel(context: Context, textView: TextView) {
+/** A navigation list row (`Widget.KyPost.ListRow`): `ink` icon and chevron, `inkStrong` title,
+ *  `ink` description. The ripple is a foreground: the tree walk paints the text column's
+ *  background, which would hide a background ripple. */
+fun applyListRowTheme(context: Context, row: ViewGroup) {
     val palette = getStoredThemePalette(context)
-    val inkStrong = Color.parseColor(palette.inkStrong)
-    textView.isAllCaps = true
-    textView.letterSpacing = 0.08f
-    textView.textSize = 11f
-    textView.setTextColor(withAlpha(inkStrong, 0.72f))
+    val ink = ColorStateList.valueOf(Color.parseColor(palette.ink))
+    row.foreground = android.graphics.drawable.RippleDrawable(
+        ColorStateList.valueOf(withAlpha(Color.parseColor(palette.inkStrong), 0.12f)), null, ColorDrawable(Color.WHITE),
+    )
+    (row.getChildAt(0) as ImageView).imageTintList = ink
+    (row.getChildAt(row.childCount - 1) as ImageView).imageTintList = ink
+    val text = row.getChildAt(1) as ViewGroup
+    (text.getChildAt(0) as TextView).setTextColor(Color.parseColor(palette.inkStrong))
+    (text.getChildAt(1) as TextView).setTextColor(Color.parseColor(palette.ink))
 }
 
-/** Inactive fill must be an opaque `panel`: ChipDrawable paints colorSurface underneath it. */
+/** Colours every bare `View` child of [list] (`Widget.KyPost.ListRowDivider`) as a `line` hairline. */
+fun applyListDividers(context: Context, list: ViewGroup) {
+    val line = Color.parseColor(getStoredThemePalette(context).line)
+    for (index in 0 until list.childCount) {
+        val child = list.getChildAt(index)
+        if (child.javaClass == View::class.java) child.setBackgroundColor(line)
+    }
+}
+
+/** Small sentence-case section label - group headers only, not body copy or per-field captions. */
+fun applySectionEyebrowLabel(context: Context, textView: TextView) {
+    val palette = getStoredThemePalette(context)
+    textView.isAllCaps = false
+    textView.letterSpacing = 0f
+    textView.textSize = 13f
+    textView.setBold(true)
+    textView.setTextColor(Color.parseColor(palette.ink))
+}
+
+/** Inactive fill must be an opaque `panel`: ChipDrawable paints colorSurface underneath it. The
+ *  selected chip is `accentSoft` with an `accent` edge and `inkStrong` text, never an accent fill. */
 fun applyPillChipTheme(context: Context, chip: com.google.android.material.chip.Chip) {
     val palette = getStoredThemePalette(context)
     val panel = Color.parseColor(palette.panel)
     val line = Color.parseColor(palette.line)
     val inkStrong = Color.parseColor(palette.inkStrong)
     val accent = Color.parseColor(palette.accent)
-    val onAccent = readableOn(accent)
 
     val checkedState = intArrayOf(android.R.attr.state_checked)
     val uncheckedState = intArrayOf(-android.R.attr.state_checked)
     val states = arrayOf(checkedState, uncheckedState)
 
-    val contentColors = ColorStateList(states, intArrayOf(onAccent, inkStrong))
+    val contentColors = ColorStateList(states, intArrayOf(inkStrong, inkStrong))
 
-    chip.chipBackgroundColor = ColorStateList(states, intArrayOf(accent, panel))
+    chip.chipBackgroundColor = ColorStateList(states, intArrayOf(Color.parseColor(palette.accentSoft), panel))
     chip.setTextColor(contentColors)
     chip.chipStrokeColor = ColorStateList(states, intArrayOf(accent, line))
     chip.chipStrokeWidth = 1f * density
@@ -778,7 +862,13 @@ private fun applyThemeToViewTree(view: View, palette: ThemePalette) {
             return
         }
         // Always repaint, so a theme switch without a recreate refreshes already-painted containers.
-        view.setBackgroundColor(panelColor)
+        if (view is androidx.cardview.widget.CardView) {
+            // setBackgroundColor would replace the card's rounded background.
+            view.setCardBackgroundColor(panelColor)
+            applyCardOutline(view.context, view)
+        } else {
+            view.setBackgroundColor(panelColor)
+        }
         for (index in 0 until view.childCount) {
             applyThemeToViewTree(view.getChildAt(index), palette)
         }
@@ -811,10 +901,37 @@ private fun panelBackground(context: Context, palette: ThemePalette): GradientDr
         shape = GradientDrawable.RECTANGLE
         cornerRadius = context.resources.getDimension(R.dimen.card_corner_radius)
         setColor(Color.parseColor(palette.panel))
+        // Cards are flat with a 1px line, never a shadow.
+        setStroke(dpToPx(1), Color.parseColor(palette.line))
     }
 }
 
-/** Rounded `panel` background at the shared card radius (STYLE_GUIDE.md §3). */
+/** A list card: no shadow, a 1dp `line` edge drawn over its own background at the card radius.
+ *  [selected] adds the selection bar, a 3dp `accent` stroke on the start edge; the caller fills the
+ *  card with `accentSoft`. */
+fun applyCardOutline(context: Context, card: androidx.cardview.widget.CardView, selected: Boolean = false) {
+    val palette = getStoredThemePalette(context)
+    card.cardElevation = 0f
+    val outline = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = card.radius
+        setStroke(dpToPx(1), Color.parseColor(palette.line))
+    }
+    card.foreground = if (!selected) outline else android.graphics.drawable.LayerDrawable(arrayOf(
+        outline,
+        GradientDrawable().apply {
+            cornerRadius = dpToPx(2).toFloat()
+            setColor(Color.parseColor(palette.accent))
+        },
+    )).apply {
+        // Inset from the rounded corners so the bar never pokes past the card's edge.
+        setLayerGravity(1, Gravity.START or Gravity.FILL_VERTICAL)
+        setLayerWidth(1, dpToPx(3))
+        setLayerInsetRelative(1, 0, card.radius.toInt(), 0, card.radius.toInt())
+    }
+}
+
+/** Rounded `panel` background at the shared card radius (STYLE_GUIDE.md §3), with its 1dp line. */
 fun applyPanelBackground(context: Context, view: View) {
     view.background = panelBackground(context, getStoredThemePalette(context))
 }
@@ -838,6 +955,7 @@ private fun buttonBackground(palette: ThemePalette): GradientDrawable {
 
 /** A Button's default nine-patch carries the label's padding; a GradientDrawable has none. */
 private fun applyButtonPadding(button: Button) {
+    button.isAllCaps = false
     val padH = (16 * density).toInt()
     val padV = (10 * density).toInt()
     button.setPadding(
@@ -932,10 +1050,3 @@ private fun actionBarSize(activity: Activity): Int {
     }
 }
 
-/** [applyPanelBackground] plus a 1dp `line` stroke, for a card on a panel-coloured screen. */
-fun applyOutlinedPanelBackground(context: Context, view: View) {
-    val palette = getStoredThemePalette(context)
-    view.background = panelBackground(context, palette).apply {
-        setStroke(dpToPx(1), Color.parseColor(palette.line))
-    }
-}

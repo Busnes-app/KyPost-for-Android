@@ -9,7 +9,7 @@
 
     <string name="connection_mode_relay">Relay (paired device)</string>
     <string name="connection_mode_relay_not_paired">Not paired yet. Pair this device before using Relay mode.</string>
-    <string name="menu_pgp_key">PGP Key</string>
+    <string name="menu_pgp_key">PGP key</string>
     <string name="menu_keywords">Keywords</string>
     <string name="menu_themes">Themes</string>
     <string name="menu_pairing">Pairing</string>

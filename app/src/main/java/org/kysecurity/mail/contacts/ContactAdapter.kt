@@ -8,6 +8,7 @@ import androidx.cardview.widget.CardView
 import androidx.recyclerview.widget.RecyclerView
 import android.widget.TextView
 import com.google.android.material.chip.Chip
+import org.kysecurity.mail.applyCardOutline
 import org.kysecurity.mail.R
 import org.kysecurity.mail.ThemePalette
 import org.kysecurity.mail.StatusTone
@@ -46,6 +47,7 @@ class ContactAdapter(
 
             val panel = Color.parseColor(palette.panel)
             cardView.setCardBackgroundColor(panel)
+            applyCardOutline(cardView.context, cardView)
             nameView.setTextColor(Color.parseColor(palette.inkStrong))
             detailView.setTextColor(Color.parseColor(palette.ink))
 

@@ -20,6 +20,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.chip.Chip
+import org.kysecurity.mail.applyCardOutline
 import org.kysecurity.mail.BuildConfig
 import org.kysecurity.mail.R
 import org.kysecurity.mail.contacts.device.DeviceContactSyncEnabler
@@ -27,6 +28,7 @@ import org.kysecurity.mail.contacts.device.DeviceContactSyncSettings
 import org.kysecurity.mail.contacts.device.DeviceContactsRuntime
 import org.kysecurity.mail.applyDangerButtonTheme
 import org.kysecurity.mail.applyEmptyStateBackground
+import org.kysecurity.mail.applyGhostButtonTheme
 import org.kysecurity.mail.applyPillChipTheme
 import org.kysecurity.mail.applyPrimaryButtonTheme
 import org.kysecurity.mail.applySectionEyebrowLabel
@@ -148,12 +150,14 @@ class PushPairingActivity : LockedActivity() {
         super.onResume()
         if (redirectedToUnlock) return
         applyThemeToActivity(this)
-        applyPrimaryButtonTheme(this, btnResyncToken)
+        // One filled button per group: Scan QR pairs; the other ways in and the paired device's
+        // maintenance actions are secondary, and Unpair is destructive.
+        applyGhostButtonTheme(this, btnResyncToken)
         applyDangerButtonTheme(this, btnUnpairDevice)
-        applyPrimaryButtonTheme(this, btnReconnectServer)
+        applyGhostButtonTheme(this, btnReconnectServer)
         applyPrimaryButtonTheme(this, btnScanQr)
-        applyPrimaryButtonTheme(this, btnPasswordPairing)
-        applyPrimaryButtonTheme(this, btnKyIdentitySignOn)
+        applyGhostButtonTheme(this, btnPasswordPairing)
+        applyGhostButtonTheme(this, btnKyIdentitySignOn)
         btnKyIdentitySignOn.visibility = if (signOnAvailable()) View.VISIBLE else View.GONE
         // A sign-on finished while the app lock had destroyed its activity; the host dialog still applies.
         PendingPairingLink.take()?.let(::confirmAndApplyPairing)
@@ -413,7 +417,10 @@ class PushPairingActivity : LockedActivity() {
             val panelColor = android.graphics.Color.parseColor(palette.panel)
             val inkStrongColor = android.graphics.Color.parseColor(palette.inkStrong)
             val inkColor = android.graphics.Color.parseColor(palette.ink)
-            (view as? androidx.cardview.widget.CardView)?.setCardBackgroundColor(panelColor)
+            (view as? androidx.cardview.widget.CardView)?.let {
+                it.setCardBackgroundColor(panelColor)
+                applyCardOutline(it.context, it)
+            }
             title.setTextColor(inkStrongColor)
             subject.setTextColor(inkColor)
             date.setTextColor(inkColor)
