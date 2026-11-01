@@ -1,53 +1,64 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- One Compose header row, Gmail-style: a short label, then the chosen recipients as chips
+     flowing straight into a borderless field, then the row's actions. The hairline is the
+     parent's. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical">
+    android:orientation="horizontal">
 
-    <LinearLayout
-        android:layout_width="match_parent"
+    <TextView
+        android:id="@+id/recipientInputLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="@dimen/compose_row_min_height"
+        android:gravity="center_vertical"
+        android:minWidth="@dimen/compose_field_label_width"
+        android:labelFor="@+id/recipientInputField"
+        android:text="@string/email_to"
+        android:textSize="14sp" />
+
+    <com.google.android.material.chip.ChipGroup
+        android:id="@+id/recipientInputChips"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
+        android:layout_weight="1"
+        android:minHeight="@dimen/compose_row_min_height"
+        app:chipSpacingHorizontal="6dp"
+        app:chipSpacingVertical="0dp">
 
-        <TextView
-            android:id="@+id/recipientInputLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="@dimen/compose_field_label_width"
-            android:labelFor="@+id/recipientInputField"
-            android:text="@string/email_to"
-            android:textSize="12sp"
-            android:gravity="center_vertical"
-            android:layout_marginEnd="8dp" />
-
+        <!-- Last child: chips are added before it, so typing continues after the last one. -->
         <AutoCompleteTextView
             android:id="@+id/recipientInputField"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/compose_row_min_height"
+            android:minWidth="96dp"
+            android:textSize="16sp"
             android:inputType="textEmailAddress"
             android:imeOptions="actionDone|flagNoPersonalizedLearning"
             android:completionThreshold="1" />
 
-        <ImageButton
-            android:id="@+id/recipientInputBookButton"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:layout_marginStart="4dp"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:src="@drawable/ic_person"
-            android:contentDescription="@string/compose_address_book_content_description"
-            android:visibility="invisible" />
+    </com.google.android.material.chip.ChipGroup>
 
-    </LinearLayout>
+    <ImageButton
+        android:id="@+id/recipientInputBookButton"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginTop="2dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@drawable/ic_person"
+        android:contentDescription="@string/compose_address_book_content_description"
+        android:visibility="gone" />
 
-    <com.google.android.material.chip.ChipGroup
-        android:id="@+id/recipientInputChips"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:visibility="gone"
-        app:chipSpacingHorizontal="6dp" />
+    <ImageButton
+        android:id="@+id/recipientInputExpandButton"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_marginTop="2dp"
+        android:layout_marginEnd="-12dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@drawable/ic_expand_more"
+        android:contentDescription="@string/compose_show_cc_bcc"
+        android:visibility="gone" />
 
 </LinearLayout>

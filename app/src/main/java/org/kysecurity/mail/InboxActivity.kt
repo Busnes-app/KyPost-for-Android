@@ -1036,6 +1036,7 @@ class InboxActivity : LockedActivity() {
                 override fun onDismissed(transientBottomBar: Snackbar?, event: Int) =
                     onUndoBarDismissed(transientBottomBar, event)
             })
+            .also { applySnackbarTheme(this, it) }
             .also { it.show() }
     }
 
@@ -1342,6 +1343,7 @@ class InboxActivity : LockedActivity() {
             .setAction(R.string.action_retry) { if (stillOurs()) submitRowAction(email, label, mutate) }
             // Above the phone's bottom bar; the w600dp rail runs the full height beside the list.
             .apply { if (bottomNav is BottomNavigationView && bottomNav.isVisible) anchorView = bottomNav }
+            .also { applySnackbarTheme(this, it) }
             .show()
         rowActionFailureShownForTest?.invoke()
         return true

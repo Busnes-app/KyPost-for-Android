@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Compose on a 600dp+ window: still one column, centred and capped at
+     compose_column_max_width, with the format bar under Subject instead of docked at the
+     bottom. Never two columns: an email reads top to bottom. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
@@ -12,254 +15,39 @@
          ComposeActivity reads it as
          `findViewById<View?>(R.id.composeContent) ?: rootView`, so the phone layout's absence is
          the documented path, not a missing widget. -->
-    <LinearLayout
+    <androidx.core.widget.NestedScrollView
         android:id="@+id/composeContent"
         tools:ignore="InconsistentLayout"
         android:layout_width="0dp"
         android:layout_height="match_parent"
         android:layout_weight="1"
-        android:orientation="horizontal"
-        android:padding="16dp">
+        android:fillViewport="true">
 
-        <androidx.core.widget.NestedScrollView
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_marginEnd="16dp"
-            android:layout_weight="2"
-            android:fillViewport="true">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical">
-
-                <LinearLayout
-                    android:id="@+id/composeDetailsCard"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginBottom="16dp"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <org.kysecurity.mail.RecipientInputView
-                        android:id="@+id/composeToInput"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="12dp" />
-
-                    <View
-                        android:id="@+id/composeDetailsDivider1"
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:layout_marginBottom="12dp" />
-
-                    <org.kysecurity.mail.RecipientInputView
-                        android:id="@+id/composeCcInput"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="12dp" />
-
-                    <View
-                        android:id="@+id/composeDetailsDivider2"
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:layout_marginBottom="12dp" />
-
-                    <org.kysecurity.mail.RecipientInputView
-                        android:id="@+id/composeBccInput"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginBottom="12dp" />
-
-                    <View
-                        android:id="@+id/composeDetailsDivider3"
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:layout_marginBottom="12dp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal">
-
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginEnd="8dp"
-                            android:minWidth="@dimen/compose_field_label_width"
-                            android:gravity="center_vertical"
-                            android:labelFor="@+id/composeSubjectField"
-                            android:text="@string/compose_subject"
-                            android:textSize="12sp" />
-
-                        <EditText
-                            android:id="@+id/composeSubjectField"
-                            android:imeOptions="flagNoPersonalizedLearning"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="@dimen/compose_field_end_slot"
-                                        android:importantForAutofill="no"
-                            android:inputType="textCapSentences"
-                            android:maxLines="1" />
-
-                    </LinearLayout>
-
-                </LinearLayout>
-
-                <com.google.android.material.chip.ChipGroup
-                    android:id="@+id/composeAttachmentsCard"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginBottom="8dp"
-                    android:padding="12dp"
-                    android:visibility="gone"
-                    app:chipSpacingHorizontal="6dp" />
-
-            </LinearLayout>
-
-        </androidx.core.widget.NestedScrollView>
-
-        <LinearLayout
-            android:id="@+id/composeMessageCard"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="3"
+        <org.kysecurity.mail.ComposeColumn
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
             android:orientation="vertical"
-            android:padding="12dp">
+            android:paddingStart="24dp"
+            android:paddingEnd="24dp"
+            android:paddingBottom="32dp">
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
+            <include layout="@layout/compose_send_off_notice" />
 
-                <com.google.android.material.chip.ChipGroup
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    app:chipSpacingHorizontal="6dp">
+            <include layout="@layout/compose_header" />
 
-                    <com.google.android.material.chip.Chip
-                        android:id="@+id/composeBold"
-                        style="@style/Widget.KyPost.IconOnlyChip"
-                        android:checkable="true"
-                        android:contentDescription="@string/compose_format_bold"
-                        app:chipIcon="@drawable/ic_bold" />
-
-                    <com.google.android.material.chip.Chip
-                        android:id="@+id/composeItalic"
-                        style="@style/Widget.KyPost.IconOnlyChip"
-                        android:checkable="true"
-                        android:contentDescription="@string/compose_format_italic"
-                        app:chipIcon="@drawable/ic_italic" />
-
-                    <com.google.android.material.chip.Chip
-                        android:id="@+id/composeUnderline"
-                        style="@style/Widget.KyPost.IconOnlyChip"
-                        android:checkable="true"
-                        android:contentDescription="@string/compose_format_underline"
-                        app:chipIcon="@drawable/ic_underline" />
-
-                    <com.google.android.material.chip.Chip
-                        android:id="@+id/composeLink"
-                        style="@style/Widget.KyPost.IconOnlyChip"
-                        android:checkable="true"
-                        android:contentDescription="@string/compose_format_link"
-                        app:chipIcon="@drawable/ic_link" />
-
-                </com.google.android.material.chip.ChipGroup>
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/composeAttachButton"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="4dp"
-                    android:checkable="false"
-                    android:text="@string/compose_attach"
-                    app:chipIcon="@drawable/ic_attach"
-                    app:chipIconSize="18dp" />
-
-            </LinearLayout>
-
-            <com.google.android.material.chip.ChipGroup
-                android:id="@+id/composePgpChips"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:visibility="gone"
-                app:chipSpacingHorizontal="6dp">
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/composeEncryptChip"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:checkable="true"
-                    android:text="@string/compose_pgp_encrypt"
-                    android:visibility="gone" />
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/composeSignChip"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:checkable="true"
-                    android:text="@string/compose_pgp_sign"
-                    android:visibility="gone" />
-
-                <com.google.android.material.chip.Chip
-                    android:id="@+id/composeWebmailChip"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:checkable="false"
-                    android:text="@string/compose_pgp_webmail"
-                    android:visibility="gone" />
-
-            </com.google.android.material.chip.ChipGroup>
-
-            <TextView
-                android:id="@+id/composeKeylessWarning"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                android:padding="12dp"
-                android:visibility="gone" />
+            <include layout="@layout/compose_format_bar" />
 
             <View
-                android:id="@+id/composeMessageDivider"
+                android:id="@+id/composeFormatBarDivider"
                 android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:layout_marginBottom="12dp" />
+                android:layout_height="1dp" />
 
-            <androidx.core.widget.NestedScrollView
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1"
-                android:fillViewport="true">
+            <include layout="@layout/compose_editor" />
 
-                <FrameLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content">
+        </org.kysecurity.mail.ComposeColumn>
 
-                    <com.infomaniak.lib.richhtmleditor.RichHtmlEditorWebView
-                        android:id="@+id/composeBodyEditor"
-                        android:layout_width="match_parent"
-                        android:layout_height="match_parent" />
-
-                    <TextView
-                        android:id="@+id/composeBodyPlaceholder"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_margin="4dp"
-                        android:text="@string/compose_body_hint"
-                        android:textSize="16sp" />
-
-                </FrameLayout>
-            </androidx.core.widget.NestedScrollView>
-
-        </LinearLayout>
-
-    </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
 
     <com.google.android.material.navigationrail.NavigationRailView
         android:id="@+id/bottomNavigation"
