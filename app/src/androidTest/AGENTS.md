@@ -18,6 +18,9 @@ Owns Android instrumentation tests executed on emulator/device.
 - Prompt lifecycle tests must await the visible system prompt before recreating its Activity,
   then assert the replacement regains window focus. Request registration alone precedes window
   attachment; API 31 SystemUI can strand a window if cancelled during that interval.
+  Such tests carry `@SystemPromptLifecycle`: CI runs them in a separate pass after the main suite,
+  because a recreate under an open prompt has intermittently left CI emulators with no window
+  focus for the rest of the boot, failing every later Espresso test.
 - A test that taps into a launched Activity calls `afterSplash()` (`SplashWindow.kt`) on the
   scenario first. The system splash is not focusable, so Espresso taps under it, and
   `LockedActivity`'s overlay protection drops the obscured tap. Debug builds log each obscured
