@@ -1,5 +1,6 @@
 package org.kysecurity.mail
 
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
@@ -7,9 +8,9 @@ import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
+import android.widget.CheckedTextView
 import android.widget.ListView
 import android.widget.RadioGroup
-import android.widget.TextView
 import org.kysecurity.mail.security.LockedActivity
 
 /** The pair picker plus a System / Light / Dark choice (ky-ui's Appearance page, natively). */
@@ -37,7 +38,7 @@ class ThemesActivity : LockedActivity() {
             THEME_PAIRS.map { it.name },
         ) {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val row = super.getView(position, convertView, parent) as TextView
+                val row = super.getView(position, convertView, parent) as CheckedTextView
                 val activePalette = getStoredThemePalette(this@ThemesActivity)
                 row.background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
@@ -47,6 +48,8 @@ class ThemesActivity : LockedActivity() {
                 }
                 row.setPadding(dpToPx(16), dpToPx(14), dpToPx(16), dpToPx(14))
                 row.setTextColor(Color.parseColor(activePalette.inkStrong))
+                // Otherwise the radio mark keeps the XML theme's teal colorSecondary.
+                row.checkMarkTintList = ColorStateList.valueOf(Color.parseColor(activePalette.accent))
                 row.compoundDrawablePadding = dpToPx(16)
                 row.setCompoundDrawablesRelativeWithIntrinsicBounds(pairPreview(THEME_PAIRS[position]), null, null, null)
                 row.contentDescription = getString(R.string.themes_pair_description, THEME_PAIRS[position].name)
