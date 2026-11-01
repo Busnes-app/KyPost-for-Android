@@ -14,6 +14,9 @@
   and Unpair stays red. Contact edit's "Add" actions are text buttons.
 - Cards are flat with a thin line, and selected chips and rows use a soft accent tint instead of
   a solid accent fill.
+- Pairing uses the "KyPost | Pairing" top bar. "Scan QR code" is a flat filled button in the
+  pairing card instead of a bar pinned to the bottom, and the other ways to pair sit under it.
+- The inbox's keyword chips sit on the page, without a card behind them.
 
 ## 0.5.1.4 — 2026-10-31
 

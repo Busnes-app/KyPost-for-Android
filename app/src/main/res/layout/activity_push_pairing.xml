@@ -6,14 +6,8 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
-    <!-- Pair buttons stay pinned below; in landscape the cards outgrow the screen and scroll
-         here instead of pushing the buttons off it. wrap_content caps at the space left. -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="vertical">
-
+    <!-- In landscape the cards outgrow the screen and scroll here; wrap_content caps at the
+         space the history list leaves. -->
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
@@ -89,6 +83,30 @@
                 android:layout_height="wrap_content"
                 android:textSize="12sp"
                 android:layout_marginBottom="8dp" />
+
+            <!-- The card's actions: pairing first, as its one filled button, then the other ways
+                 in, then the paired device's maintenance. -->
+            <Button
+                android:id="@+id/btnScanQr"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:stateListAnimator="@null"
+                android:text="@string/push_pairing_scan_qr" />
+
+            <Button
+                android:id="@+id/btnKyIdentitySignOn"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/kyidentity_signon_open" />
+
+            <Button
+                android:id="@+id/btnPasswordPairing"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/password_pairing_open" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -233,37 +251,5 @@
             android:visibility="gone" />
 
     </FrameLayout>
-
-    </LinearLayout>
-
-    <Button
-        android:id="@+id/btnKyIdentitySignOn"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:layout_marginTop="8dp"
-        android:text="@string/kyidentity_signon_open" />
-
-    <Button
-        android:id="@+id/btnPasswordPairing"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:layout_marginTop="8dp"
-        android:text="@string/password_pairing_open" />
-
-    <Button
-        android:id="@+id/btnScanQr"
-        android:layout_width="match_parent"
-        android:layout_height="72dp"
-        android:layout_marginStart="16dp"
-        android:layout_marginEnd="16dp"
-        android:layout_marginTop="8dp"
-        android:layout_marginBottom="16dp"
-        android:text="@string/push_pairing_scan_qr"
-        android:textSize="18sp"
-        android:textStyle="bold" />
 
 </LinearLayout>

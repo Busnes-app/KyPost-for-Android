@@ -343,7 +343,7 @@
     <string name="contact_status_identity_changed">Details changed \u2014 check before trusting</string>
     <string name="contact_self_label">This is you</string>
 
-    <string name="push_pairing_title">Push Notifications</string>
+    <string name="push_pairing_title">Push notifications</string>
     <string name="push_pairing_status_paired">Paired</string>
     <string name="push_pairing_status_with_mode">%1$s • %2$s</string>
     <string name="push_pairing_mode_pull">App Pull</string>
@@ -388,7 +388,7 @@
     <string name="push_pairing_latest_title">Latest push preview</string>
     <string name="push_pairing_history_title">Notification history</string>
     <string name="push_pairing_history_empty">No push notifications received yet</string>
-    <string name="push_pairing_scan_qr">Scan QR Code</string>
+    <string name="push_pairing_scan_qr">Scan QR code</string>
     <string name="push_pairing_use_unifiedpush">Use UnifiedPush</string>
     <string name="push_pairing_use_firebase">Use Firebase</string>
     <string name="pairing_confirm_title">Pair this device?</string>

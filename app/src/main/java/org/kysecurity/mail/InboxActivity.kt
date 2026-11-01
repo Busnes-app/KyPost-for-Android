@@ -346,11 +346,12 @@ class InboxActivity : LockedActivity() {
         inboxRoot.setBackgroundColor(bg)
         inboxContent.setBackgroundColor(bg)
         recyclerView.setBackgroundColor(bg)
+        // The keyword chips sit on the page, not in a card; the tree walk painted both panel.
+        keywordChipScroll.setBackgroundColor(bg)
+        keywordChips.setBackgroundColor(bg)
 
         applyFolderTitle()
 
-        // Rounded panel bar behind the keyword pills — shared STYLE_GUIDE.md §3 Card/panel radius.
-        applyPanelBackground(this, keywordChipScroll)
         applyEmptyStateBackground(this, emptyText)
         applyPillChipTheme(this, newMailPill)
 

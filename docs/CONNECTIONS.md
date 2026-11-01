@@ -34,7 +34,7 @@ Commands and unlinked file paths below are relative to the repository root.
 ## Pairing from a desktop QR code
 
 1. The desktop web app shows a QR code with the deep link. The link contains `sub`, `srv`, `pt`, and optionally `reg`.
-2. In the Push Notifications screen, tap **Scan QR Code**. You can also open the deep link directly, because the app is a handler for `kypost://native-pair`.
+2. On the Pairing screen, tap **Scan QR code**. You can also open the deep link directly, because the app is a handler for `kypost://native-pair`.
 3. The app validates the required parameters (`sub`, `srv`, `pt`), checks that `srv` and any `reg` are `https` and the same origin, and resolves the registration endpoint.
 4. The app shows a confirmation dialog naming the server host, then calls the native registration endpoint with the FCM token. The app marks the device as paired only on success, and stores the `deviceId` and `deviceSecret` the response returns.
 5. On each later FCM token refresh, the app repeats the same registration call with the stored pairing.
