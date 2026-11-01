@@ -20,12 +20,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.addCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.core.content.IntentCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.navigation.NavigationBarView
-import com.google.android.material.snackbar.Snackbar
 import com.infomaniak.lib.richhtmleditor.RichHtmlEditorWebView
 import org.kysecurity.mail.contacts.AddressBookSheet
 import org.kysecurity.mail.contacts.RecipientCandidate
@@ -87,10 +88,9 @@ class ComposeActivity : LockedActivity() {
     private lateinit var italicChip: Chip
     private lateinit var underlineChip: Chip
     private lateinit var linkChip: Chip
-    private lateinit var detailsCard: android.view.View
-    private lateinit var messageCard: android.view.View
-    private lateinit var detailsDividers: List<android.view.View>
-    private lateinit var messageDivider: android.view.View
+    private lateinit var dividers: List<android.view.View>
+    private lateinit var ccRows: List<android.view.View>
+    private lateinit var sendOffNotice: android.view.View
     private lateinit var rootView: android.view.View
     private lateinit var bottomNav: NavigationBarView
     private lateinit var pgpChips: ChipGroup
@@ -110,7 +110,9 @@ class ComposeActivity : LockedActivity() {
      *  custody is known. A failed bootstrap leaves it false (see [resolveCustody]). */
     private var custodyKnown = false
     private var custodyJob: Job? = null
-    private var custodyRetryBar: Snackbar? = null
+
+    /** Cc and Bcc are folded behind the To row's chevron until asked for or holding an address. */
+    private var ccBccOpened = false
 
     /** True when the encryption happens on this device and the send goes to `/api/mail/send-pgp`
      *  rather than `/api/mail/send`. From [PgpComposeState.clientSide]. */
@@ -263,9 +265,8 @@ class ComposeActivity : LockedActivity() {
         rootView = findViewById(R.id.composeRoot)
         // Keeps the composition out of the saved-state Bundle, which system_server owns.
         rootView.isSaveFromParentEnabled = false
-        applyTopInsetWithHeader(this, findViewById<View?>(R.id.composeContent) ?: rootView)
-
         bottomNav = findViewById(R.id.bottomNavigation)
+        applyComposeInsets(findViewById<View?>(R.id.composeContent) ?: rootView)
         applyPrimaryNavigationInsets(this, bottomNav)
         setupPrimaryNavigation(this, bottomNav, R.id.nav_compose)
         applyPrimaryNavigationTheme(this, bottomNav)
@@ -286,14 +287,15 @@ class ComposeActivity : LockedActivity() {
         italicChip = findViewById(R.id.composeItalic)
         underlineChip = findViewById(R.id.composeUnderline)
         linkChip = findViewById(R.id.composeLink)
-        detailsCard = findViewById(R.id.composeDetailsCard)
-        messageCard = findViewById(R.id.composeMessageCard)
-        detailsDividers = listOf(
+        dividers = listOf(
             findViewById(R.id.composeDetailsDivider1),
             findViewById(R.id.composeDetailsDivider2),
             findViewById(R.id.composeDetailsDivider3),
+            findViewById(R.id.composeSubjectDivider),
+            findViewById(R.id.composeFormatBarDivider),
         )
-        messageDivider = findViewById(R.id.composeMessageDivider)
+        sendOffNotice = findViewById(R.id.composeSendOffNotice)
+        findViewById<View>(R.id.composeSendOffRetry).setOnClickListener { resolveCustody() }
         onBackPressedDispatcher.addCallback(this) { confirmDiscard() }
 
         pgpChips = findViewById(R.id.composePgpChips)
@@ -308,6 +310,13 @@ class ComposeActivity : LockedActivity() {
         toInput = findViewById(R.id.composeToInput)
         ccInput = findViewById(R.id.composeCcInput)
         bccInput = findViewById(R.id.composeBccInput)
+        ccRows = listOf<View>(
+            ccInput,
+            findViewById(R.id.composeDetailsDivider2),
+            bccInput,
+            findViewById(R.id.composeDetailsDivider3),
+        )
+        ccBccOpened = savedInstanceState?.getBoolean(STATE_CC_BCC_OPENED) == true
         toInput.setLabel(getString(R.string.email_to))
         ccInput.setLabel(getString(R.string.email_cc))
         bccInput.setLabel(getString(R.string.email_bcc))
@@ -323,8 +332,9 @@ class ComposeActivity : LockedActivity() {
         // Only while Encrypt is on: an empty recipient list short-circuits the initial check.
         val onRecipientsChanged = { if (encryptChip.isChecked) runPreflight() }
         toInput.onRecipientsChanged = onRecipientsChanged
-        ccInput.onRecipientsChanged = onRecipientsChanged
-        bccInput.onRecipientsChanged = onRecipientsChanged
+        // An address in Cc or Bcc keeps both rows open: a hidden recipient is one sent to unseen.
+        ccInput.onRecipientsChanged = { onRecipientsChanged(); renderCcBcc() }
+        bccInput.onRecipientsChanged = { onRecipientsChanged(); renderCcBcc() }
 
         // A draft the app lock destroyed wins over an internal Reply/Forward prefill.
         val restored = ComposeDraftCache.takeOnOpen(
@@ -448,7 +458,42 @@ class ComposeActivity : LockedActivity() {
             .launchIn(lifecycleScope)
 
         attachButton.setOnClickListener { pickAttachments.launch(arrayOf("*/*")) }
-        applyToolbarChipsTheme()
+        renderCcBcc()
+        applyComposeTheme()
+    }
+
+    /** Shows Cc and Bcc when asked for or when either holds an address (a reply-all, a restored
+     *  draft); the chevron folds them away only while both are empty. */
+    private fun renderCcBcc() {
+        val holdsAddresses = ccInput.recipientEmails().isNotEmpty() || bccInput.recipientEmails().isNotEmpty()
+        val shown = ccBccOpened || holdsAddresses
+        ccRows.forEach { it.visibility = if (shown) View.VISIBLE else View.GONE }
+        toInput.setExpandToggle(shown = !holdsAddresses, expanded = shown) {
+            ccBccOpened = !ccBccOpened
+            renderCcBcc()
+            if (ccBccOpened) ccInput.requestFocus()
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(STATE_CC_BCC_OPENED, ccBccOpened)
+    }
+
+    /** Pads for the system bars and the keyboard, so the format bar rides on the keyboard. The top
+     *  inset already includes the top bar: it overlays the content, and AppCompat adds its height
+     *  to the insets the content receives, so adding actionBarSize again (as
+     *  [applyTopInsetWithHeader] does) leaves a top-bar-sized gap. The bottom bar steps aside
+     *  while the keyboard is up, as Gmail's compose has none; the rail stays. */
+    private fun applyComposeInsets(content: View) {
+        ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
+            val top = insets.getInsets(WindowInsetsCompat.Type.systemBars()).top
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            view.setPadding(view.paddingLeft, top, view.paddingRight, ime)
+            if (bottomNav is BottomNavigationView) bottomNav.visibility = if (ime > 0) View.GONE else View.VISIBLE
+            insets
+        }
+        ViewCompat.requestApplyInsets(content)
     }
 
     override fun onResume() {
@@ -457,7 +502,7 @@ class ComposeActivity : LockedActivity() {
         applyThemeToActivity(this)
         applyKyPostTopBar(this, getString(R.string.nav_compose))
         applyPrimaryNavigationTheme(this, bottomNav)
-        applyToolbarChipsTheme()
+        applyComposeTheme()
         applySendMenuItemTheme()
         applyEditorThemeCss()
         toInput.applyTheme()
@@ -474,18 +519,15 @@ class ComposeActivity : LockedActivity() {
      *  blocked, and offers a retry. Only a real answer reaches [applyPgpComposeState]. */
     private fun resolveCustody() {
         if (custodyKnown || custodyJob?.isActive == true) return
-        custodyRetryBar?.dismiss()
+        sendOffNotice.visibility = View.GONE
         custodyJob = lifecycleScope.launch {
             val state = pgpController.composeState()
             if (state != null) {
-                custodyRetryBar?.dismiss()
                 applyPgpComposeState(state)
             } else {
                 applySendAvailability()
-                custodyRetryBar = Snackbar.make(rootView, R.string.compose_custody_check_failed, Snackbar.LENGTH_INDEFINITE)
-                    .apply { if (bottomNav is BottomNavigationView) anchorView = bottomNav }
-                    .setAction(R.string.compose_custody_retry) { resolveCustody() }
-                    .also { it.show() }
+                // In place, not a snackbar: it holds until a retry succeeds, so it is a state.
+                sendOffNotice.visibility = View.VISIBLE
             }
         }
     }
@@ -517,6 +559,7 @@ class ComposeActivity : LockedActivity() {
         // Drafts are encrypted here, so a server-held key gets no Save draft.
         saveDraftMenuItem?.isVisible = clientSideAccount && !handoffOnlyAccount
         saveDraftMenuItem?.isEnabled = sendMenuItem?.isEnabled == true
+        applySendMenuItemTheme()
     }
 
     /** The one custody gate. Every path to the relay asks it, at the moment it would send, because
@@ -549,8 +592,12 @@ class ComposeActivity : LockedActivity() {
         }
     }
 
+    /** Enabled Send is the accent; disabled is faint `ink`, so off reads as off at a glance. */
     private fun applySendMenuItemTheme() {
-        sendMenuItem?.icon?.mutate()?.setTint(Color.parseColor(getStoredThemePalette(this).inkStrong))
+        val item = sendMenuItem ?: return
+        val palette = getStoredThemePalette(this)
+        val tint = if (item.isEnabled) Color.parseColor(palette.accent) else withAlpha(Color.parseColor(palette.ink), 0.38f)
+        item.icon?.mutate()?.setTint(tint)
     }
 
     private fun openAddressBook() {
@@ -564,20 +611,42 @@ class ComposeActivity : LockedActivity() {
         }.show(supportFragmentManager, AddressBookSheet.TAG)
     }
 
-    private fun applyToolbarChipsTheme() {
-        listOf(boldChip, italicChip, underlineChip, linkChip, attachButton, encryptChip, signChip, webmailChip).forEach {
-            applyPillChipTheme(this, it)
-        }
-        // applyThemeToViewTree paints every ViewGroup flat `panel`; repaint root `bg` so cards pop.
-        rootView.setBackgroundColor(Color.parseColor(getStoredThemePalette(this).bg))
-        // Rounded panel cards behind each section — shared STYLE_GUIDE.md §3 Card/panel radius,
-        // same applyPanelBackground precedent as Inbox's keyword-chip bar.
-        applyPanelBackground(this, detailsCard)
-        applyPanelBackground(this, messageCard)
-        applyPanelBackground(this, attachmentChips)
-        val line = Color.parseColor(getStoredThemePalette(this).line)
-        detailsDividers.forEach { it.setBackgroundColor(line) }
-        messageDivider.setBackgroundColor(line)
+    /** One page: [applyThemeToActivity] paints every container `panel`, so clear them back to the
+     *  page `bg` and draw only hairlines between rows. The nav and the notice keep their own. */
+    private fun applyComposeTheme() {
+        val palette = getStoredThemePalette(this)
+        rootView.setBackgroundColor(Color.parseColor(palette.bg))
+        clearContainerBackgrounds(rootView)
+        listOf(boldChip, italicChip, underlineChip, linkChip, attachButton).forEach { applyFormatChipTheme(this, it) }
+        listOf(encryptChip, signChip, webmailChip).forEach { applyPillChipTheme(this, it) }
+        applyBorderlessFieldTheme(this, subjectField)
+        val line = Color.parseColor(palette.line)
+        dividers.forEach { it.setBackgroundColor(line) }
+        val ink = Color.parseColor(palette.ink)
+        findViewById<android.widget.TextView>(R.id.composeSubjectLabel).setTextColor(ink)
+        (bodyPlaceholder as android.widget.TextView).setTextColor(ink)
+        applyWarningNoticeTheme(
+            this,
+            sendOffNotice,
+            findViewById(R.id.composeSendOffIcon),
+            findViewById<android.widget.TextView>(R.id.composeSendOffText).apply { text = sendOffText() },
+            findViewById(R.id.composeSendOffRetry),
+        )
+    }
+
+    /** "Send is off" in bold, then why: the state is a word, not just a colour. */
+    private fun sendOffText(): CharSequence {
+        val word = getString(R.string.compose_send_off)
+        return android.text.SpannableStringBuilder(word)
+            .apply { setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, word.length, 0) }
+            .append(". ")
+            .append(getString(R.string.compose_custody_check_failed))
+    }
+
+    private fun clearContainerBackgrounds(view: View) {
+        if (view === bottomNav || view === sendOffNotice || view !is android.view.ViewGroup) return
+        if (view !== rootView) view.background = null
+        for (i in 0 until view.childCount) clearContainerBackgrounds(view.getChildAt(i))
     }
 
     /** Views only — the rule itself is [org.kysecurity.mail.pgp.pgpComposeStateOf], unit-tested. */
@@ -642,7 +711,9 @@ class ComposeActivity : LockedActivity() {
         keylessWarning.visibility = View.GONE
     }
 
-    /** Also sets a min-height: the editor reports document height back as the WebView's height. */
+    /** Also sets a min-height: the editor reports document height back as the WebView's height.
+     *  No margin and a 16px top pad, matching composeBodyPlaceholder, so the body starts in line
+     *  with the header labels. */
     private fun applyEditorThemeCss() {
         val palette = getStoredThemePalette(this)
         val css = """
@@ -650,10 +721,14 @@ class ComposeActivity : LockedActivity() {
                 min-height: 500px;
             }
             body {
+                margin: 0;
+                padding: 16px 0;
                 background-color: ${palette.bg};
                 color: ${palette.inkStrong};
+                caret-color: ${palette.accent};
                 font-family: sans-serif;
                 font-size: 16px;
+                line-height: 1.5;
             }
             a { color: ${palette.accent}; }
         """.trimIndent()
@@ -1438,6 +1513,8 @@ class ComposeActivity : LockedActivity() {
         @androidx.annotation.VisibleForTesting
         @Volatile
         internal var openDescriptorForTest: ((Uri) -> android.content.res.AssetFileDescriptor?)? = null
+
+        private const val STATE_CC_BCC_OPENED = "compose_cc_bcc_opened"
 
         const val EXTRA_TO = "compose_to"
         const val EXTRA_SUBJECT = "compose_subject"

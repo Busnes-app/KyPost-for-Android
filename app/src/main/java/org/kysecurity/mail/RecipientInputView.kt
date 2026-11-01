@@ -38,6 +38,7 @@ class RecipientInputView @JvmOverloads constructor(
     private val labelView: TextView
     private val field: AutoCompleteTextView
     private val bookButton: ImageButton
+    private val expandButton: ImageButton
     private val chipGroup: ChipGroup
     private val recipients = mutableListOf<String>()
 
@@ -53,6 +54,7 @@ class RecipientInputView @JvmOverloads constructor(
         labelView = findViewById(R.id.recipientInputLabel)
         field = findViewById(R.id.recipientInputField)
         bookButton = findViewById(R.id.recipientInputBookButton)
+        expandButton = findViewById(R.id.recipientInputExpandButton)
         chipGroup = findViewById(R.id.recipientInputChips)
 
         field.setOnItemClickListener { _, _, position, _ ->
@@ -68,7 +70,15 @@ class RecipientInputView @JvmOverloads constructor(
                 false
             }
         }
+        // The field is only as wide as the space after the chips; the whole row takes the tap.
+        chipGroup.setOnClickListener {
+            field.visibility = View.VISIBLE
+            field.requestFocus()
+            field.showSoftKeyboard()
+        }
+        field.setOnFocusChangeListener { _, _ -> fitFieldToChips() }
         field.doAfterTextChanged { text ->
+            fitFieldToChips()
             if (text != null && (text.endsWith(",") || text.endsWith(" "))) {
                 commitTypedEmail()
             }
@@ -77,6 +87,8 @@ class RecipientInputView @JvmOverloads constructor(
 
     fun setLabel(text: CharSequence) {
         labelView.text = text
+        // The row is what TalkBack reaches while the field after the chips is stepped out.
+        chipGroup.contentDescription = text
     }
 
     /** Pass [onOpenAddressBook] on exactly one instance; the modal covers TO/CC/BCC itself. */
@@ -88,6 +100,17 @@ class RecipientInputView @JvmOverloads constructor(
             bookButton.visibility = View.VISIBLE
             bookButton.setOnClickListener { onOpenAddressBook() }
         }
+    }
+
+    /** The To row's Cc/Bcc chevron. [shown] false hides it, for while Cc or Bcc hold addresses
+     *  and so cannot be folded away; [expanded] points it up and names the action that hides them. */
+    fun setExpandToggle(shown: Boolean, expanded: Boolean, onToggle: () -> Unit) {
+        expandButton.visibility = if (shown) View.VISIBLE else View.GONE
+        expandButton.rotation = if (expanded) 180f else 0f
+        expandButton.contentDescription = context.getString(
+            if (expanded) R.string.compose_hide_cc_bcc else R.string.compose_show_cc_bcc,
+        )
+        expandButton.setOnClickListener { onToggle() }
     }
 
     /** Parses a comma-separated address string (matches [org.kysecurity.mail.mail.MailDraft]'s wire
@@ -108,21 +131,38 @@ class RecipientInputView @JvmOverloads constructor(
         recipients.add(email)
         val chip = Chip(context).apply {
             text = displayName?.takeIf { it.isNotBlank() } ?: email
+            // A notch under the field's 16sp, so a full address fits a phone row beside the label.
+            textSize = 13f
             isCloseIconVisible = true
             setOnCloseIconClickListener {
                 recipients.remove(email)
                 chipGroup.removeView(this)
-                chipGroup.visibility = if (chipGroup.childCount == 0) View.GONE else View.VISIBLE
+                fitFieldToChips()
                 onRecipientsChanged?.invoke()
             }
         }
         applyPillChipTheme(context, chip)
-        chipGroup.addView(chip)
-        chipGroup.visibility = View.VISIBLE
+        // Before the field, its last child, so the cursor follows the chips.
+        chipGroup.addView(chip, chipGroup.indexOfChild(field))
+        fitFieldToChips()
         field.setText("")
         field.dismissDropDown()
         onRecipientsChanged?.invoke()
         return true
+    }
+
+    /** An empty field after the chips steps out of the layout until the row is tapped, so it never
+     *  wraps onto a blank line of its own; typed text widens it (wrap_content) and the chip group
+     *  wraps it then. With no chips it keeps a tappable width. */
+    private fun fitFieldToChips() {
+        val afterChips = field.text.isNullOrEmpty() && recipients.isNotEmpty()
+        field.visibility = if (afterChips && !field.hasFocus()) View.GONE else View.VISIBLE
+        val minWidth = if (afterChips) 0 else dpToPx(EMPTY_ROW_FIELD_MIN_WIDTH_DP)
+        // Both: XML minWidth also sets View's own minimum, which TextView.setMinWidth leaves alone.
+        if (field.minWidth != minWidth) {
+            field.minWidth = minWidth
+            field.minimumWidth = minWidth
+        }
     }
 
     fun recipientEmails(): List<String> = recipients.toList()
@@ -132,6 +172,9 @@ class RecipientInputView @JvmOverloads constructor(
 
     fun applyTheme() {
         applyIconButtonTheme(context, bookButton)
+        applyIconButtonTheme(context, expandButton)
+        applyBorderlessFieldTheme(context, field)
+        labelView.setTextColor(android.graphics.Color.parseColor(getStoredThemePalette(context).ink))
         for (i in 0 until chipGroup.childCount) {
             (chipGroup.getChildAt(i) as? Chip)?.let { applyPillChipTheme(context, it) }
         }
@@ -223,7 +266,12 @@ class RecipientInputView @JvmOverloads constructor(
             // a search slower than the next keystroke.
             if (field.text.toString() != query) return@launch
             adapter.submit(query, matches)
-            if (matches.isNotEmpty() || query.isNotBlank()) field.showDropDown()
+            if (matches.isNotEmpty() || query.isNotBlank()) {
+                // The field is only the space after the chips; the list spans the whole row.
+                field.dropDownWidth = chipGroup.width
+                field.dropDownHorizontalOffset = -field.left
+                field.showDropDown()
+            }
         }
     }
 
@@ -233,8 +281,14 @@ class RecipientInputView @JvmOverloads constructor(
         searchJob = null
     }
 
+    private fun AutoCompleteTextView.showSoftKeyboard() {
+        context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+            ?.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+    }
+
     private companion object {
         const val DEBOUNCE_MS = 150L
         const val MAX_RESULTS = 5
+        const val EMPTY_ROW_FIELD_MIN_WIDTH_DP = 96
     }
 }

@@ -124,6 +124,18 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   Both surfaces share `RecipientCandidate`/`RecipientField`/matching logic in
   `contacts/RecipientMatching.kt` — extend that file, don't duplicate matching logic in either UI
   layer.
+- Compose is one column on every window: `activity_compose` (bottom bar), `_rail` (440dp notlong)
+  and `_wide` (600dp+) share `compose_header`, `compose_editor` and `compose_format_bar`;
+  `ComposeColumn` caps it at `compose_column_max_width` (720dp) and the wide layout centres it.
+  Never split header and body side by side. Header rows are label plus borderless field with one
+  hairline between rows. Cc and Bcc stay folded behind the To row's chevron until asked for, and
+  are forced open (chevron hidden) while either holds an address, so a reply-all, restored draft
+  or prefill never hides a recipient. The format bar docks above the keyboard on phone layouts
+  (the bottom bar steps aside while the IME is up) and sits under Subject on wide ones.
+  `applyComposeInsets` pads by the system-bar top inset only: the action bar overlays the content
+  and AppCompat already adds its height there, so `applyTopInsetWithHeader`'s extra
+  `actionBarSize` is a gap (other screens still carry it). A failed custody lookup is the
+  in-place `composeSendOffNotice` (warning tone, Retry), not a snackbar.
 - External compose entry (`mailto:`, `ACTION_SEND`, `ACTION_SEND_MULTIPLE`) is normalized by
   `ComposeIntentParser.kt`; use Android's `MailTo` parser and keep public-Intent quirks out of
   `ComposeActivity`. Shared attachments still enter through the Activity's existing bounded

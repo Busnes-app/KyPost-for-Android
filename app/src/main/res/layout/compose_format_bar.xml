@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Formatting and Attach as quiet icon buttons. The phone layouts dock it above the keyboard;
+     activity_compose_wide puts it under Subject. -->
+<merge xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <LinearLayout
+        android:id="@+id/composeFormatBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:minHeight="48dp"
+        android:orientation="horizontal">
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/composeBold"
+            style="@style/Widget.KyPost.FormatChip"
+            android:checkable="true"
+            android:contentDescription="@string/compose_format_bold"
+            app:chipIcon="@drawable/ic_bold" />
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/composeItalic"
+            style="@style/Widget.KyPost.FormatChip"
+            android:checkable="true"
+            android:contentDescription="@string/compose_format_italic"
+            app:chipIcon="@drawable/ic_italic" />
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/composeUnderline"
+            style="@style/Widget.KyPost.FormatChip"
+            android:checkable="true"
+            android:contentDescription="@string/compose_format_underline"
+            app:chipIcon="@drawable/ic_underline" />
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/composeLink"
+            style="@style/Widget.KyPost.FormatChip"
+            android:checkable="true"
+            android:contentDescription="@string/compose_format_link"
+            app:chipIcon="@drawable/ic_link" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.chip.Chip
+            android:id="@+id/composeAttachButton"
+            style="@style/Widget.KyPost.FormatChip"
+            android:checkable="false"
+            android:contentDescription="@string/compose_attach"
+            app:chipIcon="@drawable/ic_attach" />
+
+    </LinearLayout>
+
+</merge>

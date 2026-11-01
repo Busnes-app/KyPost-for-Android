@@ -9,6 +9,8 @@
     <!-- Compose header rows share these so To, Cc, Bcc and Subject boxes start and end on the same
          lines: every label is at least this wide ("Subject" at 12sp is ~48dp), and every row keeps
          the address-book button's slot (32dp + 4dp margin) even where the button is hidden. -->
-    <dimen name="compose_field_label_width">56dp</dimen>
-    <dimen name="compose_field_end_slot">36dp</dimen>
+    <dimen name="compose_field_label_width">64dp</dimen>
+    <dimen name="compose_row_min_height">52dp</dimen>
+    <!-- Compose is one column; on a wide window it stops here and centres. -->
+    <dimen name="compose_column_max_width">720dp</dimen>
 </resources>

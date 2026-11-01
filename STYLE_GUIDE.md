@@ -131,6 +131,9 @@ the equivalent iOS (`Presentation/Components/`) and Linux (`app/qml/components/`
   text, 10dp radius. **Done** (`applyEmptyStateBackground`).
 - **Section eyebrow label** — small uppercase, letter-spaced, ~72%-opacity `inkStrong` —
   group headers only, not body copy. **Done** (`applySectionEyebrowLabel`).
+- **Snackbar** — transient messages only: `panel` slab, `inkStrong` text, `accent` action
+  (`applySnackbarTheme`). A state that holds until the user acts (Compose's "Send is off") is
+  an inline notice in the warning or danger tone instead (`applyWarningNoticeTheme`).
 - **Swipe-to-archive/delete on list rows** — doesn't exist yet on *any* platform's inbox
   list. If/when swipe gestures are added, use `ItemTouchHelper` on Android with the same
   red=delete / yellow=archive reveal coloring as the other platforms. Not required now —

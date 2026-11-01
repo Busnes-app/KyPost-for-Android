@@ -39,4 +39,13 @@
         <item name="textEndPadding">0dp</item>
         <item name="android:text"></item>
     </style>
+
+    <!-- Compose's format bar: an icon on no fill until it is on (applyFormatChipTheme). -->
+    <style name="Widget.KyPost.FormatChip" parent="Widget.KyPost.IconOnlyChip">
+        <item name="android:layout_marginEnd">2dp</item>
+        <item name="chipIconSize">20dp</item>
+        <item name="chipMinHeight">40dp</item>
+        <item name="chipStrokeWidth">0dp</item>
+        <item name="chipSurfaceColor">@android:color/transparent</item>
+    </style>
 </resources>

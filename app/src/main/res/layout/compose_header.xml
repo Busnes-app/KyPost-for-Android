@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Compose's header rows, Gmail-style: label and borderless field on one line, one hairline
+     between rows. Cc and Bcc start hidden behind the To row's chevron (ComposeActivity). -->
+<merge xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <LinearLayout
+        android:id="@+id/composeDetailsCard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <org.kysecurity.mail.RecipientInputView
+            android:id="@+id/composeToInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <View
+            android:id="@+id/composeDetailsDivider1"
+            android:layout_width="match_parent"
+            android:layout_height="1dp" />
+
+        <org.kysecurity.mail.RecipientInputView
+            android:id="@+id/composeCcInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+        <View
+            android:id="@+id/composeDetailsDivider2"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:visibility="gone" />
+
+        <org.kysecurity.mail.RecipientInputView
+            android:id="@+id/composeBccInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+        <View
+            android:id="@+id/composeDetailsDivider3"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:minHeight="@dimen/compose_row_min_height"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/composeSubjectLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="@dimen/compose_field_label_width"
+                android:labelFor="@+id/composeSubjectField"
+                android:text="@string/compose_subject"
+                android:textSize="14sp" />
+
+            <EditText
+                android:id="@+id/composeSubjectField"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:imeOptions="flagNoPersonalizedLearning"
+                android:importantForAutofill="no"
+                android:inputType="textCapSentences|textMultiLine"
+                android:maxLines="3"
+                android:textSize="16sp" />
+
+        </LinearLayout>
+
+        <View
+            android:id="@+id/composeSubjectDivider"
+            android:layout_width="match_parent"
+            android:layout_height="1dp" />
+
+    </LinearLayout>
+
+</merge>

@@ -435,6 +435,50 @@ fun applyWarningCalloutTheme(context: Context, textView: TextView) {
     setLeadingStatusDot(context, textView, warning)
 }
 
+/** Send-off notice: the warning callout's fill and stroke on a row, with its icon, text and
+ *  action all in the warning colour, which the status gate holds to 4.5:1 on that fill. */
+fun applyWarningNoticeTheme(context: Context, row: View, icon: ImageView, text: TextView, action: Button) {
+    val palette = getStoredThemePalette(context)
+    val warning = Color.parseColor(palette.warning)
+    row.background = warningCalloutBackground(Color.parseColor(palette.statusSoft(palette.warning)), warning)
+    icon.imageTintList = ColorStateList.valueOf(warning)
+    text.setTextColor(warning)
+    action.background = null
+    action.setTextColor(warning)
+    action.typeface = Typeface.DEFAULT_BOLD
+}
+
+/** A transient bar from the active half: `panel` slab, `inkStrong` text, `accent` action. The
+ *  Material default is a light slab whatever the theme. */
+fun applySnackbarTheme(context: Context, snackbar: com.google.android.material.snackbar.Snackbar) {
+    val palette = getStoredThemePalette(context)
+    snackbar.setBackgroundTint(Color.parseColor(palette.panel))
+    snackbar.setTextColor(Color.parseColor(palette.inkStrong))
+    snackbar.setActionTextColor(Color.parseColor(palette.accent))
+}
+
+/** A field with no box: Compose's header rows draw one hairline between rows instead. */
+fun applyBorderlessFieldTheme(context: Context, field: EditText) {
+    val palette = getStoredThemePalette(context)
+    field.background = null
+    field.setTextColor(Color.parseColor(palette.inkStrong))
+    field.setHintTextColor(Color.parseColor(palette.ink))
+    field.highlightColor = withAlpha(Color.parseColor(palette.accent), 0.3f)
+    field.setPadding(0, dpToPx(14), 0, dpToPx(14))
+}
+
+/** Compose format-bar button: a bare `ink` icon, an `accent` icon on a light accent wash while on. */
+fun applyFormatChipTheme(context: Context, chip: com.google.android.material.chip.Chip) {
+    val palette = getStoredThemePalette(context)
+    val accent = Color.parseColor(palette.accent)
+    val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+    chip.chipBackgroundColor = ColorStateList(states, intArrayOf(Color.parseColor(mixHex(palette.accent, 16, palette.bg)), Color.TRANSPARENT))
+    chip.chipStrokeWidth = 0f
+    chip.chipIconTint = ColorStateList(states, intArrayOf(accent, Color.parseColor(palette.ink)))
+    chip.rippleColor = ColorStateList.valueOf(withAlpha(accent, 0.22f))
+    chip.checkedIcon = null
+}
+
 /** Status text, e.g. an error line: the tone's colour plus a leading dot. */
 fun applyStatusText(context: Context, textView: TextView, tone: StatusTone) {
     val color = Color.parseColor(getStoredThemePalette(context).statusColor(tone))

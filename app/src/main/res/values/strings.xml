@@ -77,9 +77,9 @@
     <string name="email_row_has_attachments">has attachments</string>
     <string name="email_row_snoozed">Snoozed</string>
     <string name="attachment_chip_label">👁 %1$s</string>
-    <string name="email_to">To:</string>
-    <string name="email_cc">Cc:</string>
-    <string name="email_bcc">Bcc:</string>
+    <string name="email_to">To</string>
+    <string name="email_cc">Cc</string>
+    <string name="email_bcc">Bcc</string>
     <string name="email_subject_label">Subject:</string>
     <string name="email_body_label">Message:</string>
     <string name="reply">Reply</string>
@@ -363,8 +363,11 @@
     <string name="compose_fill_all_fields">Fill in the recipient and message.</string>
     <string name="compose_empty_subject_title">Send without a subject?</string>
     <string name="compose_send_custody_pending">Still checking this account\'s encryption settings. Try again in a moment.</string>
-    <string name="compose_custody_check_failed">Couldn\'t check this account\'s encryption settings, so Send is off.</string>
+    <string name="compose_send_off">Send is off</string>
+    <string name="compose_custody_check_failed">Couldn\'t check this account\'s encryption settings.</string>
     <string name="compose_custody_retry">Retry</string>
+    <string name="compose_show_cc_bcc">Show Cc and Bcc</string>
+    <string name="compose_hide_cc_bcc">Hide Cc and Bcc</string>
     <string name="compose_empty_subject_add">Add subject</string>
     <string name="compose_empty_subject_send">Send</string>
     <string name="push_pairing_status_not_paired">Not paired</string>
