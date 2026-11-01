@@ -5,9 +5,9 @@
 A KyPost GitHub release carries two APKs, each with a `.sha256` checksum. `kypost-vX.Y.Z.apk` is
 the `github` channel (`org.kysecurity.mail.github`), built for ARM phones only. Install this one.
 `kypost-fdroid-vX.Y.Z.apk` is the `fdroid` channel (`org.kysecurity.mail.fdroid`). It is published
-for F-Droid's reproducible-build check, described below. This page shows how to check that an APK was signed with KyPost's release key
-and which commit it says it was built from. It also explains why a rebuild from source does not
-give the same bytes today.
+for F-Droid's reproducible-build check, described below. This page shows how to check that an
+APK was signed with KyPost's release key and which commit it says it was built from. It also
+explains which APK a rebuild from source reproduces, and why the `github` one does not.
 
 The release workflow publishes every release as a **draft**. A draft is not a download. Use only a
 release that the Releases page shows as published.
