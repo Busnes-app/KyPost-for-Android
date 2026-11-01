@@ -27,8 +27,9 @@ import org.kysecurity.mail.contacts.device.DeviceContactSyncEnabler
 import org.kysecurity.mail.contacts.device.DeviceContactSyncSettings
 import org.kysecurity.mail.contacts.device.DeviceContactsRuntime
 import org.kysecurity.mail.applyDangerButtonTheme
-import org.kysecurity.mail.applyEmptyStateBackground
 import org.kysecurity.mail.applyGhostButtonTheme
+import org.kysecurity.mail.applyKyPostTopBar
+import org.kysecurity.mail.applyPanelBackground
 import org.kysecurity.mail.applyPillChipTheme
 import org.kysecurity.mail.applyPrimaryButtonTheme
 import org.kysecurity.mail.applySectionEyebrowLabel
@@ -120,7 +121,7 @@ class PushPairingActivity : LockedActivity() {
         intent.data = null
 
         initViews()
-        applyTopInsetWithHeader(this, findViewById(R.id.pushPairingRoot))
+        applyTopInsetWithHeader(this, findViewById(R.id.pushPairingRoot), withActionBar = false)
         historyAdapter = PushHistoryAdapter(this)
         historyList.emptyView = historyEmptyText
         historyList.adapter = historyAdapter
@@ -150,6 +151,7 @@ class PushPairingActivity : LockedActivity() {
         super.onResume()
         if (redirectedToUnlock) return
         applyThemeToActivity(this)
+        applyKyPostTopBar(this, getString(R.string.menu_pairing))
         // One filled button per group: Scan QR pairs; the other ways in and the paired device's
         // maintenance actions are secondary, and Unpair is destructive.
         applyGhostButtonTheme(this, btnResyncToken)
@@ -163,7 +165,7 @@ class PushPairingActivity : LockedActivity() {
         PendingPairingLink.take()?.let(::confirmAndApplyPairing)
         applyPillChipTheme(this, chipUseUnifiedPush)
         applyPillChipTheme(this, chipUseFirebase)
-        applyEmptyStateBackground(this, historyEmptyText)
+        applyPanelBackground(this, historyEmptyText)
         applySectionEyebrowLabel(this, findViewById(R.id.pushPairingLatestTitle))
         applySectionEyebrowLabel(this, findViewById(R.id.pushPairingHistoryTitle))
     }

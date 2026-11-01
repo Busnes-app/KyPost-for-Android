@@ -32,7 +32,6 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:scrollbars="none"
-                    android:paddingHorizontal="8dp"
                     android:paddingVertical="6dp">
 
                     <com.google.android.material.chip.ChipGroup
