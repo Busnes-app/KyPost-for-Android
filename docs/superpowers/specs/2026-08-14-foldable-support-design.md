@@ -130,6 +130,14 @@ The rail also shows on `notlong` windows below 600dp, which is the Fold's 475x75
 while a long 20:9 phone (Moto G Play, 411x845dp) keeps the bottom bar. The `layout-w600dp/` files
 moved to `layout/` and are selected by `values-w600dp` and `values-notlong` layout aliases.
 
+**Update 2026-11-01 — Rail position, a 440dp floor on `notlong`, hinge split.** Themes now has Rail
+position: Right (default) or Left, physical sides, stored as `kypost-rail-position`. With Left, the
+inbox pane keeps the rail in the split and the message pane hides its own: Rail | List | Message.
+`values-notlong` became `values-w440dp-notlong`: the Fold's 475dp cover keeps the rail, while a
+squarish flip cover (~360-412dp) keeps the bottom bar like any tall screen. A separating vertical
+fold (half-open book posture) splits along the hinge through a `SplitAttributesCalculator`.
+`applySideInsets` keeps content clear of landscape cutouts and side navigation bars.
+
 **Asked and answered: the nav bar cannot borrow space from the message pane.** A floating "island"
 nav that took its footprint from the preview rather than the list is not buildable under embedding —
 the panes are separate Activities in separate window containers, each clipped to its own bounds, and

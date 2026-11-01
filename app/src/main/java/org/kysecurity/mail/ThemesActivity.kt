@@ -13,13 +13,19 @@ import android.widget.ListView
 import android.widget.RadioGroup
 import org.kysecurity.mail.security.LockedActivity
 
-/** The pair picker plus a System / Light / Dark choice (ky-ui's Appearance page, natively). */
+/** The pair picker plus a System / Light / Dark choice (ky-ui's Appearance page, natively), and
+ *  which side of a wide window the navigation rail takes. */
 class ThemesActivity : LockedActivity() {
 
     private val modeButtons = mapOf(
         ThemeMode.SYSTEM to R.id.themeModeSystem,
         ThemeMode.LIGHT to R.id.themeModeLight,
         ThemeMode.DARK to R.id.themeModeDark,
+    )
+
+    private val railButtons = mapOf(
+        RailPosition.RIGHT to R.id.railPositionRight,
+        RailPosition.LEFT to R.id.railPositionLeft,
     )
 
     private lateinit var listView: ListView
@@ -70,6 +76,11 @@ class ThemesActivity : LockedActivity() {
             val mode = modeButtons.entries.first { it.value == checkedId }.key
             choose(getStoredThemeChoice(this).copy(mode = mode))
         }
+        val railGroup = findViewById<RadioGroup>(R.id.railPositionGroup)
+        railGroup.check(railButtons.getValue(getStoredRailPosition(this)))
+        railGroup.setOnCheckedChangeListener { _, checkedId ->
+            saveRailPosition(this, railButtons.entries.first { it.value == checkedId }.key)
+        }
         paint()
     }
 
@@ -82,6 +93,7 @@ class ThemesActivity : LockedActivity() {
     private fun paint() {
         applyThemeToActivity(this)
         applySectionEyebrowLabel(this, findViewById(R.id.themeModeLabel))
+        applySectionEyebrowLabel(this, findViewById(R.id.railPositionLabel))
         applySectionEyebrowLabel(this, findViewById(R.id.themePairLabel))
         (listView.adapter as ArrayAdapter<*>).notifyDataSetChanged()
     }

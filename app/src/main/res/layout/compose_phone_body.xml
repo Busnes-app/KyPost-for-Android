@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The phone Compose body, shared by activity_compose (bottom bar) and activity_compose_rail (rail
-     beside it on a notlong screen narrower than 600dp). -->
+     beside it on a 440-600dp notlong window). -->
 <merge xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 

@@ -13,7 +13,7 @@ import org.kysecurity.mail.security.UnlockActivity
 
 fun applyPrimaryNavigationInsets(activity: Activity, nav: NavigationBarView) {
     if (activity.resources.getBoolean(R.bool.nav_is_rail)) {
-        applyRailInsets(activity, nav)
+        placeRail(activity, nav)
     } else {
         applyBottomInset(nav)
     }

@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The rail layouts, shared by values-w600dp and values-notlong so each exists once.
-         w600dp outranks notlong, so a wide notlong window still gets activity_compose_wide. -->
+    <!-- The rail layouts, shared by values-w600dp and values-w440dp-notlong so each exists once.
+         The larger width wins, so a wide notlong window still gets activity_compose_wide.
+         440dp keeps a squarish flip cover screen (~360-412dp) on the phone layout while a 475dp
+         book-fold cover still gets the rail. -->
     <item name="activity_inbox" type="layout">@layout/activity_inbox_rail</item>
     <item name="activity_contacts_list" type="layout">@layout/activity_contacts_list_rail</item>
     <item name="activity_settings" type="layout">@layout/activity_settings_rail</item>
