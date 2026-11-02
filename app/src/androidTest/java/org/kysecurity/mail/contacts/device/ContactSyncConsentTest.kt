@@ -72,6 +72,18 @@ class ContactSyncConsentTest {
         return body
     }
 
+    /** The row is redrawn on the main thread once the setting changes, which can be after the
+     *  setting reads as changed here: wait for the row, not for a time. */
+    private fun awaitRowBody(scenario: ActivityScenario<SettingsActivity>, expected: String) {
+        val deadline = System.currentTimeMillis() + 15_000
+        while (rowBody(scenario) != expected && System.currentTimeMillis() < deadline) android.os.SystemClock.sleep(50)
+        assertEquals(expected, rowBody(scenario))
+    }
+
+    private fun onBody(): String = context.getString(R.string.settings_contact_sync_on_body, TEST_SYNC_SERVER)
+
+    private fun offBody(): String = context.getString(R.string.settings_contact_sync_off_body)
+
     private fun awaitEnabled(expected: Boolean) {
         val deadline = System.currentTimeMillis() + 15_000
         while (settings.isEnabled() != expected && System.currentTimeMillis() < deadline) android.os.SystemClock.sleep(50)
@@ -101,8 +113,7 @@ class ContactSyncConsentTest {
 
             assertEquals(destination(), settings.consentedDestination())
             assertTrue(accounts.accountExists())
-            instrumentation.waitForIdleSync()
-            assertTrue(rowBody(scenario), TEST_SYNC_SERVER in rowBody(scenario))
+            awaitRowBody(scenario, onBody())
         }
     }
 
@@ -147,8 +158,43 @@ class ContactSyncConsentTest {
             val deadline = System.currentTimeMillis() + 10_000
             while (accounts.accountExists() && System.currentTimeMillis() < deadline) android.os.SystemClock.sleep(50)
             assertFalse(accounts.accountExists())
+            awaitRowBody(scenario, offBody())
+        }
+    }
+
+    /** Agree tapped while a revoke is still removing the account waits for it, so the account it
+     *  ensures is not removed after sync turns on. */
+    @Test
+    fun agreeDuringRevoke_keepsSyncOnWithItsAccount() {
+        ActivityScenario.launch(SettingsActivity::class.java).use { scenario ->
             instrumentation.waitForIdleSync()
-            assertEquals(context.getString(R.string.settings_contact_sync_off_body), rowBody(scenario))
+            agree(scenario)
+
+            tapRow(scenario)
+            val revoke = awaitDialog(scenario) as androidx.appcompat.app.AlertDialog
+            instrumentation.runOnMainSync { revoke.getButton(DialogInterface.BUTTON_POSITIVE).performClick() }
+            // Off as soon as consent is cleared, which is before the account is gone: agree then.
+            awaitRowBody(scenario, offBody())
+            agree(scenario)
+
+            awaitRowBody(scenario, onBody())
+            assertEquals(destination(), settings.consentedDestination())
+            instrumentation.waitForIdleSync()
+            assertTrue("the revoke removed the account Agree ensured", accounts.accountExists())
+            assertTrue(settings.isEnabled())
+        }
+    }
+
+    /** Clearing the pairing elsewhere clears the consent; the open row follows the setting. */
+    @Test
+    fun consentClearedElsewhere_rowTurnsOff() {
+        ActivityScenario.launch(SettingsActivity::class.java).use { scenario ->
+            instrumentation.waitForIdleSync()
+            agree(scenario)
+            awaitRowBody(scenario, onBody())
+
+            runBlocking { settings.clearConsentDuring {} }
+            awaitRowBody(scenario, offBody())
         }
     }
 

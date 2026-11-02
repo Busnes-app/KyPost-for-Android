@@ -949,9 +949,14 @@ Owns production Android app code and resources.
   The menu toggle, Settings' Contact sync row, import's re-ask and account setup all call it; the
   pairing screen no longer asks before scanning, since no server is known yet. Revoking (menu or
   Settings) is `DeviceContactSyncEnabler.revoke`: consent and import choices cleared, sync off,
-  account removed. `SourceRulesTest.contactsPermissionIsRequestedOnlyBehindTheDisclosure`,
+  account removed, all under the consent lock; enabling ensures the account and turns sync on
+  under the same lock (`withPurgeLock`), so Agree tapped mid-revoke cannot have its account
+  removed after it. Both finish after their dialog closes, so Settings' row observes the setting
+  (`DeviceContactSyncSettings.observe`) rather than waiting on a callback; the API 31 emulator
+  showed the stale "On". `SourceRulesTest.contactsPermissionIsRequestedOnlyBehindTheDisclosure`,
   `AccountSetupConsentTest.theMenuToggle_disclosesTheUploadBeforeEnabling`,
-  `ContactSyncConsentTest` (agree, decline, revoke, unpaired, pre-consent installs).
+  `ContactSyncConsentTest` (agree, decline, revoke, agree during revoke, consent cleared
+  elsewhere, unpaired, pre-consent installs).
 - **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
   `applyBatch` as the insert. `device_contact_links` is a cache of that: `adoptLostLinks` runs
   before the pull and relinks every row of our account by SOURCE_ID, tombstones included and

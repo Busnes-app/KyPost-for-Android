@@ -61,10 +61,13 @@ class DeviceContactSyncEnabler(
         val graph = DeviceContactsRuntime.graph(activity)
         activity.lifecycleScope.launch {
             try {
-                graph.settings.clearConsentDuring {}
-                DeviceContactSyncScheduler.cancelPeriodic(activity)
-                graph.observer.unregister()
-                graph.accountManager.removeAccount()
+                // The account goes under the consent lock, which enabling also takes: Agree tapped
+                // while it is being removed waits, rather than ensuring an account this then removes.
+                graph.settings.clearConsentDuring {
+                    DeviceContactSyncScheduler.cancelPeriodic(activity)
+                    graph.observer.unregister()
+                    graph.accountManager.removeAccount()
+                }
                 Toast.makeText(activity, R.string.contacts_device_sync_disabled_toast, Toast.LENGTH_SHORT).show()
                 onRevoked()
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -124,24 +127,29 @@ class DeviceContactSyncEnabler(
         }
         activity.lifecycleScope.launch {
             try {
-                // Enabling over a failed account creation scheduled the periodic worker against an
-                // account that does not exist, and left teardown with no account to purge rows under.
-                if (!graph.accountManager.ensureAccount()) {
-                    Toast.makeText(activity, R.string.contacts_device_sync_account_failed, Toast.LENGTH_LONG).show()
-                    return@launch
+                // Under the lock a revoke removes the account in, so one still running finishes
+                // first. Enabling over a failed account creation scheduled the periodic worker
+                // against an account that does not exist, and left teardown with no account to
+                // purge rows under.
+                val refused: (() -> Unit)? = graph.settings.withPurgeLock {
+                    when {
+                        !graph.accountManager.ensureAccount() -> {
+                            { Toast.makeText(activity, R.string.contacts_device_sync_account_failed, Toast.LENGTH_LONG).show() }
+                        }
+                        // Rechecked after the suspensions above: the request may have been displaced since.
+                        displaced() -> activity::finish
+                        // The pairing may have changed while the disclosure was open: the user agreed to
+                        // send contacts to the server it named, not to whichever is paired now.
+                        graph.settings.consentedDestination() != ContactsRuntime.graph(activity).repository.destination() -> {
+                            { Toast.makeText(activity, R.string.contacts_device_sync_not_paired, Toast.LENGTH_LONG).show() }
+                        }
+                        else -> {
+                            graph.settings.setEnabled(true)
+                            null
+                        }
+                    }
                 }
-                // Rechecked after the suspension above: the request may have been displaced since.
-                if (displaced()) {
-                    activity.finish()
-                    return@launch
-                }
-                // The pairing may have changed while the disclosure was open: the user agreed to
-                // send contacts to the server it named, not to whichever is paired now.
-                if (graph.settings.consentedDestination() != ContactsRuntime.graph(activity).repository.destination()) {
-                    Toast.makeText(activity, R.string.contacts_device_sync_not_paired, Toast.LENGTH_LONG).show()
-                    return@launch
-                }
-                graph.settings.setEnabled(true)
+                if (refused != null) return@launch refused()
                 setupToken()?.let { PendingAccountSetup.complete(it, DeviceContactAccount.ACCOUNT_NAME) }
                     ?: PendingAccountSetup.complete(DeviceContactAccount.ACCOUNT_NAME)
                 graph.observer.register()

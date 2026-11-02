@@ -28,11 +28,15 @@ class SettingsActivity : LockedActivity() {
             Toast.makeText(this, R.string.contacts_device_sync_permission_denied, Toast.LENGTH_SHORT).show()
         }
     }
-    private val syncEnabler: DeviceContactSyncEnabler = DeviceContactSyncEnabler(this, contactPermissionLauncher, onEnabled = ::renderContactSync)
+    private val syncEnabler: DeviceContactSyncEnabler = DeviceContactSyncEnabler(this, contactPermissionLauncher)
 
     /** The contact-sync disclosure or the revoke confirmation, while shown. */
     @androidx.annotation.VisibleForTesting
     internal var contactSyncDialog: AlertDialog? = null
+
+    /** The row follows the setting itself, not a callback: revoke and agree finish after their
+     *  dialog closes, and a pairing change elsewhere clears the consent too. */
+    private var contactSyncObserver: AutoCloseable? = null
 
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
         setContentView(R.layout.activity_settings)
@@ -85,7 +89,14 @@ class SettingsActivity : LockedActivity() {
         super.onResume()
         if (redirectedToUnlock) return
         applyTheme()
+        contactSyncObserver = contactSyncObserver ?: DeviceContactsRuntime.graph(this).settings.observe(::renderContactSync)
         renderContactSync()
+    }
+
+    override fun onPause() {
+        contactSyncObserver?.close()
+        contactSyncObserver = null
+        super.onPause()
     }
 
     override fun onDestroy() {
@@ -110,7 +121,7 @@ class SettingsActivity : LockedActivity() {
             contactSyncDialog = AlertDialog.Builder(this)
                 .setTitle(R.string.settings_contact_sync_revoke_title)
                 .setMessage(getString(R.string.settings_contact_sync_revoke_message, consented.substringBefore('\n')))
-                .setPositiveButton(R.string.settings_contact_sync_revoke_positive) { _, _ -> syncEnabler.revoke(onRevoked = ::renderContactSync) }
+                .setPositiveButton(R.string.settings_contact_sync_revoke_positive) { _, _ -> syncEnabler.revoke() }
                 .setNegativeButton(R.string.cancel, null)
                 .showThemed()
             return

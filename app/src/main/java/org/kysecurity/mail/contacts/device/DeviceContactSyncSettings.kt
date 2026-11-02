@@ -26,6 +26,15 @@ class DeviceContactSyncSettings(context: Context) {
         prefs.edit().putBoolean(KEY_ENABLED, enabled).commit()
     }
 
+    /** Calls [onChange] on the main thread after every write, from any instance or thread, until
+     *  the returned handle is closed. SharedPreferences holds listeners weakly; the handle keeps
+     *  this one alive. */
+    fun observe(onChange: () -> Unit): AutoCloseable {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> onChange() }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        return AutoCloseable { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
     fun lastForeignScanAtEpochMs(): Long = prefs.getLong(KEY_LAST_FOREIGN_SCAN, 0L)
 
     fun setLastForeignScanAtEpochMs(epochMs: Long) {
