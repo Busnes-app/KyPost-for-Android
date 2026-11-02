@@ -36,6 +36,7 @@ class ContactAccountFlowsTest {
 
     @After
     fun tearDown() {
+        unpairAfterSyncTest(context)
         DeviceContactSyncSettings(context).setEnabled(false)
         DeviceContactSyncScheduler.cancelPeriodic(context)
         DeviceContactPurge.deleteSyncedRows(context)
@@ -80,6 +81,7 @@ class ContactAccountFlowsTest {
     fun addAccount_fromAnActivity_completesWithTheAccount() {
         accounts.removeAccountBlocking()
         DeviceContactSyncSettings(context).setEnabled(false)
+        pairForSyncTest(context)
         var caller: Activity? = null
         ActivityScenario.launch(ContactsListActivity::class.java).use { scenario ->
             scenario.onActivity { caller = it }
