@@ -17,6 +17,11 @@
 
 ### Changed
 
+- The contact sync disclosure now also says how your KyPost server uses uploaded contacts
+  (address book sync, recipient suggestions, signature checks, Primary sorting and encryption-key
+  lookups, which send the address to the recipient's mail domain and keys.openpgp.org), that it
+  stores them unencrypted, and how long they are kept. It matches KyPost for iPhone, iPad and Mac.
+
 - Contact sync turned on in an earlier version stays off until you agree to the new disclosure.
   Pairing no longer offers contact sync before the server is known; turn it on in Settings or
   Contacts after pairing. Turning sync off also clears the accounts picked under Import from
