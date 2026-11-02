@@ -2,7 +2,19 @@
 
 ## Unreleased
 
+### Added
+
+- Before contact sync reads or sends any contacts, KyPost shows Google Play's prominent
+  disclosure: what is sent, the address of the KyPost server it goes to, and why, with Agree and
+  Not now. Not now leaves sync off and the app working. The choice is stored for that server, and
+  Settings has a Contact sync row that shows it and turns it off (#282).
+
 ### Changed
+
+- Contact sync turned on in an earlier version stays off until you agree to the new disclosure.
+  Pairing no longer offers contact sync before the server is known; turn it on in Settings or
+  Contacts after pairing. Turning sync off also clears the accounts picked under Import from
+  other accounts.
 
 - The top bar shows the logo and an ink "KyPost", then the page name as its own title. The
   ALL-CAPS label under the brand is gone, and button labels are sentence case.

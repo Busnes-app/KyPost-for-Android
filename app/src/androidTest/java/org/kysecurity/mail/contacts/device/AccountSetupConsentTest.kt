@@ -42,11 +42,13 @@ class AccountSetupConsentTest {
         automation.grantRuntimePermission(context.packageName, Manifest.permission.WRITE_CONTACTS)
         settings.setEnabled(false)
         accounts.removeAccountBlocking()
+        pairForSyncTest(context)
     }
 
     @After
     fun tearDown() {
         PendingAccountSetup.cancel()
+        unpairAfterSyncTest(context)
         settings.setEnabled(false)
         DeviceContactSyncScheduler.cancelPeriodic(context)
         DeviceContactPurge.deleteSyncedRows(context)
@@ -93,6 +95,7 @@ class AccountSetupConsentTest {
     @Test
     fun setupAnswersOnlyOnceTheAccountExists() {
         settings.setEnabled(true)
+        settings.recordConsent(kotlinx.coroutines.runBlocking { ContactsRuntime.graph(context).repository.destination()!! })
         var existedWhenAnswered: Boolean? = null
         val added = CountDownLatch(1)
         val intent = ContactsListActivity.setupIntent(context, PendingAccountSetup.hold(onAdded = { existedWhenAnswered = accounts.accountExists(); added.countDown() }, onCancelled = {}))
@@ -145,7 +148,8 @@ class AccountSetupConsentTest {
         }
     }
 
-    /** The menu toggle shows the disclosure first; Not now enables nothing, Continue enables. */
+    /** The menu toggle shows the disclosure, naming the server, first; Not now enables nothing,
+     *  Agree enables. */
     @Test
     fun theMenuToggle_disclosesTheUploadBeforeEnabling() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -164,7 +168,7 @@ class AccountSetupConsentTest {
                 val dialog = it.consentDialog
                 assertNotNull("the toggle must disclose before enabling", dialog)
                 val message = dialog!!.findViewById<android.widget.TextView>(android.R.id.message)!!.text.toString()
-                assertTrue(message, "uploaded to your KyPost server" in message && "synced to your other devices" in message)
+                assertTrue(message, "upload them to your KyPost server at $TEST_SYNC_SERVER" in message)
                 dialog.getButton(DialogInterface.BUTTON_NEGATIVE).performClick()
             }
             instrumentation.waitForIdleSync()
@@ -176,7 +180,7 @@ class AccountSetupConsentTest {
             }
             val deadline = System.currentTimeMillis() + 15_000
             while (!settings.isEnabled() && System.currentTimeMillis() < deadline) android.os.SystemClock.sleep(50)
-            assertTrue("Continue enables", settings.isEnabled())
+            assertTrue("Agree enables", settings.isEnabled())
         }
     }
 

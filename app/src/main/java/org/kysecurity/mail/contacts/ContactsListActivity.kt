@@ -191,21 +191,29 @@ class ContactsListActivity : LockedActivity() {
     /** Explicit consent for an add-account request, which any app can make through AccountManager:
      *  until the user confirms, nothing is enabled and nothing reaches the contacts provider. */
     private fun askToEnableForSetup() {
-        consentDialog = syncEnabler.askToEnable(
-            lead = R.string.contacts_account_setup_message,
-            onDecline = {
-                consentDialog = null
-                finish()
-            },
-            onContinue = { requested ->
-                consentDialog = null
-                setupPermissionRequested = requested
-            },
-        )
+        lifecycleScope.launch {
+            // Nothing to name and nowhere to send: the request is answered with a cancel.
+            val destination = syncEnabler.pairedDestination() ?: return@launch finish()
+            consentDialog = syncEnabler.askToEnable(
+                destination,
+                lead = R.string.contacts_account_setup_message,
+                onDecline = {
+                    consentDialog = null
+                    finish()
+                },
+                onContinue = { requested ->
+                    consentDialog = null
+                    setupPermissionRequested = requested
+                },
+            )
+        }
     }
 
     private fun askToEnable() {
-        consentDialog = syncEnabler.askToEnable(onDecline = { consentDialog = null }, onContinue = { consentDialog = null })
+        lifecycleScope.launch {
+            val destination = syncEnabler.pairedDestination() ?: return@launch
+            consentDialog = syncEnabler.askToEnable(destination, onDecline = { consentDialog = null }, onContinue = { consentDialog = null })
+        }
     }
 
     /** Leaving the add-account flow without turning sync on answers the waiting caller with a
@@ -320,7 +328,7 @@ class ContactsListActivity : LockedActivity() {
             MENU_DEVICE_SYNC -> {
                 val graph = DeviceContactsRuntime.graph(this)
                 if (graph.settings.isEnabled()) {
-                    disableDeviceSync()
+                    syncEnabler.revoke(onRevoked = ::invalidateOptionsMenu)
                 } else {
                     askToEnable()
                 }
@@ -554,34 +562,6 @@ class ContactsListActivity : LockedActivity() {
             }
             .setNegativeButton(android.R.string.cancel, null)
             .showThemed()
-    }
-
-    private fun disableDeviceSync() {
-        val graph = DeviceContactsRuntime.graph(this)
-        lifecycleScope.launch {
-            try {
-                graph.settings.setEnabled(false)
-                DeviceContactSyncScheduler.cancelPeriodic(this@ContactsListActivity)
-                graph.observer.unregister()
-                graph.accountManager.removeAccount()
-                Toast.makeText(
-                    this@ContactsListActivity,
-                    R.string.contacts_device_sync_disabled_toast,
-                    Toast.LENGTH_SHORT,
-                ).show()
-                invalidateOptionsMenu()
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                // The activity went away mid-disable. Rethrow rather than reporting it as a failure
-                // and touching the UI of a destroyed activity — same rule as the collect above.
-                throw e
-            } catch (e: Exception) {
-                Toast.makeText(
-                    this@ContactsListActivity,
-                    "Failed to disable device sync: ${e.message}",
-                    Toast.LENGTH_SHORT,
-                ).show()
-            }
-        }
     }
 
     companion object {
