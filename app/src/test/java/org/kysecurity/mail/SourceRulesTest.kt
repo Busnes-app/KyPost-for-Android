@@ -215,6 +215,8 @@ class SourceRulesTest {
         assertNotNull(disclosure)
         // Play: what is sent, where (the server, by address) and why, with an explicit Agree.
         assertTrue("upload them to your KyPost server at %1\$s" in disclosure && "Agree" in disclosure, disclosure)
+        // App Store and Play: how the server uses uploaded contacts and how long it keeps them.
+        assertTrue("How they are used:" in disclosure && "How long:" in disclosure, disclosure)
     }
 
     /** A dialog is its own window, so it needs [org.kysecurity.mail.security.showSecurely]. */
