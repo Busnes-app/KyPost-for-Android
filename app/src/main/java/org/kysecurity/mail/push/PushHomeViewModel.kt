@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -24,6 +25,8 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
 
     private val isWorking = MutableStateFlow(false)
     private val localMessage = MutableStateFlow<String?>(null)
+    private val pendingApproval = MutableStateFlow<PendingApprovalUi?>(null)
+    private var approvalJob: Job? = null
 
     /** One element per registration that succeeded; conflated, so a stopped screen still gets it. */
     private val pairedChannel = Channel<Unit>(Channel.CONFLATED)
@@ -34,7 +37,8 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
         graph.repository.everPaired,
         isWorking,
         localMessage,
-    ) { repo, everPaired, working, local ->
+        pendingApproval,
+    ) { repo, everPaired, working, local, approval ->
         PushHomeUiState(
             pairing = repo.pairing,
             lastTokenSyncAtEpochMs = repo.lastTokenSyncAtEpochMs,
@@ -46,6 +50,7 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
             everPaired = everPaired,
             isWorking = working,
             localMessage = local,
+            pendingApproval = approval,
         )
     }.stateIn(
         scope = scope,
@@ -107,29 +112,61 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
             }
             else -> {
                 val result = graph.syncCoordinator.attemptPairing(pairing)
-                if (result is NativeRegistrationResult.Success) {
-                    // If the server put this user in pull mode, start fetching immediately.
-                    graph.pullCoordinator.pullNowAsync()
-                    pairedChannel.trySend(Unit)
-                }
-                localMessage.value = when (result) {
-                    is NativeRegistrationResult.Success ->
-                        string(org.kysecurity.mail.R.string.push_pairing_result_paired)
-                    is NativeRegistrationResult.Error -> if (result.wipeOwed) {
-                        string(org.kysecurity.mail.R.string.push_pairing_blocked_wipe)
-                    } else {
-                        string(
-                            if (result.expiredPairingToken) {
-                                org.kysecurity.mail.R.string.push_pairing_result_failed_rescan
-                            } else {
-                                org.kysecurity.mail.R.string.push_pairing_result_failed
-                            },
-                            result.message,
-                        )
-                    }
-                }
                 isWorking.value = false
+                if (result is NativeRegistrationResult.Pending) awaitApproval(result) else reportPairing(result)
             }
+        }
+    }
+
+    /** Shows the waiting-for-approval card and polls until the web page decides. Internal so the
+     *  instrumented screenshot test can show the card without a server. */
+    internal fun awaitApproval(pending: NativeRegistrationResult.Pending) {
+        approvalJob?.cancel()
+        pendingApproval.value = PendingApprovalUi(
+            approvalCode = pending.approvalCode,
+            serverHost = pairingUrlHost(pending.pairing.serverUrl) ?: pending.pairing.serverUrl,
+        )
+        approvalJob = scope.launch {
+            // The coordinator wipes the pending secret on every way out, including this
+            // scope's cancellation in onCleared (the screen closed).
+            val result = graph.syncCoordinator.awaitApproval(pending)
+            pendingApproval.value = null
+            reportPairing(result)
+        }
+    }
+
+    /** Cancel on the waiting card: stops polling and drops the pending credentials. */
+    fun cancelApproval() {
+        approvalJob?.cancel()
+        approvalJob = null
+        pendingApproval.value = null
+    }
+
+    private fun reportPairing(result: NativeRegistrationResult) {
+        if (result is NativeRegistrationResult.Success) {
+            // If the server put this user in pull mode, start fetching immediately.
+            graph.pullCoordinator.pullNowAsync()
+            pairedChannel.trySend(Unit)
+        }
+        localMessage.value = when (result) {
+            is NativeRegistrationResult.Success ->
+                string(org.kysecurity.mail.R.string.push_pairing_result_paired)
+            is NativeRegistrationResult.Error -> if (result.wipeOwed) {
+                string(org.kysecurity.mail.R.string.push_pairing_blocked_wipe)
+            } else if (result.notApproved) {
+                string(org.kysecurity.mail.R.string.push_pairing_not_approved)
+            } else {
+                string(
+                    if (result.expiredPairingToken) {
+                        org.kysecurity.mail.R.string.push_pairing_result_failed_rescan
+                    } else {
+                        org.kysecurity.mail.R.string.push_pairing_result_failed
+                    },
+                    result.message,
+                )
+            }
+            // Unreachable: callers route a Pending to awaitApproval.
+            is NativeRegistrationResult.Pending -> null
         }
     }
 
@@ -175,6 +212,7 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
             localMessage.value = when (result) {
                 is NativeRegistrationResult.Success -> "Switched to Firebase"
                 is NativeRegistrationResult.Error -> "Failed to switch to Firebase: ${result.message}"
+                is NativeRegistrationResult.Pending -> "Failed to switch to Firebase: approval requested again"
             }
             isWorking.value = false
         }
@@ -193,6 +231,7 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
                     val suffix = if (result.expiredPairingToken) " — rescan the pairing QR code" else ""
                     "Token sync failed: ${result.message}$suffix"
                 }
+                is NativeRegistrationResult.Pending -> "Token sync failed: the server asked to approve this device again"
             }
             isWorking.value = false
         }
@@ -216,4 +255,9 @@ data class PushHomeUiState(
     val everPaired: Boolean = true,
     val isWorking: Boolean = false,
     val localMessage: String? = null,
+    /** Non-null while a registration waits for approval on the web; the screen shows the card. */
+    val pendingApproval: PendingApprovalUi? = null,
 )
+
+/** What the waiting card shows. No credentials: those stay with the coordinator's poll. */
+data class PendingApprovalUi(val approvalCode: String, val serverHost: String)

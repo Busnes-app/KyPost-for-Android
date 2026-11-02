@@ -174,6 +174,7 @@ class DeviceContactSourceIdTest {
     @Test
     fun aPairingReplacedDuringThePass_queuesNothingForTheNewPairing() = runBlocking {
         settings.setEnabled(true)
+        settings.recordConsent("test")
         insertCreatedElsewhere()
         var active = TEST_PAIRING
         val paired = pairedRepository({ active }) {
@@ -194,6 +195,7 @@ class DeviceContactSourceIdTest {
     @Test
     fun thePurgesDatabaseStepDuringThePass_leavesNothingQueued() = runBlocking {
         settings.setEnabled(true)
+        settings.recordConsent("test")
         insertCreatedElsewhere()
         val paired = pairedRepository({ TEST_PAIRING }) {
             settings.clearConsentDuring {
@@ -214,6 +216,7 @@ class DeviceContactSourceIdTest {
     @Test
     fun aContactCreatedInOurAccountElsewhere_isUploadedOnce() = runBlocking {
         settings.setEnabled(true)
+        settings.recordConsent("test")
         val rawContactId = insertCreatedElsewhere()
         val paired = pairedRepository({ TEST_PAIRING })
 

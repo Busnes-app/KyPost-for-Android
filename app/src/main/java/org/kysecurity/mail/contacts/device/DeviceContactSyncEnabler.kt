@@ -10,6 +10,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import org.kysecurity.mail.R
+import org.kysecurity.mail.contacts.ContactsRuntime
 import org.kysecurity.mail.showThemed
 import kotlinx.coroutines.launch
 
@@ -23,20 +24,60 @@ class DeviceContactSyncEnabler(
     /** A setup screen whose request a newer one displaced must not act on it. */
     private fun displaced(): Boolean = setupToken()?.let { !PendingAccountSetup.isCurrent(it) } == true
 
-    /** The disclosure every path shows before contacts access is requested. Continue enables,
-     *  asking for the permission if needed, and passes [onContinue] whether it asked; Not now or
-     *  Back asks for nothing. [lead] says why the dialog appeared, when the user did not ask. */
+    /** The pairing the disclosure names, or null, with a toast, when there is none to name. */
+    suspend fun pairedDestination(): String? =
+        ContactsRuntime.graph(activity).repository.destination()
+            ?: null.also { Toast.makeText(activity, R.string.contacts_device_sync_not_paired, Toast.LENGTH_LONG).show() }
+
+    /** Google Play's prominent disclosure, shown on every path before contacts access is requested:
+     *  what is sent, to which server ([destination], from [pairedDestination]) and why. Agree
+     *  records consent for that pairing and enables, asking for the permission if needed, and
+     *  passes [onContinue] whether it asked; Not now or Back asks for and records nothing. [lead]
+     *  says why the dialog appeared, when the user did not ask. */
     fun askToEnable(
+        destination: String,
         @StringRes lead: Int? = null,
         onDecline: () -> Unit = {},
         onContinue: (requestedPermission: Boolean) -> Unit = {},
     ): AlertDialog = AlertDialog.Builder(activity)
         .setTitle(R.string.contact_sync_intro_title)
-        .setMessage(listOfNotNull(lead, R.string.contacts_access_disclosure).joinToString("\n\n") { activity.getString(it) })
-        .setPositiveButton(R.string.contact_sync_intro_positive) { _, _ -> onContinue(checkAndEnable()) }
+        .setMessage(
+            listOfNotNull(
+                lead?.let { activity.getString(it) },
+                activity.getString(R.string.contacts_access_disclosure, destination.substringBefore('\n')),
+            ).joinToString("\n\n"),
+        )
+        .setPositiveButton(R.string.contact_sync_intro_positive) { _, _ -> agree(destination); onContinue(checkAndEnable()) }
         .setNegativeButton(R.string.contact_sync_intro_negative) { _, _ -> onDecline() }
         .setOnCancelListener { onDecline() }
         .showThemed()
+
+    private fun agree(destination: String) = DeviceContactsRuntime.graph(activity).settings.recordConsent(destination)
+
+    /** Withdraws consent: sync off, import choices cleared, and the KyPost account (with the
+     *  contacts it put in the phone's address book) removed. Nothing more is sent until the user
+     *  agrees to the disclosure again. */
+    fun revoke(onRevoked: () -> Unit = {}) {
+        val graph = DeviceContactsRuntime.graph(activity)
+        activity.lifecycleScope.launch {
+            try {
+                // The account goes under the consent lock, which enabling also takes: Agree tapped
+                // while it is being removed waits, rather than ensuring an account this then removes.
+                graph.settings.clearConsentDuring {
+                    DeviceContactSyncScheduler.cancelPeriodic(activity)
+                    graph.observer.unregister()
+                    graph.accountManager.removeAccount()
+                }
+                Toast.makeText(activity, R.string.contacts_device_sync_disabled_toast, Toast.LENGTH_SHORT).show()
+                onRevoked()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                // The activity went away mid-disable; swallowing it toasts a destroyed activity.
+                throw e
+            } catch (e: Exception) {
+                Toast.makeText(activity, "Failed to disable device sync: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     /** True when permissions had to be requested; the caller must wait for the launcher callback. */
     private fun checkAndEnable(): Boolean {
@@ -86,18 +127,29 @@ class DeviceContactSyncEnabler(
         }
         activity.lifecycleScope.launch {
             try {
-                // Enabling over a failed account creation scheduled the periodic worker against an
-                // account that does not exist, and left teardown with no account to purge rows under.
-                if (!graph.accountManager.ensureAccount()) {
-                    Toast.makeText(activity, R.string.contacts_device_sync_account_failed, Toast.LENGTH_LONG).show()
-                    return@launch
+                // Under the lock a revoke removes the account in, so one still running finishes
+                // first. Enabling over a failed account creation scheduled the periodic worker
+                // against an account that does not exist, and left teardown with no account to
+                // purge rows under.
+                val refused: (() -> Unit)? = graph.settings.withPurgeLock {
+                    when {
+                        !graph.accountManager.ensureAccount() -> {
+                            { Toast.makeText(activity, R.string.contacts_device_sync_account_failed, Toast.LENGTH_LONG).show() }
+                        }
+                        // Rechecked after the suspensions above: the request may have been displaced since.
+                        displaced() -> activity::finish
+                        // The pairing may have changed while the disclosure was open: the user agreed to
+                        // send contacts to the server it named, not to whichever is paired now.
+                        graph.settings.consentedDestination() != ContactsRuntime.graph(activity).repository.destination() -> {
+                            { Toast.makeText(activity, R.string.contacts_device_sync_not_paired, Toast.LENGTH_LONG).show() }
+                        }
+                        else -> {
+                            graph.settings.setEnabled(true)
+                            null
+                        }
+                    }
                 }
-                // Rechecked after the suspension above: the request may have been displaced since.
-                if (displaced()) {
-                    activity.finish()
-                    return@launch
-                }
-                graph.settings.setEnabled(true)
+                if (refused != null) return@launch refused()
                 setupToken()?.let { PendingAccountSetup.complete(it, DeviceContactAccount.ACCOUNT_NAME) }
                     ?: PendingAccountSetup.complete(DeviceContactAccount.ACCOUNT_NAME)
                 graph.observer.register()

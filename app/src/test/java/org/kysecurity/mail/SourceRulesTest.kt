@@ -204,15 +204,19 @@ class SourceRulesTest {
         val continueButton = enabler.indexOf(".setPositiveButton(R.string.contact_sync_intro_positive)")
         assertTrue(
             continueButton >= 0 && calls.size == 1 && calls.single() - continueButton in 0..120,
-            "only the disclosure's Continue button may request the permission",
+            "only the disclosure's Agree button may request the permission",
         )
+        assertTrue("agree(destination); onContinue(checkAndEnable())" in enabler, "Agree records consent before enabling")
         assertTrue("R.string.contacts_access_disclosure" in enabler, "every path shows the disclosure text")
 
         val strings = listOf(File("src/main/res/values/strings.xml"), File("app/src/main/res/values/strings.xml"))
             .first { it.isFile }.readText()
         val disclosure = Regex("""<string name="contacts_access_disclosure">(.*)</string>""").find(strings)?.groupValues?.get(1)
         assertNotNull(disclosure)
-        assertTrue("uploaded to your KyPost server" in disclosure && "synced to your other devices" in disclosure, disclosure)
+        // Play: what is sent, where (the server, by address) and why, with an explicit Agree.
+        assertTrue("upload them to your KyPost server at %1\$s" in disclosure && "Agree" in disclosure, disclosure)
+        // App Store and Play: how the server uses uploaded contacts and how long it keeps them.
+        assertTrue("How they are used:" in disclosure && "How long:" in disclosure, disclosure)
     }
 
     /** A dialog is its own window, so it needs [org.kysecurity.mail.security.showSecurely]. */

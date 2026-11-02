@@ -20,12 +20,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.chip.Chip
+import com.google.android.material.progressindicator.LinearProgressIndicator
 import org.kysecurity.mail.applyCardOutline
 import org.kysecurity.mail.BuildConfig
 import org.kysecurity.mail.R
-import org.kysecurity.mail.contacts.device.DeviceContactSyncEnabler
-import org.kysecurity.mail.contacts.device.DeviceContactSyncSettings
-import org.kysecurity.mail.contacts.device.DeviceContactsRuntime
 import org.kysecurity.mail.applyDangerButtonTheme
 import org.kysecurity.mail.applyGhostButtonTheme
 import org.kysecurity.mail.applyKyPostTopBar
@@ -72,6 +70,12 @@ class PushPairingActivity : LockedActivity() {
     private lateinit var latestSubjectText: TextView
     private lateinit var latestKeywordsText: TextView
     private lateinit var historyEmptyText: TextView
+    private lateinit var approvalPanel: View
+    private lateinit var approvalCodeText: TextView
+    private lateinit var approvalServerText: TextView
+    private lateinit var approvalProgress: LinearProgressIndicator
+    private lateinit var btnCancelApproval: Button
+    private lateinit var pairingPanels: List<View>
 
     private val reviewLoginTaps = ReviewLoginTaps()
     private var reviewLoginArmed = false
@@ -90,25 +94,6 @@ class PushPairingActivity : LockedActivity() {
             Toast.makeText(this, R.string.push_pairing_notifications_denied, Toast.LENGTH_SHORT).show()
         }
     }
-
-    private val contactPermissionLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>> = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { permissions ->
-        val allGranted = permissions.all { it.value }
-        if (allGranted) {
-            syncEnabler.enableAfterPermissionGrant()
-        } else {
-            Toast.makeText(this, R.string.contacts_device_sync_permission_denied, Toast.LENGTH_SHORT).show()
-        }
-        // Whether or not sync got enabled, this is the resolution of the permission flow the
-        // intro popup kicked off — safe to continue to the scanner now that it's settled.
-        scanQr()
-    }
-
-    private val syncEnabler = DeviceContactSyncEnabler(
-        activity = this,
-        permissionLauncher = contactPermissionLauncher,
-    )
 
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
         setContentView(R.layout.activity_push_pairing)
@@ -129,7 +114,8 @@ class PushPairingActivity : LockedActivity() {
         btnResyncToken.setOnClickListener { viewModel.resyncToken() }
         btnUnpairDevice.setOnClickListener { confirmAndUnpairDevice() }
         btnReconnectServer.setOnClickListener { confirmAndReconnect() }
-        btnScanQr.setOnClickListener { onScanQrClicked() }
+        btnScanQr.setOnClickListener { scanQr() }
+        btnCancelApproval.setOnClickListener { viewModel.cancelApproval() }
         btnPasswordPairing.setOnClickListener { startActivity(Intent(this, PasswordPairingActivity::class.java)) }
         btnKyIdentitySignOn.setOnClickListener { startActivity(Intent(this, KyIdentitySignOnActivity::class.java)) }
         chipUseUnifiedPush.setOnClickListener { viewModel.switchToUnifiedPush(this) }
@@ -158,6 +144,17 @@ class PushPairingActivity : LockedActivity() {
         applyDangerButtonTheme(this, btnUnpairDevice)
         applyGhostButtonTheme(this, btnReconnectServer)
         applyPrimaryButtonTheme(this, btnScanQr)
+        // The waiting card's only action; it backs out, so it is secondary.
+        applyGhostButtonTheme(this, btnCancelApproval)
+        applySectionEyebrowLabel(this, findViewById(R.id.pushPairingApprovalCodeLabel))
+        getStoredThemePalette(this).let { palette ->
+            approvalProgress.setIndicatorColor(android.graphics.Color.parseColor(palette.accent))
+            approvalProgress.trackColor = android.graphics.Color.parseColor(palette.line)
+            // The code is what the user compares; the tree's grey remap would give it `ink` in dark mode.
+            val strong = android.graphics.Color.parseColor(palette.inkStrong)
+            approvalCodeText.setTextColor(strong)
+            findViewById<TextView>(R.id.pushPairingApprovalTitle).setTextColor(strong)
+        }
         applyGhostButtonTheme(this, btnPasswordPairing)
         applyGhostButtonTheme(this, btnKyIdentitySignOn)
         btnKyIdentitySignOn.visibility = if (signOnAvailable()) View.VISIBLE else View.GONE
@@ -206,9 +203,31 @@ class PushPairingActivity : LockedActivity() {
         btnReconnectServer = findViewById(R.id.btnReconnectServer)
         chipUseUnifiedPush = findViewById(R.id.chipUseUnifiedPush)
         chipUseFirebase = findViewById(R.id.chipUseFirebase)
+        approvalPanel = findViewById(R.id.pushPairingApprovalPanel)
+        approvalCodeText = findViewById(R.id.pushPairingApprovalCode)
+        approvalServerText = findViewById(R.id.pushPairingApprovalServer)
+        approvalProgress = findViewById(R.id.pushPairingApprovalProgress)
+        btnCancelApproval = findViewById(R.id.btnCancelApproval)
+        pairingPanels = listOf(
+            findViewById(R.id.pushPairingMainPanel),
+            findViewById(R.id.pushPairingHistoryTitle),
+            findViewById(R.id.pushPairingHistoryPanel),
+        )
+    }
+
+    /** The waiting card replaces the whole screen while a registration awaits web approval. */
+    private fun renderApproval(approval: PendingApprovalUi?) {
+        approvalPanel.visibility = if (approval == null) View.GONE else View.VISIBLE
+        pairingPanels.forEach { it.visibility = if (approval == null) View.VISIBLE else View.GONE }
+        if (approval == null) return
+        // Grouped like the web prompt ("048 213"); TalkBack reads it digit by digit.
+        approvalCodeText.text = approval.approvalCode.chunked(3).joinToString(" ")
+        approvalCodeText.contentDescription = approval.approvalCode.toList().joinToString(" ")
+        approvalServerText.text = getString(R.string.push_pairing_approval_server, approval.serverHost)
     }
 
     private fun render(state: PushHomeUiState) {
+        renderApproval(state.pendingApproval)
         val baseStatus = getString(
             if (state.pairing == null) R.string.push_pairing_status_not_paired else R.string.push_pairing_status_paired,
         )
@@ -299,23 +318,6 @@ class PushPairingActivity : LockedActivity() {
     private fun consumeDeepLink(intent: android.content.Intent?) {
         val data = intent?.dataString ?: return
         handleParsedPairing(NativePairingDeepLinkParser.parse(data))
-    }
-
-    private fun onScanQrClicked() {
-        val settings = DeviceContactsRuntime.graph(this).settings
-        if (settings.hasShownSyncIntro()) {
-            scanQr()
-        } else {
-            showSyncIntroDialog(settings)
-        }
-    }
-
-    private fun showSyncIntroDialog(settings: DeviceContactSyncSettings) {
-        syncEnabler.askToEnable(
-            onDecline = ::scanQr,
-            // The permission callback calls scanQr(); calling here too would stack it on the system dialog.
-            onContinue = { requestedPermission -> if (!requestedPermission) scanQr() },
-        ).setOnDismissListener { settings.setHasShownSyncIntro(true) }
     }
 
     private fun scanQr() {
