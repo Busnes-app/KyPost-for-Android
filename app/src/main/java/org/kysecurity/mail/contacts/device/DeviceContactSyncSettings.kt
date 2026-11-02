@@ -9,7 +9,18 @@ import kotlinx.coroutines.sync.withLock
 class DeviceContactSyncSettings(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    fun isEnabled(): Boolean = prefs.getBoolean(KEY_ENABLED, false)
+    /** On only with the disclosure agreed to: installs that enabled sync before it named the
+     *  server read as off until the user agrees. */
+    fun isEnabled(): Boolean = prefs.getBoolean(KEY_ENABLED, false) && consentedDestination() != null
+
+    /** The pairing (`ContactSyncRepository.destination`) whose server the user agreed, on the
+     *  disclosure, to send this phone's contacts to. Null until they agree and after they revoke;
+     *  replacing the pairing purges through [clearConsentDuring], which clears it. */
+    fun consentedDestination(): String? = prefs.getString(KEY_SYNC_CONSENT, null)
+
+    fun recordConsent(destination: String) {
+        prefs.edit().putString(KEY_SYNC_CONSENT, destination).commit()
+    }
 
     fun setEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_ENABLED, enabled).commit()
@@ -56,11 +67,11 @@ class DeviceContactSyncSettings(context: Context) {
         Unit
     }
 
-    /** Clears import consent, turns device sync off and runs [block] under the consent lock, for
+    /** Clears sync and import consent, turns device sync off and runs [block] under the consent lock, for
      *  the account purge: an import or create is either queued before [block] (which then removes
      *  it) or finds no consent and sync off after. */
     suspend fun <T> clearConsentDuring(block: suspend () -> T): T = consentLock.withLock {
-        prefs.edit().remove(KEY_IMPORT_ACCOUNTS).remove(KEY_IMPORT_DESTINATION)
+        prefs.edit().remove(KEY_IMPORT_ACCOUNTS).remove(KEY_IMPORT_DESTINATION).remove(KEY_SYNC_CONSENT)
             .putLong(KEY_CONSENT_REVISION, consentRevision() + 1)
             .putBoolean(KEY_ENABLED, false).commit()
         block()
@@ -74,17 +85,11 @@ class DeviceContactSyncSettings(context: Context) {
     /** Runs [block] under the lock the account purge holds through [clearConsentDuring]. */
     suspend fun <T> withPurgeLock(block: suspend () -> T): T = consentLock.withLock { block() }
 
-    fun hasShownSyncIntro(): Boolean = prefs.getBoolean(KEY_SHOWN_INTRO, false)
-
-    fun setHasShownSyncIntro(shown: Boolean) {
-        prefs.edit().putBoolean(KEY_SHOWN_INTRO, shown).commit()
-    }
-
     companion object {
         private const val PREFS_NAME = "org.kysecurity.mail.device_contacts"
         private const val KEY_ENABLED = "enabled"
         private const val KEY_LAST_FOREIGN_SCAN = "last_foreign_scan_epoch_ms"
-        private const val KEY_SHOWN_INTRO = "has_shown_sync_intro"
+        private const val KEY_SYNC_CONSENT = "sync_consent_destination"
         private const val KEY_IMPORT_ACCOUNTS = "import_account_keys"
         private const val KEY_IMPORT_DESTINATION = "import_destination"
         private const val KEY_CONSENT_REVISION = "import_consent_revision"

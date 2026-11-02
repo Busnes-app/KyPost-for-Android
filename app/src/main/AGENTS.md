@@ -929,7 +929,7 @@ Owns production Android app code and resources.
   caller's response in `PendingAccountSetup` and opens the Contacts screen in account-setup mode.
   Any app can make that request, so setup never enables on its own: it asks first
   (`contacts_account_setup_message` above the disclosure), even with contacts permission already
-  granted; Continue runs the normal enable flow and answers with the account once it exists, while
+  granted; Agree runs the normal enable flow and answers with the account once it exists, while
   declining or leaving answers with a cancel. An outstanding permission request is saved state of
   its own, so a recreate resumes it or asks again. The app-lock redirect keeps the request
   (MainActivity resumes the flow after unlock). Each request's token rides in the setup intent
@@ -938,13 +938,20 @@ Owns production Android app code and resources.
   `AccountSetupConsentTest`. `editProperties` answers
   an empty bundle. `ContactSyncAdapterDeclarationTest`, `ContactAccountFlowsTest`. Unverified on
   hardware: how stock Contacts apps render and edit these contacts with the schema.
-- **Contacts access is requested only behind Google Play's prominent disclosure.**
+- **Contacts access is requested only behind Google Play's prominent disclosure (#282).**
   `DeviceContactSyncEnabler.askToEnable` is the one way in: it shows `contacts_access_disclosure`
-  (contacts are uploaded to the user's KyPost server and synced to their other devices) with
-  Continue / Not now, and only Continue reaches the runtime prompt; `checkAndEnable` is private.
-  The pairing intro, the menu toggle, import's re-ask and account setup all call it.
-  `SourceRulesTest.contactsPermissionIsRequestedOnlyBehindTheDisclosure`,
-  `AccountSetupConsentTest.theMenuToggle_disclosesTheUploadBeforeEnabling`.
+  (what is sent, that it goes to the user's KyPost server, named by the paired origin, and why)
+  with Agree / Not now, and only Agree reaches the runtime prompt; `checkAndEnable` is private.
+  Agree first records `DeviceContactSyncSettings.recordConsent(destination)`; `isEnabled()` is
+  false without it, so installs enabled before the disclosure named the server read as off until
+  the user agrees. Unpaired, there is no server to name: callers get `pairedDestination()` null
+  and ask nothing. Replacing or clearing the pairing clears the consent (`clearConsentDuring`).
+  The menu toggle, Settings' Contact sync row, import's re-ask and account setup all call it; the
+  pairing screen no longer asks before scanning, since no server is known yet. Revoking (menu or
+  Settings) is `DeviceContactSyncEnabler.revoke`: consent and import choices cleared, sync off,
+  account removed. `SourceRulesTest.contactsPermissionIsRequestedOnlyBehindTheDisclosure`,
+  `AccountSetupConsentTest.theMenuToggle_disclosesTheUploadBeforeEnabling`,
+  `ContactSyncConsentTest` (agree, decline, revoke, unpaired, pre-consent installs).
 - **A raw contact carries its contact uid in `RawContacts.SOURCE_ID`**, written in the same
   `applyBatch` as the insert. `device_contact_links` is a cache of that: `adoptLostLinks` runs
   before the pull and relinks every row of our account by SOURCE_ID, tombstones included and

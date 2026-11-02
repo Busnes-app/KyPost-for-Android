@@ -116,6 +116,34 @@
     <View style="@style/Widget.KyPost.ListRowDivider" />
 
     <LinearLayout
+        android:id="@+id/settingsContactSync"
+        style="@style/Widget.KyPost.ListRow">
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowIcon"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_nav_contacts" />
+
+        <LinearLayout style="@style/Widget.KyPost.ListRowText">
+
+            <TextView
+                style="@style/Widget.KyPost.ListRowTitle"
+                android:text="@string/settings_contact_sync" />
+
+            <TextView
+                android:id="@+id/settingsContactSyncBody"
+                style="@style/Widget.KyPost.ListRowBody"
+                android:text="@string/settings_contact_sync_off_body" />
+        </LinearLayout>
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowChevron"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
+
+    <View style="@style/Widget.KyPost.ListRowDivider" />
+
+    <LinearLayout
         android:id="@+id/settingsPgp"
         style="@style/Widget.KyPost.ListRow">
 
