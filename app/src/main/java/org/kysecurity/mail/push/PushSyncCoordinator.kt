@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
@@ -107,35 +108,118 @@ class PushSyncCoordinator(
                 p256dh = credential.p256dh,
                 auth = credential.auth,
             )
+            // A 202 is held for web approval: nothing is stored or purged until awaitApproval sees it approved.
             if (result !is NativeRegistrationResult.Success) return@withContext result
+            finishPairing(pairing, result, credential, credentialState, isReplacement)
+        }
+    }
 
-            // NOTHING is destroyed until the replacement is proven. Purging first meant a
-            // replacement that failed at the FCM token fetch — offline, say — had already deleted
-            // the mail, contacts, keys and pairing of the account that was working a moment ago.
-            if (isReplacement) {
-                val residue = repository.clearPairing()
-                if (residue.isNotEmpty()) {
-                    // No table carries a subscriber column, so survivors are readable by whoever
-                    // pairs next. Refuse the new account and wipe rather than leave the two mixed.
-                    wipeOnIncompletePurge(residue)
-                    return@withContext NativeRegistrationResult.Error(
-                        "Could not remove the previous account's data ($residue); erasing this device instead",
+    /** What a proven registration does, whether register answered 200 or a pending one was
+     *  approved later. Caller holds [registrationGate] inside `NonCancellable`. */
+    private suspend fun finishPairing(
+        pairing: PairingData,
+        result: NativeRegistrationResult.Success,
+        credential: PushRegistrationCredential,
+        credentialState: PushRepository.PairingCredentialState,
+        isReplacement: Boolean,
+    ): NativeRegistrationResult {
+        // NOTHING is destroyed until the replacement is proven. Purging first meant a
+        // replacement that failed at the FCM token fetch — offline, say — had already deleted
+        // the mail, contacts, keys and pairing of the account that was working a moment ago.
+        if (isReplacement) {
+            val residue = repository.clearPairing()
+            if (residue.isNotEmpty()) {
+                // No table carries a subscriber column, so survivors are readable by whoever
+                // pairs next. Refuse the new account and wipe rather than leave the two mixed.
+                wipeOnIncompletePurge(residue)
+                return NativeRegistrationResult.Error(
+                    "Could not remove the previous account's data ($residue); erasing this device instead",
+                )
+            }
+        }
+
+        // TOFU: capture the pin only on the pairing call, never on routine resyncs. BEFORE the
+        // pairing, for the same reason SecurePairingStore.saveTlsPin writes its own three in
+        // that order: a pin with no pairing is inert, but a pairing with no pin reads as
+        // NeverPaired, and every credentialed call then goes out through the unpinned TOFU
+        // window until some later resync happens to repair it.
+        result.tlsPin?.let { repository.saveTlsPin(it) }
+        persistSuccess(pairing, result, credentialState)
+        // After the replacement purge above, which clears the endpoint along with the pairing.
+        recordUnifiedPush(credential.transport, credential.token, credential.p256dh, credential.auth)
+        return result
+    }
+
+    /** Polls `pairing-status` for [pending] until the user approves it on the web, it is denied,
+     *  or it expires (KyPost-Server `docs/device-approval.md`). Approval finishes the pairing
+     *  exactly as a 200 from register does. Cancel the caller to stop: the secret is wiped on every
+     *  way out, so a cancelled, denied or expired request leaves nothing behind.
+     *
+     *  Polls at the server's interval, doubling up to [MAX_POLL_MS] after a failed check and
+     *  honouring `Retry-After`. [now] and [sleep] are seams for tests. */
+    suspend fun awaitApproval(
+        pending: NativeRegistrationResult.Pending,
+        now: () -> Long = System::currentTimeMillis,
+        sleep: suspend (Long) -> Unit = { delay(it) },
+    ): NativeRegistrationResult {
+        try {
+            var waitMs = pollMs(pending.pollIntervalSeconds)
+            while (true) {
+                val remaining = pending.expiresAtEpochMs - now()
+                if (remaining <= 0) return notApproved()
+                sleep(waitMs.coerceAtMost(remaining))
+                waitMs = when (val status = registrationClient.pairingStatus(pending)) {
+                    is PairingStatus.Approved -> return completeApproval(pending, status, now())
+                    PairingStatus.Rejected -> return notApproved()
+                    is PairingStatus.Waiting -> pollMs(status.pollIntervalSeconds ?: pending.pollIntervalSeconds)
+                    is PairingStatus.Retry -> maxOf(
+                        (status.retryAfterSeconds ?: 0L) * 1_000L,
+                        (waitMs * 2).coerceAtMost(MAX_POLL_MS),
                     )
                 }
             }
-
-            // TOFU: capture the pin only on the pairing call, never on routine resyncs. BEFORE the
-            // pairing, for the same reason SecurePairingStore.saveTlsPin writes its own three in
-            // that order: a pin with no pairing is inert, but a pairing with no pin reads as
-            // NeverPaired, and every credentialed call then goes out through the unpinned TOFU
-            // window until some later resync happens to repair it.
-            result.tlsPin?.let { repository.saveTlsPin(it) }
-            persistSuccess(pairing, result, credentialState)
-            // After the replacement purge above, which clears the endpoint along with the pairing.
-            recordUnifiedPush(credential.transport, credential.token, credential.p256dh, credential.auth)
-            result
+        } finally {
+            pending.wipe()
         }
     }
+
+    private suspend fun completeApproval(
+        pending: NativeRegistrationResult.Pending,
+        approved: PairingStatus.Approved,
+        nowEpochMs: Long,
+    ): NativeRegistrationResult = registrationGate.withLock {
+        if (wipeOwed()) {
+            return@withLock NativeRegistrationResult.Error(
+                "A security wipe must finish before this device can pair again.",
+                wipeOwed = true,
+            )
+        }
+        // Read INSIDE the gate, as attemptPairing does: the current account may have changed while we waited.
+        val existing = repository.state.first().pairing
+        val isReplacement = isAccountReplacement(pending.pairing, existing, repository.reconnectExpectation())
+        val credentialState = repository.currentCredentialState()
+        if (credentialState is PushRepository.PairingCredentialState.Unavailable) return credentialGateDeferral()
+        val secret = pending.deviceSecret ?: return@withLock notApproved()
+        val success = NativeRegistrationResult.Success(
+            syncedAtEpochMs = nowEpochMs,
+            deviceId = approved.deviceId ?: pending.deviceId,
+            deviceSecret = secret,
+            deliveryMode = approved.deliveryMode,
+            pullEndpoint = approved.pullEndpoint,
+            transport = approved.transport,
+            tlsPin = pending.tlsPin,
+        )
+        withContext(NonCancellable) {
+            finishPairing(pending.pairing, success, pending.credential, credentialState, isReplacement)
+        }
+    }
+
+    private fun notApproved() = NativeRegistrationResult.Error(
+        "This pairing was denied or has expired",
+        notApproved = true,
+    )
+
+    private fun pollMs(seconds: Long) = seconds.coerceIn(1L, MAX_POLL_MS / 1_000L) * 1_000L
 
     private suspend fun persistSuccess(
         pairing: PairingData,
@@ -281,6 +365,11 @@ class PushSyncCoordinator(
                 recordUnifiedPush(transport, token, p256dh, auth)
             }
             is NativeRegistrationResult.Error -> repository.updateSyncState(lastSyncAtEpochMs = null, syncError = result.message)
+            // A resync re-registers an approved device, so a 202 here is a server fault. Store nothing.
+            is NativeRegistrationResult.Pending -> repository.updateSyncState(
+                lastSyncAtEpochMs = null,
+                syncError = "The server asked to approve this device again; scan a new pairing code",
+            )
         }
         return result
     }
@@ -326,5 +415,8 @@ class PushSyncCoordinator(
         /** One message for both entry points, naming neither Firebase nor a distributor: which one
          *  is missing depends on the build, and the injected seam above is what decides. */
         const val UNAVAILABLE_CREDENTIAL = "Unable to obtain a push registration token"
+
+        /** Backoff ceiling for pairing-status polls. */
+        const val MAX_POLL_MS = 30_000L
     }
 }

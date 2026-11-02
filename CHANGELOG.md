@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Added
+
+- New-device approval (KyPost-Server #516). After a pairing QR code or link, the server holds the
+  device until you approve it on the web page that showed the code. Pairing shows a "Waiting for
+  approval" card with the same 6-digit code and the server's name, so you can check they match,
+  and a Cancel button. Approved, it finishes pairing as before. Denied or timed out, it says "Not
+  approved: denied or timed out. Scan a new code." KyIdentity sign-on and review pairing still
+  pair at once. A code someone else already used is now named as such.
+
 ### Changed
 
 - The top bar shows the logo and an ink "KyPost", then the page name as its own title. The
