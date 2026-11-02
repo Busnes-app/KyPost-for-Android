@@ -6,9 +6,92 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
+    <!-- Shown instead of everything below while a registration waits for approval on the web
+         (#516). The code is the point of the card: the user compares it with the web page's. -->
+    <ScrollView
+        android:id="@+id/pushPairingApprovalPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
+
+    <androidx.cardview.widget.CardView
+        android:id="@+id/pushPairingApprovalCard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="12dp"
+        app:cardCornerRadius="@dimen/card_corner_radius"
+        app:cardElevation="0dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/pushPairingApprovalTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/push_pairing_approval_title"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/pushPairingApprovalMessage"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/push_pairing_approval_message"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/pushPairingApprovalCodeLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="24dp"
+                android:text="@string/push_pairing_approval_code_label" />
+
+            <TextView
+                android:id="@+id/pushPairingApprovalCode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="4dp"
+                android:fontFamily="@font/ibm_plex_mono"
+                android:textIsSelectable="false"
+                android:textSize="44sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.progressindicator.LinearProgressIndicator
+                android:id="@+id/pushPairingApprovalProgress"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:indeterminate="true" />
+
+            <TextView
+                android:id="@+id/pushPairingApprovalServer"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:fontFamily="@font/ibm_plex_mono"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/btnCancelApproval"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/cancel" />
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+    </ScrollView>
+
     <!-- In landscape the cards outgrow the screen and scroll here; wrap_content caps at the
          space the history list leaves. -->
     <ScrollView
+        android:id="@+id/pushPairingMainPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content">
 
@@ -229,6 +312,7 @@
         android:layout_marginBottom="8dp" />
 
     <FrameLayout
+        android:id="@+id/pushPairingHistoryPanel"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1">

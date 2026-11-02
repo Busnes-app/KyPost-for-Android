@@ -29,6 +29,8 @@ data class NativeRegistrationRequest(
     @SerialName("transport") val transport: String? = null,
     @SerialName("deviceName") val deviceName: String?,
     @SerialName("appVersion") val appVersion: String?,
+    // Display only: the server's approval prompt shows it next to deviceName (#516).
+    @SerialName("osVersion") val osVersion: String? = null,
     // WebPush encryption keys (RFC 8291), present only for transport="unifiedpush".
     @SerialName("p256dh") val p256dh: String? = null,
     @SerialName("auth") val auth: String? = null,
@@ -50,14 +52,28 @@ data class NativeRegistrationResponse(
     @SerialName("pullEndpoint") val pullEndpoint: String? = null,
     // The transport the server actually stored, echoed back. Absent on older servers.
     @SerialName("transport") val transport: String? = null,
+    // A 202 (pending approval, docs/device-approval.md in KyPost-Server) adds these.
+    @SerialName("status") val status: String? = null,
+    @SerialName("error") val error: String? = null,
+    @SerialName("approvalCode") val approvalCode: String? = null,
+    @SerialName("expiresAt") val expiresAt: String? = null,
+    @SerialName("statusEndpoint") val statusEndpoint: String? = null,
+    @SerialName("pollIntervalSeconds") val pollIntervalSeconds: Long? = null,
 ) {
     /** Redacted: carries a freshly minted device secret. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "NativeRegistrationResponse(redacted)"
 }
 
 /** The server-provided pull endpoint wins only if it is same-origin with the paired server. */
-fun resolvePullEndpoint(serverUrl: String, provided: String?): String {
-    val fallback = pairingEndpoint(serverUrl, "/api/notifications/native/pull")?.toString() ?: return ""
+fun resolvePullEndpoint(serverUrl: String, provided: String?): String =
+    resolveSameOrigin(serverUrl, "/api/notifications/native/pull", provided)
+
+/** The pairing-status endpoint from a 202, by the same rule as [resolvePullEndpoint]. */
+fun resolvePairingStatusEndpoint(serverUrl: String, provided: String?): String =
+    resolveSameOrigin(serverUrl, "/api/notifications/native/pairing-status", provided)
+
+private fun resolveSameOrigin(serverUrl: String, path: String, provided: String?): String {
+    val fallback = pairingEndpoint(serverUrl, path)?.toString() ?: return ""
     val candidate = provided?.takeIf { it.isNotBlank() } ?: return fallback
     return if (pairingUrlHost(candidate) != null && sameOrigin(candidate, serverUrl)) {
         candidate
@@ -85,6 +101,7 @@ object NativeRegistrationRequestMapper {
             transport = transport,
             deviceName = Build.MODEL,
             appVersion = "KyPost for Android v$APP_VERSION",
+            osVersion = Build.VERSION.RELEASE?.let { "Android $it" },
             p256dh = p256dh,
             auth = auth,
         )
@@ -107,7 +124,61 @@ sealed class NativeRegistrationResult {
         /** Redacted: carries a freshly minted device secret. Enforced by `SourceRulesTest`. */
         override fun toString(): String = "Success(redacted)"
     }
-    data class Error(val message: String, val expiredPairingToken: Boolean = false, val wipeOwed: Boolean = false) : NativeRegistrationResult()
+    /** 202: the server holds this device until the user approves it on the web page that showed
+     *  the code (KyPost-Server `docs/device-approval.md`). Memory only: nothing here is persisted
+     *  unless the approval arrives, and [wipe] drops the secret on cancel, denial or expiry.
+     *  Carries the [pairing] and [credential] it was registered with so completion can persist
+     *  exactly what a 200 would have. */
+    class Pending(
+        val pairing: PairingData,
+        val credential: PushRegistrationCredential,
+        val deviceId: String,
+        deviceSecret: String,
+        val approvalCode: String,
+        val expiresAtEpochMs: Long,
+        val statusEndpoint: String,
+        val pollIntervalSeconds: Long,
+        val tlsPin: TlsPin?,
+    ) : NativeRegistrationResult() {
+        /** Valid for the pairing-status endpoint only; null once wiped. */
+        @Volatile var deviceSecret: String? = deviceSecret
+            private set
+
+        fun wipe() {
+            deviceSecret = null
+        }
+
+        /** Redacted: carries a device secret. */
+        override fun toString(): String = "Pending(redacted)"
+    }
+
+    data class Error(
+        val message: String,
+        val expiredPairingToken: Boolean = false,
+        val wipeOwed: Boolean = false,
+        /** The pairing-status endpoint answered 410, or the pending request expired. */
+        val notApproved: Boolean = false,
+    ) : NativeRegistrationResult()
+}
+
+/** One answer from `GET native/pairing-status`. */
+sealed class PairingStatus {
+    /** 202: still waiting; the server may change the interval. */
+    data class Waiting(val pollIntervalSeconds: Long?) : PairingStatus()
+
+    /** 200: approved. [deviceId] wins over the pending one: the server may have merged rows. */
+    data class Approved(
+        val deviceId: String?,
+        val deliveryMode: DeliveryMode,
+        val pullEndpoint: String?,
+        val transport: PushTransport?,
+    ) : PairingStatus()
+
+    /** 410: denied, expired or unknown — the server deliberately does not say which. */
+    object Rejected : PairingStatus()
+
+    /** Network failure, 429, 5xx or anything unexpected: back off and ask again. */
+    data class Retry(val retryAfterSeconds: Long?) : PairingStatus()
 }
 
 class NativeRegistrationClient(
@@ -175,6 +246,7 @@ class NativeRegistrationClient(
             ?: return NativeRegistrationResult.Error(result.exceptionOrNull()?.message ?: "Failed to register device")
 
         return when (code) {
+            202 -> pending(pairing, token, transport, p256dh, auth, rawBody, nowEpochMs, registrationHost, handshake)
             200 -> {
                 val body = runCatching { json.decodeFromString<NativeRegistrationResponse>(rawBody) }.getOrNull()
                 if (body?.ok == true && body.synced && body.deviceSecret.isNullOrBlank()) {
@@ -211,10 +283,111 @@ class NativeRegistrationClient(
             503 -> NativeRegistrationResult.Error("Pairing not configured on backend")
             // The device row exists and belongs to a credential this call did not present. Not a
             // transport failure and not a retry: re-pairing is the only thing that resolves it.
-            409 -> NativeRegistrationResult.Error(
-                "This device is already registered with a different credential — re-pair it",
-            )
+            409 -> conflict(rawBody)
             else -> NativeRegistrationResult.Error("Failed to register device ($code)")
         }
+    }
+
+    private fun conflict(rawBody: String): NativeRegistrationResult.Error {
+        val serverError = runCatching { json.decodeFromString<NativeRegistrationResponse>(rawBody) }
+            .getOrNull()?.error.orEmpty()
+        return NativeRegistrationResult.Error(
+            when {
+                // Someone else redeemed this link first. Not transient: say it plainly.
+                serverError.contains("already used", ignoreCase = true) ->
+                    "This code was already used. If you did not use it, deny the request on the web page."
+                serverError.contains("already waiting for approval", ignoreCase = true) ->
+                    "This device is already waiting for approval. Approve it on the web page, or wait 5 minutes and scan a new code."
+                serverError.contains("too many devices are waiting", ignoreCase = true) ->
+                    "Too many devices are waiting for approval. Approve or deny them on the web page first."
+                else -> "This device is already registered with a different credential — re-pair it"
+            },
+        )
+    }
+
+    private fun pending(
+        pairing: PairingData,
+        token: String,
+        transport: PushTransport?,
+        p256dh: String?,
+        auth: String?,
+        rawBody: String,
+        nowEpochMs: Long,
+        registrationHost: String?,
+        handshake: okhttp3.Handshake?,
+    ): NativeRegistrationResult {
+        val body = runCatching { json.decodeFromString<NativeRegistrationResponse>(rawBody) }.getOrNull()
+        val deviceId = body?.deviceId?.takeIf { it.isNotBlank() }
+        val deviceSecret = body?.deviceSecret?.takeIf { it.isNotBlank() }
+        val code = body?.approvalCode?.takeIf { APPROVAL_CODE.matches(it) }
+        if (body?.status != "pending" || deviceId == null || deviceSecret == null || code == null) {
+            return NativeRegistrationResult.Error("Registration did not return an approval request")
+        }
+        val expiresAt = body.expiresAt
+            ?.let { runCatching { java.time.Instant.parse(it).toEpochMilli() }.getOrNull() }
+            // The server's fixed pending lifetime, if it sent no readable expiry.
+            ?: (nowEpochMs + PENDING_LIFETIME_MS)
+        return NativeRegistrationResult.Pending(
+            pairing = pairing,
+            credential = PushRegistrationCredential(token, transport, p256dh, auth),
+            deviceId = deviceId,
+            deviceSecret = deviceSecret,
+            approvalCode = code,
+            expiresAtEpochMs = expiresAt,
+            statusEndpoint = resolvePairingStatusEndpoint(pairing.serverUrl, body.statusEndpoint),
+            pollIntervalSeconds = body.pollIntervalSeconds ?: DEFAULT_POLL_SECONDS,
+            // The same TOFU leaf a 200 captures; persisted only once the device is approved.
+            tlsPin = registrationHost?.let { host ->
+                SpkiPinner.pinsForChain(handshake?.peerCertificates.orEmpty())
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { TlsPin(host, it) }
+            },
+        )
+    }
+
+    /** `GET native/pairing-status` with the pending credentials. Pinned to the leaf the 202 was
+     *  served with while nothing is stored yet; once a pin is stored, the factory uses that. */
+    suspend fun pairingStatus(pending: NativeRegistrationResult.Pending): PairingStatus {
+        val secret = pending.deviceSecret ?: return PairingStatus.Rejected
+        val url = pending.statusEndpoint.takeIf { pairingUrlHost(it) != null }
+            ?: return PairingStatus.Rejected
+        val request = Request.Builder().url(url).get()
+            .pairingAuthHeaders(pending.deviceId, secret)
+            .apply {
+                val pin = pending.tlsPin
+                if (pin != null && pin.host.equals(url.toHttpUrlOrNull()?.host, ignoreCase = true)) {
+                    // ponytail: LinkPin holds one hash; the 202 pin is leaf-only, so first() is it.
+                    tag(org.kysecurity.mail.LinkPin::class.java, org.kysecurity.mail.LinkPin(pin.host, pin.spkiSha256.first()))
+                }
+            }
+            .build()
+        val result = withContext(Dispatchers.IO) {
+            callFactory.executeSync(request) { response ->
+                Triple(response.code, response.body?.string().orEmpty(), response.header("Retry-After"))
+            }
+        }
+        val (code, rawBody, retryAfter) = result.getOrNull() ?: return PairingStatus.Retry(null)
+        val body = runCatching { json.decodeFromString<NativeRegistrationResponse>(rawBody) }.getOrNull()
+        return when (code) {
+            200 -> if (body?.ok == true && body.status == "approved") {
+                PairingStatus.Approved(
+                    deviceId = body.deviceId?.takeIf { it.isNotBlank() },
+                    deliveryMode = DeliveryMode.fromWire(body.deliveryMode),
+                    pullEndpoint = body.pullEndpoint,
+                    transport = PushTransport.fromWire(body.transport),
+                )
+            } else {
+                PairingStatus.Retry(null)
+            }
+            202 -> PairingStatus.Waiting(body?.pollIntervalSeconds)
+            410 -> PairingStatus.Rejected
+            else -> PairingStatus.Retry(PullNotificationClient.parseRetryAfterSeconds(retryAfter))
+        }
+    }
+
+    private companion object {
+        val APPROVAL_CODE = Regex("^[0-9]{6}$")
+        const val DEFAULT_POLL_SECONDS = 3L
+        const val PENDING_LIFETIME_MS = 5 * 60_000L
     }
 }
