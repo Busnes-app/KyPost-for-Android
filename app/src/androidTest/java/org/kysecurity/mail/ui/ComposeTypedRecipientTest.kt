@@ -5,13 +5,16 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
+import androidx.lifecycle.Lifecycle
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.kysecurity.mail.ComposeActivity
 import org.kysecurity.mail.ComposeDraftCache
 import org.kysecurity.mail.ComposePgpController
+import org.kysecurity.mail.MailSignature
 import org.kysecurity.mail.pgp.PgpComposeState
 import org.kysecurity.mail.R
 import org.kysecurity.mail.RecipientInputView
@@ -49,6 +52,36 @@ class ComposeTypedRecipientTest {
                 it.sendForTest()
                 assertEquals(listOf("boss@example.com"), cc.recipientEmails())
             }
+        }
+    }
+
+    /** A lock or rotation snapshots the screen; an address still being typed is part of it. */
+    @Test
+    fun theSnapshotKeepsAnAddressStillBeingTyped() {
+        ActivityScenario.launch<ComposeActivity>(ComposeActivity.internalIntent(instrumentation.targetContext)).afterSplash().use { scenario ->
+            scenario.onActivity {
+                it.findViewById<RecipientInputView>(R.id.composeToInput)
+                    .findViewById<EditText>(R.id.recipientInputField).setText("boss@example.com")
+            }
+            scenario.moveToState(Lifecycle.State.CREATED)
+            assertEquals("boss@example.com", ComposeDraftCache.take()?.to)
+        }
+    }
+
+    /** A blank compose carrying only the device signature is not a draft: cached, it replaced the
+     *  prefill of the next Reply. */
+    @Test
+    fun aSignatureOnlyComposeIsNotCached() {
+        val context = instrumentation.targetContext
+        val saved = MailSignature.read(context)
+        MailSignature.save(context, MailSignature(enabled = true, text = "Sent from KyPost"))
+        try {
+            ActivityScenario.launch<ComposeActivity>(ComposeActivity.internalIntent(context)).afterSplash().use { scenario ->
+                scenario.moveToState(Lifecycle.State.CREATED)
+                assertNull(ComposeDraftCache.take())
+            }
+        } finally {
+            MailSignature.save(context, saved)
         }
     }
 }

@@ -139,6 +139,26 @@ class PushSyncCoordinatorOrderingTest {
         assertEquals("secret-old", sent)
     }
 
+    /** The link's pin re-pins only the SAME account; a replacement keeps the stored pin in charge. */
+    @Test
+    fun aLinkPinIsHonouredForTheSameAccountOnly() = runBlocking {
+        val linkPin = "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        fun tagOf(link: PairingData): org.kysecurity.mail.LinkPin? {
+            val store = FakePushStore(pairing = existing).apply { storedPin = TlsPin("old.example.com", setOf("sha256/x")) }
+            var tag: org.kysecurity.mail.LinkPin? = null
+            coordinator(store, { req ->
+                tag = req.tag(org.kysecurity.mail.LinkPin::class.java)
+                response(req, body("secret-1"), 200)
+            }).let { runBlocking { it.attemptPairing(link) } }
+            return tag
+        }
+
+        val sameAccount = existing.copy(pairingToken = "tok-fresh", deviceId = null, deviceSecret = null, spkiPin = linkPin)
+        assertEquals(linkPin, tagOf(sameAccount)?.spkiSha256)
+        val otherAccountSameHost = sameAccount.copy(subscriberId = "sub-other")
+        assertNull(tagOf(otherAccountSameHost))
+    }
+
     /** The reviewer's exact scenario: a valid replacement QR confirmed while offline. The old
      *  account used to be deleted before the token fetch that then failed. */
     @Test

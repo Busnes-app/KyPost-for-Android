@@ -59,8 +59,18 @@ private fun org.bouncycastle.openpgp.PGPPublicKey.canSign(
     return isEncryptionKey.not() || isMasterKey
 }
 
+/** The flags of [primary]'s NEWEST hashed key-flags signature: a rebinding replaces what an
+ *  older one granted (an encryption subkey later rebound for authentication must not encrypt). */
+internal fun org.bouncycastle.openpgp.PGPPublicKey.newestKeyFlagsAssertedBy(
+    primary: org.bouncycastle.openpgp.PGPPublicKey,
+): Int = signatures.asSequence()
+    .filterIsInstance<org.bouncycastle.openpgp.PGPSignature>()
+    .filter { it.keyID == primary.keyID && it.hashedSubPackets?.hasSubpacket(org.bouncycastle.bcpg.SignatureSubpacketTags.KEY_FLAGS) == true }
+    .maxByOrNull { it.creationTime.time }
+    ?.hashedSubPackets?.keyFlags ?: 0
+
 /** Only [primary]'s signatures, and only hashed subpackets — an unhashed flag grants nothing. */
-internal fun org.bouncycastle.openpgp.PGPPublicKey.keyFlagsAssertedBy(
+private fun org.bouncycastle.openpgp.PGPPublicKey.keyFlagsAssertedBy(
     primary: org.bouncycastle.openpgp.PGPPublicKey,
 ): Int {
     var flags = 0

@@ -42,6 +42,10 @@ abstract class LockedActivity : AppCompatActivity() {
      *  screen sits in the back stack, and `onCreate` does not run again on the way back. */
     protected open fun onStartUnlocked() = Unit
 
+    /** Called just before the app-lock redirect finishes this screen; not for the startup-tripwire
+     *  stand-down, which recreates it. [beforeShown] is true when it fires from [onCreate]. */
+    protected open fun onRedirectingToUnlock(beforeShown: Boolean) = Unit
+
     final override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // enableEdgeToEdge must precede setContentView for its cutout mode to reach the window.
@@ -53,7 +57,7 @@ abstract class LockedActivity : AppCompatActivity() {
             window.applyOverlayProtection()
         }
         if (!passesStartupTripwire()) return
-        redirectToUnlockIfLocked()
+        redirectToUnlockIfLocked(beforeShown = true)
         if (redirectedToUnlock || isFinishing) return
         // After the redirect, never before it: these consume a process-wide one-shot latch, and a
         // screen bouncing to UnlockActivity takes the dialog down with it while the latch stays set.
@@ -265,8 +269,9 @@ abstract class LockedActivity : AppCompatActivity() {
         onStartUnlocked()
     }
 
-    private fun redirectToUnlockIfLocked() {
+    private fun redirectToUnlockIfLocked(beforeShown: Boolean = false) {
         if (redirectedToUnlock || isFinishing || !isLocked()) return
+        onRedirectingToUnlock(beforeShown)
         redirectedToUnlock = true
         startActivity(Intent(this, UnlockActivity::class.java))
         finish()

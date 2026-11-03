@@ -120,11 +120,12 @@ class PinnedOrFallbackCallFactoryTest {
         assertEquals("RealCall", call.javaClass.simpleName)
     }
 
-    /** ...and only the pinned host: a link pin for another host leaves the refusal in place. */
+    /** ...and only a pin for the request's own host: `CertificatePinner` passes every host it has no
+     *  pin for, so a link pin naming another host would leave this request unpinned. */
     @Test
-    fun aLinkPinForAnotherHostDoesNotLiftTheRefusal() {
+    fun aLinkPinForAnotherHostIsIgnored() {
         val pinned = RecordingFactory()
-        val pin = TlsPin("other-relay.example", setOf("sha256/x"))
+        val pin = TlsPin("relay.example", setOf("sha256/x"))
         val factory = PinnedOrFallbackCallFactory(
             pinnedProvider = { pin to pinned },
             pinStateProvider = { TlsPinState.Pinned(pin) },
@@ -134,12 +135,13 @@ class PinnedOrFallbackCallFactoryTest {
             .url("https://relay.example/api/register")
             .tag(
                 org.kysecurity.mail.LinkPin::class.java,
-                org.kysecurity.mail.LinkPin("relay.example", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+                org.kysecurity.mail.LinkPin("other-relay.example", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
             )
             .build()
 
-        assertThrows(SSLPeerUnverifiedException::class.java) { factory.newCall(linkRequest).execute() }
-        assertSame(0, pinned.calls)
+        factory.newCall(linkRequest)
+
+        assertSame("the stored pin must still decide", 1, pinned.calls)
     }
 
     /** A link cannot re-authorise a server whose captured pin has gone missing. */

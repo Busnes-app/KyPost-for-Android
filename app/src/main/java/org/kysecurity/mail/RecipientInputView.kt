@@ -180,6 +180,9 @@ class RecipientInputView @JvmOverloads constructor(
         }
     }
 
+    /** The typed, not yet chipped, text when it is a whole address; for the lock and rotation snapshot. */
+    fun typedAddress(): String? = field.text.toString().trim(' ', ',').takeIf { it.isNotBlank() && isValidEmailFormat(it) }
+
     /** Turns typed text into a chip. Only chips are recipients, so Send and Save call this first:
      *  an address typed without a trailing comma used to be dropped in silence. False, with the
      *  invalid-address toast, when the text is not an address. */

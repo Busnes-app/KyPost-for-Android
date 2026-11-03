@@ -135,6 +135,11 @@ class ComposeActivity : LockedActivity() {
      *  *already hold* the body, which is what this mirror is for. */
     private var mirroredBodyHtml: String = ""
 
+    /** A blank composition's body as opened (the signature at most), as set and as the editor
+     *  first exports it. Such a body is not content: cached, it hijacked the next Reply. */
+    private val untouchedBodies = mutableSetOf<String>()
+    private var awaitingFirstExport = false
+
     /** What [ComposeDraftCache] handed this instance on the way in, so a test can assert that a
      *  teardown did not throw the draft away. Holds no plaintext the cache did not already hold. */
     @androidx.annotation.VisibleForTesting
@@ -201,7 +206,11 @@ class ComposeActivity : LockedActivity() {
 
     private val bodyMirror = object : Runnable {
         override fun run() {
-            bodyEditor.exportHtml { mirroredBodyHtml = it }
+            bodyEditor.exportHtml {
+                if (awaitingFirstExport) untouchedBodies += it
+                awaitingFirstExport = false
+                mirroredBodyHtml = it
+            }
             mainHandler.postDelayed(this, BODY_MIRROR_INTERVAL_MS)
         }
     }
@@ -382,6 +391,10 @@ class ComposeActivity : LockedActivity() {
             bccInput.setInitialRecipients(prefill.bcc)
             mirroredBodyHtml = bodyHtml
             bodyEditor.setHtml(bodyHtml)
+            if (prefilledHtml.isBlank()) {
+                untouchedBodies += bodyHtml
+                awaitingFirstExport = true
+            }
 
             // A forward's attachments, handed over out-of-band because they are far too large for
             // an Intent extra — see [ForwardAttachmentHandoff].
@@ -1444,14 +1457,15 @@ class ComposeActivity : LockedActivity() {
         // re-saving would put a stale copy back for whoever opens Compose next.
         bodyEditor.exportHtml { html ->
             if (isDestroyed) return@exportHtml
-            ComposeDraftCache.save(snapshot.copy(bodyHtml = html), System.identityHashCode(this))
+            ComposeDraftCache.save(snapshot.withBody(html), System.identityHashCode(this))
         }
     }
 
-    private fun currentDraft(bodyHtml: String) = CachedDraft(
-        to = toInput.commaJoinedRecipients(),
-        cc = ccInput.commaJoinedRecipients(),
-        bcc = bccInput.commaJoinedRecipients(),
+    private fun currentDraft(bodyHtml: String): CachedDraft = CachedDraft(
+        // Typed-but-unchipped addresses too, or a lock or rotation drops them.
+        to = joinRecipients(toInput.commaJoinedRecipients(), toInput.typedAddress()),
+        cc = joinRecipients(ccInput.commaJoinedRecipients(), ccInput.typedAddress()),
+        bcc = joinRecipients(bccInput.commaJoinedRecipients(), bccInput.typedAddress()),
         subject = subjectField.text.toString(),
         bodyHtml = bodyHtml,
         attachments = attachments.toList(),
@@ -1459,7 +1473,13 @@ class ComposeActivity : LockedActivity() {
         sign = signChip.isChecked,
         replyTo = replyTo,
         sourceDraft = sourceDraft,
-    )
+    ).withBody(bodyHtml)
+
+    /** An untouched blank composition is no draft, however much signature it carries. */
+    private fun CachedDraft.withBody(html: String): CachedDraft {
+        val rest = copy(bodyHtml = "")
+        return if (html in untouchedBodies && !rest.hasContent()) rest else copy(bodyHtml = html)
+    }
 
     /** Back on a finishing Activity drops the draft in [onStop]; typed mail must not go in silence.
      *  The mirror decides first, as in [onStop]: the async export only upgrades a blank mirror, and
@@ -1498,14 +1518,15 @@ class ComposeActivity : LockedActivity() {
             .create().showSecurely()
     }
 
+    /** Closed by the lock before anything was shown: nothing typed, so replay the request after unlock. */
+    override fun onRedirectingToUnlock(beforeShown: Boolean) {
+        if (beforeShown && intent.isExternalComposeIntent()) PendingExternalCompose.hold(intent)
+    }
+
     override fun onDestroy() {
         if (handoffBusy) handoffOpener.cancel()
         super.onDestroy()
         ComposeDraftCache.closed(System.identityHashCode(this))
-        // Closed by the lock redirect before anything was shown: nothing typed, so replay the request.
-        if (redirectedToUnlock && !this::toInput.isInitialized && intent.isExternalComposeIntent()) {
-            PendingExternalCompose.hold(intent)
-        }
         // Both hold message plaintext, and neither is reachable from InMemoryPlaintext.clearAll().
         // Whatever the cache needed is already in it by now — onStop saved synchronously.
         mirroredBodyHtml = ""

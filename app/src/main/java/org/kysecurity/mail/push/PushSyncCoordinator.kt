@@ -99,10 +99,14 @@ class PushSyncCoordinator(
             ?: fetchRegistrationCredential()
             ?: return NativeRegistrationResult.Error(UNAVAILABLE_CREDENTIAL)
 
+        // The link's pin re-pins the pinned server only for the SAME account (owner decision); for a
+        // replacement it is dropped, so the stored pin decides as it always did.
+        val registering = if (isReplacement && repository.currentTlsPin() != null) pairing.copy(spkiPin = null) else pairing
+
         // NonCancellable: the server has already invalidated the previous secret by the time it answers.
         withContext(NonCancellable) {
             val result = registrationClient.register(
-                pairing = pairing,
+                pairing = registering,
                 token = credential.token,
                 transport = credential.transport,
                 p256dh = credential.p256dh,

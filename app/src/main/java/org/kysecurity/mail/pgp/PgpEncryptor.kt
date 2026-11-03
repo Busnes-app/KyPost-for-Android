@@ -153,7 +153,7 @@ internal object PgpEncryptor {
      *  algorithm can, so a newer RSA authentication subkey was chosen and the recipient could not
      *  decrypt. No flags asserted at all falls back to the algorithm. */
     private fun PGPPublicKey.mayEncrypt(primary: PGPPublicKey): Boolean {
-        val flags = keyFlagsAssertedBy(primary)
+        val flags = newestKeyFlagsAssertedBy(primary)
         if (flags == 0) return true
         return flags and (org.bouncycastle.bcpg.sig.KeyFlags.ENCRYPT_COMMS or org.bouncycastle.bcpg.sig.KeyFlags.ENCRYPT_STORAGE) != 0
     }

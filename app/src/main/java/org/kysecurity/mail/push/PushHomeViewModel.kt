@@ -27,8 +27,7 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
 
     private val isWorking = MutableStateFlow(false)
     private val localMessage = MutableStateFlow<String?>(null)
-    private val pendingApproval = MutableStateFlow<PendingApprovalUi?>(null)
-    private var approvalJob: Job? = null
+    private val pendingApproval = ApprovalWait.card
 
     /** One element per registration that succeeded; conflated, so a stopped screen still gets it. */
     private val pairedChannel = Channel<Unit>(Channel.CONFLATED)
@@ -125,28 +124,24 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
     /** Shows the waiting-for-approval card and polls until the web page decides. Internal so the
      *  instrumented screenshot test can show the card without a server. */
     internal fun awaitApproval(pending: NativeRegistrationResult.Pending) {
-        approvalJob?.cancel()
-        pendingApproval.value = PendingApprovalUi(
-            approvalCode = pending.approvalCode,
-            serverHost = pairingUrlHost(pending.pairing.serverUrl) ?: pending.pairing.serverUrl,
-        )
         // The app's scope, not this screen's: the user approves in a browser, and coming back past
         // the app lock finishes this screen. Cancelling then wiped a secret the web had approved.
-        // Cancel still stops it, and the coordinator wipes the pending secret on every way out.
         val approvalScope = (getApplication<Application>() as? org.kysecurity.mail.KyPostApp)?.appScope ?: scope
-        approvalJob = approvalScope.launch {
+        ApprovalWait.start(
+            PendingApprovalUi(
+                approvalCode = pending.approvalCode,
+                serverHost = pairingUrlHost(pending.pairing.serverUrl) ?: pending.pairing.serverUrl,
+            ),
+            approvalScope,
+        ) {
             val result = graph.syncCoordinator.awaitApproval(pending)
-            pendingApproval.value = null
+            // This screen may be gone; the next one reads the pairing from the store.
             reportPairing(result)
         }
     }
 
     /** Cancel on the waiting card: stops polling and drops the pending credentials. */
-    fun cancelApproval() {
-        approvalJob?.cancel()
-        approvalJob = null
-        pendingApproval.value = null
-    }
+    fun cancelApproval() = ApprovalWait.cancel()
 
     private fun reportPairing(result: NativeRegistrationResult) {
         if (result is NativeRegistrationResult.Success) {
@@ -177,6 +172,8 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun unpairDevice() {
+        // A request still waiting would pair the device again the moment the web approved it.
+        ApprovalWait.cancel()
         // NonCancellable, escalation included: leaving the screen mid-unpair cancelled this in the
         // deregister or halfway through the purge, leaving the device paired or its data behind.
         scope.launch {
@@ -253,6 +250,51 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
         scope.cancel()
         super.onCleared()
     }
+}
+
+/** The one device-approval wait, held for the process rather than one pairing screen: the app
+ *  lock finishes that screen, and the next one must still show the card and be able to cancel it.
+ *  A newer pairing link, an unpair and a session reset (wipe) cancel it. The coordinator wipes
+ *  the pending secret on every way out. */
+internal object ApprovalWait : org.kysecurity.mail.ProcessScopedState {
+    val card = MutableStateFlow<PendingApprovalUi?>(null)
+    private var job: Job? = null
+
+    init {
+        org.kysecurity.mail.ProcessState.register(this)
+    }
+
+    @Synchronized
+    fun start(ui: PendingApprovalUi, scope: CoroutineScope, wait: suspend () -> Unit) {
+        job?.cancel()
+        card.value = ui
+        lateinit var started: Job
+        started = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            try {
+                wait()
+            } finally {
+                finished(started)
+            }
+        }
+        job = started
+        started.start()
+    }
+
+    @Synchronized
+    private fun finished(which: Job) {
+        if (job !== which) return
+        job = null
+        card.value = null
+    }
+
+    @Synchronized
+    fun cancel() {
+        job?.cancel()
+        job = null
+        card.value = null
+    }
+
+    override fun resetForNewSession() = cancel()
 }
 
 data class PushHomeUiState(

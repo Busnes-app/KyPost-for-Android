@@ -171,6 +171,54 @@ class PgpEncryptorKeyValidationTest {
         org.junit.Assert.assertEquals(encryption.keyID, firstPkedKeyId((result as EncryptResult.Ok).armored))
     }
 
+    /** A subkey once bound for encryption and later rebound for authentication only: the newer
+     *  binding is what holds, so encryption goes to the other subkey. */
+    @Test
+    fun aRebindingForAuthenticationRevokesEncryption() {
+        val gen = RSAKeyPairGenerator()
+        gen.init(RSAKeyGenerationParameters(BigInteger.valueOf(0x10001), SecureRandom(), 2048, 12))
+        val now = Date()
+        fun flags(value: Int) = org.bouncycastle.openpgp.PGPSignatureSubpacketGenerator()
+            .apply { setKeyFlags(false, value) }.generate()
+        val encryptFlags = org.bouncycastle.bcpg.sig.KeyFlags.ENCRYPT_COMMS or org.bouncycastle.bcpg.sig.KeyFlags.ENCRYPT_STORAGE
+        val primary = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, gen.generateKeyPair(), now)
+        val encryption = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, gen.generateKeyPair(), now)
+        val rebound = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, gen.generateKeyPair(), Date(now.time + 60_000))
+        val generator = PGPKeyRingGenerator(
+            PGPSignature.POSITIVE_CERTIFICATION,
+            primary,
+            "Bob <bob@example.invalid>",
+            BcPGPDigestCalculatorProvider().get(HashAlgorithmTags.SHA1),
+            flags(org.bouncycastle.bcpg.sig.KeyFlags.CERTIFY_OTHER or org.bouncycastle.bcpg.sig.KeyFlags.SIGN_DATA),
+            null,
+            BcPGPContentSignerBuilder(primary.publicKey.algorithm, HashAlgorithmTags.SHA256),
+            null,
+        ).apply {
+            addSubKey(encryption, flags(encryptFlags), null)
+            addSubKey(rebound, flags(encryptFlags), null)
+        }
+        val ring = generator.generatePublicKeyRing()
+        val primaryPriv = generator.generateSecretKeyRing().secretKey.extractPrivateKey(
+            BcPBESecretKeyDecryptorBuilder(BcPGPDigestCalculatorProvider()).build(CharArray(0)),
+        )
+        val reboundPub = ring.getPublicKey(rebound.keyID)
+        val sigGen = PGPSignatureGenerator(BcPGPContentSignerBuilder(primary.publicKey.algorithm, HashAlgorithmTags.SHA256), primary.publicKey)
+        sigGen.init(PGPSignature.SUBKEY_BINDING, primaryPriv)
+        sigGen.setHashedSubpackets(
+            org.bouncycastle.openpgp.PGPSignatureSubpacketGenerator().apply {
+                setKeyFlags(false, org.bouncycastle.bcpg.sig.KeyFlags.AUTHENTICATION)
+                setSignatureCreationTime(false, Date(now.time + 120_000))
+            }.generate(),
+        )
+        val rebinding = sigGen.generateCertification(primary.publicKey, reboundPub)
+        val reboundRing = PGPPublicKeyRing.insertPublicKey(ring, PGPPublicKey.addCertification(reboundPub, rebinding))
+
+        val result = PgpEncryptor.encrypt("x".toByteArray(), listOf(armor(reboundRing.encoded)), null as CharArray?)
+
+        assertTrue("$result", result is EncryptResult.Ok)
+        org.junit.Assert.assertEquals(encryption.keyID, firstPkedKeyId((result as EncryptResult.Ok).armored))
+    }
+
     private fun firstPkedKeyId(armoredMessage: String): Long {
         val factory = JcaPGPObjectFactory(
             PGPUtil.getDecoderStream(armoredMessage.byteInputStream(Charsets.UTF_8)),

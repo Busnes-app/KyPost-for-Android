@@ -969,6 +969,14 @@ class EmailDetailActivityTest {
         assertEquals(R.string.email_pgp_attachments_omitted, decryptedAttachmentNotice(omitted = true))
     }
 
+    @Test
+    fun quotedPlainText_isTextWithItsLineBreaks() {
+        assertEquals(
+            "Bob &lt;bob@x&gt;<br>&lt;a href=&quot;https://e&quot;&gt;x&lt;/a&gt;",
+            quotedPlainText("Bob <bob@x>\n<a href=\"https://e\">x</a>"),
+        )
+    }
+
     /** multipart/alternative: the HTML part the MIME reader chose is rendered, not the text one. */
     @Test
     fun decryptedPlainText_letsTheChosenHtmlPartWin() {

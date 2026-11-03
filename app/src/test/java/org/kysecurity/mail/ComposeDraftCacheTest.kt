@@ -44,6 +44,15 @@ class ComposeDraftCacheTest {
         assertNull(ComposeDraftCache.takeOnOpen(newExternalRequest = false))
         ComposeDraftCache.closed(2)
 
+        // Not restoring another screen's draft must still unseal, or this screen's saves vanish.
+        ComposeDraftCache.clear()
+        ComposeDraftCache.opened(4)
+        assertNull(ComposeDraftCache.takeOnOpen(newExternalRequest = false))
+        ComposeDraftCache.save(draft(subject = "Reply"), screen = 4)
+        assertEquals("Reply", ComposeDraftCache.take()?.subject)
+        ComposeDraftCache.closed(4)
+        ComposeDraftCache.save(draft(subject = "Mine"), screen = 1)
+
         ComposeDraftCache.closed(1)
         ComposeDraftCache.opened(3)
         assertEquals("Mine", ComposeDraftCache.takeOnOpen(newExternalRequest = false)?.subject)

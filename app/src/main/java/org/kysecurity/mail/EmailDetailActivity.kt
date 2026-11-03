@@ -1447,7 +1447,7 @@ class EmailDetailActivity : LockedActivity() {
         // A plain body is text: parsed as HTML its line breaks collapsed, `<bob@x>` vanished, and
         // literal `<a href>` text became a live link in the reply.
         if (fetchedBodyMode.trim().equals("plain", ignoreCase = true)) {
-            then(TextUtils.htmlEncode(body).replace("\n", "<br>"))
+            then(quotedPlainText(body))
             return
         }
         ioExecutor.execute {
@@ -1706,13 +1706,13 @@ internal fun emailBodyToHtml(body: String, mode: String): String {
     return "<div class=\"kypost-plain-text\">${escapeEmailText(body)}</div>"
 }
 
-/** Selects native wrapping for explicit plain bodies and old rows whose mode was not persisted. */
 /** The decrypted body for the native text view, or null for the WebView. The part the MIME reader
  *  chose (HTML when there is any) decides, as for a relay body; an alternative text part never
  *  hides it. */
 internal fun decryptedPlainText(body: org.kysecurity.mail.pgp.DecryptedBody): String? =
     (body.html?.takeIf { it.isNotBlank() } ?: body.plain)?.takeIf { isPlainTextBody(it, body.bodyMode) }
 
+/** Selects native wrapping for explicit plain bodies and old rows whose mode was not persisted. */
 internal fun isPlainTextBody(body: String, mode: String): Boolean = when (mode.trim().lowercase()) {
     // Some relay/cache rows incorrectly label Markdown/plain content as HTML. Keep real markup in
     // WebView, but let text-only bodies use the native wrapping view even when that label is wrong.
@@ -1919,6 +1919,9 @@ private fun escapeEmailText(text: String): String = text
     .replace("<", "&lt;")
     .replace(">", "&gt;")
     .replace("\"", "&quot;")
+
+/** A plain body quoted into a reply: escaped text with its line breaks, never parsed as HTML. */
+internal fun quotedPlainText(body: String): String = escapeEmailText(body).replace("\n", "<br>")
 
 /** True only for [ReadOutcome.FetchFailed]; NoEncryptedContent is terminal, so no Retry. */
 internal fun showsRetryButton(outcome: ReadOutcome): Boolean = outcome is ReadOutcome.FetchFailed

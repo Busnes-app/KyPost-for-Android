@@ -44,7 +44,13 @@ object ComposeDraftCache : ProcessScopedState {
      *  an unrelated draft would replace what the sending app asked the user to send. Recreating
      *  that screen (a rotation) is the same composition and takes its own draft back. */
     fun takeOnOpen(newExternalRequest: Boolean): CachedDraft? {
-        if (!newExternalRequest) return if (owner != 0 && owner in liveScreens) null else take()
+        if (!newExternalRequest) {
+            if (owner == 0 || owner !in liveScreens) return take()
+            // Not ours to restore, but this is still a live session: unseal so this screen's own
+            // saves count, as take() would.
+            sealed = false
+            return null
+        }
         resetForNewSession()
         take() // Unseals, so this new composition can survive a lock teardown.
         return null
@@ -52,6 +58,7 @@ object ComposeDraftCache : ProcessScopedState {
 
     fun clear() {
         draft = null
+        owner = 0
         sealed = true
     }
 
