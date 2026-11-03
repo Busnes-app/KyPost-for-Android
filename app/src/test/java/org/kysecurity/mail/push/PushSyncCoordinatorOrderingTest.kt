@@ -96,6 +96,32 @@ class PushSyncCoordinatorOrderingTest {
         assertEquals(listOf("register:secret-1", "persist:secret-1", "register:secret-2", "persist:secret-2"), events)
     }
 
+    /** An unpair tapped while a resync is in flight used to clear first, after which the resync's
+     *  late reply persisted its fresh secret and re-paired the device. Held, the unpair runs after
+     *  the persist and clears what it wrote. */
+    @Test
+    fun anUnpairWaitsForTheRegistrationInFlight() = runBlocking {
+        val store = FakePushStore(pairing = existing)
+        val registering = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val coordinator = coordinator(store, { req ->
+            store.events += "register:secret-1"
+            registering.countDown()
+            release.await(5, TimeUnit.SECONDS)
+            response(req, body("secret-1"), 200)
+        })
+
+        val resync = async(Dispatchers.IO) { coordinator.syncProvidedToken("token-a") }
+        assertTrue(registering.await(5, TimeUnit.SECONDS))
+        val unpair = async(Dispatchers.IO) { coordinator.withRegistrationsHeld { store.clearPairing() } }
+        Thread.sleep(200)
+        release.countDown()
+        listOf(resync, unpair).awaitAll()
+
+        assertEquals(listOf("register:secret-1", "persist:secret-1", "clearPairing"), store.events.take(3))
+        assertNull(store.currentPairing())
+    }
+
     /** The reviewer's exact scenario: a valid replacement QR confirmed while offline. The old
      *  account used to be deleted before the token fetch that then failed. */
     @Test

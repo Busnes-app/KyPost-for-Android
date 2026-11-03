@@ -173,7 +173,9 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
     fun unpairDevice() {
         scope.launch {
             isWorking.value = true
-            val result = graph.repository.unpairDevice(graph.deregisterClient)
+            val result = graph.syncCoordinator.withRegistrationsHeld {
+                graph.repository.unpairDevice(graph.deregisterClient)
+            }
             localMessage.value = when (val network = result.deregister) {
                 is DeregisterResult.Success -> "Device unpaired"
                 is DeregisterResult.Error -> "Unpaired locally (server update failed: ${network.message})"

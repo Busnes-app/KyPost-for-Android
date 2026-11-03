@@ -267,6 +267,11 @@ class PushSyncCoordinator(
         return syncCurrentPairingToken()
     }
 
+    /** Runs [block] (an unpair) with no registration in flight. A resync whose reply landed after
+     *  the unpair's clear persisted its fresh secret and re-paired the device; inside the gate, an
+     *  in-flight one finishes first and the unpair then revokes the secret it minted. */
+    suspend fun <T> withRegistrationsHeld(block: suspend () -> T): T = registrationGate.withLock { block() }
+
     /** Queues UnifiedPush callback work. Call it from the callback itself: arrival order is run order. */
     fun enqueueUnifiedPush(event: suspend PushSyncCoordinator.() -> Unit) {
         unifiedPushEvents.trySend(event)
