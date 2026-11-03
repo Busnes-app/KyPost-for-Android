@@ -62,7 +62,10 @@ they leave the app.
 2. **Pairing link → app.** Pairing is trust-on-first-use. A pin carried in the pairing link
    narrows the TOFU window to one key; a pin that does not parse fails the pairing
    (`normalizeSpkiPin`). The registration URL must be same-origin with the server
-   (`push/NativeRegistration.kt`).
+   (`push/NativeRegistration.kt`). A user-confirmed link for the host already pinned re-pins it:
+   its registration (and approval poll) is pinned to the link's key instead of the stored one, so
+   a renewed leaf needs no teardown. That is the exposure "Reconnect to server" then a scan
+   already had; a link for any other host is still refused.
 3. **Mail content → renderer.** HTML is cleaned with jsoup's `Safelist.relaxed()`
    (`mail/QuotedHtmlSanitizer.kt`). The WebView has JavaScript, file access, content access and
    DOM storage off and network loads blocked. Navigation needs a real tap on an `http`, `https`,

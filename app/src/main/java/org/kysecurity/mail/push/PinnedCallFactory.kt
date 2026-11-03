@@ -56,7 +56,12 @@ class PinnedOrFallbackCallFactory(
             // mismatch means the pairing moved under an in-flight call: refuse, and let the caller
             // retry against the pin that is current.
             return if (request.url.host.equals(pin.host, ignoreCase = true)) {
-                pinned.newCall(request)
+                // A confirmed pairing link's own pin re-pins the same server (owner decision on
+                // certificate pinning): a renewed leaf no longer needs "Reconnect" before the scan.
+                // Only link-driven registration and its approval poll carry the tag, never a stored
+                // pairing; finishPairing stores the leaf this call validates. Exposure is that of
+                // Reconnect-then-scan, one step shorter. Other hosts are still refused below.
+                linkPinnedCall(request) ?: pinned.newCall(request)
             } else {
                 FailedCall(
                     request,
@@ -91,6 +96,8 @@ class PinnedOrFallbackCallFactory(
     /** Null when the request carries no link pin, so the caller falls back to the TOFU window. */
     private fun linkPinnedCall(request: Request): Call? {
         val linkPin = request.tag(org.kysecurity.mail.LinkPin::class.java) ?: return null
+        // CertificatePinner passes every host it has no pin for: the pin must be for THIS host.
+        if (!linkPin.host.equals(request.url.host, ignoreCase = true)) return null
         // Built for this call and dropped with it. These were cached, keyed by the pin, behind a
         // comment claiming the map was "bounded in practice" — it was keyed by whatever host and
         // pin a BROWSABLE pairing link supplied, so any app on the device could grow it without
