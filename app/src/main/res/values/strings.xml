@@ -757,9 +757,9 @@
     <string name="security_verifier_unavailable">This device\'s secure key store has changed, so your PIN can no longer be checked. This attempt was not counted. Reinstall the app to set it up again.</string>
     <string name="security_change_pin_secret_unreadable">Your PIN was not changed. The paired credential could not be read with your current PIN, and changing it would make this device unable to reach the server. Unpair and pair again to fix this.</string>
     <string name="security_hostile_location_confirm_enable_title">Turn on Hostile Location Protection?</string>
-    <string name="security_hostile_location_confirm_enable_body">This erases every message cached on this device, removes the contacts this app added to your phone, and restarts the app. Mail is kept in memory only from now on.</string>
+    <string name="security_hostile_location_confirm_enable_body">This erases every message cached on this device, contact changes not yet synced, and the keys you verified in person. It removes the contacts this app added to your phone and restarts the app. Mail is kept in memory only from now on.</string>
     <string name="security_hostile_location_confirm_disable_title">Turn off Hostile Location Protection?</string>
-    <string name="security_hostile_location_confirm_disable_body">This erases every message cached on this device and restarts the app. Mail is written to this device again from now on.</string>
+    <string name="security_hostile_location_confirm_disable_body">This erases every message cached on this device, contact changes not yet synced, and the keys you verified in person, then restarts the app. Mail is written to this device again from now on.</string>
     <string name="security_hostile_location_confirm_positive">Continue</string>
 
     <string name="email_link_no_handler">No app can open that link</string>
