@@ -4,6 +4,7 @@ import org.kysecurity.mail.data.AppDatabase
 import org.kysecurity.mail.data.ContactEntity
 import org.kysecurity.mail.data.PendingContactChangeEntity
 import org.kysecurity.mail.data.RecipientPinEntity
+import org.kysecurity.mail.ProcessState
 import org.kysecurity.mail.pgp.PgpFingerprint
 import org.kysecurity.mail.pgp.withVerifiedRevocation
 import org.kysecurity.mail.push.PairingData
@@ -54,9 +55,25 @@ class ContactSyncRepository(
         }
 
     /** Recorded before unlocking, so a waiting caller cannot record ahead of this one. */
-    suspend fun sync(): ContactSyncOutcome = syncMutex.withLock { syncLocked().also(health::record) }
+    suspend fun sync(): ContactSyncOutcome = syncMutex.withLock {
+        val session = ProcessState.generation()
+        try {
+            syncLocked(session)
+        } catch (_: SessionEnded) {
+            // An unpair or wipe ran while the reply was in flight; its rows must not come back.
+            ContactSyncOutcome.NotPaired
+        }.also(health::record)
+    }
 
-    private suspend fun syncLocked(): ContactSyncOutcome = run {
+    private class SessionEnded : Exception()
+
+    /** Called INSIDE each write transaction: a purge advances the generation before it clears, so
+     *  a reply either commits before that clear (and is purged) or sees the session over. */
+    private fun requireSession(session: Long) {
+        if (!ProcessState.isCurrent(session)) throw SessionEnded()
+    }
+
+    private suspend fun syncLocked(session: Long): ContactSyncOutcome = run {
         val pairing = pairingProvider() ?: return@run ContactSyncOutcome.NotPaired
         val deviceId = pairing.deviceId
         val deviceSecret = pairing.deviceSecret
@@ -101,7 +118,7 @@ class ContactSyncRepository(
                 continue
             }
             val response = (result as? ContactSyncResult.Success)?.response ?: return@run failureOutcome(result)
-            applyDelta(pairing.subscriberId, response, batch.map { it.first }, advanceCursor = !snapshotOwed)
+            applyDelta(session, pairing.subscriberId, response, batch.map { it.first }, advanceCursor = !snapshotOwed)
             // Keep pushing on the stale cursor once tooOld: the server keeps answering tooOld
             // without contact lists, and one full pull below replaces them all.
             tooOld = tooOld || response.tooOld
@@ -114,7 +131,7 @@ class ContactSyncRepository(
         while (pullFrom != null) {
             val result = client.pull(pairing.serverUrl, deviceId, deviceSecret, pullFrom)
             val response = (result as? ContactSyncResult.Success)?.response ?: return@run failureOutcome(result)
-            applyDelta(pairing.subscriberId, response, emptyList(), snapshot = pullFrom == 0L)
+            applyDelta(session, pairing.subscriberId, response, emptyList(), snapshot = pullFrom == 0L)
             pullFrom = if (response.tooOld && pullFrom != 0L) 0L else null
         }
 
@@ -260,6 +277,7 @@ class ContactSyncRepository(
 
     /** [snapshot] marks a since=0 reply: every live contact, so absence means deleted. */
     private suspend fun applyDelta(
+        session: Long,
         subscriberId: String,
         response: ContactSyncPullResponseDto,
         flushedChanges: List<PendingContactChangeEntity>,
@@ -271,6 +289,7 @@ class ContactSyncRepository(
             // they are already persisted and the outbox rows are cleared. Only the cursor is
             // discarded; sync() follows with a since=0 snapshot.
             db.withTransaction {
+                requireSession(session)
                 cursorStore.resetCursor(subscriberId)
                 if (flushedChanges.isNotEmpty()) {
                     db.pendingContactChangeDao().clearFlushed(flushedChanges.map { it.id })
@@ -280,6 +299,7 @@ class ContactSyncRepository(
         }
 
         db.withTransaction {
+            requireSession(session)
             // Keys verified on this device live in recipient_pins. Sync never adds to them; the one
             // thing it may do is revoke one, and that is stored here, with the sync that brought
             // it, so it holds after the synced contact itself is replaced or removed.
