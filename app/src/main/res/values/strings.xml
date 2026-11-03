@@ -41,7 +41,13 @@
     <string name="settings_pairing_body">Push pairing and notification transport</string>
     <string name="settings_pgp_body">Show or scan PGP key QR codes</string>
     <string name="settings_signature">Signature</string>
-    <string name="settings_signature_body">Added to new messages, replies and forwards, above any quoted text</string>
+    <string name="settings_signature_body">A signature for mail you write on this device</string>
+    <string name="signature_enabled">Add a signature</string>
+    <string name="signature_on_reply">Add to replies</string>
+    <string name="signature_on_forward">Add to forwards</string>
+    <string name="signature_device_only_note">Used only on this device. Your web signature is set in KyPost on the web.</string>
+    <string name="signature_too_long">Signatures can be at most %1$,d characters. This one has %2$,d.</string>
+    <string name="signature_control_character">Signatures can\'t contain control characters or text-direction characters. Remove them to save.</string>
     <string name="signature_hint">Your name, title, phone…</string>
     <string name="save">Save</string>
     <string name="settings_about_body">Version and license</string>

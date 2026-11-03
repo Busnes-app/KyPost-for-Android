@@ -754,15 +754,23 @@ Owns production Android app code and resources.
   `check-status-colours.mjs` (180 checks): a new or changed half must pass it.
 - `SettingsActivity` is only a hub for existing settings surfaces: Security, Themes, Keywords,
   Pairing, PGP Key, Signature, and About. Keep settings logic in the destination screens rather
-  than duplicating it in the hub; Signature's destination is `showSignatureDialog`.
-- The signature (`MailSignature.kt`) is plain text only, at most 1000 characters, in its own
-  private preferences file. It is account data: the pairing purge deletes the file, and so does
-  a security wipe. It is a user-typed setting, not mail metadata, so Hostile Location Protection
-  does not suppress it. Compose escapes it (`plainTextToHtml`) and puts it after an RFC 3676
-  `-- ` delimiter, above any quote (`withSignature`). It goes on new messages, replies and
-  forwards, but never above text another app shared in, which is the message itself. A
-  signature-only body counts as content, so Back on an untouched composer prompts once.
-  `ComposeSignatureTest` covers the escaping and the share exclusion.
+  than duplicating it in the hub; Signature's destination is `SignatureSettingsActivity`.
+- The signature (`MailSignature.kt`) is this device's own ("mobile signature"), separate from the
+  web signatures KyPost-Server stores: the app never fetches or uses those. Plain text in its own
+  private preferences file (not Keystore, not synced), with an on/off switch (off for a new
+  install; a signature saved before the switch existed stays on) and "Add to replies" / "Add to
+  forwards" (on). Text follows the server's `config/signatures.go` rules (`signatureProblem`): at
+  most 2000 code points, no control characters but newline and tab, no bidi override or isolate
+  characters; refused text is shown inline and not saved. It is account data: the pairing purge
+  deletes the file, and so does a security wipe. It is a user-typed setting, not mail metadata, so
+  Hostile Location Protection does not suppress it. Compose escapes it and places it as web does
+  (`withSignature`, KyPost-Server `docs/SIGNATURES.md`): a blank line each side, above any quote,
+  no `-- ` delimiter. `EmailDetailActivity` passes `EXTRA_KIND` (internal launches only) so the
+  reply/forward switches apply. Inserted once on open, never into a restored or edited draft nor
+  above text another app shared in; edits in the body are left alone. A signature-only body
+  counts as content, so Back on an untouched composer prompts once. `MailSignatureTest` covers
+  the rules and placement; `ComposeSignatureTest` the escaping, switches, restored draft, share
+  exclusion and persistence.
 - Primary navigation uses `bottom_nav_menu.xml` for both phone bottom navigation and the rail on
   Inbox, Compose, Contacts, and Settings. The rail shows on `w600dp` windows (the Material medium
   width class: an unfolded book-style foldable, a tablet, a phone turned sideways) **and** on

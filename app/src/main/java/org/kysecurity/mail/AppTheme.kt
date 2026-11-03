@@ -833,6 +833,14 @@ private fun applyThemeToViewTree(view: View, palette: ThemePalette) {
             val padV = (12 * density).toInt()
             view.setPadding(padH, maxOf(padV, view.paddingTop), padH, maxOf(padV, view.paddingBottom))
         }
+        // Before Button, which SwitchCompat extends: a switch is a labelled row, not a filled button.
+        is androidx.appcompat.widget.SwitchCompat -> {
+            val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+            view.setTextColor(inkStrong)
+            view.background = null
+            view.thumbTintList = ColorStateList(states, intArrayOf(accent, ink))
+            view.trackTintList = ColorStateList(states, intArrayOf(Color.parseColor(palette.accentSoft), Color.parseColor(palette.line)))
+        }
         // Before Button, which CheckBox and RadioButton extend.
         is CheckBox, is RadioButton -> {
             applyCheckBoxTheme(view.context, view as CompoundButton)

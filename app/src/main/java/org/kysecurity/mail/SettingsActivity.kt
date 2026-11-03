@@ -63,7 +63,7 @@ class SettingsActivity : LockedActivity() {
             startActivity(Intent(this, PgpKeyActivity::class.java))
         }
         findViewById<View>(R.id.settingsSignature).setOnClickListener {
-            showSignatureDialog(this)
+            startActivity(Intent(this, SignatureSettingsActivity::class.java))
         }
         findViewById<View>(R.id.settingsAbout).setOnClickListener {
             showAboutDialog(this)

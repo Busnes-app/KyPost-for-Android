@@ -369,10 +369,11 @@ class ComposeActivity : LockedActivity() {
             val prefilledHtml = prefill.bodyHtml
             sourceDraft = prefill.sourceDraft
             // Not above text another app asked to send, nor again on a draft that already has one.
+            // A restored draft (the branch above) never gets one either.
             val bodyHtml = if ((intent.isExternalComposeIntent() && prefilledHtml.isNotBlank()) || sourceDraft != null) {
                 prefilledHtml
             } else {
-                withSignature(prefilledHtml, plainTextToHtml(MailSignature.read(this)))
+                withSignature(prefilledHtml, MailSignature.read(this).textFor(prefill.kind))
             }
             subjectField.setText(prefill.subject)
             toInput.setInitialRecipients(prefill.to)
@@ -1532,6 +1533,8 @@ class ComposeActivity : LockedActivity() {
 
         /** A [ReplyThreadHandoff] token, never the message id itself. */
         const val EXTRA_REPLY_TOKEN = "compose_reply_token"
+        /** A [ComposeKind] name; decides whether the device signature goes in. */
+        const val EXTRA_KIND = "compose_kind"
         const val EXTRA_CC = "compose_cc"
         const val EXTRA_BCC = "compose_bcc"
         const val EXTRA_SOURCE_DRAFT_ID = "compose_source_draft_id"
