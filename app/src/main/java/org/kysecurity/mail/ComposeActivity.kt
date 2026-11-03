@@ -135,10 +135,9 @@ class ComposeActivity : LockedActivity() {
      *  *already hold* the body, which is what this mirror is for. */
     private var mirroredBodyHtml: String = ""
 
-    /** A blank composition's body as opened (the signature at most), as set and as the editor
-     *  first exports it. Such a body is not content: cached, it hijacked the next Reply. */
-    private val untouchedBodies = mutableSetOf<String>()
-    private var awaitingFirstExport = false
+    /** The signature a blank composition opened with; null for any other. A body that still reads
+     *  as just that is not content: cached, it hijacked the next Reply. */
+    private var openedSignature: String? = null
 
     /** What [ComposeDraftCache] handed this instance on the way in, so a test can assert that a
      *  teardown did not throw the draft away. Holds no plaintext the cache did not already hold. */
@@ -206,11 +205,7 @@ class ComposeActivity : LockedActivity() {
 
     private val bodyMirror = object : Runnable {
         override fun run() {
-            bodyEditor.exportHtml {
-                if (awaitingFirstExport) untouchedBodies += it
-                awaitingFirstExport = false
-                mirroredBodyHtml = it
-            }
+            bodyEditor.exportHtml { mirroredBodyHtml = it }
             mainHandler.postDelayed(this, BODY_MIRROR_INTERVAL_MS)
         }
     }
@@ -385,16 +380,16 @@ class ComposeActivity : LockedActivity() {
             } else {
                 withSignature(prefilledHtml, MailSignature.read(this).textFor(prefill.kind))
             }
+            if (intent.getBooleanExtra(PendingExternalCompose.EXTRA_FILES_DROPPED, false)) {
+                Toast.makeText(this, R.string.compose_shared_files_dropped, Toast.LENGTH_LONG).show()
+            }
             subjectField.setText(prefill.subject)
             toInput.setInitialRecipients(prefill.to)
             ccInput.setInitialRecipients(prefill.cc)
             bccInput.setInitialRecipients(prefill.bcc)
             mirroredBodyHtml = bodyHtml
             bodyEditor.setHtml(bodyHtml)
-            if (prefilledHtml.isBlank()) {
-                untouchedBodies += bodyHtml
-                awaitingFirstExport = true
-            }
+            if (prefilledHtml.isBlank() && sourceDraft == null) openedSignature = MailSignature.read(this).textFor(prefill.kind)
 
             // A forward's attachments, handed over out-of-band because they are far too large for
             // an Intent extra — see [ForwardAttachmentHandoff].
@@ -1478,7 +1473,8 @@ class ComposeActivity : LockedActivity() {
     /** An untouched blank composition is no draft, however much signature it carries. */
     private fun CachedDraft.withBody(html: String): CachedDraft {
         val rest = copy(bodyHtml = "")
-        return if (html in untouchedBodies && !rest.hasContent()) rest else copy(bodyHtml = html)
+        val signature = openedSignature
+        return if (signature != null && !rest.hasContent() && isUntouchedSignatureBody(html, signature)) rest else copy(bodyHtml = html)
     }
 
     /** Back on a finishing Activity drops the draft in [onStop]; typed mail must not go in silence.

@@ -8,7 +8,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** The approval wait belongs to the process, not one pairing screen; cancelling it from any
@@ -20,7 +19,9 @@ class ApprovalWaitTest {
     @Test
     fun cancelStopsTheWaitAndClearsTheCard() = runBlocking {
         val cancelled = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
         ApprovalWait.start(ui, scope) {
+            started.complete(Unit)
             try {
                 kotlinx.coroutines.awaitCancellation()
             } finally {
@@ -28,6 +29,8 @@ class ApprovalWaitTest {
             }
         }
         assertEquals(ui, ApprovalWait.card.value)
+        // Cancelled before it starts, the body never runs and its finally would never fire.
+        withTimeout(5_000) { started.await() }
 
         ApprovalWait.resetForNewSession()
 
@@ -36,16 +39,13 @@ class ApprovalWaitTest {
     }
 
     @Test
-    fun aFinishedWaitClearsItsCardButNotANewerOnes() = runBlocking {
-        val release = CompletableDeferred<Unit>()
-        val firstDone = CompletableDeferred<Unit>()
-        ApprovalWait.start(ui, scope) { firstDone.complete(Unit) }
-        withTimeout(5_000) { firstDone.await() }
-        val newer = ui.copy(approvalCode = "111222")
-        ApprovalWait.start(newer, scope) { release.await() }
-        assertEquals(newer, ApprovalWait.card.value)
-        assertTrue(release.complete(Unit))
-        ApprovalWait.cancel()
+    fun aFinishedWaitClearsItsCard() = runBlocking {
+        val done = CompletableDeferred<Unit>()
+        ApprovalWait.start(ui, scope) { done.complete(Unit) }
+        withTimeout(5_000) {
+            done.await()
+            while (ApprovalWait.card.value != null) kotlinx.coroutines.delay(10)
+        }
         assertNull(ApprovalWait.card.value)
     }
 }

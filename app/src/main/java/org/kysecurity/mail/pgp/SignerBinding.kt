@@ -59,15 +59,27 @@ private fun org.bouncycastle.openpgp.PGPPublicKey.canSign(
     return isEncryptionKey.not() || isMasterKey
 }
 
-/** The flags of [primary]'s NEWEST hashed key-flags signature: a rebinding replaces what an
- *  older one granted (an encryption subkey later rebound for authentication must not encrypt). */
+/** A subkey's flags from [primary]'s NEWEST binding that VERIFIES: a rebinding replaces what an
+ *  older one granted (an encryption subkey rebound for authentication must not encrypt), and an
+ *  unverifiable one appended to the key changes nothing. The primary's own flags stay OR-ed over
+ *  its self-signatures, which can only add to them. */
 internal fun org.bouncycastle.openpgp.PGPPublicKey.newestKeyFlagsAssertedBy(
     primary: org.bouncycastle.openpgp.PGPPublicKey,
-): Int = signatures.asSequence()
-    .filterIsInstance<org.bouncycastle.openpgp.PGPSignature>()
-    .filter { it.keyID == primary.keyID && it.hashedSubPackets?.hasSubpacket(org.bouncycastle.bcpg.SignatureSubpacketTags.KEY_FLAGS) == true }
-    .maxByOrNull { it.creationTime.time }
-    ?.hashedSubPackets?.keyFlags ?: 0
+): Int {
+    if (isMasterKey) return keyFlagsAssertedBy(primary)
+    val verifier = org.bouncycastle.openpgp.operator.bc.BcPGPContentVerifierBuilderProvider()
+    return getSignaturesOfType(org.bouncycastle.openpgp.PGPSignature.SUBKEY_BINDING).asSequence()
+        .filterIsInstance<org.bouncycastle.openpgp.PGPSignature>()
+        .filter { it.hashedSubPackets?.hasSubpacket(org.bouncycastle.bcpg.SignatureSubpacketTags.KEY_FLAGS) == true }
+        .filter { signature ->
+            runCatching {
+                signature.init(verifier, primary)
+                signature.verifyCertification(primary, this)
+            }.getOrDefault(false)
+        }
+        .maxByOrNull { it.creationTime.time }
+        ?.hashedSubPackets?.keyFlags ?: 0
+}
 
 /** Only [primary]'s signatures, and only hashed subpackets — an unhashed flag grants nothing. */
 private fun org.bouncycastle.openpgp.PGPPublicKey.keyFlagsAssertedBy(

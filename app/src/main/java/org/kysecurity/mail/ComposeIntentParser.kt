@@ -83,7 +83,7 @@ internal fun joinRecipients(vararg parts: String?): String =
 /** A mailto/share request the app-lock redirect closed before the screen was shown, replayed once
  *  by [MainActivity] after unlock; it used to land the user in the Inbox with the request gone.
  *  In memory only. ponytail: shared files are not carried (their URI grant ends with the closed
- *  screen), so a share with attachments must be shared again; text, subject and recipients survive. */
+ *  screen), so a share with attachments must be shared again (Compose says so); text, subject and recipients survive. */
 internal object PendingExternalCompose : ProcessScopedState {
     @Volatile
     private var held: Intent? = null
@@ -92,8 +92,12 @@ internal object PendingExternalCompose : ProcessScopedState {
         ProcessState.register(this)
     }
 
+    /** Set on a replay whose request carried files, so Compose can say they must be shared again. */
+    const val EXTRA_FILES_DROPPED = "org.kysecurity.mail.extra.FILES_DROPPED"
+
     fun hold(intent: Intent) {
         held = Intent(intent.action, intent.data).apply {
+            if (intent.hasExtra(Intent.EXTRA_STREAM)) putExtra(EXTRA_FILES_DROPPED, true)
             listOf(Intent.EXTRA_EMAIL, Intent.EXTRA_CC, Intent.EXTRA_BCC).forEach { key ->
                 intent.getStringArrayExtra(key)?.let { putExtra(key, it) }
             }

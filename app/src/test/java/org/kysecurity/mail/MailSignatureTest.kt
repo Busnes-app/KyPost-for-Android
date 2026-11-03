@@ -1,7 +1,9 @@
 package org.kysecurity.mail
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MailSignatureTest {
@@ -122,5 +124,17 @@ class MailSignatureTest {
             "<br><br>&lt;b&gt;Ada&lt;/b&gt; &amp; &quot;co&#39;<br>&lt;script&gt;",
             withSignature("", "<b>Ada</b> & \"co'\r\n<script>"),
         )
+    }
+
+    /** A blank composition holding only its signature is not a draft; any typed word makes it one. */
+    @Test
+    fun isUntouchedSignatureBody_onlyForTheSignatureAlone() {
+        val sig = "Jane & Co\nSent from KyPost"
+        val opened = withSignature("", sig)
+        assertTrue(isUntouchedSignatureBody(opened, sig))
+        assertTrue(isUntouchedSignatureBody("<p><br></p><div>Jane &amp; Co</div><div>Sent from KyPost</div>", sig))
+        assertTrue(isUntouchedSignatureBody("", ""))
+        assertFalse(isUntouchedSignatureBody("Hi<br>$opened", sig))
+        assertFalse(isUntouchedSignatureBody("<img src=x>$opened", sig))
     }
 }

@@ -142,7 +142,9 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   path and its `to`, `cc` and `bcc` headers, or from `EXTRA_EMAIL`, `EXTRA_CC` and `EXTRA_BCC`. A
   request the app-lock redirect closed before the screen was shown is held in memory
   (`PendingExternalCompose`) and opened once by `MainActivity` after unlock; shared files are not
-  carried, since their URI grant ends with the closed screen. Shared attachments still enter through the Activity's existing bounded
+  carried, since their URI grant ends with the closed screen, and Compose says so
+  (`EXTRA_FILES_DROPPED`). The hold happens at the lock redirect itself
+  (`LockedActivity.onRedirectingToUnlock`), never on the startup-verdict recreate. Shared attachments still enter through the Activity's existing bounded
   attachment reader, which accepts only `content:` URIs from other packages' providers and
   refuses a descriptor whose `/proc/self/fd` path is under this app's data directories. An external compose request starts a new draft and must not restore an
   unrelated `ComposeDraftCache` entry left by an earlier internal compose screen. Recreating that

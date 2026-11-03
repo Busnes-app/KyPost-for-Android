@@ -338,6 +338,7 @@
     <string name="compose_schedule_too_large">Scheduled mail can carry up to 12 MB of attachments. Send it now, or remove some.</string>
     <string name="compose_scheduled_for">Scheduled for %1$s. Cancel it from Scheduled in the folder list.</string>
     <string name="compose_draft_restored">Restored your unsent message</string>
+    <string name="compose_shared_files_dropped">Files shared while KyPost was locked were not kept. Share them again.</string>
     <string name="compose_discard_title">Discard this message?</string>
     <string name="compose_discard_body">It has not been sent, and KyPost keeps no copy.</string>
     <string name="compose_discard_confirm">Discard</string>

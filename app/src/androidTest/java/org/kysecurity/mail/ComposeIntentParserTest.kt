@@ -47,6 +47,15 @@ class ComposeIntentParserTest {
         assertEquals("Notes", prefill.subject)
         assertEquals("hello", prefill.bodyHtml)
         assertEquals(null, PendingExternalCompose.take(context))
+        assertEquals(false, replay.getBooleanExtra(PendingExternalCompose.EXTRA_FILES_DROPPED, false))
+
+        // Files are not carried, and the replay says so rather than dropping them in silence.
+        PendingExternalCompose.hold(
+            Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, Uri.parse("content://example/doc")),
+        )
+        val withFiles = PendingExternalCompose.take(context)!!
+        assertEquals(true, withFiles.getBooleanExtra(PendingExternalCompose.EXTRA_FILES_DROPPED, false))
+        assertEquals(null, withFiles.extras?.get(Intent.EXTRA_STREAM))
     }
 
     @Test
