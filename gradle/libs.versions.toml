@@ -78,12 +78,11 @@ room = "2.8.5"
 sqlcipher = "4.19.1"
 ksp = "2.3.12"
 bouncyCastlePgp = "1.86"
-# 1.23.2 makes QuotedHtmlSanitizer output non-idempotent on an mXSS probe
-# (Run4SanitizerMxssProbeTest.everyOutputIsStableUnderReSanitization). Held until that passes.
-# Known advisory on 1.23.1: GHSA-65r4-943x-97jj, fixed in 1.23.2, is in XmlTreeBuilder only. The
-# app parses HTML and never uses Parser.xmlParser(). Rechecked 2026-10-11: 1.23.2 still fails the
-# test above and is the newest release.
-jsoup = "1.23.1"
+# GHSA-65r4-943x-97jj (CVE-2026-75140, XmlTreeBuilder memory exhaustion) affects < 1.23.2.
+# 1.23.2 and later parse `</p>` inside <svg> as browsers do. That left QuotedHtmlSanitizer
+# output inert but not a whitespace fixed point while it pretty-printed; it no longer does
+# (Run4SanitizerMxssProbeTest.everyOutputIsStableUnderReSanitization).
+jsoup = "1.24.1"
 zxingCore = "3.5.4"
 zxingEmbedded = "4.3.0"
 richHtmlEditor = "1.1.0"
