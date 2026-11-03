@@ -95,6 +95,8 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
 
     /** Applies a pairing PushPairingActivity has already parsed and confirmed. */
     fun applyPairing(pairing: PairingData) {
+        // A newer confirmed link supersedes a request still waiting, or its late approval replaces this one.
+        cancelApproval()
         scope.launch {
             isWorking.value = true
             applyParsedPairing(pairing)
