@@ -180,14 +180,18 @@ class RecipientInputView @JvmOverloads constructor(
         }
     }
 
-    private fun commitTypedEmail() {
+    /** Turns typed text into a chip. Only chips are recipients, so Send and Save call this first:
+     *  an address typed without a trailing comma used to be dropped in silence. False, with the
+     *  invalid-address toast, when the text is not an address. */
+    fun commitTypedEmail(): Boolean {
         val typed = field.text.toString().trim(' ', ',')
-        if (typed.isBlank()) return
+        if (typed.isBlank()) return true
         if (!isValidEmailFormat(typed)) {
             Toast.makeText(context, R.string.recipient_invalid_email_toast, Toast.LENGTH_SHORT).show()
-            return
+            return false
         }
         addRecipient(typed)
+        return true
     }
 
     /** Dropdown adapter only; the search lives in [debounceAndSearch], not in a [Filter]. */

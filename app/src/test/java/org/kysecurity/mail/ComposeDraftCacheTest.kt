@@ -33,6 +33,23 @@ class ComposeDraftCacheTest {
         assertNull(ComposeDraftCache.take())
     }
 
+    /** A compose screen stopped behind the Inbox tab still owns its draft: a Reply opened meanwhile
+     *  must get its own prefill, not that draft. Once the screen is destroyed (lock, rotation) the
+     *  draft is a lost one and the next screen restores it. */
+    @Test
+    fun aLiveScreensDraftIsNotRestoredIntoAnotherScreen() {
+        ComposeDraftCache.opened(1)
+        ComposeDraftCache.save(draft(subject = "Mine"), screen = 1)
+        ComposeDraftCache.opened(2)
+        assertNull(ComposeDraftCache.takeOnOpen(newExternalRequest = false))
+        ComposeDraftCache.closed(2)
+
+        ComposeDraftCache.closed(1)
+        ComposeDraftCache.opened(3)
+        assertEquals("Mine", ComposeDraftCache.takeOnOpen(newExternalRequest = false)?.subject)
+        ComposeDraftCache.closed(3)
+    }
+
     @Test
     fun anEmptyDraftIsNotWorthKeeping() {
         ComposeDraftCache.save(draft())

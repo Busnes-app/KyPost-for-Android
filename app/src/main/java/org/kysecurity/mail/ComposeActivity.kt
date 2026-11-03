@@ -337,6 +337,7 @@ class ComposeActivity : LockedActivity() {
         bccInput.onRecipientsChanged = { onRecipientsChanged(); renderCcBcc() }
 
         // A draft the app lock destroyed wins over an internal Reply/Forward prefill.
+        ComposeDraftCache.opened(System.identityHashCode(this))
         val restored = ComposeDraftCache.takeOnOpen(
             newExternalRequest = intent.isExternalComposeIntent() && savedInstanceState == null,
         )
@@ -901,9 +902,14 @@ class ComposeActivity : LockedActivity() {
         }
     }
 
+    /** Every field, not the first failure only: each valid address still becomes a chip. */
+    private fun commitTypedRecipients(): Boolean =
+        listOf(toInput, ccInput, bccInput).map { it.commitTypedEmail() }.all { it }
+
     private fun sendEmail(allowEmptySubject: Boolean = false, sendAt: Instant? = null) {
         if (handoffBusy || sending != null || sendJob?.isActive == true) return
         if (!custodyPermitsSend()) return
+        if (!commitTypedRecipients()) return
         if (sendAt != null) {
             // Server-held keys get no scheduling: the copy for Drafts must be encrypted here.
             if (!clientSideAccount) return
@@ -1149,6 +1155,7 @@ class ComposeActivity : LockedActivity() {
         // Send disables its item before its own export, while sendJob is not yet set.
         if (handoffBusy || sending != null || sendJob?.isActive == true || sendMenuItem?.isEnabled != true) return
         if (!custodyPermitsSend() || !clientSideAccount) return
+        if (!commitTypedRecipients()) return
         // Until the save lands or fails; a second tap would otherwise start a second export.
         listOf(sendMenuItem, scheduleMenuItem, saveDraftMenuItem).forEach { it?.isEnabled = false }
         val session = ProcessState.generation()
@@ -1431,13 +1438,13 @@ class ComposeActivity : LockedActivity() {
         if (sendSucceeded) return
         val snapshot = currentDraft(mirroredBodyHtml)
         // Synchronously, from the mirror: everything after this line is best effort.
-        ComposeDraftCache.save(snapshot)
+        ComposeDraftCache.save(snapshot, System.identityHashCode(this))
         // The upgrade to the very last keystrokes, when the export still lands in time. Still
         // guarded: once destroyed, the replacement Activity has already taken the draft, and
         // re-saving would put a stale copy back for whoever opens Compose next.
         bodyEditor.exportHtml { html ->
             if (isDestroyed) return@exportHtml
-            ComposeDraftCache.save(snapshot.copy(bodyHtml = html))
+            ComposeDraftCache.save(snapshot.copy(bodyHtml = html), System.identityHashCode(this))
         }
     }
 
@@ -1494,6 +1501,7 @@ class ComposeActivity : LockedActivity() {
     override fun onDestroy() {
         if (handoffBusy) handoffOpener.cancel()
         super.onDestroy()
+        ComposeDraftCache.closed(System.identityHashCode(this))
         // Both hold message plaintext, and neither is reachable from InMemoryPlaintext.clearAll().
         // Whatever the cache needed is already in it by now — onStop saved synchronously.
         mirroredBodyHtml = ""
