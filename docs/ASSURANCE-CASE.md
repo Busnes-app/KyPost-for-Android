@@ -122,7 +122,7 @@ they leave the app.
 | Tampering with a security setting | The HLP flag carries an HMAC under a Keystore key; written with `commit()` | `security/HostileLocationSettings.kt` |
 | Secrets on screen or in backups | `FLAG_SECURE` windows; `allowBackup="false"` | `security/SecureWindow.kt`, `app/src/main/AndroidManifest.xml` |
 | Weak randomness | Keys, salts, IVs and tokens from `SecureRandom` | `security/CredentialCipher.kt`, `security/DatabaseKey.kt`, `push/NotificationIntentToken.kt` |
-| Vulnerable or tampered dependencies | `gradle/verification-metadata.xml` pins 577 components, and CI fails if a build changes it; Dependabot with a 7-day cooldown | `.github/workflows/ci.yml`, `.github/dependabot.yml` |
+| Vulnerable or tampered dependencies | `gradle/verification-metadata.xml` pins the SHA-256 of every dependency artifact except sources, javadoc and the Gradle source zip, and CI fails if a build changes it; Dependabot with a 7-day cooldown | `.github/workflows/ci.yml`, `.github/dependabot.yml` |
 | Signing key exposure | Release secrets only in the protected `release` environment, never on a `pull_request` trigger; `checkSigningSecretsAreNotInTheTree`; signer checked against `RELEASE_KEY_SHA256` before publishing | `.github/workflows/release.yml`, [VERIFYING-RELEASES.md](VERIFYING-RELEASES.md) |
 
 ## Residual risk
@@ -141,9 +141,6 @@ The full list, with costs, is in [SECURITY.md](../SECURITY.md). The largest:
   the sender and subject.
 - The QR scanner on Play and GitHub builds is Google Play Services code.
 - Attachments saved while HLP is off and then moved or shared are beyond the wipe.
-- jsoup is held at 1.23.1 (`gradle/libs.versions.toml`). Advisory GHSA-65r4-943x-97jj, fixed in
-  1.23.2, affects only `XmlTreeBuilder`, and no source file uses jsoup's XML parser. 1.23.2 is held
-  back because it breaks an mXSS sanitizer test.
 - No test or tool enforces "no secrets in logs". A review of the 48 log calls that interpolate a
   value found names, counts, step names and URIs, not credentials or mail content. Exceptions are
   logged with their messages.

@@ -88,6 +88,11 @@ class QuotedHtmlSanitizerTest {
     }
 
     @Test
+    fun keepsTheSendersWhitespaceInsteadOfReindenting() {
+        assertEquals("<p>one</p><p>two  three</p>", sanitized("<p>one</p><p>two  three</p>"))
+    }
+
+    @Test
     fun emptyInputStaysEmpty() {
         assertEquals("", sanitized(""))
     }
