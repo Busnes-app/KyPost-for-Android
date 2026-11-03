@@ -137,8 +137,12 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   `actionBarSize` is a gap (other screens still carry it). A failed custody lookup is the
   in-place `composeSendOffNotice` (warning tone, Retry), not a snackbar.
 - External compose entry (`mailto:`, `ACTION_SEND`, `ACTION_SEND_MULTIPLE`) is normalized by
-  `ComposeIntentParser.kt`; use Android's `MailTo` parser and keep public-Intent quirks out of
-  `ComposeActivity`. Shared attachments still enter through the Activity's existing bounded
+  `ComposeIntentParser.kt` (its own query split: `MailTo.parse` decodes before splitting on older
+  releases); keep public-Intent quirks out of `ComposeActivity`. Recipients come from the mailto
+  path and its `to`, `cc` and `bcc` headers, or from `EXTRA_EMAIL`, `EXTRA_CC` and `EXTRA_BCC`. A
+  request the app-lock redirect closed before the screen was shown is held in memory
+  (`PendingExternalCompose`) and opened once by `MainActivity` after unlock; shared files are not
+  carried, since their URI grant ends with the closed screen. Shared attachments still enter through the Activity's existing bounded
   attachment reader, which accepts only `content:` URIs from other packages' providers and
   refuses a descriptor whose `/proc/self/fd` path is under this app's data directories. An external compose request starts a new draft and must not restore an
   unrelated `ComposeDraftCache` entry left by an earlier internal compose screen. Recreating that
