@@ -30,6 +30,25 @@ class ComposeIntentParserTest {
         assertEquals("support@example.com", prefill.to)
     }
 
+    /** Held across the unlock screen: what comes back parses to the same request, as public. */
+    @Test
+    fun aRequestHeldAcrossTheLockIsReplayedOnce() {
+        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        PendingExternalCompose.hold(
+            Intent(Intent.ACTION_SEND)
+                .putExtra(Intent.EXTRA_EMAIL, arrayOf("a@example.com"))
+                .putExtra(Intent.EXTRA_SUBJECT, "Notes")
+                .putExtra(Intent.EXTRA_TEXT, "hello"),
+        )
+        val replay = PendingExternalCompose.take(context)!!
+        assertEquals(ComposeActivity::class.java.name, replay.component?.className)
+        val prefill = parse(replay)
+        assertEquals("a@example.com", prefill.to)
+        assertEquals("Notes", prefill.subject)
+        assertEquals("hello", prefill.bodyHtml)
+        assertEquals(null, PendingExternalCompose.take(context))
+    }
+
     @Test
     fun shareKeepsCcAndBcc() {
         val prefill = parse(

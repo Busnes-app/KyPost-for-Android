@@ -61,8 +61,11 @@ class MainActivity : LockedActivity() {
             // once; any other launch goes where it was going. Process-local state, never read from
             // the (exported) launch intent.
             val setupToken = org.kysecurity.mail.contacts.device.PendingAccountSetup.takeInterrupted()
+            val interruptedCompose = PendingExternalCompose.take(this@MainActivity)?.takeIf { configured }
             val targetIntent = if (setupToken != null) {
                 org.kysecurity.mail.contacts.ContactsListActivity.setupIntent(this@MainActivity, setupToken)
+            } else if (interruptedCompose != null) {
+                interruptedCompose
             } else if (configured) {
                 Intent(this@MainActivity, InboxActivity::class.java).apply {
                     notificationExtras(intent)?.let { putExtras(it) }

@@ -1502,6 +1502,10 @@ class ComposeActivity : LockedActivity() {
         if (handoffBusy) handoffOpener.cancel()
         super.onDestroy()
         ComposeDraftCache.closed(System.identityHashCode(this))
+        // Closed by the lock redirect before anything was shown: nothing typed, so replay the request.
+        if (redirectedToUnlock && !this::toInput.isInitialized && intent.isExternalComposeIntent()) {
+            PendingExternalCompose.hold(intent)
+        }
         // Both hold message plaintext, and neither is reachable from InMemoryPlaintext.clearAll().
         // Whatever the cache needed is already in it by now — onStop saved synchronously.
         mirroredBodyHtml = ""
