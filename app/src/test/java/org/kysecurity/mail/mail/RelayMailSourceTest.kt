@@ -858,6 +858,24 @@ class RelayMailSourceTest {
         assertTrue("expected ClientSideNeeded, got $outcome", outcome is MailOutcome.ClientSideNeeded)
     }
 
+    /** OkHttp re-sends an ordinary POST whose connection failed after the request went out. */
+    @Test
+    fun sendBodyIsOneShot_soOkHttpNeverResendsIt() {
+        var oneShot: Boolean? = null
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request ->
+                oneShot = request.body?.isOneShot()
+                jsonResponse(request, """{"ok":true}""")
+            },
+        )
+
+        source.sendMail(MailDraft(to = "a@example.com", subject = "s", body = "b"))
+
+        assertEquals(true, oneShot)
+    }
+
     @Test
     fun send409WithoutMarker_staysBadRequest() {
         val source = RelayMailSource(
