@@ -5,6 +5,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -173,7 +174,9 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun unpairDevice() {
-        scope.launch {
+        // NonCancellable, escalation included: leaving the screen mid-unpair cancelled this in the
+        // deregister or halfway through the purge, leaving the device paired or its data behind.
+        scope.launch(NonCancellable) {
             isWorking.value = true
             val result = graph.syncCoordinator.withRegistrationsHeld {
                 graph.repository.unpairDevice(graph.deregisterClient)
