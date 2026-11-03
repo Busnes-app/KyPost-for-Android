@@ -169,7 +169,16 @@ class PushSyncCoordinator(
                 if (remaining <= 0) return notApproved()
                 sleep(waitMs.coerceAtMost(remaining))
                 waitMs = when (val status = registrationClient.pairingStatus(pending)) {
-                    is PairingStatus.Approved -> return completeApproval(pending, status, now())
+                    is PairingStatus.Approved -> {
+                        // Approved while the app is locked: the secret can be stored only once the
+                        // PIN-derived key exists again, so hold it until unlock or expiry.
+                        while (repository.currentCredentialState() is PushRepository.PairingCredentialState.Unavailable &&
+                            pending.expiresAtEpochMs > now()
+                        ) {
+                            sleep(1_000L)
+                        }
+                        return completeApproval(pending, status, now())
+                    }
                     PairingStatus.Rejected -> return notApproved()
                     is PairingStatus.Waiting -> pollMs(status.pollIntervalSeconds ?: pending.pollIntervalSeconds)
                     is PairingStatus.Retry -> maxOf(

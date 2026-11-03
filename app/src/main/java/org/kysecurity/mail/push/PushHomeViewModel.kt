@@ -126,9 +126,11 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
             approvalCode = pending.approvalCode,
             serverHost = pairingUrlHost(pending.pairing.serverUrl) ?: pending.pairing.serverUrl,
         )
-        approvalJob = scope.launch {
-            // The coordinator wipes the pending secret on every way out, including this
-            // scope's cancellation in onCleared (the screen closed).
+        // The app's scope, not this screen's: the user approves in a browser, and coming back past
+        // the app lock finishes this screen. Cancelling then wiped a secret the web had approved.
+        // Cancel still stops it, and the coordinator wipes the pending secret on every way out.
+        val approvalScope = (getApplication<Application>() as? org.kysecurity.mail.KyPostApp)?.appScope ?: scope
+        approvalJob = approvalScope.launch {
             val result = graph.syncCoordinator.awaitApproval(pending)
             pendingApproval.value = null
             reportPairing(result)

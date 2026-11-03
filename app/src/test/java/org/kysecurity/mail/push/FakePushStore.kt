@@ -16,7 +16,7 @@ internal class FakePushStore(
     /** The marker `PushRepository.resetPairingCredential` leaves: a pairing was cleared but the
      *  account-scoped data was KEPT. Written and cleared here exactly where the real store does. */
     var reconnectMarker: ReconnectExpectation? = null,
-    private var credentialState: PushRepository.PairingCredentialState =
+    var credentialState: PushRepository.PairingCredentialState =
         PushRepository.PairingCredentialState.NotGated,
 ) : PushStore {
     private val backing = MutableStateFlow(PushState(pairing = pairing, lastTokenSyncAtEpochMs = null, syncError = null, latestPayload = null, history = emptyList()))
