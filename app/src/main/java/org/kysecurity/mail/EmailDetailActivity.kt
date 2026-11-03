@@ -1444,6 +1444,12 @@ class EmailDetailActivity : LockedActivity() {
             then(TextUtils.htmlEncode(preview))
             return
         }
+        // A plain body is text: parsed as HTML its line breaks collapsed, `<bob@x>` vanished, and
+        // literal `<a href>` text became a live link in the reply.
+        if (fetchedBodyMode.trim().equals("plain", ignoreCase = true)) {
+            then(TextUtils.htmlEncode(body).replace("\n", "<br>"))
+            return
+        }
         ioExecutor.execute {
             val sanitized = runCatching { QuotedHtmlSanitizer.sanitize(body) }
                 .getOrElse { TextUtils.htmlEncode(preview) }
