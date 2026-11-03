@@ -292,6 +292,7 @@ class EmailDetailActivity : LockedActivity() {
                     subject = withPrefix(emailSubject, "Re:"),
                     bodyHtml = quoteForReply(emailSender, quoted),
                     replyTo = ReplyRef(emailId, emailFolder),
+                    kind = ComposeKind.REPLY,
                 )
             }
         }
@@ -309,6 +310,7 @@ class EmailDetailActivity : LockedActivity() {
                         subject = withPrefix(emailSubject, "Re:"),
                         bodyHtml = quoteForReply(emailSender, quoted),
                         replyTo = ReplyRef(emailId, emailFolder),
+                        kind = ComposeKind.REPLY,
                     )
                 }
             }
@@ -481,6 +483,7 @@ class EmailDetailActivity : LockedActivity() {
                     subject = withPrefix(emailSubject, "Fwd:"),
                     bodyHtml = quoteForForward(emailSender, emailSubject, quoted),
                     attachments = orderedForwardAttachments(),
+                    kind = ComposeKind.FORWARD,
                 )
             }
             return
@@ -525,6 +528,7 @@ class EmailDetailActivity : LockedActivity() {
                         subject = withPrefix(emailSubject, "Fwd:"),
                         bodyHtml = quoteForForward(emailSender, emailSubject, quoted),
                         attachments = orderedForwardAttachments(),
+                        kind = ComposeKind.FORWARD,
                     )
                 }
             }
@@ -1372,8 +1376,10 @@ class EmailDetailActivity : LockedActivity() {
         cc: String = "",
         bcc: String = "",
         sourceDraft: ReplyRef? = null,
+        kind: ComposeKind = ComposeKind.NEW,
     ) {
         val intent = ComposeActivity.internalIntent(this)
+        intent.putExtra(ComposeActivity.EXTRA_KIND, kind.name)
         intent.putExtra(ComposeActivity.EXTRA_TO, to)
         intent.putExtra(ComposeActivity.EXTRA_SUBJECT, subject)
         intent.putExtra(ComposeActivity.EXTRA_BODY_HTML, bodyHtml)

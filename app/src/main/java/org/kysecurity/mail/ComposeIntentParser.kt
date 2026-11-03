@@ -14,6 +14,8 @@ internal data class ComposePrefill(
     val sourceDraft: ReplyRef? = null,
     /** How many attachments the draft had; fewer arriving means the old copy must stay. */
     val sourceDraftAttachments: Int = 0,
+    /** Reply and Forward come only from in-app launches; everything else is a new message. */
+    val kind: ComposeKind = ComposeKind.NEW,
 )
 
 internal fun Intent.isExternalComposeIntent(): Boolean =
@@ -59,6 +61,8 @@ internal fun parseComposeIntent(
             bcc = intent.getStringExtra(ComposeActivity.EXTRA_BCC).orEmpty(),
             sourceDraft = if (draftId.isNullOrBlank() || draftFolder.isNullOrBlank()) null else ReplyRef(draftId, draftFolder),
             sourceDraftAttachments = intent.getIntExtra(ComposeActivity.EXTRA_SOURCE_DRAFT_ATTACHMENTS, 0),
+            kind = ComposeKind.entries.firstOrNull { it.name == intent.getStringExtra(ComposeActivity.EXTRA_KIND) }
+                ?: ComposeKind.NEW,
         )
     }
     return ComposePrefill(

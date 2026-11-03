@@ -24,7 +24,6 @@ class ThemedDialogsTest {
         val NEXT_FUNCTION = Regex("""\n\s*(private |internal )?fun """)
         val SITES = listOf(
             "MoveToFolder.kt" to "pickMoveTarget",
-            "MailSignature.kt" to "showSignatureDialog",
             "ComposeActivity.kt" to "confirmEmptySubject",
             "EmailDetailActivity.kt" to "showRsvpDialog",
             "CalendarHandoff.kt" to "Activity.handOffToCalendar",

@@ -56,6 +56,10 @@
             android:exported="false" />
 
         <activity
+            android:name=".SignatureSettingsActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".FoldersActivity"
             android:exported="false" />
 
