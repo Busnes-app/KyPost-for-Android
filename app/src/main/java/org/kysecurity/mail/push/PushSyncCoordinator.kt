@@ -325,7 +325,9 @@ class PushSyncCoordinator(
         // Read INSIDE the gate, not by the caller before it: a registration that completed while
         // this one queued replaced the deviceSecret, and re-registering with the stale one is the
         // request the server rejects.
-        val rawPairing = repository.state.first().pairing
+        // The unwrapped secret, not the state flow's copy: with the credential PIN gate on, that copy
+        // carries no secret, and a re-registration without one is refused as a rebind attempt.
+        val rawPairing = repository.pairingForAuthenticatedCall()
             ?: return NativeRegistrationResult.Error("Device is not paired")
 
         // Re-derive the registration URL every use: a stored host divergence left clients unpinned.

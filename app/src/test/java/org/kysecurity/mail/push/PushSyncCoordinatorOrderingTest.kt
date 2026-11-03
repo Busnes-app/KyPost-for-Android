@@ -1,5 +1,6 @@
 package org.kysecurity.mail.push
 
+import org.kysecurity.mail.HEADER_DEVICE_SECRET
 import org.kysecurity.mail.testing.FakeCallFactory
 import org.kysecurity.mail.testing.response
 import org.kysecurity.mail.testing.testTlsHandshake
@@ -120,6 +121,22 @@ class PushSyncCoordinatorOrderingTest {
 
         assertEquals(listOf("register:secret-1", "persist:secret-1", "clearPairing"), store.events.take(3))
         assertNull(store.currentPairing())
+    }
+
+    /** With the credential PIN gate on, the published pairing has no secret; a resync must send the
+     *  unwrapped one, or the relay refuses it as a rebind of someone else's device. */
+    @Test
+    fun aGatedResyncSendsTheUnwrappedSecret() = runBlocking {
+        val store = FakePushStore(pairing = existing.copy(deviceSecret = null)).apply { unwrappedSecret = "secret-old" }
+        var sent: String? = null
+        val coordinator = coordinator(store, { req ->
+            sent = req.header(HEADER_DEVICE_SECRET)
+            response(req, body("secret-1"), 200)
+        })
+
+        coordinator.syncProvidedToken("token-a")
+
+        assertEquals("secret-old", sent)
     }
 
     /** The reviewer's exact scenario: a valid replacement QR confirmed while offline. The old
