@@ -140,11 +140,23 @@ internal object PgpEncryptor {
             BcKeyFingerprintCalculator(),
         ).keyRings.asSequence()
             .flatMap { ring -> ring.publicKeys.asSequence().map { ring.publicKey to it } }
-            .filter { (_, key) -> key.isEncryptionKey && !key.hasRevocation() && !key.hasExpired() }
+            .filter { (primary, key) ->
+                key.isEncryptionKey && !key.hasRevocation() && !key.hasExpired() &&
+                    !primary.hasRevocation() && !primary.hasExpired() && key.mayEncrypt(primary)
+            }
             .filter { (primary, key) -> PgpStrengthPolicy.memberAllowed(primary, key) }
             // Newest, not "last in the serialisation": a ring may carry a rotated-away subkey.
             .maxByOrNull { it.second.creationTime.time }
     }.getOrNull()
+
+    /** Key flags, as [SignerBinding] reads them for signing: `isEncryptionKey` only says the
+     *  algorithm can, so a newer RSA authentication subkey was chosen and the recipient could not
+     *  decrypt. No flags asserted at all falls back to the algorithm. */
+    private fun PGPPublicKey.mayEncrypt(primary: PGPPublicKey): Boolean {
+        val flags = keyFlagsAssertedBy(primary)
+        if (flags == 0) return true
+        return flags and (org.bouncycastle.bcpg.sig.KeyFlags.ENCRYPT_COMMS or org.bouncycastle.bcpg.sig.KeyFlags.ENCRYPT_STORAGE) != 0
+    }
 
     /** `validSeconds == 0` means no expiry; [PGPPublicKey.isEncryptionKey] ignores expiry. */
     private fun PGPPublicKey.hasExpired(nowMillis: Long = System.currentTimeMillis()): Boolean {

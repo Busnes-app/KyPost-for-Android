@@ -60,7 +60,7 @@ private fun org.bouncycastle.openpgp.PGPPublicKey.canSign(
 }
 
 /** Only [primary]'s signatures, and only hashed subpackets — an unhashed flag grants nothing. */
-private fun org.bouncycastle.openpgp.PGPPublicKey.keyFlagsAssertedBy(
+internal fun org.bouncycastle.openpgp.PGPPublicKey.keyFlagsAssertedBy(
     primary: org.bouncycastle.openpgp.PGPPublicKey,
 ): Int {
     var flags = 0

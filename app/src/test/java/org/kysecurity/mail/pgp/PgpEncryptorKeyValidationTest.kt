@@ -140,6 +140,37 @@ class PgpEncryptorKeyValidationTest {
         )
     }
 
+    /** A gpg key with an SSH authentication subkey added later: newest is not "may encrypt". */
+    @Test
+    fun aNewerAuthenticationSubkeyIsNotEncryptedTo() {
+        val gen = RSAKeyPairGenerator()
+        gen.init(RSAKeyGenerationParameters(BigInteger.valueOf(0x10001), SecureRandom(), 2048, 12))
+        val now = Date()
+        fun flags(value: Int) = org.bouncycastle.openpgp.PGPSignatureSubpacketGenerator()
+            .apply { setKeyFlags(false, value) }.generate()
+        val primary = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, gen.generateKeyPair(), now)
+        val encryption = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, gen.generateKeyPair(), now)
+        val authentication = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, gen.generateKeyPair(), Date(now.time + 60_000))
+        val ring = PGPKeyRingGenerator(
+            PGPSignature.POSITIVE_CERTIFICATION,
+            primary,
+            "Bob <bob@example.invalid>",
+            BcPGPDigestCalculatorProvider().get(HashAlgorithmTags.SHA1),
+            flags(org.bouncycastle.bcpg.sig.KeyFlags.CERTIFY_OTHER or org.bouncycastle.bcpg.sig.KeyFlags.SIGN_DATA),
+            null,
+            BcPGPContentSignerBuilder(primary.publicKey.algorithm, HashAlgorithmTags.SHA256),
+            null,
+        ).apply {
+            addSubKey(encryption, flags(org.bouncycastle.bcpg.sig.KeyFlags.ENCRYPT_COMMS or org.bouncycastle.bcpg.sig.KeyFlags.ENCRYPT_STORAGE), null)
+            addSubKey(authentication, flags(org.bouncycastle.bcpg.sig.KeyFlags.AUTHENTICATION), null)
+        }.generatePublicKeyRing()
+
+        val result = PgpEncryptor.encrypt("x".toByteArray(), listOf(armor(ring.encoded)), null as CharArray?)
+
+        assertTrue("$result", result is EncryptResult.Ok)
+        org.junit.Assert.assertEquals(encryption.keyID, firstPkedKeyId((result as EncryptResult.Ok).armored))
+    }
+
     private fun firstPkedKeyId(armoredMessage: String): Long {
         val factory = JcaPGPObjectFactory(
             PGPUtil.getDecoderStream(armoredMessage.byteInputStream(Charsets.UTF_8)),
