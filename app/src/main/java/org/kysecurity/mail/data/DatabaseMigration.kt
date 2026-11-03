@@ -115,7 +115,7 @@ internal object DatabaseMigration {
     }.getOrNull()
 
     /** SQLCipher encrypts the 16-byte header too, so a missing magic means already-converted. */
-    private fun isPlaintext(file: File): Boolean {
+    fun isPlaintext(file: File): Boolean {
         val header = ByteArray(SQLITE_MAGIC.size)
         // Looped, not a single read(): `InputStream.read` may return fewer bytes than asked for,
         // and the discarded count left the tail zeroed — so a plaintext database read as encrypted.
