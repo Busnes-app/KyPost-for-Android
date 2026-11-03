@@ -116,4 +116,19 @@ class ContactPushBatchingTest {
         assertEquals(setOf("Small 1", "Small 2"), server.live().map { it.fn }.toSet())
         assertEquals(listOf(huge), db.pendingContactChangeDao().getAllPending().map { it.localUid })
     }
+
+    /** The refused change stays queued, so the outbox is never empty again; incoming changes from
+     *  the web must still arrive. */
+    @Test
+    fun aRefusedChangeDoesNotStopIncomingChanges() = runBlocking {
+        // A non-zero cursor first: a sync starting at zero always pulls its snapshot.
+        server.seed(ContactDto(uid = "web-0", fn = "Already here"))
+        assertEquals(ContactSyncOutcome.Success, repository.sync())
+        repository.queueCreate(ContactDto(fn = "Huge", notes = "x".repeat(1_100_000)))
+        server.seed(ContactDto(uid = "web-1", fn = "From the web"))
+
+        assertTrue(repository.sync() is ContactSyncOutcome.Retry)
+
+        assertTrue(db.contactDao().observeAll().first().any { it.uid == "web-1" })
+    }
 }

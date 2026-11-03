@@ -127,7 +127,8 @@ class ContactSyncRepository(
 
         // A sync starting at zero owes the snapshot even with pushes queued: a tooOld whose sync
         // failed before its pull leaves only the reset cursor behind.
-        var pullFrom: Long? = if (tooOld || startCursor == 0L) 0L else cursor.takeIf { pendingChanges.isEmpty() }
+        // A refused change stays queued for good; without a pull here it stopped every incoming one.
+        var pullFrom: Long? = if (tooOld || startCursor == 0L) 0L else cursor.takeIf { pendingChanges.isEmpty() || refused.isNotEmpty() }
         while (pullFrom != null) {
             val result = client.pull(pairing.serverUrl, deviceId, deviceSecret, pullFrom)
             val response = (result as? ContactSyncResult.Success)?.response ?: return@run failureOutcome(result)
