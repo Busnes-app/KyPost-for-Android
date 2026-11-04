@@ -134,8 +134,9 @@ class PushSyncCoordinator(
         if (isReplacement) {
             // The replaced account's device row still holds this installation's push token, so its
             // mail and MFA prompts kept arriving under the new account. Its credentials go with the
-            // purge below: this is the last moment they can sign the removal.
-            repository.state.first().pairing?.let { previous ->
+            // purge below: this is the last moment they can sign the removal. The authenticated read:
+            // the state flow's copy carries no secret while the credential gate is on.
+            repository.pairingForAuthenticatedCall()?.let { previous ->
                 runCatching { deregisterReplaced(previous) }
                     .onFailure { android.util.Log.w("PushSyncCoordinator", "Could not deregister the replaced account", it) }
             }

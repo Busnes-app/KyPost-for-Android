@@ -522,10 +522,10 @@ class ContactEditActivity : LockedActivity() {
         lifecycleScope.launch {
             val graph = ContactsRuntime.graph(this@ContactEditActivity)
             if (existingUid.isBlank()) {
-                graph.repository.queueCreate(dto)
+                graph.repository.queueCreate(dto, session = openedSession)
             } else {
                 // The user's own edit, behind the app lock, is not the third-party rebind this catches.
-                graph.repository.queueUpdate(dto, identityChanged = false)
+                graph.repository.queueUpdate(dto, identityChanged = false, session = openedSession)
             }
             graph.coordinator.syncNowAsync()
             DeviceContactsRuntime.graph(this@ContactEditActivity).coordinator.syncNowAsync()
@@ -554,7 +554,7 @@ class ContactEditActivity : LockedActivity() {
             deviceGraph.repository.deleteDeviceRawContact(existingUid)
 
             val graph = ContactsRuntime.graph(this@ContactEditActivity)
-            graph.repository.queueDelete(existingUid, existingRev)
+            graph.repository.queueDelete(existingUid, existingRev, session = openedSession)
             graph.coordinator.syncNowAsync()
             finish()
         }

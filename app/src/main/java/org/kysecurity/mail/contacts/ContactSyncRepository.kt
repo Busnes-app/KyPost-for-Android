@@ -193,7 +193,8 @@ class ContactSyncRepository(
      *  deletes mean nothing there and are dropped, as are its group ids and photo refs (as on Mac),
      *  and any key the relay would refuse (expired, revoked, or naming none of the contact's
      *  addresses): one such key kept that contact's create refused for good (owner decision on
-     *  contact keys). The phone's own row keeps it.
+     *  contact keys). Such a key is unusable anyway; the server's copy, without it, replaces the
+     *  phone's row on the next pull.
      *  False, changing nothing, when [account] is no longer paired or the question was answered.
      *  The caller syncs afterwards. */
     suspend fun bringKeptContacts(account: ReconnectExpectation): Boolean = answerKeptContacts(account) {
@@ -280,10 +281,13 @@ class ContactSyncRepository(
 
     /** The local uid is permanent: the server stores an unknown uid as a create, so a replayed
      *  push lands on the same contact. [verifiedInPerson] as for [queueUpdate]. */
-    suspend fun queueCreate(contact: ContactDto, verifiedInPerson: Boolean = false): String {
+    /** [session], when given, is the editor's: a write from an ended session changes nothing,
+     *  checked inside the transaction so it cannot land after an account purge. */
+    suspend fun queueCreate(contact: ContactDto, verifiedInPerson: Boolean = false, session: Long? = null): String {
         val localUid = UUID.randomUUID().toString()
         val localCopy = contact.copy(uid = localUid)
         db.withTransaction {
+            if (session != null && !ProcessState.isCurrent(session)) return@withTransaction
             db.contactDao().upsertAll(listOf(localCopy.toEntity(verifiedInPerson = verifiedInPerson)))
             if (verifiedInPerson) recordVerifiedKey(localCopy)
             recordRevocations(localCopy)
@@ -315,8 +319,10 @@ class ContactSyncRepository(
         contact: ContactDto,
         identityChanged: Boolean,
         verifiedInPerson: Boolean = false,
+        session: Long? = null,
     ) {
         db.withTransaction {
+            if (session != null && !ProcessState.isCurrent(session)) return@withTransaction
             val previous = db.contactDao().getByUid(contact.uid)
             db.contactDao().upsertAll(listOf(contact.toEntity(previous, verifiedInPerson, identityChanged)))
             if (verifiedInPerson) recordVerifiedKey(contact)
@@ -333,8 +339,9 @@ class ContactSyncRepository(
         }
     }
 
-    suspend fun queueDelete(uid: String, rev: Long) {
+    suspend fun queueDelete(uid: String, rev: Long, session: Long? = null) {
         db.withTransaction {
+            if (session != null && !ProcessState.isCurrent(session)) return@withTransaction
             db.contactDao().deleteByUids(listOf(uid))
             enqueueCoalesced(
                 PendingContactChangeEntity(

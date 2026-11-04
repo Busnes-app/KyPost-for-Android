@@ -30,7 +30,7 @@
 - A device approved on the web while KyPost was locked finishes pairing after unlock, and the
   result shows even if the pairing screen was reopened.
 - Switching this phone to another account stops the previous account's notifications: its
-  device is removed from its server first.
+  device is removed from its server first, when that server can be reached.
 - Restarting the phone during a PIN lockout no longer extends it for days.
 - Two attachments saved to Downloads at the same moment are both removed by a later wipe.
 - A snoozed message that wakes, or a message moved out and back, shows again in the folder.

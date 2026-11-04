@@ -726,11 +726,12 @@ class ComposeActivity : LockedActivity() {
                 // server change first.
                 if (clientSideAccount) signChip.isChecked = false
             }
-            applySendAvailability()
+            // Visibility only: re-enabling here would offer Send again while an export is pending.
+            saveDraftMenuItem?.isVisible = draftSaveAllowed()
         }
         signChip.setOnCheckedChangeListener { _, checked ->
             if (checked && clientSideAccount && !encryptChip.isChecked) encryptChip.isChecked = true
-            applySendAvailability()
+            saveDraftMenuItem?.isVisible = draftSaveAllowed()
         }
         webmailChip.setOnClickListener { handOffToWebmail() }
 

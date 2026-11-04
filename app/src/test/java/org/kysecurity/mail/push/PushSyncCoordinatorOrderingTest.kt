@@ -207,14 +207,15 @@ class PushSyncCoordinatorOrderingTest {
      *  the new registration is proven and before the purge drops those credentials. */
     @Test
     fun aReplacementDeregistersTheReplacedDeviceBeforeThePurge() = runBlocking {
-        val store = FakePushStore(pairing = existing)
+        // Credential gate on: the state flow's copy carries no secret, only the unwrapped read does.
+        val store = FakePushStore(pairing = existing.copy(deviceSecret = null)).apply { unwrappedSecret = "secret-old" }
         val deregistered = mutableListOf<PairingData>()
         val coordinator = coordinator(store, { req -> response(req, body("secret-new"), 200) }, deregistered = deregistered)
 
         val result = coordinator.attemptPairing(replacement)
 
         assertTrue("pairing failed: $result", result is NativeRegistrationResult.Success)
-        assertEquals(listOf(existing), deregistered)
+        assertEquals(listOf("secret-old"), deregistered.map { it.deviceSecret })
     }
 
     /** Same rule one step later: the network call itself is what fails. */

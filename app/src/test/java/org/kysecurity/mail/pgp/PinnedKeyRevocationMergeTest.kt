@@ -157,6 +157,8 @@ class PinnedKeyRevocationMergeTest {
         assertFalse("no address to bind", contactKeyAcceptable(public(A), emptyList()))
         assertFalse("revoked", contactKeyAcceptable(revoked(A, signer = A), listOf("a@example.invalid")))
         assertFalse("not a key", contactKeyAcceptable("garbage", listOf("a@example.invalid")))
+        val bare = armored(publicRing(generator("d@example.invalid").generateSecretKeyRing()).encoded)
+        assertTrue("a bare-address user ID", contactKeyAcceptable(bare, listOf("D@example.invalid")))
     }
 
     private companion object {
