@@ -5,7 +5,6 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.After
-import androidx.lifecycle.Lifecycle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Before
@@ -63,8 +62,9 @@ class ComposeTypedRecipientTest {
                 it.findViewById<RecipientInputView>(R.id.composeToInput)
                     .findViewById<EditText>(R.id.recipientInputField).setText("boss@example.com")
             }
-            scenario.moveToState(Lifecycle.State.CREATED)
-            assertEquals("boss@example.com", ComposeDraftCache.take()?.to)
+            // A recreate goes through the same onStop snapshot a lock teardown does.
+            scenario.recreate()
+            scenario.onActivity { assertEquals("boss@example.com", it.restoredDraftForTest?.to) }
         }
     }
 
@@ -77,8 +77,8 @@ class ComposeTypedRecipientTest {
         MailSignature.save(context, MailSignature(enabled = true, text = "Sent from KyPost"))
         try {
             ActivityScenario.launch<ComposeActivity>(ComposeActivity.internalIntent(context)).afterSplash().use { scenario ->
-                scenario.moveToState(Lifecycle.State.CREATED)
-                assertNull(ComposeDraftCache.take())
+                scenario.recreate()
+                scenario.onActivity { assertNull(it.restoredDraftForTest) }
             }
         } finally {
             MailSignature.save(context, saved)
