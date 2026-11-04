@@ -291,14 +291,6 @@ class PushSyncCoordinator(
         return syncCurrentPairingToken()
     }
 
-    /** Called after a successful unlock: retries a resync that [syncLocked] deferred while the app
-     *  was locked (an FCM token rotation in the background is the usual one). Otherwise only
-     *  opening the pairing screen retried it. Null when nothing was deferred. */
-    suspend fun retryIfDeferredByLock(): NativeRegistrationResult? {
-        if (repository.state.first().syncError != CREDENTIAL_GATE_DEFERRAL) return null
-        return resyncActiveTransport()
-    }
-
     /** Runs [block] (an unpair) with no registration in flight. A resync whose reply landed after
      *  the unpair's clear persisted its fresh secret and re-paired the device; inside the gate, an
      *  in-flight one finishes first and the unpair then revokes the secret it minted. */

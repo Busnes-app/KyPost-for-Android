@@ -2,10 +2,8 @@ package org.kysecurity.mail.security
 
 import android.content.Context
 import org.kysecurity.mail.push.PushRuntime
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Re-wraps the pairing secret under the current credential key; call after each PIN unlock. */
@@ -31,20 +29,5 @@ suspend fun rewrapPairingIfNeeded(context: Context, appLockManager: AppLockManag
             credentialKeys = credentialKeys,
             credentialSalt = credentialSalt,
         )
-    }
-}
-
-/** Retries a push re-registration deferred while the app was locked; call after each unlock, after
- *  [rewrapPairingIfNeeded]. In the app's scope: the unlock screen finishes at once. */
-fun retryDeferredPushSync(context: Context) {
-    val app = context.applicationContext as? org.kysecurity.mail.KyPostApp ?: return
-    app.appScope.launch {
-        try {
-            PushRuntime.graph(app).syncCoordinator.retryIfDeferredByLock()
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            android.util.Log.e("CredentialGateSync", "Deferred push resync failed", e)
-        }
     }
 }

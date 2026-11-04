@@ -120,7 +120,6 @@ class UnlockActivity : AppCompatActivity() {
     /** Shared by both unlock paths so each runs the rewrap and the enrollment report. */
     private suspend fun completeUnlock() {
         rewrapPairingIfNeeded(this, appLockManager)
-        retryDeferredPushSync(this)
         org.kysecurity.mail.pgp.EnrollmentStateWorker.enqueue(this)
         proceedIntoApp()
     }

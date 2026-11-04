@@ -158,8 +158,8 @@ class ContactSyncRepository(
         val store = ownerStore ?: return ContactsAccountCheck.PROCEED
         val current = pairing.contactsAccount()
         val owner = store.contactsOwner()
-        // A cursor row exists once this account has synced; read before cursorStore.cursor() creates one.
-        val syncedWithCurrent = db.contactSyncStateDao().cursor(pairing.subscriberId) != null
+        // Read before cursorStore.cursor() creates a row (or imports the legacy cursor).
+        val syncedWithCurrent = cursorStore.hasSynced(pairing.subscriberId)
         val check = contactsAccountCheck(owner, current, db.contactDao().allUids().isNotEmpty(), syncedWithCurrent)
         if (check == ContactsAccountCheck.ADOPT) {
             if (owner != null && owner != current) {

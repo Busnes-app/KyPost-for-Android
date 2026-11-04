@@ -385,7 +385,7 @@ class PushRepository(
         if (contactsOwner() != null) return
         val leaving = securePairingStore.pairing.value ?: return
         val db = org.kysecurity.mail.data.DataRuntime.graph(context).database
-        if (db.contactSyncStateDao().cursor(leaving.subscriberId) != null) {
+        if (org.kysecurity.mail.contacts.ContactCursorStore(context, db).hasSynced(leaving.subscriberId)) {
             setContactsOwner(ReconnectExpectation(leaving.subscriberId, leaving.serverUrl))
         }
     }

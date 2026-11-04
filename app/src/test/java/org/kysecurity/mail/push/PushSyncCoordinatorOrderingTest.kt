@@ -148,30 +148,6 @@ class PushSyncCoordinatorOrderingTest {
         assertEquals("secret-old", sent)
     }
 
-    /** A resync deferred while the app was locked (an FCM rotation in the background) used to wait
-     *  for someone to open the pairing screen. An unlock retries it, and only it. */
-    @Test
-    fun anUnlockRetriesOnlyAResyncTheLockDeferred() = runBlocking {
-        val store = FakePushStore(pairing = existing, credentialState = PushRepository.PairingCredentialState.Unavailable)
-        var registers = 0
-        val coordinator = coordinator(store, { req ->
-            registers++
-            response(req, body("secret-1"), 200)
-        })
-
-        val deferred = coordinator.syncProvidedToken("token-a") as NativeRegistrationResult.Error
-        assertEquals(PushSyncCoordinator.CREDENTIAL_GATE_DEFERRAL, deferred.message)
-        assertEquals(0, registers)
-
-        store.credentialState = PushRepository.PairingCredentialState.NotGated
-        assertTrue(coordinator.retryIfDeferredByLock() is NativeRegistrationResult.Success)
-        assertEquals(1, registers)
-        assertEquals("secret-1", store.currentPairing()?.deviceSecret)
-
-        // Nothing deferred any more: a second unlock registers nothing.
-        assertNull(coordinator.retryIfDeferredByLock())
-        assertEquals(1, registers)
-    }
 
     /** The link's pin re-pins only the SAME account; a replacement keeps the stored pin in charge. */
     @Test
