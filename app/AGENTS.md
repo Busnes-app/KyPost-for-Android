@@ -154,7 +154,10 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   server-held key with Sign and Encrypt off); it leaves
   only once the save succeeds. Recreating that
   screen (a rotation, `savedInstanceState` set) is the same composition: it takes its own draft
-  back and adopts its send in flight (`ComposeDraftCache.takeOnOpen`).
+  back and adopts its send in flight (`ComposeDraftCache.takeOnOpen`). A screen that sends, saves
+  or discards drops only its own cached draft (`ComposeDraftCache.clear(screen)`): another composer
+  still alive behind it keeps its draft and its saves. Being unpaired (Reconnect) is not another
+  account, so it does not close the screen.
   In-app launches go through `ComposeActivity.internalIntent` (the non-exported
   `InternalComposeActivity` alias); only those read the `compose_*` extras, including prefilled
   HTML. Every launch of the exported `ComposeActivity` gets public extras only, as plain text.

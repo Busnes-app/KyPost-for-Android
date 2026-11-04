@@ -43,6 +43,18 @@ internal fun isPrimaryRevoked(armored: String): Boolean = runCatching {
     revocationsOf(primary).any { verifies(it, primary, primary) }
 }.getOrDefault(false)
 
+/** The relay's rule for a key on a contact (KyPost-Server `validateContactKey`): one public key
+ *  whose primary is neither revoked nor expired, carrying one of [emails] as a user ID's
+ *  `<address>`. The relay refuses any other on a write, so a change carrying one stays queued. */
+internal fun contactKeyAcceptable(armored: String, emails: List<String>): Boolean = runCatching {
+    val primary = singleRing(armored)?.publicKey ?: return false
+    if (isPrimaryRevoked(armored)) return false
+    val validSeconds = primary.validSeconds
+    if (validSeconds > 0 && System.currentTimeMillis() > primary.creationTime.time + validSeconds * 1000L) return false
+    val wanted = emails.map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
+    primary.userIDs.asSequence().any { uid -> uid.substringAfter('<', "").substringBefore('>').trim().lowercase() in wanted }
+}.getOrDefault(false)
+
 private fun revocationsOf(key: PGPPublicKey): List<PGPSignature> =
     key.getSignaturesOfType(if (key.isMasterKey) PGPSignature.KEY_REVOCATION else PGPSignature.SUBKEY_REVOCATION)
         .asSequence().filterIsInstance<PGPSignature>().toList()

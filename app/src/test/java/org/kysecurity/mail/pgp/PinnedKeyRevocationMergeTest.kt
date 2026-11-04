@@ -149,6 +149,16 @@ class PinnedKeyRevocationMergeTest {
         assertNull(withVerifiedRevocation(public(C), subkeyRevoked(C, NEWEST_SUBKEY, signer = B)))
     }
 
+    /** The relay's contact-key rule, applied before kept contacts are brought into an account. */
+    @Test
+    fun aContactKeyIsAcceptableOnlyUnrevokedAndNamingOneOfTheContactsAddresses() {
+        assertTrue(contactKeyAcceptable(public(A), listOf("other@example.invalid", " A@Example.Invalid ")))
+        assertFalse("names none of the addresses", contactKeyAcceptable(public(A), listOf("b@example.invalid")))
+        assertFalse("no address to bind", contactKeyAcceptable(public(A), emptyList()))
+        assertFalse("revoked", contactKeyAcceptable(revoked(A, signer = A), listOf("a@example.invalid")))
+        assertFalse("not a key", contactKeyAcceptable("garbage", listOf("a@example.invalid")))
+    }
+
     private companion object {
         const val ALICE = "alice@example.invalid"
         const val NEWEST_SUBKEY = 1

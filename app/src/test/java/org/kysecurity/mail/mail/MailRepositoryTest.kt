@@ -1407,20 +1407,38 @@ class MailRepositoryTest {
         assertEquals(listOf("42"), repository.cachedEmails("INBOX").map { it.id })
     }
 
-    /** The refresh read the window before the delete landed and writes after it. An IMAP UID is
-     *  never reused in its mailbox, so that row is stale and must not come back. */
+    /** The refresh read the window before the delete landed and writes after it, so that row is
+     *  stale and must not come back. */
     @Test
     fun aRefreshThatReadTheWindowBeforeADeleteDoesNotResurrectIt() {
         val dao = FakeEmailDao()
         dao.put(row("42", "INBOX"))
         val source = FakeMailSource(fetchOutcome = snapshot("42", "7"))
         val repository = repository(dao, source)
+        source.duringRead = { source.duringRead = null; repository.delete("42", "INBOX") }
 
-        repository.delete("42", "INBOX")
         repository.refreshFolder("INBOX")
 
         assertEquals(setOf("INBOX" to "7"), dao.rows.keys)
         assertEquals(listOf("7"), repository.cachedEmails("INBOX").map { it.id })
+    }
+
+    /** A native mailbox keeps a message's id across a move, so a snooze wakes it into INBOX under
+     *  the id it was removed with. A refresh started after the removal is the server's word. */
+    @Test
+    fun aMessageBackUnderTheSameIdShowsOnTheNextRefresh() {
+        val dao = FakeEmailDao()
+        dao.put(row("42", "INBOX"))
+        val source = FakeMailSource(fetchOutcome = snapshot("7"))
+        val repository = repository(dao, source)
+
+        repository.delete("42", "INBOX")
+        repository.refreshFolder("INBOX")
+        source.fetchOutcome = snapshot("42", "7")
+        repository.refreshFolder("INBOX")
+
+        assertEquals(setOf("INBOX" to "42", "INBOX" to "7"), dao.rows.keys)
+        assertEquals(setOf("42", "7"), repository.cachedEmails("INBOX").map { it.id }.toSet())
     }
 
     @Test
@@ -1433,8 +1451,8 @@ class MailRepositoryTest {
             ),
         )
         val repository = repository(dao, source)
+        source.duringRead = { source.duringRead = null; repository.delete("42", "INBOX") }
 
-        repository.delete("42", "INBOX")
         repository.refreshFolder("INBOX")
 
         assertTrue(dao.rows.isEmpty())
@@ -1475,7 +1493,7 @@ class MailRepositoryTest {
     /** UIDs are small integers in every account: the next account's INBOX 42 must not stay hidden. */
     @Test
     fun aSessionResetForgetsTheProcessWideRemovals() {
-        PendingMailActions.process.removed += "INBOX" to "42"
+        PendingMailActions.process.markRemoved("INBOX" to "42")
 
         org.kysecurity.mail.ProcessState.resetAll()
 
@@ -1785,8 +1803,8 @@ class MailRepositoryTest {
         val source = FakeMailSource()
         source.olderPages += page("42", "41")
         val repository = repository(dao, source)
+        source.duringRead = { source.duringRead = null; repository.delete(repository.beginRemoval("42", "INBOX")) }
 
-        repository.delete(repository.beginRemoval("42", "INBOX"))
         repository.loadOlder("INBOX", "43")
 
         assertEquals(setOf("INBOX" to "41"), dao.rows.keys)

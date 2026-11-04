@@ -140,6 +140,11 @@ class EmailDetailActivity : LockedActivity() {
     /** This message's attachment listing, once loaded — what Forward has to fetch. */
     private var attachmentInfos: List<AttachmentInfo> = emptyList()
 
+    /** Whether [attachmentInfos] is the relay's answer, and whether the last ask failed: until it
+     *  is, Forward would open without the message's files and without a word. */
+    private var attachmentsListed = false
+    private var attachmentsListFailed = false
+
     private var toRecipients: List<String> = emptyList()
     private var ccRecipients: List<String> = emptyList()
 
@@ -475,6 +480,14 @@ class EmailDetailActivity : LockedActivity() {
         emailSubject: String,
         emailPreview: String,
     ) {
+        if (intent.getBooleanExtra("email_has_attachments", false) && !attachmentsListed) {
+            Toast.makeText(this, R.string.forward_attachments_not_listed, Toast.LENGTH_LONG).show()
+            if (attachmentsListFailed) {
+                attachmentsListFailed = false
+                loadAttachments(emailId, emailFolder)
+            }
+            return
+        }
         val missing = attachmentInfos.filter { it.index !in downloadedAttachments }
         if (missing.isEmpty()) {
             quotedBodyHtmlAsync(emailPreview) { quoted ->
@@ -855,6 +868,8 @@ class EmailDetailActivity : LockedActivity() {
             val infos = (outcome as? MailOutcome.Success)?.value.orEmpty()
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
+                attachmentsListed = outcome is MailOutcome.Success
+                attachmentsListFailed = !attachmentsListed
                 renderAttachments(emailId, emailFolder, infos)
             }
             // After the chips: a slow or hostile invite must not hold up the attachment list.

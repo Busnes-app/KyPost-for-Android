@@ -245,6 +245,18 @@ class AppLockManagerTest {
     }
 
     @Test
+    fun remainingLockout_runsOutAfterAReboot_insteadOfWaitingForTheOldUptime() = runBlocking {
+        clock = 14L * 24 * 60 * 60 * 1000
+        repeat(3) { manager.attemptPin("000001".toCharArray()) }
+        clock = 5_000L
+        assertEquals(30_000L, manager.remainingLockoutMillis())
+        clock += 10_000L
+        assertEquals(20_000L, manager.remainingLockoutMillis())
+        clock += 20_001L
+        assertEquals(0L, manager.remainingLockoutMillis())
+    }
+
+    @Test
     fun remainingLockout_isZero_whenNoLockoutWasEverSet() {
         assertEquals(0L, manager.remainingLockoutMillis())
     }

@@ -66,6 +66,15 @@ class ContactEditActivity : LockedActivity() {
     /** [save] must `.copy()` off this — the local upsert and the server push both replace the row. */
     private var loadedDto: ContactDto = ContactDto()
 
+    /** An account change (`ProcessState.resetAll`) ends this form's session: it belonged to the
+     *  account before, and saving it then queued it under the next one, past the kept-contacts
+     *  question. Compose does the same. */
+    private val openedSession = org.kysecurity.mail.ProcessState.generation()
+
+    override fun onStartUnlocked() {
+        if (!org.kysecurity.mail.ProcessState.isCurrent(openedSession)) finish()
+    }
+
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
         setContentView(R.layout.activity_contact_edit)
         applyThemeToActivity(this)
@@ -504,6 +513,10 @@ class ContactEditActivity : LockedActivity() {
             Toast.makeText(this, R.string.contacts_name_required, Toast.LENGTH_SHORT).show()
             return
         }
+        if (!org.kysecurity.mail.ProcessState.isCurrent(openedSession)) {
+            finish()
+            return
+        }
         val dto = currentFormDto(fn)
 
         lifecycleScope.launch {
@@ -532,6 +545,10 @@ class ContactEditActivity : LockedActivity() {
     }
 
     private fun delete() {
+        if (!org.kysecurity.mail.ProcessState.isCurrent(openedSession)) {
+            finish()
+            return
+        }
         lifecycleScope.launch {
             val deviceGraph = DeviceContactsRuntime.graph(this@ContactEditActivity)
             deviceGraph.repository.deleteDeviceRawContact(existingUid)

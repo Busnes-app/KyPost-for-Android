@@ -529,9 +529,13 @@ class ComposeActivity : LockedActivity() {
             finish()
             return
         }
-        // Across process death only the account can tell: another one is paired now.
+        // Across process death only the account can tell: another one is paired now. Unpaired is
+        // not another account: Reconnect (keep mail) clears the pairing and keeps this composition.
         val expected = openedAccount ?: return
-        lifecycleScope.launch { if (pairedAccountKey() != expected && !isFinishing) finish() }
+        lifecycleScope.launch {
+            val current = pairedAccountKey()
+            if (current != null && current != expected && !isFinishing) finish()
+        }
     }
 
     override fun onResume() {
@@ -1073,7 +1077,7 @@ class ComposeActivity : LockedActivity() {
                 val length = if (outcome.warning.isBlank()) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
                 Toast.makeText(this, message, length).show()
                 sendSucceeded = true
-                ComposeDraftCache.clear()
+                ComposeDraftCache.clear(System.identityHashCode(this))
                 finish()
             }
             // The user dismissed their own prompt. Not an error, and nothing to say — the screen
@@ -1255,7 +1259,7 @@ class ComposeActivity : LockedActivity() {
         if (outcome == DraftSaveOutcome.Saved) {
             deleteSourceDraft()
             sendSucceeded = true
-            ComposeDraftCache.clear()
+            ComposeDraftCache.clear(System.identityHashCode(this))
             Toast.makeText(this, R.string.compose_draft_saved, Toast.LENGTH_SHORT).show()
             finish()
         } else {
@@ -1320,7 +1324,7 @@ class ComposeActivity : LockedActivity() {
                 val length = if (warning.isBlank()) Toast.LENGTH_SHORT else Toast.LENGTH_LONG
                 Toast.makeText(this, message, length).show()
                 sendSucceeded = true
-                ComposeDraftCache.clear()
+                ComposeDraftCache.clear(System.identityHashCode(this))
                 finish()
             }
             is MailOutcome.PickupFallbackNeeded -> {
@@ -1503,7 +1507,7 @@ class ComposeActivity : LockedActivity() {
         if (redirectedToUnlock) return
         if (isFinishing) {
             mirroredBodyHtml = ""
-            ComposeDraftCache.clear()
+            ComposeDraftCache.clear(System.identityHashCode(this))
             return
         }
         if (sendSucceeded) return

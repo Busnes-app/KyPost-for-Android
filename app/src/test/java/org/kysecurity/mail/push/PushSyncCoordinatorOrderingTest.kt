@@ -58,6 +58,7 @@ class PushSyncCoordinatorOrderingTest {
         // the credential wrapper keeps them expressed in the token they actually care about.
         onWipe: suspend (List<String>) -> Unit = {},
         wipeOwed: () -> Boolean = { false },
+        deregistered: MutableList<PairingData>? = null,
     ) = PushSyncCoordinator(
         repository = store,
         // An older server without native/refresh: these tests are about register's secret rotation.
@@ -73,6 +74,11 @@ class PushSyncCoordinatorOrderingTest {
         wipeOnIncompletePurge = onWipe,
         wipeOwed = wipeOwed,
         fetchRegistrationCredential = { token()?.let { PushRegistrationCredential(token = it) } },
+        deregisterReplaced = { previous ->
+            // Before the purge, while the replaced credentials still exist.
+            assertTrue("deregistered after the purge", "clearPairing" !in store.events)
+            deregistered?.add(previous)
+        },
     )
 
     /** Two registrations in flight at once used to interleave as register-A, register-B,
@@ -194,6 +200,21 @@ class PushSyncCoordinatorOrderingTest {
 
         assertTrue("pairing failed: $result", result is NativeRegistrationResult.Success)
         assertEquals(true, store.keptContacts)
+    }
+
+    /** The replaced account's server still held this installation's push token, so its mail
+     *  kept arriving under the new account. It is deregistered with its own credentials, after
+     *  the new registration is proven and before the purge drops those credentials. */
+    @Test
+    fun aReplacementDeregistersTheReplacedDeviceBeforeThePurge() = runBlocking {
+        val store = FakePushStore(pairing = existing)
+        val deregistered = mutableListOf<PairingData>()
+        val coordinator = coordinator(store, { req -> response(req, body("secret-new"), 200) }, deregistered = deregistered)
+
+        val result = coordinator.attemptPairing(replacement)
+
+        assertTrue("pairing failed: $result", result is NativeRegistrationResult.Success)
+        assertEquals(listOf(existing), deregistered)
     }
 
     /** Same rule one step later: the network call itself is what fails. */

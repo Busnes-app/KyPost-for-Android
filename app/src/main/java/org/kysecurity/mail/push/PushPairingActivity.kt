@@ -369,6 +369,18 @@ class PushPairingActivity : LockedActivity() {
             Toast.makeText(this, R.string.pairing_confirm_bad_url, Toast.LENGTH_LONG).show()
             return
         }
+        // The stored leaf pin refuses every other host, so a switch to another server could only
+        // fail with a TLS error after the user agreed to it. Say how to switch instead.
+        val pinnedHost = repository.currentTlsPin()?.host
+        if (pinnedHost != null && !pinnedHost.equals(shownHost, ignoreCase = true)) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.pairing_confirm_title)
+                .setMessage(getString(R.string.pairing_other_server_needs_unpair, pinnedHost, shownHost))
+                .setPositiveButton(android.R.string.ok, null)
+                .create()
+                .showSecurely()
+            return
+        }
         // showSecurely: a BROWSABLE deep link raises this, so its accept button must not be coverable.
         AlertDialog.Builder(this)
             .setTitle(R.string.pairing_confirm_title)
@@ -383,8 +395,12 @@ class PushPairingActivity : LockedActivity() {
      *  confirm-before-destructive-action treatment as [confirmAndApplyPairing]. */
     private fun confirmAndUnpairDevice() {
         lifecycleScope.launch {
-            val contacts = org.kysecurity.mail.contacts.ContactsRuntime.graph(this@PushPairingActivity).repository
-            val unsynced = contacts.unsyncedChangeCount()
+            // An unreadable database must not take the Unpair button with it: show the dialog
+            // without the count, and let the purge's residue escalate to a wipe as before.
+            val unsynced = runCatching {
+                org.kysecurity.mail.contacts.ContactsRuntime.graph(this@PushPairingActivity).repository.unsyncedChangeCount()
+            }.onFailure { android.util.Log.w("PushPairingActivity", "Could not count unsynced contact changes", it) }
+                .getOrDefault(0)
             if (isFinishing || isDestroyed) return@launch
             // Owner decision Q2: contacts stay unless the user asks, warned about what has not synced.
             val removeContacts = android.widget.CheckBox(this@PushPairingActivity).apply {

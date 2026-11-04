@@ -35,6 +35,9 @@ class PushSyncCoordinator(
     private val fetchRegistrationCredential: suspend () -> PushRegistrationCredential?,
     /** Where UnifiedPush callback work runs; see [enqueueUnifiedPush]. */
     private val eventScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    /** Removes the replaced account's device from its server, signed with its own credentials.
+     *  Best effort, like Unpair's deregister. */
+    private val deregisterReplaced: suspend (PairingData) -> Unit = {},
 ) {
     /** ONE registration at a time, process-wide.
      *
@@ -129,6 +132,13 @@ class PushSyncCoordinator(
         // replacement that failed at the FCM token fetch — offline, say — had already deleted
         // the mail, contacts, keys and pairing of the account that was working a moment ago.
         if (isReplacement) {
+            // The replaced account's device row still holds this installation's push token, so its
+            // mail and MFA prompts kept arriving under the new account. Its credentials go with the
+            // purge below: this is the last moment they can sign the removal.
+            repository.state.first().pairing?.let { previous ->
+                runCatching { deregisterReplaced(previous) }
+                    .onFailure { android.util.Log.w("PushSyncCoordinator", "Could not deregister the replaced account", it) }
+            }
             // Contacts stay until the user answers "Bring your N contacts into …?" (owner decision Q2).
             val residue = repository.clearPairing(keepContacts = true)
             if (residue.isNotEmpty()) {
@@ -458,8 +468,7 @@ class PushSyncCoordinator(
     }
 
     companion object {
-        /** The stored sync error of a registration deferred because the app was locked; a
-         *  successful unlock retries it (`retryDeferredPushSync`). */
+        /** The stored sync error of a registration deferred because the app was locked. */
         const val CREDENTIAL_GATE_DEFERRAL = "Unlock with your PIN to sync push registration"
 
         /** One message for both entry points, naming neither Firebase nor a distributor: which one

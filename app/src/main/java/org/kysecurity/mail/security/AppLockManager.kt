@@ -135,11 +135,20 @@ class AppLockManager(
         return UnlockAttemptResult.Rejected(delay)
     }
 
-    /** Clamped to the stored duration: the monotonic clock resets to zero on reboot. */
+    /** The monotonic clock resets to zero on reboot, so a deadline further away than the delay
+     *  ever applied belongs to the previous boot: it is rebased once to a full delay from now.
+     *  Merely clamping it kept the lockout at its full length until the new uptime caught up
+     *  with the old one, days after a reboot, rejecting every PIN and biometric meanwhile. */
     fun remainingLockoutMillis(): Long {
         val duration = state.lockoutDurationMs()
         if (duration <= 0L) return 0L
-        return (state.lockoutUntilElapsedMs() - elapsedRealtimeMs()).coerceIn(0L, duration)
+        val now = elapsedRealtimeMs()
+        val remaining = state.lockoutUntilElapsedMs() - now
+        if (remaining > duration) {
+            state.setLockout(now + duration, duration)
+            return duration
+        }
+        return remaining.coerceAtLeast(0L)
     }
 
     /** Null while locked — routed through [isLockedNow], since [lockNow] may not have run yet. */

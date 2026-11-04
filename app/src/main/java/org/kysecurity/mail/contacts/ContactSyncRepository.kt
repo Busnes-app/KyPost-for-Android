@@ -6,6 +6,7 @@ import org.kysecurity.mail.data.PendingContactChangeEntity
 import org.kysecurity.mail.data.RecipientPinEntity
 import org.kysecurity.mail.ProcessState
 import org.kysecurity.mail.pgp.PgpFingerprint
+import org.kysecurity.mail.pgp.contactKeyAcceptable
 import org.kysecurity.mail.pgp.withVerifiedRevocation
 import org.kysecurity.mail.push.PairingData
 import org.kysecurity.mail.push.ReconnectExpectation
@@ -189,7 +190,10 @@ class ContactSyncRepository(
     }
 
     /** "Yes": every held contact goes to [account] as new. The other account's pending updates and
-     *  deletes mean nothing there and are dropped, as are its group ids and photo refs (as on Mac).
+     *  deletes mean nothing there and are dropped, as are its group ids and photo refs (as on Mac),
+     *  and any key the relay would refuse (expired, revoked, or naming none of the contact's
+     *  addresses): one such key kept that contact's create refused for good (owner decision on
+     *  contact keys). The phone's own row keeps it.
      *  False, changing nothing, when [account] is no longer paired or the question was answered.
      *  The caller syncs afterwards. */
     suspend fun bringKeptContacts(account: ReconnectExpectation): Boolean = answerKeptContacts(account) {
@@ -197,7 +201,11 @@ class ContactSyncRepository(
         db.groupDao().clearAll()
         val now = System.currentTimeMillis()
         db.contactDao().getAll().forEach { entity ->
-            val dto = entity.toDto().copy(rev = 0, groupIDs = emptyList(), photoRef = null)
+            val held = entity.toDto()
+            val dto = held.copy(
+                rev = 0, groupIDs = emptyList(), photoRef = null,
+                pgpKey = held.pgpKey?.takeIf { contactKeyAcceptable(it, held.emails.map { e -> e.value }) },
+            )
             db.contactDao().upsertAll(listOf(entity.copy(rev = 0, groupIDsJson = "[]", photoRef = null)))
             db.pendingContactChangeDao().enqueue(
                 PendingContactChangeEntity(
