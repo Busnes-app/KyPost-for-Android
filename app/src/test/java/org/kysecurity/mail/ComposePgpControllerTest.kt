@@ -132,6 +132,32 @@ class ComposePgpControllerTest {
         assertEquals(1, calls)
     }
 
+    /** A bootstrap still in flight when the account is purged must not seed the next account's
+     *  composer with the old account's custody and addresses. */
+    @Test
+    fun composeState_dropsABootstrapThatOutlivedItsSession() = runBlocking {
+        var calls = 0
+        val callFactory = FakeCallFactory { request ->
+            calls++
+            // The purge lands while the reply is on its way.
+            if (calls == 1) {
+                ProcessState.advanceGeneration()
+                ComposePgpController.resetSessionCache()
+            }
+            response(request, """{"hasIdentity":true,"protection":"server"}""", 200)
+        }
+        val controller = ComposePgpController(
+            pairingProvider = { testPairing() },
+            bootstrapClient = PgpBootstrapClient(callFactory = callFactory),
+            recipientKeyClient = RecipientKeyClient(callFactory = callFactory),
+        )
+
+        assertNull(controller.composeState())
+        controller.composeState()
+
+        assertEquals(2, calls)
+    }
+
     @Test
     fun composeState_doesNotCacheAFailure() = runBlocking {
         var calls = 0

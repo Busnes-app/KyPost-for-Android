@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
@@ -70,6 +71,17 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
                 // Re-read delivery mode & drain any queued pull notifications on open.
                 graph.pullCoordinator.pullNowAsync()
             }
+        }
+    }
+
+    /** The approval wait outlives the screen that started it, so its outcome is reported by the
+     *  pairing screen that is started when it ends, or the next one to start. The Activity calls
+     *  this inside `repeatOnLifecycle(STARTED)`: a stopped screen, which the app lock may finish
+     *  on return, must not take it. */
+    suspend fun reportApprovalResults(canShow: () -> Boolean) {
+        ApprovalWait.result.filterNotNull().collect {
+            // A screen the lock is finishing still reaches STARTED: leave the outcome for the next one.
+            if (canShow()) ApprovalWait.takeResult()?.let(::reportPairing)
         }
     }
 
@@ -134,9 +146,11 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
             ),
             approvalScope,
         ) {
-            val result = graph.syncCoordinator.awaitApproval(pending)
-            // This screen may be gone; the next one reads the pairing from the store.
-            reportPairing(result)
+            // Not reported here: this screen may be gone. ApprovalWait holds the result for the
+            // next started pairing screen (reportApprovalResults). The first pull does not wait for it.
+            graph.syncCoordinator.awaitApproval(pending).also {
+                if (it is NativeRegistrationResult.Success) graph.pullCoordinator.pullNowAsync()
+            }
         }
     }
 
@@ -171,7 +185,8 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun unpairDevice() {
+    /** [keepContacts]: the Remove Pairing dialog's "Also remove this device's contacts", unticked (owner decision Q2). */
+    fun unpairDevice(keepContacts: Boolean = true) {
         // A request still waiting would pair the device again the moment the web approved it.
         ApprovalWait.cancel()
         // NonCancellable, escalation included: leaving the screen mid-unpair cancelled this in the
@@ -180,7 +195,7 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
             withContext(NonCancellable) {
                 isWorking.value = true
                 val result = graph.syncCoordinator.withRegistrationsHeld {
-                    graph.repository.unpairDevice(graph.deregisterClient)
+                    graph.repository.unpairDevice(graph.deregisterClient, keepContacts = keepContacts)
                 }
                 localMessage.value = when (val network = result.deregister) {
                     is DeregisterResult.Success -> "Device unpaired"
@@ -253,11 +268,14 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
 }
 
 /** The one device-approval wait, held for the process rather than one pairing screen: the app
- *  lock finishes that screen, and the next one must still show the card and be able to cancel it.
- *  A newer pairing link, an unpair and a session reset (wipe) cancel it. The coordinator wipes
- *  the pending secret on every way out. */
+ *  lock finishes that screen, and the next one must still show the card and be able to cancel it,
+ *  and report its outcome ([result]). A newer pairing link, an unpair and a session reset (wipe)
+ *  cancel it. The coordinator wipes the pending secret on every way out. */
 internal object ApprovalWait : org.kysecurity.mail.ProcessScopedState {
     val card = MutableStateFlow<PendingApprovalUi?>(null)
+
+    /** How the last wait ended, until a pairing screen takes it ([takeResult]). */
+    val result = MutableStateFlow<NativeRegistrationResult?>(null)
     private var job: Job? = null
 
     init {
@@ -265,15 +283,17 @@ internal object ApprovalWait : org.kysecurity.mail.ProcessScopedState {
     }
 
     @Synchronized
-    fun start(ui: PendingApprovalUi, scope: CoroutineScope, wait: suspend () -> Unit) {
+    fun start(ui: PendingApprovalUi, scope: CoroutineScope, wait: suspend () -> NativeRegistrationResult) {
         job?.cancel()
         card.value = ui
+        result.value = null
         lateinit var started: Job
         started = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            var outcome: NativeRegistrationResult? = null
             try {
-                wait()
+                outcome = wait()
             } finally {
-                finished(started)
+                finished(started, outcome)
             }
         }
         job = started
@@ -281,17 +301,24 @@ internal object ApprovalWait : org.kysecurity.mail.ProcessScopedState {
     }
 
     @Synchronized
-    private fun finished(which: Job) {
+    private fun finished(which: Job, outcome: NativeRegistrationResult?) {
+        // A cancelled or superseded wait reports nothing.
         if (job !== which) return
         job = null
         card.value = null
+        result.value = outcome
     }
+
+    /** Single-use: the first screen to take it reports it. */
+    @Synchronized
+    fun takeResult(): NativeRegistrationResult? = result.value.also { result.value = null }
 
     @Synchronized
     fun cancel() {
         job?.cancel()
         job = null
         card.value = null
+        result.value = null
     }
 
     override fun resetForNewSession() = cancel()

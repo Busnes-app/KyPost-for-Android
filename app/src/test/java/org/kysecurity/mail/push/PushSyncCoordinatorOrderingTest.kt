@@ -60,7 +60,16 @@ class PushSyncCoordinatorOrderingTest {
         wipeOwed: () -> Boolean = { false },
     ) = PushSyncCoordinator(
         repository = store,
-        registrationClient = NativeRegistrationClient(callFactory = FakeCallFactory(responder)),
+        // An older server without native/refresh: these tests are about register's secret rotation.
+        registrationClient = NativeRegistrationClient(
+            callFactory = FakeCallFactory { req ->
+                if (req.url.encodedPath.endsWith("/native/refresh")) {
+                    org.kysecurity.mail.testing.response(req, "404 page not found", 404)
+                } else {
+                    responder(req)
+                }
+            },
+        ),
         wipeOnIncompletePurge = onWipe,
         wipeOwed = wipeOwed,
         fetchRegistrationCredential = { token()?.let { PushRegistrationCredential(token = it) } },
@@ -139,6 +148,7 @@ class PushSyncCoordinatorOrderingTest {
         assertEquals("secret-old", sent)
     }
 
+
     /** The link's pin re-pins only the SAME account; a replacement keeps the stored pin in charge. */
     @Test
     fun aLinkPinIsHonouredForTheSameAccountOnly() = runBlocking {
@@ -171,6 +181,19 @@ class PushSyncCoordinatorOrderingTest {
         assertTrue(result is NativeRegistrationResult.Error)
         assertEquals(emptyList<String>(), store.events)
         assertEquals(existing, store.currentPairing())
+    }
+
+    /** Owner decision Q2: a replacement erases the old account's mail but keeps its contacts until
+     *  the user answers "Bring your N contacts into …?". */
+    @Test
+    fun aReplacementKeepsContactsForTheQuestion() = runBlocking {
+        val store = FakePushStore(pairing = existing)
+        val coordinator = coordinator(store, { req -> response(req, body("secret-new"), 200) })
+
+        val result = coordinator.attemptPairing(replacement)
+
+        assertTrue("pairing failed: $result", result is NativeRegistrationResult.Success)
+        assertEquals(true, store.keptContacts)
     }
 
     /** Same rule one step later: the network call itself is what fails. */

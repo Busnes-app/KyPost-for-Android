@@ -267,4 +267,51 @@ class DeviceContactUpdatePlanTest {
         assertNull(plan.nextBase(dto, device, base = null))
         assertEquals(dto, plan.nextBase(dto, snapshot(), base = null))
     }
+
+    /** A title without a company still gets the Organization row, and the base is what was written,
+     *  so a later phone edit does not read the title as deleted. */
+    @Test
+    fun organizationRowOf_titleOnly_writesTheTitle_andTheBaseMatchesThePhone() {
+        val dto = ContactDto(uid = "u1", fn = "Ada Lovelace", title = "CTO")
+
+        assertEquals(Triple(null, "CTO", null), organizationRowOf(dto))
+        assertNull(organizationRowOf(dto.copy(title = " ")))
+
+        // The phone as CP2 reads that row back; the base the create records is dto itself.
+        val phone = snapshot().copy(title = "CTO")
+        assertTrue(DeviceContactUpdatePlan.of(dto, phone, roomNewer, deviceOlder, base = dto).isEmpty())
+        assertEquals("CTO", DeviceContactFieldMerge.againstBase(dto.title, phone.title, dto.title, true) { r, _ -> r })
+    }
+
+    /** A link made by the old create: base title CTO, no Organization row on the phone. Unrepaired,
+     *  the pull reads the missing row as the title deleted; repaired, Room's title wins both ways. */
+    @Test
+    fun repairedBase_titleDroppedByTheOldCreate_roomTitleWins() {
+        val dto = ContactDto(uid = "u1", fn = "Ada Lovelace", title = "CTO")
+        val oldBase = dto
+        val phone = snapshot()
+
+        assertNull(DeviceContactFieldMerge.againstBase(dto.title, phone.title, oldBase.title, true) { r, _ -> r })
+
+        val base = repairedBase(oldBase, phone)
+        assertNull(base!!.title)
+        val plan = DeviceContactUpdatePlan.of(dto, phone, roomNewer, deviceOlder, base = base)
+        assertEquals("CTO", plan.title)
+        assertEquals("CTO", plan.nextBase(dto, phone, base)!!.title)
+        // The device -> Room pull keeps Room's title instead of queueing title = null.
+        assertEquals("CTO", DeviceContactFieldMerge.againstBase(dto.title, phone.title, base.title, true) { _, d -> d })
+    }
+
+    /** Only that exact shape is repaired: a phone with an Organization row, or a base with a
+     *  company, keeps its base, so a title really cleared on the phone stays cleared. */
+    @Test
+    fun repairedBase_leavesOtherBasesAlone() {
+        val base = ContactDto(uid = "u1", fn = "Ada Lovelace", title = "CTO")
+
+        assertEquals(base, repairedBase(base, snapshot(org = "Analytical Engines")))
+        assertEquals(base, repairedBase(base, snapshot().copy(department = "R&D")))
+        val withCompany = base.copy(org = "Analytical Engines")
+        assertEquals(withCompany, repairedBase(withCompany, snapshot()))
+        assertNull(repairedBase(null, snapshot()))
+    }
 }

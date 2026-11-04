@@ -18,6 +18,7 @@ class ContactsGraph(context: Context) {
         client = ContactSyncClient(callFactory = pinnedCallFactory),
         cursorStore = ContactCursorStore(appContext, database),
         pairingProvider = { PushRuntime.graph(appContext).repository.pairingForAuthenticatedCall() },
+        ownerStore = PushRuntime.graph(appContext).repository,
     )
     val coordinator = ContactSyncCoordinator(repository)
     val groupSyncRepository = GroupSyncRepository(

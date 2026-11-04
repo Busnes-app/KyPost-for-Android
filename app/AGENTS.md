@@ -21,8 +21,9 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   `deviceSecret` is minted server-side once per successful `POST
   /api/notifications/native/register` call and returned only in that response — the app must
   persist whatever it receives unconditionally, overwriting any prior value, since every
-  successful register invalidates the previous secret. No bearer tokens, no cookies, no separate
-  mobile login. (Replaces the earlier account-wide `sub`/`hash` shared-secret scheme, which the
+  successful register invalidates the previous secret. A paired device's later resyncs use
+  `POST /api/notifications/native/refresh`, which is authenticated by that secret and mints none.
+  No bearer tokens, no cookies, no separate mobile login. (Replaces the earlier account-wide `sub`/`hash` shared-secret scheme, which the
   backend removed entirely — no dual-auth fallback.)
 - The relay's TLS certificate is pinned TOFU over **the leaf certificate, and nothing else**, and
   the pin is refreshed on every successful registration. `app/src/main/AGENTS.md` is the authority
@@ -142,7 +143,15 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   path and its `to`, `cc` and `bcc` headers, or from `EXTRA_EMAIL`, `EXTRA_CC` and `EXTRA_BCC`. Shared attachments still enter through the Activity's existing bounded
   attachment reader, which accepts only `content:` URIs from other packages' providers and
   refuses a descriptor whose `/proc/self/fd` path is under this app's data directories. An external compose request starts a new draft and must not restore an
-  unrelated `ComposeDraftCache` entry left by an earlier internal compose screen. Recreating that
+  unrelated `ComposeDraftCache` entry left by an earlier internal compose screen. It drops that
+  entry without zeroing its attachments: those arrays may belong to a compose screen still alive in
+  the back stack or a send in flight, and only `ProcessState.resetAll` wipes them. Compose records the
+  `ProcessState.generation()` and paired account it was opened under (kept in its saved state, the
+  generation only within the same process) and finishes in `onStartUnlocked` once that session has
+  ended or another account is paired, so a screen left behind across an unpair and re-pair, or
+  recreated afterwards, can neither send nor delete a draft under the next account. Leaving a compose with content offers Discard / Keep
+  writing, plus Save draft wherever the Save draft menu item is offered (client custody); it leaves
+  only once the save succeeds. Recreating that
   screen (a rotation, `savedInstanceState` set) is the same composition: it takes its own draft
   back and adopts its send in flight (`ComposeDraftCache.takeOnOpen`).
   In-app launches go through `ComposeActivity.internalIntent` (the non-exported

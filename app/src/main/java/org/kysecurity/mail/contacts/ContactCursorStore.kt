@@ -31,6 +31,11 @@ class ContactCursorStore(context: Context, private val db: AppDatabase) {
         return legacy
     }
 
+    /** True once [subscriberId] has synced contacts on this install: a Room cursor row, or the
+     *  legacy DataStore cursor an install from before the Room cursor still holds. Creates nothing. */
+    suspend fun hasSynced(subscriberId: String): Boolean =
+        db.contactSyncStateDao().cursor(subscriberId) != null || legacyCursor.get(subscriberId) != null
+
     suspend fun advanceCursor(subscriberId: String, newCursor: Long) {
         val current = db.contactSyncStateDao().cursor(subscriberId) ?: 0L
         db.contactSyncStateDao().upsert(ContactSyncStateEntity(subscriberId, maxOf(current, newCursor)))

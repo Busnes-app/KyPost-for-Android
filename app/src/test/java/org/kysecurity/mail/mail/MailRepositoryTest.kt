@@ -145,14 +145,19 @@ private class FakeMailSource(
     val olderPages = ArrayDeque<MailOutcome<MailPage>>()
     val befores = mutableListOf<String>()
 
+    /** Runs while a read (inbox, older page, body) is "on the wire", e.g. an account purge. */
+    var duringRead: (() -> Unit)? = null
+
     override fun fetchInbox(mailbox: String, limit: Int, forceFullResync: Boolean): MailOutcome<MailFetchResult> {
         limits += limit
+        duringRead?.invoke()
         return fetchOutcome
     }
 
     override fun fetchOlder(mailbox: String, limit: Int, before: String): MailOutcome<MailPage> {
         limits += limit
         befores += before
+        duringRead?.invoke()
         return olderPages.removeFirstOrNull() ?: unsupported()
     }
 
@@ -193,6 +198,7 @@ private class FakeMailSource(
     override fun fetchMessageBody(messageId: String, folder: String): MailOutcome<MailMessageBody> {
         val stubbed = bodyOutcome ?: unsupported()
         bodyFetches += messageId to folder
+        duringRead?.invoke()
         return stubbed
     }
     override fun listAttachments(messageId: String, folder: String) = unsupported()
@@ -717,6 +723,46 @@ class MailRepositoryTest {
         assertEquals(listOf(Triple("sub-1", "INBOX", "c-2")), cursors.saved)
         assertEquals(listOf("sub-1" to "INBOX"), cursors.fullResyncs)
         assertEquals("body-m1", dao.getById("m1", "INBOX")?.body)
+    }
+
+    /** The account was purged (generation advanced, Room cleared) while each read was in flight:
+     *  nothing from the old account may be written back, nor its checkpoint committed. */
+    @Test
+    fun readsInFlightAcrossAnAccountPurgeWriteNothing() {
+        val dao = FakeEmailDao()
+        val cursors = FakeCursorProvider()
+        val source = FakeMailSource(
+            fetchOutcome = MailOutcome.Success(
+                MailFetchResult(
+                    tabs = emptyList(),
+                    messages = listOf(email("m1")),
+                    isDelta = true,
+                    isFullWindow = true,
+                    checkpoint = MailCheckpoint(subscriberId = "sub-1", cursor = "c-2", wasFullResync = true),
+                ),
+            ),
+        ).apply {
+            olderPages += page("p1")
+            bodyOutcome = MailOutcome.Success(
+                MailMessageBody(html = "<p>old</p>", bodyMode = "html", toAddresses = emptyList(), ccAddresses = emptyList()),
+            )
+        }
+        val repo = repository(dao, source, cursors)
+        val purge = { org.kysecurity.mail.ProcessState.advanceGeneration(); dao.clearAll() }
+        source.duringRead = purge
+
+        assertTrue(repo.refreshFolder("INBOX") !is MailOutcome.Success)
+        assertTrue(repo.loadOlder("INBOX", "w1") !is MailOutcome.Success)
+        assertTrue(dao.rows.isEmpty())
+        assertTrue(cursors.saved.isEmpty())
+        assertTrue(cursors.fullResyncs.isEmpty())
+
+        // The next account's row with the same id must not get the old account's body.
+        source.duringRead = null
+        dao.put(row("42", "INBOX", body = null))
+        source.duringRead = { org.kysecurity.mail.ProcessState.advanceGeneration() }
+        assertTrue(repo.fetchBody("42", "INBOX") is MailOutcome.Unauthorized)
+        assertNull(dao.getById("42", "INBOX")?.body)
     }
 
     /** The whole point of the ordering: an acknowledged cursor the relay would honour, for mail

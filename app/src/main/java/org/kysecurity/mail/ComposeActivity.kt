@@ -57,6 +57,7 @@ import org.kysecurity.mail.push.PushRuntime
 import org.kysecurity.mail.push.pinnedPairingCallFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -260,7 +261,22 @@ class ComposeActivity : LockedActivity() {
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris -> if (!uris.isNullOrEmpty()) addAttachments(uris) }
 
+    /** The session and account this composition was opened in. An unpair and re-pair can happen
+     *  while it sits behind other screens; its Send would then go out under the next account, and
+     *  a recreation (rotation, process death) rebuilds it from the old account's Intent. Both are
+     *  kept in the saved state so a recreated screen is still the same composition. */
+    private var openedSession = 0L
+    private var openedAccount: String? = null
+
+    private suspend fun pairedAccountKey(): String? =
+        PushRuntime.graph(this).repository.state.first().pairing?.let { "${it.serverUrl}\n${it.subscriberId}" }
+
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
+        // The generation only means something in the process that saved it.
+        val sameProcess = savedInstanceState?.getInt(STATE_OPENED_PID, -1) == android.os.Process.myPid()
+        openedSession = if (sameProcess) savedInstanceState!!.getLong(STATE_OPENED_SESSION) else ProcessState.generation()
+        openedAccount = savedInstanceState?.getString(STATE_OPENED_ACCOUNT)
+        if (savedInstanceState == null) lifecycleScope.launch { openedAccount = pairedAccountKey() }
         setContentView(R.layout.activity_compose)
         applyThemeToActivity(this)
 
@@ -485,6 +501,9 @@ class ComposeActivity : LockedActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(STATE_CC_BCC_OPENED, ccBccOpened)
+        outState.putLong(STATE_OPENED_SESSION, openedSession)
+        outState.putInt(STATE_OPENED_PID, android.os.Process.myPid())
+        openedAccount?.let { outState.putString(STATE_OPENED_ACCOUNT, it) }
     }
 
     /** Pads for the system bars and the keyboard, so the format bar rides on the keyboard. The top
@@ -501,6 +520,18 @@ class ComposeActivity : LockedActivity() {
             insets
         }
         ViewCompat.requestApplyInsets(content)
+    }
+
+    /** The session ended (account purge) while this screen was stopped: its composition belonged
+     *  to that account, and the purge already reset its cached draft and send. */
+    override fun onStartUnlocked() {
+        if (!ProcessState.isCurrent(openedSession)) {
+            finish()
+            return
+        }
+        // Across process death only the account can tell: another one is paired now.
+        val expected = openedAccount ?: return
+        lifecycleScope.launch { if (pairedAccountKey() != expected && !isFinishing) finish() }
     }
 
     override fun onResume() {
@@ -943,8 +974,9 @@ class ComposeActivity : LockedActivity() {
 
         sendMenuItem?.isEnabled = false
         sendObserverForTest?.invoke()
-        // Captured before the async export: a session that ends while it runs refuses the send.
-        val session = ProcessState.generation()
+        // The composition's own session, not the current one: a screen that outlived its account
+        // (still STARTED in split screen, say) is refused by ComposeSend instead of sending as the next.
+        val session = openedSession
 
         bodyEditor.exportHtml { html ->
             // exportHtml's main-looper callback can fire after onDestroy.
@@ -1043,6 +1075,10 @@ class ComposeActivity : LockedActivity() {
             is ClientSendOutcome.KeysMissing -> {
                 sendMenuItem?.isEnabled = true
                 explainMissingKeys(outcome.addresses)
+            }
+            is ClientSendOutcome.SendFailed if outcome.outcome is MailOutcome.ReplyThreadingRefused -> {
+                sendMenuItem?.isEnabled = true
+                confirmUnthreadedSend(outcome.outcome.message)
             }
             else -> {
                 sendMenuItem?.isEnabled = true
@@ -1163,7 +1199,7 @@ class ComposeActivity : LockedActivity() {
         if (!commitTypedRecipients()) return
         // Until the save lands or fails; a second tap would otherwise start a second export.
         listOf(sendMenuItem, scheduleMenuItem, saveDraftMenuItem).forEach { it?.isEnabled = false }
-        val session = ProcessState.generation()
+        val session = openedSession
         bodyEditor.exportHtml { html ->
             if (isFinishing || isDestroyed) return@exportHtml
             // Asked again, as sendEmail does: custody can resolve between the tap and this callback.
@@ -1210,8 +1246,8 @@ class ComposeActivity : LockedActivity() {
         val source = sourceDraft ?: return
         sourceDraft = null
         val app = applicationContext
-        // The session the replacement went out in: a reset before the task runs refuses it.
-        val session = ProcessState.generation()
+        // The composition's session: a reset before the task runs refuses it.
+        val session = openedSession
         MailBackgroundExecutor.submitReporting(this, getString(R.string.compose_old_draft_delete)) {
             val repository = MailRuntime.graph(app).repository
             repository.delete(repository.beginRemoval(source.messageId, source.mailbox, session))
@@ -1311,7 +1347,13 @@ class ComposeActivity : LockedActivity() {
             .setPositiveButton(R.string.compose_unthreaded_confirm) { _, _ ->
                 sendMenuItem?.isEnabled = false
                 replyTo = null
-                dispatchSend(draft.copy(replyToMessageId = null, replyToMailbox = null), sentSession)
+                val unthreaded = draft.copy(replyToMessageId = null, replyToMailbox = null)
+                // The same path the refused send took: an encrypted reply must never fall back to a plain send.
+                if (clientSideAccount && (draft.sign || draft.encrypt)) {
+                    dispatchClientSend(unthreaded, sentSession)
+                } else {
+                    dispatchSend(unthreaded, sentSession)
+                }
             }
             .create()
             .showSecurely()
@@ -1508,6 +1550,12 @@ class ComposeActivity : LockedActivity() {
             .setMessage(R.string.compose_discard_body)
             .setNegativeButton(R.string.compose_discard_keep, null)
             .setPositiveButton(R.string.compose_discard_confirm) { _, _ -> finish() }
+            // Exactly when the Save draft menu item is offered; it finishes the screen only once saved.
+            .apply {
+                if (saveDraftMenuItem?.let { it.isVisible && it.isEnabled } == true) {
+                    setNeutralButton(R.string.compose_save_draft) { _, _ -> saveDraft() }
+                }
+            }
             .create().showSecurely()
     }
 
@@ -1537,6 +1585,9 @@ class ComposeActivity : LockedActivity() {
         internal var openDescriptorForTest: ((Uri) -> android.content.res.AssetFileDescriptor?)? = null
 
         private const val STATE_CC_BCC_OPENED = "compose_cc_bcc_opened"
+        private const val STATE_OPENED_SESSION = "compose_opened_session"
+        private const val STATE_OPENED_PID = "compose_opened_pid"
+        private const val STATE_OPENED_ACCOUNT = "compose_opened_account"
 
         const val EXTRA_TO = "compose_to"
         const val EXTRA_SUBJECT = "compose_subject"

@@ -38,6 +38,10 @@ private const val KEY_DEVICE_SECRET_PENDING_IV = "pair_device_secret_pending_iv"
 /** The account a credential-only reconnect kept data for; see [SecurePairingStore.clearPairing]. */
 private const val KEY_RECONNECT_SUB = "reconnect_expect_sub"
 private const val KEY_RECONNECT_SRV = "reconnect_expect_srv"
+/** The account the local contacts belong to; see [org.kysecurity.mail.contacts.ContactsOwnerStore].
+ *  Not removed by [SecurePairingStore.clearPairing]: an unpair that keeps contacts keeps it. */
+private const val KEY_CONTACTS_OWNER_SUB = "contacts_owner_sub"
+private const val KEY_CONTACTS_OWNER_SRV = "contacts_owner_srv"
 
 /** Legacy: a single leaf pin. Read-only now — [readTlsPin] carries it forward, nothing writes it. */
 private const val KEY_TLS_PIN = "pair_tls_spki_pin"
@@ -226,6 +230,22 @@ class SecurePairingStore(context: Context) {
         val sub = prefs.getString(KEY_RECONNECT_SUB, null)?.takeIf { it.isNotBlank() } ?: return null
         val srv = prefs.getString(KEY_RECONNECT_SRV, null)?.takeIf { it.isNotBlank() } ?: return null
         return ReconnectExpectation(subscriberId = sub, serverUrl = srv)
+    }
+
+    fun contactsOwner(): ReconnectExpectation? {
+        val sub = prefs.getString(KEY_CONTACTS_OWNER_SUB, null)?.takeIf { it.isNotBlank() } ?: return null
+        val srv = prefs.getString(KEY_CONTACTS_OWNER_SRV, null)?.takeIf { it.isNotBlank() } ?: return null
+        return ReconnectExpectation(subscriberId = sub, serverUrl = srv)
+    }
+
+    fun setContactsOwner(owner: ReconnectExpectation?) {
+        val editor = prefs.edit()
+        if (owner == null) {
+            editor.remove(KEY_CONTACTS_OWNER_SUB).remove(KEY_CONTACTS_OWNER_SRV)
+        } else {
+            editor.putString(KEY_CONTACTS_OWNER_SUB, owner.subscriberId).putString(KEY_CONTACTS_OWNER_SRV, owner.serverUrl)
+        }
+        editor.commit()
     }
 
     /** Unwraps `deviceSecret`; null if wrapped and [credentialKeys] is wrong. Never throws. */

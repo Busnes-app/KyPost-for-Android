@@ -140,3 +140,22 @@ data class DeviceContactUpdatePlan(
         }
     }
 }
+
+/** The Organization row a new raw contact gets, as (company, title, department), or null for none.
+ *  One row holds all three, so it is written when any is set, and the merge base is [dto] as is. */
+internal fun organizationRowOf(dto: ContactDto): Triple<String?, String?, String?>? =
+    Triple(dto.org?.ifBlank { null }, dto.title?.ifBlank { null }, dto.department?.ifBlank { null })
+        .takeUnless { it.first == null && it.second == null && it.third == null }
+
+/** Repair, run once per install (DeviceContactRepository.repairTitleBasesOnce): builds before
+ *  organizationRowOf wrote no Organization row for a title without a company, yet recorded the
+ *  title in the base, so the phone's missing row read as the title deleted. Such a base's title is
+ *  unknown, and Room's title wins and is written back. */
+internal fun repairedBase(base: ContactDto?, snapshot: DeviceRawContactSnapshot): ContactDto? =
+    if (base != null && !base.title.isNullOrBlank() && base.org.isNullOrBlank() &&
+        snapshot.org.isNullOrBlank() && snapshot.title.isNullOrBlank() && snapshot.department.isNullOrBlank()
+    ) {
+        base.copy(title = null)
+    } else {
+        base
+    }

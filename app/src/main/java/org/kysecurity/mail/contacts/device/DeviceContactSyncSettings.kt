@@ -35,6 +35,14 @@ class DeviceContactSyncSettings(context: Context) {
         return AutoCloseable { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
+    /** One-time repair of title-only merge bases written before `organizationRowOf` (see
+     *  [DeviceContactRepository]); true once every link has been checked. */
+    fun titleBasesRepaired(): Boolean = prefs.getBoolean(KEY_TITLE_BASES_REPAIRED, false)
+
+    fun markTitleBasesRepaired() {
+        prefs.edit().putBoolean(KEY_TITLE_BASES_REPAIRED, true).commit()
+    }
+
     fun lastForeignScanAtEpochMs(): Long = prefs.getLong(KEY_LAST_FOREIGN_SCAN, 0L)
 
     fun setLastForeignScanAtEpochMs(epochMs: Long) {
@@ -97,6 +105,7 @@ class DeviceContactSyncSettings(context: Context) {
     companion object {
         private const val PREFS_NAME = "org.kysecurity.mail.device_contacts"
         private const val KEY_ENABLED = "enabled"
+        private const val KEY_TITLE_BASES_REPAIRED = "title_bases_repaired"
         private const val KEY_LAST_FOREIGN_SCAN = "last_foreign_scan_epoch_ms"
         private const val KEY_SYNC_CONSENT = "sync_consent_destination"
         private const val KEY_IMPORT_ACCOUNTS = "import_account_keys"

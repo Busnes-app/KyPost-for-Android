@@ -242,6 +242,8 @@ class ContactsListActivity : LockedActivity() {
             lifecycleScope.launch {
                 adapter.selfHasPgpIdentity = hasPgpIdentity(this@ContactsListActivity)
             }
+            // Contacts held for another account sync nowhere until this is answered.
+            KeptContactsPrompt.showIfNeeded(this)
         }
     }
 
@@ -473,6 +475,7 @@ class ContactsListActivity : LockedActivity() {
     private fun syncOutcomeText(outcome: ContactSyncOutcome): String = when (outcome) {
         ContactSyncOutcome.Success -> getString(R.string.contacts_sync_success)
         ContactSyncOutcome.NotPaired -> getString(R.string.connection_mode_relay_not_paired)
+        ContactSyncOutcome.AwaitingAccountChoice -> getString(R.string.contacts_sync_awaiting_choice)
         ContactSyncOutcome.Unauthorized -> getString(R.string.contacts_sync_unauthorized)
         is ContactSyncOutcome.ServiceUnavailable -> outcome.message
         is ContactSyncOutcome.Retry -> outcome.message

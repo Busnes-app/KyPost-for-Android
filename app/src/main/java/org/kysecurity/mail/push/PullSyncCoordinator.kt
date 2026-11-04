@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import org.kysecurity.mail.ProcessState
 
 /** Drives App Pull mode and the push-mode heartbeat; the cursor is durable across both.
  *
@@ -45,6 +46,9 @@ class PullSyncCoordinator(
     suspend fun pullOnce(): PullOutcome = pullGate.withLock { pullLocked() }
 
     private suspend fun pullLocked(): PullOutcome {
+        // Before the pairing read: an unpair while the pull is in flight ends this session, and
+        // nothing from its reply may be written back (history, notifications, cursor, sync state).
+        val session = ProcessState.generation()
         val state = repository.state.first()
         val pairing = repository.pairingForAuthenticatedCall() ?: return PullOutcome.NotPaired
         val deviceId = pairing.deviceId
@@ -61,13 +65,17 @@ class PullSyncCoordinator(
         if (endpoint.isBlank()) return PullOutcome.Failed("Server URL is not valid")
         val cursor = repository.pullCursor(pairing.subscriberId)
 
-        return when (val result = pullClient.pull(
+        val result = pullClient.pull(
             pullEndpoint = endpoint,
             deviceId = deviceId,
             deviceSecret = deviceSecret,
             afterCursor = cursor,
-        )) {
+        )
+        // The account was purged while the reply was on its way: drop it whole.
+        if (!ProcessState.isCurrent(session)) return PullOutcome.NotPaired
+        return when (result) {
             is PullResult.Success -> handleSuccess(
+                session = session,
                 subscriberId = pairing.subscriberId,
                 endpoint = endpoint,
                 cursor = cursor,
@@ -101,6 +109,7 @@ class PullSyncCoordinator(
         state.lastPushReceivedAtEpochMs ?: state.lastTokenSyncAtEpochMs ?: 0L
 
     private suspend fun handleSuccess(
+        session: Long,
         subscriberId: String,
         endpoint: String,
         cursor: Long,
@@ -121,9 +130,12 @@ class PullSyncCoordinator(
             // Persist to in-app history AND hand off to the system notification manager
             // BEFORE advancing the cursor, so a crash mid-batch re-fetches rather than drops.
             // History is the dedupe against what push already delivered: same messageId, no re-alert.
-            if (incoming is IncomingPush.Mail && !repository.appendPayload(incoming.payload)) continue
+            if (!ProcessState.isCurrent(session)) return PullOutcome.NotPaired
+            if (incoming is IncomingPush.Mail && !repository.appendPayload(incoming.payload, session)) continue
+            if (!ProcessState.isCurrent(session)) return PullOutcome.NotPaired
             notifier(incoming)
         }
+        if (!ProcessState.isCurrent(session)) return PullOutcome.NotPaired
         repository.advancePullCursor(subscriberId, prepared.nextCursor)
         repository.updateSyncState(lastSyncAtEpochMs = now, syncError = null)
         return PullOutcome.Pulled(prepared.incoming.size)

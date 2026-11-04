@@ -192,6 +192,9 @@ data class RelayClientEncryptedRequestDto(
     val materialGeneration: Long? = null,
     val sendAt: String? = null,
     val draftCopy: String? = null,
+    /** Omitted when null, as on `/api/mail/send`. */
+    val replyToMessageId: String? = null,
+    val replyToMailbox: String? = null,
 )
 
 /** Outgoing attachment wire shape accepted by /api/mail/send and /api/mail/draft. */

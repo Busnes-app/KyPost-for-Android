@@ -25,7 +25,7 @@ class ContactSyncHealth {
 
     fun record(outcome: ContactSyncOutcome) = when (outcome) {
         ContactSyncOutcome.Success -> state.value = ContactSyncFailures()
-        ContactSyncOutcome.NotPaired -> Unit
+        ContactSyncOutcome.NotPaired, ContactSyncOutcome.AwaitingAccountChoice -> Unit
         else -> state.update { ContactSyncFailures(it.count + 1, outcome) }
     }
 }

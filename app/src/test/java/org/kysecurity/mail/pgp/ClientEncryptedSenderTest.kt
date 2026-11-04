@@ -69,6 +69,20 @@ class ClientEncryptedSenderTest {
         assertNull(transport.sent.single().materialGeneration)
     }
 
+    /** Owner decision (Q3 A): an encrypted reply names the message it answers, as a plain one does. */
+    @Test
+    fun aReplyCarriesItsReplyReference() = runBlocking {
+        val transport = FakeClientEncryptedTransport()
+
+        sender(
+            resolver = FakeRecipientKeyResolver(resolvedAll(listOf("alice@example.invalid"), TestPgpPrivateKey.ARMORED_PUBLIC)),
+            transport = transport,
+        ).send(draft().copy(replyToMessageId = "42", replyToMailbox = "Archive"), sign = false)
+
+        assertEquals("42", transport.sent.single().replyToMessageId)
+        assertEquals("Archive", transport.sent.single().replyToMailbox)
+    }
+
     /** One shared ciphertext would put each BCC recipient's key id in a packet everyone can read. */
     @Test
     fun toAndCcShareDeliveryZeroAndEachBccGetsItsOwn() = runBlocking {

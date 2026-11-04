@@ -85,6 +85,20 @@ class DeviceGroupLinker(
         Unit
     }
 
+    /** Row ids of the live device groups this app's account type owns; memberships in any other
+     *  group belong to another account and are never touched. */
+    suspend fun ownedGroupRowIds(): Set<Long> = withContext(Dispatchers.IO) {
+        val ids = HashSet<Long>()
+        contentResolver.query(
+            ContactsContract.Groups.CONTENT_URI,
+            arrayOf(ContactsContract.Groups._ID),
+            "${ContactsContract.Groups.ACCOUNT_TYPE} = ? AND ${ContactsContract.Groups.DELETED} = 0",
+            arrayOf(DeviceContactAccount.ACCOUNT_TYPE),
+            null,
+        )?.use { cursor -> while (cursor.moveToNext()) ids += cursor.getLong(0) }
+        ids
+    }
+
     /** Public so the full-refresh cycle can rename already-linked groups, not just new ones. */
     suspend fun renameIfNeeded(androidGroupRowId: Long, groupName: String) = withContext(Dispatchers.IO) {
         val currentTitle = contentResolver.query(
@@ -127,3 +141,11 @@ internal fun groupRenameTargets(links: List<GroupLinkEntity>, groups: List<Group
 /** Does any existing on-device group, scoped to our account, already have this exact title? */
 internal fun findExistingGroupRowId(existingGroups: List<Pair<Long, String>>, groupName: String): Long? =
     existingGroups.firstOrNull { it.second == groupName }?.first
+
+/** The GroupMembership rows to (add, delete) so a raw contact that is in [current] groups ends up in
+ *  exactly [wanted]. Only groups in [owned] count: another account's memberships are left alone. */
+internal fun membershipChanges(current: Collection<Long>, wanted: Collection<Long>, owned: Set<Long>): Pair<Set<Long>, Set<Long>> {
+    val have = current.filterTo(HashSet()) { it in owned }
+    val want = wanted.filterTo(HashSet()) { it in owned }
+    return (want - have) to (have - want)
+}

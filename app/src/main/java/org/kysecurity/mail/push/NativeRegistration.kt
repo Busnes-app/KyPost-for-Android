@@ -39,6 +39,18 @@ data class NativeRegistrationRequest(
     override fun toString(): String = "NativeRegistrationRequest(redacted)"
 }
 
+/** `POST native/refresh` (owner decision Q1 A): register's field names, no pairing token; the
+ *  device headers are the proof. */
+@Serializable
+data class NativeRefreshRequest(
+    @SerialName("deviceToken") val deviceToken: String,
+    @SerialName("transport") val transport: String? = null,
+    @SerialName("p256dh") val p256dh: String? = null,
+    @SerialName("auth") val auth: String? = null,
+) {
+    override fun toString(): String = "NativeRefreshRequest(redacted)"
+}
+
 @Serializable
 data class NativeRegistrationResponse(
     @SerialName("ok") val ok: Boolean = false,
@@ -285,6 +297,64 @@ class NativeRegistrationClient(
             // transport failure and not a retry: re-pairing is the only thing that resolves it.
             409 -> conflict(rawBody)
             else -> NativeRegistrationResult.Error("Failed to register device ($code)")
+        }
+    }
+
+    /** Replaces this paired device's push token without a pairing token, which lives 90 s and is
+     *  single-use, so a resync through [register] after pairing is always refused. The secret is
+     *  NOT re-minted, so a [NativeRegistrationResult.Success] carries the one it was called with.
+     *  Null when the server has no such route (404, an older server): the caller falls back to
+     *  [register]. */
+    suspend fun refresh(
+        pairing: PairingData,
+        token: String,
+        nowEpochMs: Long = System.currentTimeMillis(),
+        transport: PushTransport? = null,
+        p256dh: String? = null,
+        auth: String? = null,
+    ): NativeRegistrationResult? {
+        val deviceId = pairing.deviceId?.takeIf { it.isNotBlank() } ?: return null
+        val deviceSecret = pairing.deviceSecret?.takeIf { it.isNotBlank() } ?: return null
+        if (token.isBlank()) return NativeRegistrationResult.Error("FCM token is empty")
+        val url = pairingEndpoint(pairing.serverUrl, "/api/notifications/native/refresh")
+            ?: return NativeRegistrationResult.Error("Registration URL is not valid")
+        val body = NativeRefreshRequest(deviceToken = token, transport = transport?.wire, p256dh = p256dh, auth = auth)
+        val httpRequest = Request.Builder().url(url)
+            .post(json.encodeToString(body).toRequestBody(JSON_MEDIA_TYPE))
+            .pairingAuthHeaders(deviceId, deviceSecret)
+            .build()
+        val result = withContext(Dispatchers.IO) {
+            callFactory.executeSync(httpRequest) { response ->
+                Triple(response.code, response.body?.string().orEmpty(), response.handshake)
+            }
+        }
+        val (code, rawBody, handshake) = result.getOrNull()
+            ?: return NativeRegistrationResult.Error(result.exceptionOrNull()?.message ?: "Failed to refresh push registration")
+        return when (code) {
+            404 -> null
+            200 -> {
+                val reply = runCatching { json.decodeFromString<NativeRegistrationResponse>(rawBody) }.getOrNull()
+                if (reply?.ok != true) return NativeRegistrationResult.Error("Refresh was not acknowledged")
+                NativeRegistrationResult.Success(
+                    syncedAtEpochMs = nowEpochMs,
+                    deviceId = deviceId,
+                    deviceSecret = deviceSecret,
+                    transport = PushTransport.fromWire(reply.transport),
+                    // The leaf this call validated against: lets a legacy whole-chain pin narrow, as a register did.
+                    tlsPin = url.host.let { host ->
+                        SpkiPinner.pinsForChain(handshake?.peerCertificates.orEmpty())
+                            .takeIf { it.isNotEmpty() }
+                            ?.let { TlsPin(host, it) }
+                    },
+                )
+            }
+            400 -> NativeRegistrationResult.Error("The server refused this push token")
+            401 -> NativeRegistrationResult.Error(
+                message = "This device is no longer paired with the server",
+                expiredPairingToken = true,
+            )
+            429 -> NativeRegistrationResult.Error("Too many requests; try again later")
+            else -> NativeRegistrationResult.Error("Failed to refresh push registration ($code)")
         }
     }
 

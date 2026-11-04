@@ -51,7 +51,9 @@ object ComposeDraftCache : ProcessScopedState {
             sealed = false
             return null
         }
-        resetForNewSession()
+        // Drop, never zero: the attachment arrays are shared with a compose screen that may still
+        // be alive or a send still in flight. Only a session boundary (resetForNewSession) wipes.
+        clear()
         take() // Unseals, so this new composition can survive a lock teardown.
         return null
     }

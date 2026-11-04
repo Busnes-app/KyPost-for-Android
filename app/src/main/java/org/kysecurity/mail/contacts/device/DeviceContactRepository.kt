@@ -72,11 +72,28 @@ class DeviceContactRepository(
             },
             stage("adoptLostLinks") { adoptLostLinks() },
             stage("queueRowsCreatedElsewhere") { queueRowsCreatedElsewhere(session) },
+            stage("repairTitleBases") { repairTitleBasesOnce() },
             stage("pullDeviceChanges") { pullDeviceChangesForOwnAccount() },
             stage("removeDeletedContacts") { removeRowsOfDeletedContacts() },
             stage("importNewDeviceContacts") { importNewDeviceContacts() },
             stage("pushRoomChanges") { pushRoomChangesToDevice() },
         )
+    }
+
+    /** Once per install, before the first merge: links created before `organizationRowOf` recorded
+     *  a title the phone never got, so their next merge read it as deleted. Their base title becomes
+     *  unknown (Room's wins and is written back). Only once, so a title the user later clears on
+     *  the phone is honoured. */
+    private suspend fun repairTitleBasesOnce() = withContext(Dispatchers.IO) {
+        val settings = DeviceContactSyncSettings(context)
+        if (settings.titleBasesRepaired()) return@withContext
+        for (link in db.deviceContactLinkDao().getAll()) {
+            val snapshot = readRawContactSnapshot(link.rawContactId) ?: continue
+            val base = baseOf(link) ?: continue
+            val repaired = repairedBase(base, snapshot) ?: continue
+            if (repaired != base) db.deviceContactLinkDao().upsert(link.copy(syncedJson = syncedJsonOf(repaired)))
+        }
+        settings.markTitleBasesRepaired()
     }
 
     /** Runs every sync, not just at enable time, so installs that predate the fix repair themselves. */
@@ -490,14 +507,14 @@ class DeviceContactRepository(
                 .build(),
         )
 
-        if (!dto.org.isNullOrBlank()) {
+        organizationRowOf(dto)?.let { (company, title, department) ->
             ops.add(
                 android.content.ContentProviderOperation.newInsert(dataUriBase)
                     .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, rawContactUriIndex)
                     .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.Organization.CONTENT_ITEM_TYPE)
-                    .withValue(ContactsContract.CommonDataKinds.Organization.COMPANY, dto.org)
-                    .withValue(ContactsContract.CommonDataKinds.Organization.TITLE, dto.title)
-                    .withValue(ContactsContract.CommonDataKinds.Organization.DEPARTMENT, dto.department)
+                    .withValue(ContactsContract.CommonDataKinds.Organization.COMPANY, company)
+                    .withValue(ContactsContract.CommonDataKinds.Organization.TITLE, title)
+                    .withValue(ContactsContract.CommonDataKinds.Organization.DEPARTMENT, department)
                     .build(),
             )
         }
@@ -573,10 +590,7 @@ class DeviceContactRepository(
         ops += eventRows(dto.events, ::newRow)
 
         // Resolved before the batch: GROUP_ROW_ID is a plain value, not a back-reference target.
-        val androidGroupRowIds = dto.groupIDs.mapNotNull { groupId ->
-            db.groupDao().getById(groupId)?.let { group -> groupLinker.ensureAndroidGroupRowId(groupId, group.name) }
-        }
-        for (androidGroupRowId in androidGroupRowIds) {
+        for (androidGroupRowId in androidGroupRowIdsOf(dto.groupIDs)) {
             ops.add(
                 android.content.ContentProviderOperation.newInsert(dataUriBase)
                     .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, rawContactUriIndex)
@@ -598,8 +612,9 @@ class DeviceContactRepository(
                     uid = dto.uid,
                     rawContactId = rawContactId,
                     deviceUpdatedAtEpochMs = System.currentTimeMillis(),
-                    // A department rides on the Organization row, written only with an org.
-                    syncedJson = syncedJsonOf(dto.copy(department = dto.department.takeUnless { dto.org.isNullOrBlank() })),
+                    // organizationRowOf writes all three of company, title and department, so the
+                    // phone holds exactly dto.
+                    syncedJson = syncedJsonOf(dto),
                 ),
             )
         }
@@ -628,17 +643,52 @@ class DeviceContactRepository(
         // Each field's base advances only once the phone holds Room's value for it; an empty plan
         // alone may mean the merge kept a device value Room does not have.
         val synced = plan.nextBase(dto, currentSnapshot, base)?.let(::syncedJsonOf) ?: link.syncedJson
-        if (plan.isEmpty()) {
-            if (link.syncedJson != synced) db.deviceContactLinkDao().upsert(link.copy(syncedJson = synced))
-            return@withContext
-        }
-
-        val ops = arrayListOf<android.content.ContentProviderOperation>()
 
         val dataUriBase = ContactsContract.Data.CONTENT_URI.buildUpon()
             .appendQueryParameter(ContactsContract.CALLER_IS_SYNCADAPTER, "true")
             .build()
         val rawContactIdArg = link.rawContactId.toString()
+
+        // Memberships are outside the plan and the base: membership only flows Room -> device, so
+        // Room's groupIDs are reconciled on every update, within this app's own groups only.
+        val currentGroups = groupRowIdsOf(link.rawContactId)
+        val wantedGroups = androidGroupRowIdsOf(dto.groupIDs)
+        val (groupsToAdd, groupsToRemove) = if (currentGroups.isEmpty() && wantedGroups.isEmpty()) {
+            emptySet<Long>() to emptySet()
+        } else {
+            membershipChanges(currentGroups, wantedGroups, groupLinker.ownedGroupRowIds())
+        }
+
+        if (plan.isEmpty() && groupsToAdd.isEmpty() && groupsToRemove.isEmpty()) {
+            if (link.syncedJson != synced) db.deviceContactLinkDao().upsert(link.copy(syncedJson = synced))
+            return@withContext
+        }
+
+        val ops = arrayListOf<android.content.ContentProviderOperation>()
+        for (groupRowId in groupsToRemove) {
+            ops.add(
+                android.content.ContentProviderOperation.newDelete(dataUriBase)
+                    .withSelection(
+                        "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ? AND " +
+                            "${ContactsContract.CommonDataKinds.GroupMembership.GROUP_ROW_ID} = ?",
+                        arrayOf(
+                            rawContactIdArg,
+                            ContactsContract.CommonDataKinds.GroupMembership.CONTENT_ITEM_TYPE,
+                            groupRowId.toString(),
+                        ),
+                    )
+                    .build(),
+            )
+        }
+        for (groupRowId in groupsToAdd) {
+            ops.add(
+                android.content.ContentProviderOperation.newInsert(dataUriBase)
+                    .withValue(ContactsContract.Data.RAW_CONTACT_ID, link.rawContactId)
+                    .withValue(ContactsContract.Data.MIMETYPE, ContactsContract.CommonDataKinds.GroupMembership.CONTENT_ITEM_TYPE)
+                    .withValue(ContactsContract.CommonDataKinds.GroupMembership.GROUP_ROW_ID, groupRowId)
+                    .build(),
+            )
+        }
 
         fun insertRow(mimeType: String) =
             android.content.ContentProviderOperation.newInsert(dataUriBase)
@@ -884,6 +934,24 @@ class DeviceContactRepository(
                 .withValue(EVT.LABEL, DeviceContactFieldCoding.eventCustomLabel(event.label))
             k.restore(row, EVT.CONTENT_ITEM_TYPE, event.label, event.date).build()
         }
+    }
+
+    /** The device group row of each Room group, created if missing; shared by create and update. */
+    private suspend fun androidGroupRowIdsOf(groupIDs: List<String>): List<Long> = groupIDs.mapNotNull { groupId ->
+        db.groupDao().getById(groupId)?.let { group -> groupLinker.ensureAndroidGroupRowId(groupId, group.name) }
+    }
+
+    /** The group row ids of every GroupMembership row the raw contact has, in any account's groups. */
+    private fun groupRowIdsOf(rawContactId: Long): List<Long> {
+        val ids = mutableListOf<Long>()
+        contentResolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(ContactsContract.CommonDataKinds.GroupMembership.GROUP_ROW_ID),
+            "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+            arrayOf(rawContactId.toString(), ContactsContract.CommonDataKinds.GroupMembership.CONTENT_ITEM_TYPE),
+            null,
+        )?.use { cursor -> while (cursor.moveToNext()) if (!cursor.isNull(0)) ids += cursor.getLong(0) }
+        return ids
     }
 
     private fun syncedJsonOf(dto: ContactDto): String = json.encodeToString(ContactDto.serializer(), dto)

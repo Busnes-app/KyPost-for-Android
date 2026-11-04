@@ -273,7 +273,7 @@ class RelayMailSource(
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
         val base = baseUrl(pairing, "/api/mail/draft") ?: return MailOutcome.BadRequest("Server URL is not valid")
         val body = json.encodeToString(RelayClientEncryptedDraftDto(draft.to, draft.pgpDraft))
-        val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
+        val request = Request.Builder().url(base).post(oneShot(body.toRequestBody(JSON_MEDIA_TYPE)))
             .authed(pairing).build()
         return execute(request, onCall) { code, rawBody ->
             if (code != 200) return@execute mapErrorCode(code, rawBody)
@@ -324,12 +324,19 @@ class RelayMailSource(
                 materialGeneration = message.materialGeneration,
                 sendAt = message.sendAt?.wireTime(),
                 draftCopy = message.draftCopy,
+                replyToMessageId = message.replyToMessageId,
+                replyToMailbox = message.replyToMailbox,
             ),
         )
         val request = Request.Builder().url(base).post(oneShot(body.toRequestBody(JSON_MEDIA_TYPE)))
             .authed(pairing)
             .build()
-        return execute(request, onCall) { code, rawBody -> sendOutcome(code, rawBody, scheduling = message.sendAt != null) }
+        return execute(request, onCall) { code, rawBody ->
+            if (message.replyToMessageId != null && isReplyThreadingRefusal(code, rawBody)) {
+                return@execute MailOutcome.ReplyThreadingRefused(rawBody.trim())
+            }
+            sendOutcome(code, rawBody, scheduling = message.sendAt != null)
+        }
     }
 
     /** 200 is sent, 202 is held for later, and a 202 counts only where a hold was asked for. */

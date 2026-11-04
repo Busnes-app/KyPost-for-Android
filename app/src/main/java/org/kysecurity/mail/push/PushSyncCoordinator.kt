@@ -67,9 +67,7 @@ class PushSyncCoordinator(
 
     /** The error every deferred registration reports, so the pairing screen shows one explanation
      *  rather than a transport-specific one per entry point. */
-    private fun credentialGateDeferral() = NativeRegistrationResult.Error(
-        "Unlock with your PIN to sync push registration",
-    )
+    private fun credentialGateDeferral() = NativeRegistrationResult.Error(CREDENTIAL_GATE_DEFERRAL)
 
     suspend fun attemptPairing(pairing: PairingData): NativeRegistrationResult = registrationGate.withLock {
         // A security wipe that started but did not finish is owed a resume at the next cold start
@@ -131,7 +129,8 @@ class PushSyncCoordinator(
         // replacement that failed at the FCM token fetch — offline, say — had already deleted
         // the mail, contacts, keys and pairing of the account that was working a moment ago.
         if (isReplacement) {
-            val residue = repository.clearPairing()
+            // Contacts stay until the user answers "Bring your N contacts into …?" (owner decision Q2).
+            val residue = repository.clearPairing(keepContacts = true)
             if (residue.isNotEmpty()) {
                 // No table carries a subscriber column, so survivors are readable by whoever
                 // pairs next. Refuse the new account and wipe rather than leave the two mixed.
@@ -173,16 +172,7 @@ class PushSyncCoordinator(
                 if (remaining <= 0) return notApproved()
                 sleep(waitMs.coerceAtMost(remaining))
                 waitMs = when (val status = registrationClient.pairingStatus(pending)) {
-                    is PairingStatus.Approved -> {
-                        // Approved while the app is locked: the secret can be stored only once the
-                        // PIN-derived key exists again, so hold it until unlock or expiry.
-                        while (repository.currentCredentialState() is PushRepository.PairingCredentialState.Unavailable &&
-                            pending.expiresAtEpochMs > now()
-                        ) {
-                            sleep(1_000L)
-                        }
-                        return completeApproval(pending, status, now())
-                    }
+                    is PairingStatus.Approved -> return finishApproved(pending, status, now, sleep)
                     PairingStatus.Rejected -> return notApproved()
                     is PairingStatus.Waiting -> pollMs(status.pollIntervalSeconds ?: pending.pollIntervalSeconds)
                     is PairingStatus.Retry -> maxOf(
@@ -193,6 +183,27 @@ class PushSyncCoordinator(
             }
         } finally {
             pending.wipe()
+        }
+    }
+
+    /** Approved while the app is locked: the secret can be stored only once the PIN-derived key
+     *  exists again, so hold it until unlock. Not bounded by expiry: the server row is already
+     *  approved and needs no further call, and giving up wiped a secret nothing else could recover.
+     *  Cancel, Unpair, a newer link and a wipe still end it by cancelling this job. */
+    private suspend fun finishApproved(
+        pending: NativeRegistrationResult.Pending,
+        status: PairingStatus.Approved,
+        now: () -> Long,
+        sleep: suspend (Long) -> Unit,
+    ): NativeRegistrationResult {
+        while (true) {
+            while (repository.currentCredentialState() is PushRepository.PairingCredentialState.Unavailable) {
+                sleep(1_000L)
+            }
+            val done = completeApproval(pending, status, now())
+            // Locked again before the registration gate was free: wait for the next unlock.
+            if (done is NativeRegistrationResult.Error && done.message == CREDENTIAL_GATE_DEFERRAL) continue
+            return done
         }
     }
 
@@ -371,6 +382,21 @@ class PushSyncCoordinator(
         auth: String?,
         credentialState: PushRepository.PairingCredentialState,
     ): NativeRegistrationResult {
+        // The pairing token register needs is single-use and expires in 90 s, so a paired device
+        // refreshes with its own secret. Only a server without the route (null: 404) gets register.
+        registrationClient.refresh(pairing = pairing, token = token, transport = transport, p256dh = p256dh, auth = auth)
+            ?.let { refreshed ->
+                if (refreshed is NativeRegistrationResult.Success) {
+                    // Same secret, and no delivery mode in the reply: keep the stored ones.
+                    refreshed.transport?.let { repository.updateTransport(it) }
+                    repository.updateSyncState(lastSyncAtEpochMs = refreshed.syncedAtEpochMs, syncError = null)
+                    narrowLegacyTlsPin(refreshed.tlsPin)
+                    recordUnifiedPush(transport, token, p256dh, auth)
+                } else if (refreshed is NativeRegistrationResult.Error) {
+                    repository.updateSyncState(lastSyncAtEpochMs = null, syncError = refreshed.message)
+                }
+                return refreshed
+            }
         val result = registrationClient.register(
             pairing = pairing,
             token = token,
@@ -431,12 +457,16 @@ class PushSyncCoordinator(
         repository.updateDelivery(result.deliveryMode, endpoint)
     }
 
-    private companion object {
+    companion object {
+        /** The stored sync error of a registration deferred because the app was locked; a
+         *  successful unlock retries it (`retryDeferredPushSync`). */
+        const val CREDENTIAL_GATE_DEFERRAL = "Unlock with your PIN to sync push registration"
+
         /** One message for both entry points, naming neither Firebase nor a distributor: which one
          *  is missing depends on the build, and the injected seam above is what decides. */
-        const val UNAVAILABLE_CREDENTIAL = "Unable to obtain a push registration token"
+        private const val UNAVAILABLE_CREDENTIAL = "Unable to obtain a push registration token"
 
         /** Backoff ceiling for pairing-status polls. */
-        const val MAX_POLL_MS = 30_000L
+        private const val MAX_POLL_MS = 30_000L
     }
 }
