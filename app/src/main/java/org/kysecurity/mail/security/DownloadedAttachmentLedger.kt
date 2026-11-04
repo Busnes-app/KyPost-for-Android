@@ -15,7 +15,10 @@ object DownloadedAttachmentLedger {
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /** Call BEFORE writing the file: this row is the only thing that makes an out-of-sandbox copy
-     *  reachable by a wipe, so it must be durable before the copy exists, not after. */
+     *  reachable by a wipe, so it must be durable before the copy exists, not after.
+     *  Synchronized with [deleteAll]: two saves on the reader's two threads each read the set and
+     *  wrote back their own copy, so one row was dropped and outlived the next wipe. */
+    @Synchronized
     fun record(context: Context, uri: Uri) {
         val store = prefs(context)
         // A fresh set: SharedPreferences returns the *live* set instance from its cache, and
@@ -36,6 +39,7 @@ object DownloadedAttachmentLedger {
      *  process, under an ownership model this app does not control — a row it can never delete
      *  must be REPORTED to the user, not turned into a permanently failing wipe step that blocks
      *  the app forever. Sandbox destruction is the terminal kind; this is not. */
+    @Synchronized
     fun deleteAll(
         context: Context,
         /** Injectable for the same reason [org.kysecurity.mail.blockExternalResources] takes a

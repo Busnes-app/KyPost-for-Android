@@ -239,6 +239,7 @@
     <string name="email_pgp_attachments_label_hold_to_save">Decrypted attachments — tap to open, hold to save</string>
     <string name="attachment_too_many_open">Too many attachments are still open. Close one and try again.</string>
     <string name="forward_fetching_attachments">Fetching attachments to forward…</string>
+    <string name="forward_attachments_not_listed">This message\'s attachments have not loaded yet. Try Forward again in a moment.</string>
     <plurals name="forward_attachments_failed">
         <item quantity="one">Couldn\'t fetch %1$d attachment — it won\'t be forwarded</item>
         <item quantity="other">Couldn\'t fetch %1$d attachments — they won\'t be forwarded</item>
@@ -386,7 +387,7 @@
     <string name="push_pairing_resync">Re-sync token</string>
     <string name="push_pairing_unpair">Unpair device</string>
     <string name="push_pairing_unpair_confirm_title">Unpair this device?</string>
-    <string name="push_pairing_unpair_confirm_message">This removes the device from your account\'s paired devices on the server, clears its local pairing and erases its mail. Contacts stay on this phone unless you remove them. You\'ll need to scan a new QR code to pair again.</string>
+    <string name="push_pairing_unpair_confirm_message">This removes the device from your account\'s paired devices on the server, clears its local pairing and erases its mail. Contacts stay in KyPost on this phone unless you remove them; their copies in your phone\'s Contacts app are removed and phone contact sync is turned off. You\'ll need to scan a new QR code to pair again.</string>
     <string name="push_pairing_unpair_remove_contacts">Also remove this device\'s contacts</string>
     <plurals name="push_pairing_unpair_unsynced">
         <item quantity="one">%d contact change has not synced yet. Removing contacts loses it; sync now to keep it on your server.</item>
@@ -415,6 +416,7 @@
     <string name="push_pairing_use_unifiedpush">Use UnifiedPush</string>
     <string name="push_pairing_use_firebase">Use Firebase</string>
     <string name="pairing_confirm_title">Pair this device?</string>
+    <string name="pairing_other_server_needs_unpair">This device is paired with %1$s. To pair with %2$s instead, tap Unpair device on the Push notifications screen first, then open this link again.</string>
     <string name="pairing_confirm_message">This link wants to pair this device with:\n\n%1$s\n\nOnly continue if you trust the source of this link.</string>
     <string name="pairing_confirm_replace_message">This device still holds another account\'s mail and contacts. Continuing will erase its mail and pair with:\n\n%1$s\n\nYou will then be asked whether to bring its contacts. Only continue if you trust the source of this link and mean to switch accounts.</string>
     <string name="pairing_confirm_repin_message">This server\'s certificate changed since you paired. Only continue if you just opened this link from your own KyPost web page.\n\n%1$s</string>

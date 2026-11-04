@@ -16,6 +16,8 @@
   certificate changed since you paired" before you continue.
 - Encrypted or signed replies stay in their conversation, like plain replies.
 - Leaving a message you are writing offers Save draft where this device can save drafts.
+- Accounts whose encryption key is held by the server can save drafts too (menu and when leaving
+  a message), as on the web. A message marked Sign or Encrypt is not saved this way.
 
 ### Fixed
 
@@ -27,6 +29,22 @@
   for the old account no longer appear under the new one, and an old compose screen closes.
 - A device approved on the web while KyPost was locked finishes pairing after unlock, and the
   result shows even if the pairing screen was reopened.
+- Switching this phone to another account stops the previous account's notifications: its
+  device is removed from its server first, when that server can be reached.
+- Restarting the phone during a PIN lockout no longer extends it for days.
+- Two attachments saved to Downloads at the same moment are both removed by a later wipe.
+- A snoozed message that wakes, or a message moved out and back, shows again in the folder.
+- Rotating the phone no longer loses a message you are writing after another reply was sent or
+  discarded in the meantime, and Reconnect no longer closes it.
+- Forward waits until a message's attachments have loaded instead of leaving them out.
+- Scanning a PGP code from someone on another KyPost server works.
+- An approved switch to another account now says it is paired and asks about contacts.
+- A link for a different server than the one this phone is paired with says to unpair first,
+  instead of failing after you confirm.
+- The Unpair dialog opens even when the local database cannot, and says that contacts' copies in
+  the phone's Contacts app are removed.
+- A contact form left open across an account switch closes instead of saving into the new
+  account.
 
 ## 0.6.0 — 2026-11-02
 

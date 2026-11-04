@@ -150,10 +150,14 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   generation only within the same process) and finishes in `onStartUnlocked` once that session has
   ended or another account is paired, so a screen left behind across an unpair and re-pair, or
   recreated afterwards, can neither send nor delete a draft under the next account. Leaving a compose with content offers Discard / Keep
-  writing, plus Save draft wherever the Save draft menu item is offered (client custody); it leaves
+  writing, plus Save draft wherever the Save draft menu item is offered (client custody, or a
+  server-held key with Sign and Encrypt off); it leaves
   only once the save succeeds. Recreating that
   screen (a rotation, `savedInstanceState` set) is the same composition: it takes its own draft
-  back and adopts its send in flight (`ComposeDraftCache.takeOnOpen`).
+  back and adopts its send in flight (`ComposeDraftCache.takeOnOpen`). A screen that sends, saves
+  or discards drops only its own cached draft (`ComposeDraftCache.clear(screen)`): another composer
+  still alive behind it keeps its draft and its saves. Being unpaired (Reconnect) is not another
+  account, so it does not close the screen.
   In-app launches go through `ComposeActivity.internalIntent` (the non-exported
   `InternalComposeActivity` alias); only those read the `compose_*` extras, including prefilled
   HTML. Every launch of the exported `ComposeActivity` gets public extras only, as plain text.

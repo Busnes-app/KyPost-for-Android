@@ -59,6 +59,37 @@ class ComposeDraftCacheTest {
         ComposeDraftCache.closed(3)
     }
 
+    /** Reply B sent or discarded while composer A waits behind it: A's draft and A's later saves
+     *  (its rotation snapshot) survive, and only B's own late save is refused. */
+    @Test
+    fun anotherScreenFinishingKeepsThisScreensDraftAndSaves() {
+        ComposeDraftCache.opened(1)
+        ComposeDraftCache.save(draft(subject = "Mine"), screen = 1)
+        ComposeDraftCache.opened(2)
+        assertNull(ComposeDraftCache.takeOnOpen(newExternalRequest = false))
+
+        ComposeDraftCache.clear(2)
+        ComposeDraftCache.save(draft(subject = "Late reply"), screen = 2)
+        ComposeDraftCache.closed(2)
+        assertEquals("Mine", ComposeDraftCache.take()?.subject)
+
+        ComposeDraftCache.save(draft(subject = "Mine, edited"), screen = 1)
+        ComposeDraftCache.closed(1)
+        ComposeDraftCache.opened(3)
+        assertEquals("Mine, edited", ComposeDraftCache.takeOnOpen(newExternalRequest = false)?.subject)
+        ComposeDraftCache.closed(3)
+    }
+
+    @Test
+    fun aScreensOwnClearDropsItsDraft() {
+        ComposeDraftCache.opened(1)
+        ComposeDraftCache.save(draft(subject = "Sent"), screen = 1)
+        ComposeDraftCache.clear(1)
+        ComposeDraftCache.save(draft(subject = "Late"), screen = 1)
+        ComposeDraftCache.closed(1)
+        assertNull(ComposeDraftCache.take())
+    }
+
     @Test
     fun anEmptyDraftIsNotWorthKeeping() {
         ComposeDraftCache.save(draft())

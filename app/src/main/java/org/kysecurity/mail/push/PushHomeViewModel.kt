@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.asContextElement
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -278,6 +279,10 @@ internal object ApprovalWait : org.kysecurity.mail.ProcessScopedState {
     val result = MutableStateFlow<NativeRegistrationResult?>(null)
     private var job: Job? = null
 
+    /** Set on the running wait's threads; see [resetForNewSession]. */
+    private val runningWait = ThreadLocal<Any?>()
+    private var token: Any? = null
+
     init {
         org.kysecurity.mail.ProcessState.register(this)
     }
@@ -288,7 +293,8 @@ internal object ApprovalWait : org.kysecurity.mail.ProcessScopedState {
         card.value = ui
         result.value = null
         lateinit var started: Job
-        started = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+        val mine = Any()
+        started = scope.launch(runningWait.asContextElement(mine), start = kotlinx.coroutines.CoroutineStart.LAZY) {
             var outcome: NativeRegistrationResult? = null
             try {
                 outcome = wait()
@@ -297,6 +303,7 @@ internal object ApprovalWait : org.kysecurity.mail.ProcessScopedState {
             }
         }
         job = started
+        token = mine
         started.start()
     }
 
@@ -305,6 +312,7 @@ internal object ApprovalWait : org.kysecurity.mail.ProcessScopedState {
         // A cancelled or superseded wait reports nothing.
         if (job !== which) return
         job = null
+        token = null
         card.value = null
         result.value = outcome
     }
@@ -317,11 +325,20 @@ internal object ApprovalWait : org.kysecurity.mail.ProcessScopedState {
     fun cancel() {
         job?.cancel()
         job = null
+        token = null
         card.value = null
         result.value = null
     }
 
-    override fun resetForNewSession() = cancel()
+    /** Every other session end cancels the wait. The one exception is the reset the wait itself
+     *  runs: an approved account replacement purges the old account inside `finishPairing`, and
+     *  cancelling there dropped the result of the pairing it was finishing (no "Paired", no
+     *  contacts question). */
+    @Synchronized
+    override fun resetForNewSession() {
+        if (token != null && runningWait.get() === token) return
+        cancel()
+    }
 }
 
 data class PushHomeUiState(

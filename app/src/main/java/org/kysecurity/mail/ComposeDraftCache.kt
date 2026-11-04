@@ -18,16 +18,22 @@ object ComposeDraftCache : ProcessScopedState {
     private var owner: Int = 0
     private val liveScreens = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
+    /** Screens whose composition is over (sent, saved or discarded): their late saves are refused. */
+    private val doneScreens = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+
     fun opened(screen: Int) { liveScreens += screen }
 
-    fun closed(screen: Int) { liveScreens -= screen }
+    fun closed(screen: Int) {
+        liveScreens -= screen
+        doneScreens -= screen
+    }
 
     init {
         ProcessState.register(this)
     }
 
     fun save(draft: CachedDraft, screen: Int = 0) {
-        if (sealed) return
+        if (sealed || screen in doneScreens) return
         this.draft = draft.takeIf { it.hasContent() }
         owner = screen
     }
@@ -62,6 +68,17 @@ object ComposeDraftCache : ProcessScopedState {
         draft = null
         owner = 0
         sealed = true
+    }
+
+    /** [screen]'s composition is over: drops the draft only if it is [screen]'s, and refuses that
+     *  screen's late saves. Sealing the whole cache here lost a composer still alive behind it:
+     *  its rotation snapshot was refused and the recreated screen came back without its edits. */
+    fun clear(screen: Int) {
+        doneScreens += screen
+        if (owner == screen) {
+            draft = null
+            owner = 0
+        }
     }
 
     /** Zeroes rather than merely dropping — see [ForwardAttachmentHandoff.resetForNewSession].

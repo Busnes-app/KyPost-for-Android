@@ -89,6 +89,9 @@ they leave the app.
   call is refused when no pin was captured.
 - **Complete mediation.** Each request is checked against the current pin's host. The pinned
   client and its pin are published as one reference, so a re-pair cannot leave a stale client.
+  The one request to another host is a scanned PGP code's key fetch from the other person's
+  relay: it carries only that code's token, and the key is fingerprinted on the device before
+  it is trusted.
 - **Economy of mechanism.** Standard platform pieces where they exist: OkHttp, SQLCipher, the
   Android Keystore. jsoup and Bouncy Castle are the only third-party parsers of hostile HTML and
   OpenPGP input. CONTRIBUTING gives those the highest scrutiny.

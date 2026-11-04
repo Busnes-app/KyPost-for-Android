@@ -49,6 +49,12 @@ class PushGraph(context: Context) {
         },
         // Refuse a new pairing while an interrupted wipe is owed its resume, or that resume erases it.
         wipeOwed = { org.kysecurity.mail.security.SecurityWipe.wipeInterrupted(appContext) },
+        deregisterReplaced = { previous ->
+            val result = deregisterClient.deregister(previous)
+            if (result !is DeregisterResult.Success) {
+                android.util.Log.w("PushGraph", "Replaced account not deregistered: $result")
+            }
+        },
     )
     val mfaResponseClient = MfaResponseClient(callFactory = pinnedOrFallbackCallFactory)
 

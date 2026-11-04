@@ -9,6 +9,7 @@ import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.google.android.material.chip.Chip
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicInteger
 import okhttp3.Call
@@ -125,7 +126,9 @@ class ComposeCustodyGuardTest {
     }
 
     /** Scheduling encrypts the copy for Drafts on this device, so only an account whose key is here
-     *  is offered it: never one whose key the server holds, nor one still being looked up. */
+     *  is offered it: never one whose key the server holds, nor one still being looked up. A
+     *  server-held key saves drafts in plaintext, so only a composition not marked to sign or
+     *  encrypt is offered Save draft (owner Q4 A). */
     @Test
     fun scheduleAndSaveDraftAreOfferedOnlyWhereThisDeviceHoldsTheKey() {
         ActivityScenario.launch<ComposeActivity>(ComposeActivity.internalIntent(instrumentation.targetContext)).afterSplash().use { scenario ->
@@ -133,9 +136,15 @@ class ComposeCustodyGuardTest {
             scenario.onActivity {
                 it.applyPgpComposeStateForTest(PgpComposeState(canEncrypt = true, canSign = true, handoffToWebmail = false))
                 assertFalse("offered to a server-key account", it.scheduleOfferedForTest())
-                assertFalse("Save draft offered to a server-key account", it.saveDraftOfferedForTest())
+                assertTrue("Save draft not offered to a server-key account", it.saveDraftOfferedForTest())
+                val sign = it.findViewById<Chip>(R.id.composeSignChip)
+                sign.isChecked = true
+                assertFalse("plaintext Save draft offered for a signed composition", it.saveDraftOfferedForTest())
+                sign.isChecked = false
+                assertTrue("Save draft not restored once Sign is off", it.saveDraftOfferedForTest())
                 it.applyPgpComposeStateForTest(PgpComposeState(canEncrypt = false, canSign = false, handoffToWebmail = true))
                 assertFalse("offered to a webmail-only account", it.scheduleOfferedForTest())
+                assertFalse("Save draft offered to a webmail-only account", it.saveDraftOfferedForTest())
                 it.applyPgpComposeStateForTest(PgpComposeState(canEncrypt = true, canSign = true, handoffToWebmail = false, clientSide = true))
                 assertTrue("not offered where the key is on this device", it.scheduleOfferedForTest())
                 assertTrue("Save draft not offered where the key is on this device", it.saveDraftOfferedForTest())

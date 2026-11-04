@@ -75,6 +75,23 @@ class ApprovalWaitTest {
         assertNull(ApprovalWait.takeResult())
     }
 
+    /** An approved replacement purges the old account inside the wait, through the real session
+     *  reset. That reset must not cancel the wait finishing the pairing: its result still lands. */
+    @Test
+    fun theResetAWaitRunsItselfDoesNotCancelIt() = runBlocking {
+        val paired = NativeRegistrationResult.Success(syncedAtEpochMs = 1L, deviceId = "d", deviceSecret = null)
+        ApprovalWait.start(ui, scope) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable + Dispatchers.Default) {
+                org.kysecurity.mail.ProcessState.resetAll()
+            }
+            paired
+        }
+        withTimeout(5_000) { ApprovalWait.result.first { it != null } }
+
+        assertSame(paired, ApprovalWait.takeResult())
+        assertNull(ApprovalWait.card.value)
+    }
+
     @Test
     fun aCancelledWaitReportsNothing() = runBlocking {
         val started = CompletableDeferred<Unit>()

@@ -23,11 +23,21 @@ class MailRepository(
     private val removed = pending.removed
 
     fun cachedEmails(folder: String): List<Email> = emailDao.getByFolder(folder)
-        .filterNot { (folder to it.messageId).let { key -> removing.containsKey(key) || key in removed } }
+        .filterNot { (folder to it.messageId).let { key -> removing.containsKey(key) || removed.containsKey(key) } }
         .map { row -> row.toUiEmail().let { if (reading.containsKey(folder to it.id)) it.copy(status = "read") else it } }
 
-    /** A confirmed removal stays gone: a fetch that read the folder before it landed must not write it back. */
-    private fun notRemoved(folder: String, messages: List<Email>) = messages.filterNot { (folder to it.id) in removed }
+    /** A confirmed removal stays gone from a fetch that may have read the folder before it landed
+     *  (one started before [PendingMailActions.removalMark] passed it). A fetch started after it is
+     *  the server's word: a message listed there again came back (a native mailbox keeps its id
+     *  across a move, so a snooze wakes under the same id) and is shown, and its entry dropped.
+     *  Called under the removal lock. */
+    private fun notRemoved(folder: String, messages: List<Email>, startedAt: Long) = messages.filter { message ->
+        val key = folder to message.id
+        val removedAt = removed[key] ?: return@filter true
+        if (removedAt > startedAt) return@filter false
+        removed.remove(key)
+        true
+    }
 
     /** Unread rows per folder in the local cache: what this device holds, not a server total. */
     fun unreadCounts(): Map<String, Int> = emailDao.unreadCounts().associate { it.folder to it.unread }
@@ -47,6 +57,7 @@ class MailRepository(
     /** [forceFullResync] asks for since=0; the daily self-heal runs regardless of this flag. */
     fun refreshFolder(folder: String, forceFullResync: Boolean = false): MailOutcome<MailFetchResult> {
         val session = ProcessState.generation()
+        val startedAt = pending.removalMark()
         val outcome = relaySource.fetchInbox(folder, WINDOW_LIMIT, forceFullResync)
         if (outcome !is MailOutcome.Success) return outcome
         val result = outcome.value
@@ -62,8 +73,8 @@ class MailRepository(
         // Filter and write under the removal lock, so a confirmed removal lands before or after
         // the whole write, never between the filter and it.
         val written = writeIfCurrent(session) {
-            reconcileFetchResult(emailDao, folder, "relay", result.copy(messages = notRemoved(folder, result.messages)))
-            reconcileOlderMail(emailDao, folder, "relay", notRemoved(folder, overflow))
+            reconcileFetchResult(emailDao, folder, "relay", result.copy(messages = notRemoved(folder, result.messages, startedAt)))
+            reconcileOlderMail(emailDao, folder, "relay", notRemoved(folder, overflow, startedAt))
         }
         // An ended session's checkpoint would skip, for the next account, mail it never stored.
         if (!written || !ProcessState.isCurrent(session)) return MailOutcome.Unauthorized(SESSION_ENDED)
@@ -119,13 +130,14 @@ class MailRepository(
 
     /** One page older than [before] into Room. The caller pages on from [MailPage.nextBefore]. */
     fun loadOlder(folder: String, before: String, session: Long = ProcessState.generation()): MailOutcome<MailPage> {
+        val startedAt = pending.removalMark()
         val outcome = relaySource.fetchOlder(folder, WINDOW_LIMIT, before)
         if (outcome !is MailOutcome.Success) return outcome
         // The server ignored before= and sent its newest window, which is not older mail.
         if (outcome.value.hasMore == null) return MailOutcome.BadRequest(OLDER_MAIL_UNSUPPORTED)
         // Room reports a full disk or I/O error as a RuntimeException (SQLiteFullException and kin).
         val written = try {
-            writeIfCurrent(session) { reconcileOlderMail(emailDao, folder, "relay", notRemoved(folder, outcome.value.messages)) }
+            writeIfCurrent(session) { reconcileOlderMail(emailDao, folder, "relay", notRemoved(folder, outcome.value.messages, startedAt)) }
         } catch (_: RuntimeException) {
             return MailOutcome.BadRequest(OLDER_MAIL_NOT_SAVED)
         }
@@ -240,7 +252,7 @@ class MailRepository(
         account: MailAccount? = null,
         wakeAt: java.time.Instant? = null,
     ): MailOutcome<Unit> = perform(claim, action, targetFolder, account, wakeAt) {
-        removed.add(claim.folder to claim.id)
+        pending.markRemoved(claim.folder to claim.id)
         emailDao.deleteById(claim.id, claim.folder)
     }
 
@@ -303,7 +315,7 @@ class MailRepository(
             }
             pending.applyIfCurrent(first.session) {
                 confirmed.forEach {
-                    removed.add(folder to it)
+                    pending.markRemoved(folder to it)
                     emailDao.deleteById(it, folder)
                 }
                 applied = true
@@ -322,6 +334,10 @@ class MailRepository(
         folder: String,
         targetFolder: String? = null,
     ): MailOutcome<Unit> = mutateAll(action, beginRemovals(ids, folder), targetFolder)
+
+    /** Plaintext, for a server-held key only; [onCall] as for [send]. */
+    fun saveDraft(draft: MailDraft, onCall: (okhttp3.Call) -> Unit = {}): MailOutcome<Unit> =
+        relaySource.saveDraft(draft, onCall)
 
     fun saveClientEncryptedDraft(draft: ClientEncryptedDraft, onCall: (okhttp3.Call) -> Unit = {}): MailOutcome<Unit> =
         relaySource.saveClientEncryptedDraft(draft, onCall)
@@ -427,11 +443,18 @@ class PendingMailActions : ProcessScopedState {
     val removing: MutableMap<Pair<String, String>, PendingMail> = ConcurrentHashMap()
     val reading: MutableMap<Pair<String, String>, PendingMail> = ConcurrentHashMap()
 
-    /** Confirmed removals. An IMAP UID is never reused in its mailbox, so a refresh that read the
-     *  window before the removal landed must not write the row back.
-     *  ponytail: one entry per removal until the session ends; a UIDVALIDITY reset would hide a
-     *  reused id until then. */
-    val removed: MutableSet<Pair<String, String>> = ConcurrentHashMap.newKeySet()
+    /** Confirmed removals, each with the [removalMark] it took: a refresh that read the window
+     *  before the removal landed must not write the row back (see `MailRepository.notRemoved`).
+     *  ponytail: an entry no later fetch lists again stays until the session ends. */
+    val removed: MutableMap<Pair<String, String>, Long> = ConcurrentHashMap()
+    private val removals = java.util.concurrent.atomic.AtomicLong()
+
+    /** Taken by a fetch before it reads the server. */
+    fun removalMark(): Long = removals.get()
+
+    fun markRemoved(key: Pair<String, String>) {
+        removed[key] = removals.incrementAndGet()
+    }
 
     /** See [MailRepository.setOverlayListener]. */
     @Volatile

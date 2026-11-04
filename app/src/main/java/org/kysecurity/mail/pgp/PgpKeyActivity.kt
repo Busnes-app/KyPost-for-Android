@@ -51,6 +51,25 @@ class PgpKeyActivity : LockedActivity() {
     // lazy: pinnedPairingCallFactory needs a Context that does not exist at property-init time.
     private val client by lazy { PgpQrClient(callFactory = pinnedPairingCallFactory(this)) }
     private val bootstrapClient by lazy { PgpBootstrapClient(callFactory = pinnedPairingCallFactory(this)) }
+
+    /** A scanned code names the other person's relay, which this device's leaf pin refuses. That
+     *  fetch carries only the code's token, never this device's credentials, and the key it returns
+     *  is fingerprinted here before anything trusts it, so another host goes over system trust. */
+    private val scanClient by lazy {
+        val ownRelay = pinnedPairingCallFactory(this)
+        val otherRelay = org.kysecurity.mail.pairingHttpClient(org.kysecurity.mail.PinPosture.TofuWindow)
+        val app = applicationContext
+        PgpQrClient(
+            callFactory = okhttp3.Call.Factory { request ->
+                val pinned = org.kysecurity.mail.push.PushRuntime.graph(app).repository.currentTlsPin()?.host
+                if (pinned == null || request.url.host.equals(pinned, ignoreCase = true)) {
+                    ownRelay.newCall(request)
+                } else {
+                    otherRelay.newCall(request)
+                }
+            },
+        )
+    }
     private val vaultOpener = AndroidVaultOpener(this)
     private var vaultOpenOffered = false
     private var ownQrJob: Job? = null
@@ -202,7 +221,7 @@ class PgpKeyActivity : LockedActivity() {
 
         scanStatusText.text = getString(R.string.pgp_qr_my_code_loading)
         lifecycleScope.launch {
-            when (val result = client.fetchKey(parsed.serverUrl, parsed.token)) {
+            when (val result = scanClient.fetchKey(parsed.serverUrl, parsed.token)) {
                 is PgpQrKeyResult.Success -> showFetchedKey(result.key, parsed.fingerprint)
                 is PgpQrKeyResult.Forbidden -> {
                     scanStatusText.text = getString(R.string.pgp_qr_scan_forbidden)
