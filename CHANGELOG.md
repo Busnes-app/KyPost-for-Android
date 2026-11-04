@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Remove Pairing keeps the contacts on this phone unless you tick "Also remove this device's
+  contacts". It warns when contact changes have not synced yet and offers Sync now. Pairing a
+  different account, or pairing after adding contacts while unpaired, asks "Bring your N contacts
+  into <server>?" before anything is uploaded; Remove them deletes them from the phone.
+- Push keeps working after Firebase rotates its token or you switch between Firebase and
+  UnifiedPush: the app refreshes its registration with its own device key instead of the
+  one-time pairing code (needs a KyPost server with `native/refresh`; older servers behave as
+  before).
+- A pairing link that would trust a new certificate for the same server now says "This server's
+  certificate changed since you paired" before you continue.
+- Encrypted or signed replies stay in their conversation, like plain replies.
+- Leaving a message you are writing offers Save draft where this device can save drafts.
+
+### Fixed
+
+- Sharing a file into KyPost while another message was open no longer blanks that message's
+  attachments.
+- A contact with a job title but no company keeps its title when edited in the phone's Contacts
+  app, and moving a contact between groups on the web now updates the phone.
+- After unpairing or switching accounts, mail, notifications and encryption settings still loading
+  for the old account no longer appear under the new one, and an old compose screen closes.
+- A device approved on the web while KyPost was locked finishes pairing after unlock, and the
+  result shows even if the pairing screen was reopened.
+
 ## 0.6.0 — 2026-11-02
 
 ### Added
