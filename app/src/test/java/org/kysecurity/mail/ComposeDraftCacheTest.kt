@@ -118,12 +118,15 @@ class ComposeDraftCacheTest {
     }
 
     @Test
-    fun aNewExternalRequestDropsAndZeroesTheCachedDraftButStaysUnsealed() {
+    fun aNewExternalRequestDropsTheCachedDraftWithoutZeroingItAndStaysUnsealed() {
+        // The arrays are shared with a compose screen still alive behind the Inbox tab (or a send in
+        // flight): zeroing them here sent that screen's attachment as zeroes.
         val bytes = byteArrayOf(1, 2, 3)
         ComposeDraftCache.save(draft(attachments = listOf(OutgoingAttachment("a.bin", "application/octet-stream", bytes))))
 
         assertNull(ComposeDraftCache.takeOnOpen(newExternalRequest = true))
-        assertArrayEquals(ByteArray(3), bytes)
+        assertArrayEquals(byteArrayOf(1, 2, 3), bytes)
+        assertNull(ComposeDraftCache.take())
         ComposeDraftCache.save(draft(subject = "New"))
         assertEquals("New", ComposeDraftCache.take()?.subject)
     }

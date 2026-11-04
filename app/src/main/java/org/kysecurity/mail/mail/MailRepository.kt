@@ -46,6 +46,7 @@ class MailRepository(
 
     /** [forceFullResync] asks for since=0; the daily self-heal runs regardless of this flag. */
     fun refreshFolder(folder: String, forceFullResync: Boolean = false): MailOutcome<MailFetchResult> {
+        val session = ProcessState.generation()
         val outcome = relaySource.fetchInbox(folder, WINDOW_LIMIT, forceFullResync)
         if (outcome !is MailOutcome.Success) return outcome
         val result = outcome.value
@@ -60,14 +61,29 @@ class MailRepository(
         // (upserts and deletes are idempotent), whereas the other order dropped it.
         // Filter and write under the removal lock, so a confirmed removal lands before or after
         // the whole write, never between the filter and it.
-        pending.serialized {
-            emailDao.inTransaction {
-                reconcileFetchResult(emailDao, folder, "relay", result.copy(messages = notRemoved(folder, result.messages)))
-                reconcileOlderMail(emailDao, folder, "relay", notRemoved(folder, overflow))
-            }
+        val written = writeIfCurrent(session) {
+            reconcileFetchResult(emailDao, folder, "relay", result.copy(messages = notRemoved(folder, result.messages)))
+            reconcileOlderMail(emailDao, folder, "relay", notRemoved(folder, overflow))
         }
+        // An ended session's checkpoint would skip, for the next account, mail it never stored.
+        if (!written || !ProcessState.isCurrent(session)) return MailOutcome.Unauthorized(SESSION_ENDED)
         commitCheckpoint(folder, result.checkpoint)
         return outcome
+    }
+
+    /** Runs [write] in one Room transaction under the removal lock, only while [session] is current.
+     *  Checked inside the transaction: the account purge advances the generation before it clears
+     *  Room, so a reply that was in flight across it cannot write the old account's rows back. */
+    private fun writeIfCurrent(session: Long, write: () -> Unit): Boolean {
+        var written = false
+        pending.serialized {
+            emailDao.inTransaction {
+                if (!ProcessState.isCurrent(session)) return@inTransaction
+                write()
+                written = true
+            }
+        }
+        return written
     }
 
     /** More new mail arrived than the window holds: page down until reaching mail already held. */
@@ -91,28 +107,29 @@ class MailRepository(
     /** One page older than [frontier], or than the oldest row held when there is none yet. Null
      *  when the folder holds no row to page from. */
     fun loadOlderFrom(folder: String, frontier: String?): MailOutcome<MailPage>? {
+        val session = ProcessState.generation()
         // A failed read is not an empty folder: report it, so the caller keeps offering a retry.
         val before = frontier ?: try {
             cachedEmails(folder).lastOrNull()?.id
         } catch (_: RuntimeException) {
             return MailOutcome.BadRequest(OLDER_MAIL_NOT_SAVED)
         } ?: return null
-        return loadOlder(folder, before)
+        return loadOlder(folder, before, session)
     }
 
     /** One page older than [before] into Room. The caller pages on from [MailPage.nextBefore]. */
-    fun loadOlder(folder: String, before: String): MailOutcome<MailPage> {
+    fun loadOlder(folder: String, before: String, session: Long = ProcessState.generation()): MailOutcome<MailPage> {
         val outcome = relaySource.fetchOlder(folder, WINDOW_LIMIT, before)
         if (outcome !is MailOutcome.Success) return outcome
         // The server ignored before= and sent its newest window, which is not older mail.
         if (outcome.value.hasMore == null) return MailOutcome.BadRequest(OLDER_MAIL_UNSUPPORTED)
         // Room reports a full disk or I/O error as a RuntimeException (SQLiteFullException and kin).
-        try {
-            pending.serialized { reconcileOlderMail(emailDao, folder, "relay", notRemoved(folder, outcome.value.messages)) }
+        val written = try {
+            writeIfCurrent(session) { reconcileOlderMail(emailDao, folder, "relay", notRemoved(folder, outcome.value.messages)) }
         } catch (_: RuntimeException) {
             return MailOutcome.BadRequest(OLDER_MAIL_NOT_SAVED)
         }
-        return outcome
+        return if (written) outcome else MailOutcome.Unauthorized(SESSION_ENDED)
     }
 
     /** Takes an action's claim on the caller's thread, before the work is queued: the row shows
@@ -359,6 +376,7 @@ class MailRepository(
         knownTo: List<String> = emptyList(),
         knownCc: List<String> = emptyList(),
     ): MailOutcome<MailMessageBody> {
+        val session = ProcessState.generation()
         val row = emailDao.getById(id, folder) ?: return when (val fetched = relaySource.fetchMessageBody(id, folder)) {
             is MailOutcome.Success -> MailOutcome.Success(fetched.value.copy(toAddresses = knownTo, ccAddresses = knownCc))
             else -> fetched
@@ -376,7 +394,8 @@ class MailRepository(
             if (fetched !is MailOutcome.Success) return fetched
             // An older page carries no PGP flags, so a server-decrypted body cached on such a row
             // would escape clearServerDecryptedBodies. Out-of-window bodies are fetched per open.
-            if (row.inWindow) emailDao.updateBody(id, folder, fetched.value.html, fetched.value.bodyMode)
+            // Not into the next account's cache: the purge may have run while this was in flight.
+            if (row.inWindow) writeIfCurrent(session) { emailDao.updateBody(id, folder, fetched.value.html, fetched.value.bodyMode) }
             return MailOutcome.Success(fetched.value.copy(toAddresses = to, ccAddresses = cc))
         }
         return MailOutcome.Success(

@@ -65,13 +65,15 @@ class ComposePgpController(
     /** The cached bootstrap, or null when unpaired or the fetch failed. */
     private suspend fun bootstrap(): PgpBootstrapResult.Success? {
         cachedBootstrap?.let { return it }
+        // Before the pairing read: a fetch that outlives an unpair must not seed the next account.
+        val session = ProcessState.generation()
         // pairingProvider() reads Keystore-backed prefs and does an AES unwrap: disk plus crypto.
         val pairing = withContext(Dispatchers.IO) { pairingProvider() }
         val deviceId = pairing?.deviceId
         val deviceSecret = pairing?.deviceSecret
         if (pairing == null || deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return null
         return when (val result = bootstrapClient.fetch(pairing.serverUrl, deviceId, deviceSecret)) {
-            is PgpBootstrapResult.Success -> result.also { cachedBootstrap = it }
+            is PgpBootstrapResult.Success -> result.takeIf { cacheIfCurrent(it, session) }
             is PgpBootstrapResult.Failed -> null
         }
     }
@@ -100,8 +102,18 @@ class ComposePgpController(
 
         override fun resetForNewSession() = resetSessionCache()
 
+        private val lock = Any()
+
         fun resetSessionCache() {
-            cachedBootstrap = null
+            synchronized(lock) { cachedBootstrap = null }
+        }
+
+        /** Under the reset's lock, so a store cannot land between the generation check and a reset.
+         *  False (nothing stored) once [session] has ended. */
+        private fun cacheIfCurrent(result: PgpBootstrapResult.Success, session: Long): Boolean = synchronized(lock) {
+            if (!ProcessState.isCurrent(session)) return false
+            cachedBootstrap = result
+            true
         }
 
         fun from(context: Context): ComposePgpController = ComposePgpController(

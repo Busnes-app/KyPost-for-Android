@@ -260,7 +260,12 @@ class ComposeActivity : LockedActivity() {
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris -> if (!uris.isNullOrEmpty()) addAttachments(uris) }
 
+    /** The session this screen was opened in. An unpair and re-pair can happen while it sits
+     *  behind other screens; its Send would then go out under the next account. */
+    private var openedSession = 0L
+
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
+        openedSession = ProcessState.generation()
         setContentView(R.layout.activity_compose)
         applyThemeToActivity(this)
 
@@ -501,6 +506,12 @@ class ComposeActivity : LockedActivity() {
             insets
         }
         ViewCompat.requestApplyInsets(content)
+    }
+
+    /** The session ended (account purge) while this screen was stopped: its composition belonged
+     *  to that account, and the purge already reset its cached draft and send. */
+    override fun onStartUnlocked() {
+        if (!ProcessState.isCurrent(openedSession)) finish()
     }
 
     override fun onResume() {
@@ -1044,6 +1055,10 @@ class ComposeActivity : LockedActivity() {
                 sendMenuItem?.isEnabled = true
                 explainMissingKeys(outcome.addresses)
             }
+            is ClientSendOutcome.SendFailed if outcome.outcome is MailOutcome.ReplyThreadingRefused -> {
+                sendMenuItem?.isEnabled = true
+                confirmUnthreadedSend(outcome.outcome.message)
+            }
             else -> {
                 sendMenuItem?.isEnabled = true
                 Toast.makeText(this, clientSendMessage(outcome), Toast.LENGTH_LONG).show()
@@ -1311,7 +1326,13 @@ class ComposeActivity : LockedActivity() {
             .setPositiveButton(R.string.compose_unthreaded_confirm) { _, _ ->
                 sendMenuItem?.isEnabled = false
                 replyTo = null
-                dispatchSend(draft.copy(replyToMessageId = null, replyToMailbox = null), sentSession)
+                val unthreaded = draft.copy(replyToMessageId = null, replyToMailbox = null)
+                // The same path the refused send took: an encrypted reply must never fall back to a plain send.
+                if (clientSideAccount && (draft.sign || draft.encrypt)) {
+                    dispatchClientSend(unthreaded, sentSession)
+                } else {
+                    dispatchSend(unthreaded, sentSession)
+                }
             }
             .create()
             .showSecurely()
@@ -1508,6 +1529,12 @@ class ComposeActivity : LockedActivity() {
             .setMessage(R.string.compose_discard_body)
             .setNegativeButton(R.string.compose_discard_keep, null)
             .setPositiveButton(R.string.compose_discard_confirm) { _, _ -> finish() }
+            // Exactly when the Save draft menu item is offered; it finishes the screen only once saved.
+            .apply {
+                if (saveDraftMenuItem?.let { it.isVisible && it.isEnabled } == true) {
+                    setNeutralButton(R.string.compose_save_draft) { _, _ -> saveDraft() }
+                }
+            }
             .create().showSecurely()
     }
 

@@ -5,6 +5,7 @@ import org.kysecurity.mail.testing.response
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -100,5 +101,33 @@ class PullSyncCoordinatorSerializationTest {
             listOf("readCursor:0", "advanceCursor:1", "readCursor:1", "advanceCursor:1"),
             cursorEvents,
         )
+    }
+
+    /** An unpair while the pull is on the wire: its reply belongs to the purged account and must
+     *  not restore its history, notifications, cursor, delivery mode or sync state. */
+    @Test
+    fun aPullWhoseSessionEndedInFlightWritesNothing() = runBlocking {
+        val store = FakePushStore(pairing = pairing)
+        store.updateDelivery(DeliveryMode.PULL, "https://relay.example.com/api/notifications/pull")
+        val before = store.state.first()
+        val shown = mutableListOf<IncomingPush>()
+        val coordinator = PullSyncCoordinator(
+            repository = store,
+            pullClient = PullNotificationClient(
+                callFactory = FakeCallFactory { req ->
+                    org.kysecurity.mail.ProcessState.advanceGeneration()
+                    response(req, oneNotification.replace("\"pull\"", "\"push\""), 200)
+                },
+            ),
+            notifier = { shown += it },
+            ensurePeriodic = {},
+        )
+
+        coordinator.pullOnce()
+
+        assertTrue(shown.isEmpty())
+        assertEquals(listOf("readCursor:0"), store.events.toList())
+        assertEquals(0L, store.cursor)
+        assertEquals(before, store.state.first())
     }
 }
