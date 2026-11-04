@@ -380,9 +380,6 @@ class ComposeActivity : LockedActivity() {
             } else {
                 withSignature(prefilledHtml, MailSignature.read(this).textFor(prefill.kind))
             }
-            if (intent.getBooleanExtra(PendingExternalCompose.EXTRA_FILES_DROPPED, false)) {
-                Toast.makeText(this, R.string.compose_shared_files_dropped, Toast.LENGTH_LONG).show()
-            }
             subjectField.setText(prefill.subject)
             toInput.setInitialRecipients(prefill.to)
             ccInput.setInitialRecipients(prefill.cc)
@@ -1512,11 +1509,6 @@ class ComposeActivity : LockedActivity() {
             .setNegativeButton(R.string.compose_discard_keep, null)
             .setPositiveButton(R.string.compose_discard_confirm) { _, _ -> finish() }
             .create().showSecurely()
-    }
-
-    /** Closed by the lock before anything was shown: nothing typed, so replay the request after unlock. */
-    override fun onRedirectingToUnlock(beforeShown: Boolean) {
-        if (beforeShown && intent.isExternalComposeIntent()) PendingExternalCompose.hold(intent)
     }
 
     override fun onDestroy() {

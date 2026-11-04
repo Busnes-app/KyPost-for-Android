@@ -30,34 +30,6 @@ class ComposeIntentParserTest {
         assertEquals("support@example.com", prefill.to)
     }
 
-    /** Held across the unlock screen: what comes back parses to the same request, as public. */
-    @Test
-    fun aRequestHeldAcrossTheLockIsReplayedOnce() {
-        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
-        PendingExternalCompose.hold(
-            Intent(Intent.ACTION_SEND)
-                .putExtra(Intent.EXTRA_EMAIL, arrayOf("a@example.com"))
-                .putExtra(Intent.EXTRA_SUBJECT, "Notes")
-                .putExtra(Intent.EXTRA_TEXT, "hello"),
-        )
-        val replay = PendingExternalCompose.take(context)!!
-        assertEquals(ComposeActivity::class.java.name, replay.component?.className)
-        val prefill = parse(replay)
-        assertEquals("a@example.com", prefill.to)
-        assertEquals("Notes", prefill.subject)
-        assertEquals("hello", prefill.bodyHtml)
-        assertEquals(null, PendingExternalCompose.take(context))
-        assertEquals(false, replay.getBooleanExtra(PendingExternalCompose.EXTRA_FILES_DROPPED, false))
-
-        // Files are not carried, and the replay says so rather than dropping them in silence.
-        PendingExternalCompose.hold(
-            Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, Uri.parse("content://example/doc")),
-        )
-        val withFiles = PendingExternalCompose.take(context)!!
-        assertEquals(true, withFiles.getBooleanExtra(PendingExternalCompose.EXTRA_FILES_DROPPED, false))
-        assertEquals(null, withFiles.extras?.get(Intent.EXTRA_STREAM))
-    }
-
     @Test
     fun shareKeepsCcAndBcc() {
         val prefill = parse(
