@@ -94,6 +94,8 @@ class PushSyncCoordinator(
         // Taken BEFORE the network call and reused after it: the app can lock while it is in flight.
         val credentialState = repository.currentCredentialState()
         if (credentialState is PushRepository.PairingCredentialState.Unavailable) return credentialGateDeferral()
+        // Unwrapped now, with the credential state: the app can lock during the register call.
+        val replaced = if (isReplacement) repository.pairingForAuthenticatedCall() else null
 
         // A known UnifiedPush endpoint is the user's distributor choice, on either channel.
         val credential = repository.state.first().unifiedPushCredential()
@@ -115,7 +117,7 @@ class PushSyncCoordinator(
             )
             // A 202 is held for web approval: nothing is stored or purged until awaitApproval sees it approved.
             if (result !is NativeRegistrationResult.Success) return@withContext result
-            finishPairing(pairing, result, credential, credentialState, isReplacement)
+            finishPairing(pairing, result, credential, credentialState, isReplacement, replaced)
         }
     }
 
@@ -127,6 +129,8 @@ class PushSyncCoordinator(
         credential: PushRegistrationCredential,
         credentialState: PushRepository.PairingCredentialState,
         isReplacement: Boolean,
+        /** The replaced account's pairing with its secret, read when [credentialState] was. */
+        replaced: PairingData?,
     ): NativeRegistrationResult {
         // NOTHING is destroyed until the replacement is proven. Purging first meant a
         // replacement that failed at the FCM token fetch — offline, say — had already deleted
@@ -134,9 +138,10 @@ class PushSyncCoordinator(
         if (isReplacement) {
             // The replaced account's device row still holds this installation's push token, so its
             // mail and MFA prompts kept arriving under the new account. Its credentials go with the
-            // purge below: this is the last moment they can sign the removal. The authenticated read:
-            // the state flow's copy carries no secret while the credential gate is on.
-            repository.pairingForAuthenticatedCall()?.let { previous ->
+            // purge below: this is the last moment they can sign the removal. The authenticated read
+            // (the state flow's copy carries no secret while the credential gate is on), taken before
+            // the register call.
+            replaced?.let { previous ->
                 runCatching { deregisterReplaced(previous) }
                     .onFailure { android.util.Log.w("PushSyncCoordinator", "Could not deregister the replaced account", it) }
             }
@@ -234,6 +239,7 @@ class PushSyncCoordinator(
         val isReplacement = isAccountReplacement(pending.pairing, existing, repository.reconnectExpectation())
         val credentialState = repository.currentCredentialState()
         if (credentialState is PushRepository.PairingCredentialState.Unavailable) return credentialGateDeferral()
+        val replaced = if (isReplacement) repository.pairingForAuthenticatedCall() else null
         val secret = pending.deviceSecret ?: return@withLock notApproved()
         val success = NativeRegistrationResult.Success(
             syncedAtEpochMs = nowEpochMs,
@@ -245,7 +251,7 @@ class PushSyncCoordinator(
             tlsPin = pending.tlsPin,
         )
         withContext(NonCancellable) {
-            finishPairing(pending.pairing, success, pending.credential, credentialState, isReplacement)
+            finishPairing(pending.pairing, success, pending.credential, credentialState, isReplacement, replaced)
         }
     }
 

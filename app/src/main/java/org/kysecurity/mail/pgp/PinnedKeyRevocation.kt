@@ -51,9 +51,21 @@ internal fun contactKeyAcceptable(armored: String, emails: List<String>): Boolea
     if (isPrimaryRevoked(armored)) return false
     val validSeconds = primary.validSeconds
     if (validSeconds > 0 && System.currentTimeMillis() > primary.creationTime.time + validSeconds * 1000L) return false
+    // The relay's IsExpired also refuses a key whose primary identity's self-signature expired.
+    val uids = primary.userIDs.asSequence().toList()
+    val primaryUid = uids.firstOrNull { newestSelfSignature(primary, it)?.hashedSubPackets?.isPrimaryUserID == true }
+        ?: uids.firstOrNull() ?: return false
+    newestSelfSignature(primary, primaryUid)?.let { sig ->
+        val seconds = sig.hashedSubPackets?.signatureExpirationTime ?: 0L
+        if (seconds > 0 && System.currentTimeMillis() > sig.creationTime.time + seconds * 1000L) return false
+    }
     val wanted = emails.map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
-    primary.userIDs.asSequence().any { uid -> uidAddress(uid) in wanted }
+    uids.any { uid -> uidAddress(uid) in wanted }
 }.getOrDefault(false)
+
+private fun newestSelfSignature(primary: PGPPublicKey, uid: String): PGPSignature? =
+    primary.getSignaturesForID(uid)?.asSequence()?.filterIsInstance<PGPSignature>()
+        ?.filter { it.keyID == primary.keyID }?.maxByOrNull { it.creationTime.time }
 
 /** `Name <address>`, or a bare address: over-accepting costs one refused change, under-accepting
  *  drops a key the relay would keep. */

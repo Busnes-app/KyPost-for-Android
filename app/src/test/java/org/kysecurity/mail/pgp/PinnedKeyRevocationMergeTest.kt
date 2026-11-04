@@ -159,6 +159,8 @@ class PinnedKeyRevocationMergeTest {
         assertFalse("not a key", contactKeyAcceptable("garbage", listOf("a@example.invalid")))
         val bare = armored(publicRing(generator("d@example.invalid").generateSecretKeyRing()).encoded)
         assertTrue("a bare-address user ID", contactKeyAcceptable(bare, listOf("D@example.invalid")))
+        val lapsed = armored(publicRing(generator("E <e@example.invalid>", selfSignatureExpiredDaysAgo = 1).generateSecretKeyRing()).encoded)
+        assertFalse("its self-signature expired", contactKeyAcceptable(lapsed, listOf("e@example.invalid")))
     }
 
     private companion object {
@@ -211,7 +213,7 @@ class PinnedKeyRevocationMergeTest {
         }
 
         @Suppress("DEPRECATION")
-        fun generator(uid: String, subkeys: Int = 1): PGPKeyRingGenerator {
+        fun generator(uid: String, subkeys: Int = 1, selfSignatureExpiredDaysAgo: Int? = null): PGPKeyRingGenerator {
             val rsa = RSAKeyPairGenerator().apply {
                 init(RSAKeyGenerationParameters(BigInteger.valueOf(0x10001), SecureRandom(), 2048, 12))
             }
@@ -219,12 +221,19 @@ class PinnedKeyRevocationMergeTest {
             val primary = BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), Date(now.time - subkeys * 60_000L))
             // Each later subkey a minute newer, so "newest" is well defined.
             val subs = (1..subkeys).map { BcPGPKeyPair(PublicKeyAlgorithmTags.RSA_GENERAL, rsa.generateKeyPair(), Date(now.time - (subkeys - it) * 60_000L)) }
+            // A self-signature made two days before the given expiry, valid for one day.
+            val hashed = selfSignatureExpiredDaysAgo?.let { days ->
+                org.bouncycastle.openpgp.PGPSignatureSubpacketGenerator().apply {
+                    setSignatureCreationTime(false, Date(now.time - (days + 1) * 86_400_000L))
+                    setSignatureExpirationTime(false, 86_400L)
+                }.generate()
+            }
             return PGPKeyRingGenerator(
                 PGPSignature.POSITIVE_CERTIFICATION,
                 primary,
                 uid,
                 BcPGPDigestCalculatorProvider().get(HashAlgorithmTags.SHA1),
-                null,
+                hashed,
                 null,
                 BcPGPContentSignerBuilder(primary.publicKey.algorithm, HashAlgorithmTags.SHA256),
                 null,

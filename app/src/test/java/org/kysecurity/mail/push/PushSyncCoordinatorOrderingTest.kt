@@ -210,7 +210,12 @@ class PushSyncCoordinatorOrderingTest {
         // Credential gate on: the state flow's copy carries no secret, only the unwrapped read does.
         val store = FakePushStore(pairing = existing.copy(deviceSecret = null)).apply { unwrappedSecret = "secret-old" }
         val deregistered = mutableListOf<PairingData>()
-        val coordinator = coordinator(store, { req -> response(req, body("secret-new"), 200) }, deregistered = deregistered)
+        // The app locks while the register call is in flight: the key is gone by the time it answers.
+        val coordinator = coordinator(
+            store,
+            { req -> store.unwrappedSecret = null; response(req, body("secret-new"), 200) },
+            deregistered = deregistered,
+        )
 
         val result = coordinator.attemptPairing(replacement)
 
