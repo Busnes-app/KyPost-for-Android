@@ -16,6 +16,8 @@
   certificate changed since you paired" before you continue.
 - Encrypted or signed replies stay in their conversation, like plain replies.
 - Leaving a message you are writing offers Save draft where this device can save drafts.
+- Accounts whose encryption key is held by the server can save drafts too (menu and when leaving
+  a message), as on the web. A message marked Sign or Encrypt is not saved this way.
 
 ### Fixed
 

@@ -113,7 +113,8 @@ Owns production Android app code and resources.
   launch succeed; only the user's normal discard/send action removes it. A modal
   prevents edits during saving, and Activity destruction cancels its vault prompt.
   Unenrolled devices open webmail without transferring any composition; unknown custody refuses
-  the operation. Compose never calls the plaintext `saveDraft` transport. Retry after a successful
+  the operation. Compose calls the plaintext `saveDraft` transport only for a server-held key, and
+  never for a composition marked to sign or encrypt (owner Q4 A). Retry after a successful
   save but failed browser launch can create another draft: the relay exposes no draft ID/upsert.
 - **`MailRepository` is the one synchronization boundary: the source returns facts, the repository
   decides when they become durable.** Two rules follow from that, and both were once broken.
@@ -226,8 +227,11 @@ Owns production Android app code and resources.
   `sendOutcome` reads 200 as sent and 202 as held, each only where it was asked for, so a hold is
   never shown as sent. `ScheduledActivity` (folder picker, "Scheduled") lists `GET /api/scheduled`
   and cancels only a waiting row, after a confirm; the id is one escaped path segment.
-- Drafts are saved and edited only where this device holds the key; a server-held key gets
-  neither. "Edit draft" (detail overflow) exists only for a draft this device decrypted
+- Save draft: client custody encrypts the draft here (above). A server-held key saves it through
+  the relay's plaintext `/api/mail/draft`, as the web app does (the server stores those drafts
+  unencrypted anyway), but only while Sign and Encrypt are both off: `draftSaveAllowed` withdraws
+  the menu item and the leave prompt's button for a composition marked to sign or encrypt. Drafts
+  are edited only where this device holds the key. "Edit draft" (detail overflow) exists only for a draft this device decrypted
   (`decryptedDraft`, zeroed with `decryptedAttachments`) and refuses one it cannot carry whole.
   The relay cannot replace a draft, so `deleteSourceDraft` deletes the old copy only after the new
   one is saved, sent or scheduled, and never when fewer attachments arrived than it had: two

@@ -285,7 +285,8 @@ interface MailSource {
         account: MailAccount? = null,
         wakeAt: java.time.Instant? = null,
     ): MailOutcome<MailActionOutcome>
-    fun saveDraft(draft: MailDraft): MailOutcome<Unit>
+    /** [onCall] as for [sendMail]. */
+    fun saveDraft(draft: MailDraft, onCall: (okhttp3.Call) -> Unit = {}): MailOutcome<Unit>
     /** [onCall] as for [sendMail]. */
     fun saveClientEncryptedDraft(draft: ClientEncryptedDraft, onCall: (okhttp3.Call) -> Unit = {}): MailOutcome<Unit>
     /** Null when unpaired. */

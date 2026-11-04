@@ -259,14 +259,14 @@ class RelayMailSource(
         }
     }
 
-    override fun saveDraft(draft: MailDraft): MailOutcome<Unit> {
+    override fun saveDraft(draft: MailDraft, onCall: (Call) -> Unit): MailOutcome<Unit> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
         val base = baseUrl(pairing, "/api/mail/draft") ?: return MailOutcome.BadRequest("Server URL is not valid")
         val body = json.encodeToString(draft.toWireDto())
-        val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
+        val request = Request.Builder().url(base).post(oneShot(body.toRequestBody(JSON_MEDIA_TYPE)))
             .authed(pairing)
             .build()
-        return execute(request) { code, rawBody -> mutationOutcome(code, rawBody) }
+        return execute(request, onCall) { code, rawBody -> mutationOutcome(code, rawBody) }
     }
 
     override fun saveClientEncryptedDraft(draft: ClientEncryptedDraft, onCall: (Call) -> Unit): MailOutcome<Unit> {

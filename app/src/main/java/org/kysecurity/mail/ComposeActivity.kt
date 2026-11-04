@@ -594,11 +594,20 @@ class ComposeActivity : LockedActivity() {
         // Only where this device holds the key: the fallback copy for Drafts is encrypted here.
         scheduleMenuItem?.isVisible = clientSideAccount && !handoffOnlyAccount
         scheduleMenuItem?.isEnabled = sendMenuItem?.isEnabled == true
-        // Drafts are encrypted here, so a server-held key gets no Save draft.
-        saveDraftMenuItem?.isVisible = clientSideAccount && !handoffOnlyAccount
+        saveDraftMenuItem?.isVisible = draftSaveAllowed()
         saveDraftMenuItem?.isEnabled = sendMenuItem?.isEnabled == true
         applySendMenuItemTheme()
     }
+
+    /** Client custody encrypts its draft here. A server-held key saves through the plaintext
+     *  `/api/mail/draft`, as the web app does, so a composition marked to sign or encrypt never
+     *  goes that way (owner Q4 A). */
+    private fun draftSaveAllowed(): Boolean = !handoffOnlyAccount &&
+        (clientSideAccount || (custodyKnown && !markedToSignOrEncrypt()))
+
+    private fun markedToSignOrEncrypt(): Boolean =
+        (signChip.isChecked && signChip.visibility == View.VISIBLE) ||
+            (encryptChip.isChecked && encryptChip.visibility == View.VISIBLE)
 
     /** The one custody gate. Every path to the relay asks it, at the moment it would send, because
      *  custody can resolve while a prompt is open. Hidden chips mean both flags false, so letting a
@@ -713,9 +722,11 @@ class ComposeActivity : LockedActivity() {
                 // server change first.
                 if (clientSideAccount) signChip.isChecked = false
             }
+            applySendAvailability()
         }
         signChip.setOnCheckedChangeListener { _, checked ->
             if (checked && clientSideAccount && !encryptChip.isChecked) encryptChip.isChecked = true
+            applySendAvailability()
         }
         webmailChip.setOnClickListener { handOffToWebmail() }
 
@@ -1191,25 +1202,38 @@ class ComposeActivity : LockedActivity() {
         else -> getString(R.string.compose_pgp_encrypt_failed, "")
     }
 
-    /** Saves to Drafts, encrypted here to the account's own key, and leaves the screen. */
+    /** Saves to Drafts and leaves the screen: encrypted here to the account's own key on client
+     *  custody, as plaintext through the relay on a server-held key. */
     private fun saveDraft() {
         // Send disables its item before its own export, while sendJob is not yet set.
         if (handoffBusy || sending != null || sendJob?.isActive == true || sendMenuItem?.isEnabled != true) return
-        if (!custodyPermitsSend() || !clientSideAccount) return
+        if (!custodyPermitsSend() || !draftSaveAllowed()) return
         if (!commitTypedRecipients()) return
         // Until the save lands or fails; a second tap would otherwise start a second export.
         listOf(sendMenuItem, scheduleMenuItem, saveDraftMenuItem).forEach { it?.isEnabled = false }
         val session = openedSession
         bodyEditor.exportHtml { html ->
             if (isFinishing || isDestroyed) return@exportHtml
-            // Asked again, as sendEmail does: custody can resolve between the tap and this callback.
-            if (!custodyPermitsSend() || !clientSideAccount) return@exportHtml
+            // Asked again, as sendEmail does: custody or the toggles can change before this callback.
+            if (!custodyPermitsSend()) return@exportHtml
+            if (!draftSaveAllowed()) {
+                applySendAvailability()
+                return@exportHtml
+            }
             val draft = MailDraft(
                 to = toInput.commaJoinedRecipients(), cc = ccInput.commaJoinedRecipients(),
                 bcc = bccInput.commaJoinedRecipients(), subject = subjectField.text.toString().trim(),
                 body = html, mode = "html", attachments = attachments.toList(),
             )
             val app = application as KyPostApp
+            if (!clientSideAccount) {
+                awaitSend(
+                    ComposeSend.start(app.appScope, draft, session, ComposeSend.Kind.DRAFT_SAVE) { d, onCall ->
+                        MailRuntime.graph(app).repository.saveDraft(d, onCall)
+                    },
+                )
+                return@exportHtml
+            }
             sendJob = lifecycleScope.launch {
                 val saver = ClientEncryptedDraftSaver(handoffOpener, pgpController.accountAddress()) {
                     MailRuntime.graph(app).repository.saveClientEncryptedDraft(it)

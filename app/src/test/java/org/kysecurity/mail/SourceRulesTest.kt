@@ -259,9 +259,12 @@ class SourceRulesTest {
     }
 
     @Test
-    fun composeCannotCallThePlaintextDraftTransport() {
+    fun composeCallsThePlaintextDraftTransportOnlyForAServerHeldKey() {
         val compose = mainSources().single { it.relativePath.endsWith("/ComposeActivity.kt") }.readText()
-        assertEquals(false, ".saveDraft(" in compose, "Compose must use the self-encrypted draft transport")
+        val save = compose.substringAfter("private fun saveDraft()").substringBefore("private fun renderDraftSaveOutcome")
+        assertEquals(2, compose.split(".saveDraft(").size, "one plaintext draft call, in saveDraft()")
+        assertEquals(true, ".saveDraft(" in save.substringAfter("if (!clientSideAccount) {"), "plaintext only for a server-held key")
+        assertEquals(true, "draftSaveAllowed()" in save.substringBefore(".saveDraft("), "the sign/encrypt gate runs first")
         val targetResolution = compose.substringAfter("private fun handOffToWebmail()")
             .substringBefore("private fun confirmHandoff")
         assertEquals(false, "exportHtml" in targetResolution, "Resolve custody before exporting a draft")

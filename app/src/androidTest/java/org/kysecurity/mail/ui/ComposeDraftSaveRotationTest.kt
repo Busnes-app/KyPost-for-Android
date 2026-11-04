@@ -29,7 +29,8 @@ import org.kysecurity.mail.pgp.PgpBootstrapClient
 import org.kysecurity.mail.pgp.RecipientKeyClient
 import org.kysecurity.mail.push.PairingData
 
-/** A rotation mid-save must neither drop the relay's answer nor offer Save draft again. */
+/** A rotation mid-save must neither drop the relay's answer nor offer Save draft again; a
+ *  server-held key saves through the plaintext route. */
 @RunWith(AndroidJUnit4::class)
 class ComposeDraftSaveRotationTest {
 
@@ -101,6 +102,49 @@ class ComposeDraftSaveRotationTest {
         assertNull(ComposeDraftCache.take())
     }
 
+    /** Owner Q4 A: a server-held key saves through the plaintext draft route, unflagged. */
+    @Test
+    fun aServerKeyAccountSavesThePlaintextDraftAndLeaves() {
+        ComposeActivity.pgpControllerForTest = controllerAnswering(SERVER_BOOTSTRAP)
+        val intent = ComposeActivity.internalIntent(context)
+            .putExtra(ComposeActivity.EXTRA_TO, "bob@example.com")
+            .putExtra(ComposeActivity.EXTRA_SUBJECT, "Plans")
+            .putExtra(ComposeActivity.EXTRA_BODY_HTML, "<p>draft</p>")
+
+        ActivityScenario.launch<ComposeActivity>(intent).use { scenario ->
+            waitFor("Save draft to be offered") {
+                var ready = false
+                scenario.onActivity { ready = it.saveDraftOfferedForTest() && it.sendEnabledForTest() == true }
+                ready
+            }
+            scenario.onActivity { it.saveDraftForTest() }
+            waitFor("the saved draft to close the screen") { scenario.state == Lifecycle.State.DESTROYED }
+        }
+        val saved = source.plainDraftSaves.single()
+        assertEquals("bob@example.com", saved.to)
+        assertEquals("Plans", saved.subject)
+        assertFalse(saved.sign || saved.encrypt)
+        assertTrue("the encrypted transport was used", source.draftSaves.isEmpty())
+    }
+
+    private fun controllerAnswering(body: String): ComposePgpController {
+        val bootstrap = OkHttpClient.Builder().addInterceptor { chain ->
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(body.toResponseBody("application/json".toMediaType())).build()
+        }.build()
+        return ComposePgpController(
+            pairingProvider = {
+                PairingData(
+                    subscriberId = "sub-1", serverUrl = "https://relay.example.com", registrationUrl = "",
+                    pairingToken = "", deviceId = "d", deviceSecret = "s", pairedAtEpochMs = 0L,
+                )
+            },
+            bootstrapClient = PgpBootstrapClient(callFactory = bootstrap),
+            recipientKeyClient = RecipientKeyClient(callFactory = bootstrap),
+            enrollmentProbe = { true },
+        )
+    }
+
     private fun waitFor(what: String, condition: () -> Boolean) {
         val deadline = System.nanoTime() + 20_000_000_000L
         while (!condition()) {
@@ -113,5 +157,7 @@ class ComposeDraftSaveRotationTest {
     private companion object {
         const val BOOTSTRAP =
             """{"hasIdentity":true,"protection":"client","suggestedUserIDs":["me@example.invalid"]}"""
+        const val SERVER_BOOTSTRAP =
+            """{"hasIdentity":true,"protection":"server","suggestedUserIDs":["me@example.invalid"]}"""
     }
 }

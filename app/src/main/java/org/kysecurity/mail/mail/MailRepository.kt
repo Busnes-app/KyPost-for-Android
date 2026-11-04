@@ -323,6 +323,10 @@ class MailRepository(
         targetFolder: String? = null,
     ): MailOutcome<Unit> = mutateAll(action, beginRemovals(ids, folder), targetFolder)
 
+    /** Plaintext, for a server-held key only; [onCall] as for [send]. */
+    fun saveDraft(draft: MailDraft, onCall: (okhttp3.Call) -> Unit = {}): MailOutcome<Unit> =
+        relaySource.saveDraft(draft, onCall)
+
     fun saveClientEncryptedDraft(draft: ClientEncryptedDraft, onCall: (okhttp3.Call) -> Unit = {}): MailOutcome<Unit> =
         relaySource.saveClientEncryptedDraft(draft, onCall)
 
