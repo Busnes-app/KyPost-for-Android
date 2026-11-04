@@ -6,7 +6,6 @@ import org.kysecurity.mail.data.PendingContactChangeEntity
 import org.kysecurity.mail.data.RecipientPinEntity
 import org.kysecurity.mail.ProcessState
 import org.kysecurity.mail.pgp.PgpFingerprint
-import org.kysecurity.mail.pgp.contactKeyAcceptable
 import org.kysecurity.mail.pgp.withVerifiedRevocation
 import org.kysecurity.mail.push.PairingData
 import org.kysecurity.mail.push.ReconnectExpectation
@@ -190,11 +189,7 @@ class ContactSyncRepository(
     }
 
     /** "Yes": every held contact goes to [account] as new. The other account's pending updates and
-     *  deletes mean nothing there and are dropped, as are its group ids and photo refs (as on Mac),
-     *  and any key the relay would refuse (expired, revoked, or naming none of the contact's
-     *  addresses): one such key kept that contact's create refused for good (owner decision on
-     *  contact keys). Such a key is unusable anyway; the server's copy, without it, replaces the
-     *  phone's row on the next pull.
+     *  deletes mean nothing there and are dropped, as are its group ids and photo refs (as on Mac).
      *  False, changing nothing, when [account] is no longer paired or the question was answered.
      *  The caller syncs afterwards. */
     suspend fun bringKeptContacts(account: ReconnectExpectation): Boolean = answerKeptContacts(account) {
@@ -202,11 +197,7 @@ class ContactSyncRepository(
         db.groupDao().clearAll()
         val now = System.currentTimeMillis()
         db.contactDao().getAll().forEach { entity ->
-            val held = entity.toDto()
-            val dto = held.copy(
-                rev = 0, groupIDs = emptyList(), photoRef = null,
-                pgpKey = held.pgpKey?.takeIf { contactKeyAcceptable(it, held.emails.map { e -> e.value }) },
-            )
+            val dto = entity.toDto().copy(rev = 0, groupIDs = emptyList(), photoRef = null)
             db.contactDao().upsertAll(listOf(entity.copy(rev = 0, groupIDsJson = "[]", photoRef = null)))
             db.pendingContactChangeDao().enqueue(
                 PendingContactChangeEntity(
@@ -280,9 +271,9 @@ class ContactSyncRepository(
     }
 
     /** The local uid is permanent: the server stores an unknown uid as a create, so a replayed
-     *  push lands on the same contact. [verifiedInPerson] as for [queueUpdate]. */
-    /** [session], when given, is the editor's: a write from an ended session changes nothing,
-     *  checked inside the transaction so it cannot land after an account purge. */
+     *  push lands on the same contact. [verifiedInPerson] as for [queueUpdate]. [session], when
+     *  given, is the editor's: a write from an ended session changes nothing, checked inside the
+     *  transaction so it cannot land after an account purge. */
     suspend fun queueCreate(contact: ContactDto, verifiedInPerson: Boolean = false, session: Long? = null): String {
         val localUid = UUID.randomUUID().toString()
         val localCopy = contact.copy(uid = localUid)

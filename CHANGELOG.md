@@ -38,8 +38,6 @@
   discarded in the meantime, and Reconnect no longer closes it.
 - Forward waits until a message's attachments have loaded instead of leaving them out.
 - Scanning a PGP code from someone on another KyPost server works.
-- Bringing contacts into a new account leaves out PGP keys that server would refuse, so those
-  contacts sync.
 - An approved switch to another account now says it is paired and asks about contacts.
 - A link for a different server than the one this phone is paired with says to unpair first,
   instead of failing after you confirm.

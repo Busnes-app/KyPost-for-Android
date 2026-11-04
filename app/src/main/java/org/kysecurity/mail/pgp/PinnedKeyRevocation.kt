@@ -43,35 +43,6 @@ internal fun isPrimaryRevoked(armored: String): Boolean = runCatching {
     revocationsOf(primary).any { verifies(it, primary, primary) }
 }.getOrDefault(false)
 
-/** The relay's rule for a key on a contact (KyPost-Server `validateContactKey`): one public key
- *  whose primary is neither revoked nor expired (BouncyCastle's `validSeconds` reads the self-signed
- *  key expiry), carrying one of [emails] as a user ID's address. The relay refuses any other on a write, so a change carrying one stays queued. */
-internal fun contactKeyAcceptable(armored: String, emails: List<String>): Boolean = runCatching {
-    val primary = singleRing(armored)?.publicKey ?: return false
-    if (isPrimaryRevoked(armored)) return false
-    val validSeconds = primary.validSeconds
-    if (validSeconds > 0 && System.currentTimeMillis() > primary.creationTime.time + validSeconds * 1000L) return false
-    // The relay's IsExpired also refuses a key whose primary identity's self-signature expired.
-    val uids = primary.userIDs.asSequence().toList()
-    val primaryUid = uids.firstOrNull { newestSelfSignature(primary, it)?.hashedSubPackets?.isPrimaryUserID == true }
-        ?: uids.firstOrNull() ?: return false
-    newestSelfSignature(primary, primaryUid)?.let { sig ->
-        val seconds = sig.hashedSubPackets?.signatureExpirationTime ?: 0L
-        if (seconds > 0 && System.currentTimeMillis() > sig.creationTime.time + seconds * 1000L) return false
-    }
-    val wanted = emails.map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
-    uids.any { uid -> uidAddress(uid) in wanted }
-}.getOrDefault(false)
-
-private fun newestSelfSignature(primary: PGPPublicKey, uid: String): PGPSignature? =
-    primary.getSignaturesForID(uid)?.asSequence()?.filterIsInstance<PGPSignature>()
-        ?.filter { it.keyID == primary.keyID }?.maxByOrNull { it.creationTime.time }
-
-/** `Name <address>`, or a bare address: over-accepting costs one refused change, under-accepting
- *  drops a key the relay would keep. */
-private fun uidAddress(uid: String): String =
-    (if ('<' in uid) uid.substringAfter('<').substringBefore('>') else uid).trim().lowercase()
-
 private fun revocationsOf(key: PGPPublicKey): List<PGPSignature> =
     key.getSignaturesOfType(if (key.isMasterKey) PGPSignature.KEY_REVOCATION else PGPSignature.SUBKEY_REVOCATION)
         .asSequence().filterIsInstance<PGPSignature>().toList()
