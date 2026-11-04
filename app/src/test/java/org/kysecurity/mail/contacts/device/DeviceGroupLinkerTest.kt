@@ -99,4 +99,20 @@ class DeviceGroupLinkerTest {
 
         assertEquals(listOf(gone to false), groupRemovals(links, listOf(GroupEntity(id = "g1", name = "Team", rev = 1))))
     }
+
+    /** Moved from "Customers" (row 1) to "Former customers" (row 2) on the web: the phone gains row
+     *  2 and loses row 1, and its membership in another account's group (row 9) is left alone. */
+    @Test
+    fun membershipChanges_addsMissing_deletesExtra_ignoresOtherAccountsGroups() {
+        val (add, delete) = membershipChanges(current = listOf(1L, 9L), wanted = listOf(2L), owned = setOf(1L, 2L, 3L))
+
+        assertEquals(setOf(2L), add)
+        assertEquals(setOf(1L), delete)
+    }
+
+    @Test
+    fun membershipChanges_inStep_changesNothing_andNeverAddsAGroupWeDoNotOwn() {
+        assertEquals(emptySet<Long>() to emptySet(), membershipChanges(listOf(1L, 1L), listOf(1L), setOf(1L)))
+        assertEquals(emptySet<Long>() to emptySet(), membershipChanges(emptyList(), listOf(9L), setOf(1L)))
+    }
 }
