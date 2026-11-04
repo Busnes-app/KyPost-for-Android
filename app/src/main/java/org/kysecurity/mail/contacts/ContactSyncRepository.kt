@@ -42,9 +42,10 @@ class ContactSyncRepository(
     private val db: AppDatabase,
     private val client: ContactSyncClient,
     private val cursorStore: ContactCursorStore,
-    private val pairingProvider: suspend () -> PairingData?,
-    /** Null only in tests that predate the account check: production always passes PushRepository. */
+    /** Null only in tests that predate the account check: production always passes PushRepository.
+     *  Before [pairingProvider], so callers passing that as a trailing lambda still bind it. */
     private val ownerStore: ContactsOwnerStore? = null,
+    private val pairingProvider: suspend () -> PairingData?,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
