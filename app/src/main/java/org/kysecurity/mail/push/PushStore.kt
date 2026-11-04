@@ -54,5 +54,6 @@ interface PushStore {
     suspend fun pullCursor(subscriberId: String): Long
     suspend fun advancePullCursor(subscriberId: String, cursor: Long)
     /** Adds to history; false when [PushPayload.messageId] was already there. */
-    suspend fun appendPayload(payload: PushPayload): Boolean
+    /** False, storing nothing, once [generation] (when given) has ended; checked inside the write. */
+    suspend fun appendPayload(payload: PushPayload, generation: Long? = null): Boolean
 }

@@ -72,11 +72,28 @@ class DeviceContactRepository(
             },
             stage("adoptLostLinks") { adoptLostLinks() },
             stage("queueRowsCreatedElsewhere") { queueRowsCreatedElsewhere(session) },
+            stage("repairTitleBases") { repairTitleBasesOnce() },
             stage("pullDeviceChanges") { pullDeviceChangesForOwnAccount() },
             stage("removeDeletedContacts") { removeRowsOfDeletedContacts() },
             stage("importNewDeviceContacts") { importNewDeviceContacts() },
             stage("pushRoomChanges") { pushRoomChangesToDevice() },
         )
+    }
+
+    /** Once per install, before the first merge: links created before `organizationRowOf` recorded
+     *  a title the phone never got, so their next merge read it as deleted. Their base title becomes
+     *  unknown (Room's wins and is written back). Only once, so a title the user later clears on
+     *  the phone is honoured. */
+    private suspend fun repairTitleBasesOnce() = withContext(Dispatchers.IO) {
+        val settings = DeviceContactSyncSettings(context)
+        if (settings.titleBasesRepaired()) return@withContext
+        for (link in db.deviceContactLinkDao().getAll()) {
+            val snapshot = readRawContactSnapshot(link.rawContactId) ?: continue
+            val base = baseOf(link) ?: continue
+            val repaired = repairedBase(base, snapshot) ?: continue
+            if (repaired != base) db.deviceContactLinkDao().upsert(link.copy(syncedJson = syncedJsonOf(repaired)))
+        }
+        settings.markTitleBasesRepaired()
     }
 
     /** Runs every sync, not just at enable time, so installs that predate the fix repair themselves. */
@@ -166,8 +183,7 @@ class DeviceContactRepository(
             val roomUpdatedAtEpochMs = roomDto.updatedAt?.let { DeviceContactConflictResolver.parseIso(it) }
             val deviceUpdatedAtEpochMs = snapshot.lastUpdatedEpochMs
 
-            // Repairs links whose create dropped a title-only Organization row (repairedBase).
-            val base = repairedBase(baseOf(link), snapshot)
+            val base = baseOf(link)
             fun <T> merge(field: (ContactDto) -> T, device: T, twoWay: (T, T, Long?, Long?) -> T): T =
                 DeviceContactFieldMerge.againstBase(field(roomDto), device, base?.let(field), base != null) { r, d ->
                     twoWay(r, d, roomUpdatedAtEpochMs, deviceUpdatedAtEpochMs)
@@ -616,8 +632,7 @@ class DeviceContactRepository(
             return@withContext
         }
 
-        // Repairs links whose create dropped a title-only Organization row (repairedBase).
-        val base = repairedBase(baseOf(link), currentSnapshot)
+        val base = baseOf(link)
         val plan = DeviceContactUpdatePlan.of(
             dto = dto,
             snapshot = currentSnapshot,

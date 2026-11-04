@@ -145,10 +145,11 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
   refuses a descriptor whose `/proc/self/fd` path is under this app's data directories. An external compose request starts a new draft and must not restore an
   unrelated `ComposeDraftCache` entry left by an earlier internal compose screen. It drops that
   entry without zeroing its attachments: those arrays may belong to a compose screen still alive in
-  the back stack or a send in flight, and only `ProcessState.resetAll` wipes them. Compose captures
-  `ProcessState.generation()` in `onCreateUnlocked` and finishes in `onStartUnlocked` once that
-  session has ended, so a screen left behind across an unpair and re-pair can neither send nor
-  delete a draft under the next account. Leaving a compose with content offers Discard / Keep
+  the back stack or a send in flight, and only `ProcessState.resetAll` wipes them. Compose records the
+  `ProcessState.generation()` and paired account it was opened under (kept in its saved state, the
+  generation only within the same process) and finishes in `onStartUnlocked` once that session has
+  ended or another account is paired, so a screen left behind across an unpair and re-pair, or
+  recreated afterwards, can neither send nor delete a draft under the next account. Leaving a compose with content offers Discard / Keep
   writing, plus Save draft wherever the Save draft menu item is offered (client custody); it leaves
   only once the save succeeds. Recreating that
   screen (a rotation, `savedInstanceState` set) is the same composition: it takes its own draft

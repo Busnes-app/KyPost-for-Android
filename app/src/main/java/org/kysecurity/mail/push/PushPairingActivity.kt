@@ -127,6 +127,7 @@ class PushPairingActivity : LockedActivity() {
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch { viewModel.reportApprovalResults() }
                 launch {
                     viewModel.paired.collect {
                         org.kysecurity.mail.security.AppLockOffer.showIfDue(this@PushPairingActivity)

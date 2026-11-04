@@ -57,6 +57,7 @@ import org.kysecurity.mail.push.PushRuntime
 import org.kysecurity.mail.push.pinnedPairingCallFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -260,12 +261,22 @@ class ComposeActivity : LockedActivity() {
         ActivityResultContracts.OpenMultipleDocuments(),
     ) { uris -> if (!uris.isNullOrEmpty()) addAttachments(uris) }
 
-    /** The session this screen was opened in. An unpair and re-pair can happen while it sits
-     *  behind other screens; its Send would then go out under the next account. */
+    /** The session and account this composition was opened in. An unpair and re-pair can happen
+     *  while it sits behind other screens; its Send would then go out under the next account, and
+     *  a recreation (rotation, process death) rebuilds it from the old account's Intent. Both are
+     *  kept in the saved state so a recreated screen is still the same composition. */
     private var openedSession = 0L
+    private var openedAccount: String? = null
+
+    private suspend fun pairedAccountKey(): String? =
+        PushRuntime.graph(this).repository.state.first().pairing?.let { "${it.serverUrl}\n${it.subscriberId}" }
 
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
-        openedSession = ProcessState.generation()
+        // The generation only means something in the process that saved it.
+        val sameProcess = savedInstanceState?.getInt(STATE_OPENED_PID, -1) == android.os.Process.myPid()
+        openedSession = if (sameProcess) savedInstanceState!!.getLong(STATE_OPENED_SESSION) else ProcessState.generation()
+        openedAccount = savedInstanceState?.getString(STATE_OPENED_ACCOUNT)
+        if (savedInstanceState == null) lifecycleScope.launch { openedAccount = pairedAccountKey() }
         setContentView(R.layout.activity_compose)
         applyThemeToActivity(this)
 
@@ -490,6 +501,9 @@ class ComposeActivity : LockedActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean(STATE_CC_BCC_OPENED, ccBccOpened)
+        outState.putLong(STATE_OPENED_SESSION, openedSession)
+        outState.putInt(STATE_OPENED_PID, android.os.Process.myPid())
+        openedAccount?.let { outState.putString(STATE_OPENED_ACCOUNT, it) }
     }
 
     /** Pads for the system bars and the keyboard, so the format bar rides on the keyboard. The top
@@ -511,7 +525,13 @@ class ComposeActivity : LockedActivity() {
     /** The session ended (account purge) while this screen was stopped: its composition belonged
      *  to that account, and the purge already reset its cached draft and send. */
     override fun onStartUnlocked() {
-        if (!ProcessState.isCurrent(openedSession)) finish()
+        if (!ProcessState.isCurrent(openedSession)) {
+            finish()
+            return
+        }
+        // Across process death only the account can tell: another one is paired now.
+        val expected = openedAccount ?: return
+        lifecycleScope.launch { if (pairedAccountKey() != expected && !isFinishing) finish() }
     }
 
     override fun onResume() {
@@ -1564,6 +1584,9 @@ class ComposeActivity : LockedActivity() {
         internal var openDescriptorForTest: ((Uri) -> android.content.res.AssetFileDescriptor?)? = null
 
         private const val STATE_CC_BCC_OPENED = "compose_cc_bcc_opened"
+        private const val STATE_OPENED_SESSION = "compose_opened_session"
+        private const val STATE_OPENED_PID = "compose_opened_pid"
+        private const val STATE_OPENED_ACCOUNT = "compose_opened_account"
 
         const val EXTRA_TO = "compose_to"
         const val EXTRA_SUBJECT = "compose_subject"

@@ -131,7 +131,8 @@ class PullSyncCoordinator(
             // BEFORE advancing the cursor, so a crash mid-batch re-fetches rather than drops.
             // History is the dedupe against what push already delivered: same messageId, no re-alert.
             if (!ProcessState.isCurrent(session)) return PullOutcome.NotPaired
-            if (incoming is IncomingPush.Mail && !repository.appendPayload(incoming.payload)) continue
+            if (incoming is IncomingPush.Mail && !repository.appendPayload(incoming.payload, session)) continue
+            if (!ProcessState.isCurrent(session)) return PullOutcome.NotPaired
             notifier(incoming)
         }
         if (!ProcessState.isCurrent(session)) return PullOutcome.NotPaired

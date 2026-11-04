@@ -761,7 +761,7 @@ class MailRepositoryTest {
         source.duringRead = null
         dao.put(row("42", "INBOX", body = null))
         source.duringRead = { org.kysecurity.mail.ProcessState.advanceGeneration() }
-        repo.fetchBody("42", "INBOX")
+        assertTrue(repo.fetchBody("42", "INBOX") is MailOutcome.Unauthorized)
         assertNull(dao.getById("42", "INBOX")?.body)
     }
 

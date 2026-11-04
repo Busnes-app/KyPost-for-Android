@@ -396,6 +396,7 @@ class MailRepository(
             // would escape clearServerDecryptedBodies. Out-of-window bodies are fetched per open.
             // Not into the next account's cache: the purge may have run while this was in flight.
             if (row.inWindow) writeIfCurrent(session) { emailDao.updateBody(id, folder, fetched.value.html, fetched.value.bodyMode) }
+            if (!ProcessState.isCurrent(session)) return MailOutcome.Unauthorized(SESSION_ENDED)
             return MailOutcome.Success(fetched.value.copy(toAddresses = to, ccAddresses = cc))
         }
         return MailOutcome.Success(

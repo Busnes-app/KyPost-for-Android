@@ -172,17 +172,7 @@ class PushSyncCoordinator(
                 if (remaining <= 0) return notApproved()
                 sleep(waitMs.coerceAtMost(remaining))
                 waitMs = when (val status = registrationClient.pairingStatus(pending)) {
-                    is PairingStatus.Approved -> {
-                        // Approved while the app is locked: the secret can be stored only once the
-                        // PIN-derived key exists again, so hold it until unlock. Not bounded by
-                        // expiry: the server row is already approved and needs no further call, and
-                        // giving up wiped a secret nothing else could recover. Cancel, Unpair, a
-                        // newer link and a wipe still end it by cancelling this job.
-                        while (repository.currentCredentialState() is PushRepository.PairingCredentialState.Unavailable) {
-                            sleep(1_000L)
-                        }
-                        return completeApproval(pending, status, now())
-                    }
+                    is PairingStatus.Approved -> return finishApproved(pending, status, now, sleep)
                     PairingStatus.Rejected -> return notApproved()
                     is PairingStatus.Waiting -> pollMs(status.pollIntervalSeconds ?: pending.pollIntervalSeconds)
                     is PairingStatus.Retry -> maxOf(
@@ -193,6 +183,27 @@ class PushSyncCoordinator(
             }
         } finally {
             pending.wipe()
+        }
+    }
+
+    /** Approved while the app is locked: the secret can be stored only once the PIN-derived key
+     *  exists again, so hold it until unlock. Not bounded by expiry: the server row is already
+     *  approved and needs no further call, and giving up wiped a secret nothing else could recover.
+     *  Cancel, Unpair, a newer link and a wipe still end it by cancelling this job. */
+    private suspend fun finishApproved(
+        pending: NativeRegistrationResult.Pending,
+        status: PairingStatus.Approved,
+        now: () -> Long,
+        sleep: suspend (Long) -> Unit,
+    ): NativeRegistrationResult {
+        while (true) {
+            while (repository.currentCredentialState() is PushRepository.PairingCredentialState.Unavailable) {
+                sleep(1_000L)
+            }
+            val done = completeApproval(pending, status, now())
+            // Locked again before the registration gate was free: wait for the next unlock.
+            if (done is NativeRegistrationResult.Error && done.message == CREDENTIAL_GATE_DEFERRAL) continue
+            return done
         }
     }
 

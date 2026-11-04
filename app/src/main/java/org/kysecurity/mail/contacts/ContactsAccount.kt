@@ -10,6 +10,9 @@ interface ContactsOwnerStore {
     fun setContactsOwner(owner: ReconnectExpectation?)
 }
 
+/** "Bring your [count] contacts into [account]?" */
+data class KeptContactsQuestion(val count: Int, val account: ReconnectExpectation)
+
 enum class ContactsAccountCheck {
     /** The contacts are this account's: sync. */
     PROCEED,

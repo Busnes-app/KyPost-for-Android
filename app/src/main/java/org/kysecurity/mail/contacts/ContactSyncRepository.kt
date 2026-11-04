@@ -158,11 +158,18 @@ class ContactSyncRepository(
         val store = ownerStore ?: return ContactsAccountCheck.PROCEED
         val current = pairing.contactsAccount()
         val owner = store.contactsOwner()
-        val holds = db.contactDao().allUids().isNotEmpty() || db.pendingContactChangeDao().getAllPending().isNotEmpty()
-        val check = contactsAccountCheck(owner, current, holds, cursorStore.cursor(pairing.subscriberId) > 0L)
+        // A cursor row exists once this account has synced; read before cursorStore.cursor() creates one.
+        val syncedWithCurrent = db.contactSyncStateDao().cursor(pairing.subscriberId) != null
+        val check = contactsAccountCheck(owner, current, db.contactDao().allUids().isNotEmpty(), syncedWithCurrent)
         if (check == ContactsAccountCheck.ADOPT) {
-            // Any account change restarts from a full pull.
-            if (owner != null) cursorStore.resetCursor(pairing.subscriberId)
+            if (owner != null && owner != current) {
+                // Any account change restarts from a full pull, and the other account's queued
+                // changes (deletes and updates of contacts no longer here) mean nothing in this one.
+                db.withTransaction {
+                    db.pendingContactChangeDao().clearAll()
+                    db.contactSyncStateDao().clearAll()
+                }
+            }
             store.setContactsOwner(current)
         }
         return check
@@ -171,18 +178,20 @@ class ContactSyncRepository(
     /** Contacts with a change not yet on the server; the unpair dialog warns with it. */
     suspend fun unsyncedChangeCount(): Int = db.pendingContactChangeDao().getAllPending().distinctBy { it.localUid }.size
 
-    /** The number of contacts waiting for "Bring your N contacts into …?", or null when there is
-     *  no question to ask (unpaired, or the contacts are this account's). */
-    suspend fun keptContactsAwaitingChoice(): Int? = syncMutex.withLock {
+    /** The "Bring your N contacts into …?" question, or null when there is none to ask (unpaired,
+     *  or the contacts are this account's). Its [KeptContactsQuestion.account] is what an answer
+     *  must still match. */
+    suspend fun keptContactsQuestion(): KeptContactsQuestion? = syncMutex.withLock {
         val pairing = pairingProvider() ?: return@withLock null
         if (accountCheck(pairing) != ContactsAccountCheck.ASK) return@withLock null
-        db.contactDao().allUids().size
+        KeptContactsQuestion(db.contactDao().allUids().size, pairing.contactsAccount())
     }
 
-    /** "Yes": every held contact goes to the paired account as new. The other account's pending
-     *  updates and deletes mean nothing there and are dropped, as are its group ids and photo refs.
+    /** "Yes": every held contact goes to [account] as new. The other account's pending updates and
+     *  deletes mean nothing there and are dropped, as are its group ids and photo refs (as on Mac).
+     *  False, changing nothing, when [account] is no longer paired or the question was answered.
      *  The caller syncs afterwards. */
-    suspend fun bringKeptContacts() = answerKeptContacts { pairing ->
+    suspend fun bringKeptContacts(account: ReconnectExpectation): Boolean = answerKeptContacts(account) {
         db.pendingContactChangeDao().clearAll()
         db.groupDao().clearAll()
         val now = System.currentTimeMillis()
@@ -201,23 +210,29 @@ class ContactSyncRepository(
         }
     }
 
-    /** "No": the held contacts are removed from this device; the paired account's are pulled next. */
-    suspend fun removeKeptContacts() = answerKeptContacts {
+    /** "No": the held contacts are removed from this device; [account]'s are pulled next. */
+    suspend fun removeKeptContacts(account: ReconnectExpectation): Boolean = answerKeptContacts(account) {
         db.contactDao().clearAll()
         db.pendingContactChangeDao().clearAll()
         db.groupDao().clearAll()
         db.importedDeviceContactDao().clearAll()
     }
 
-    private suspend fun answerKeptContacts(change: suspend (PairingData) -> Unit) = syncMutex.withLock {
-        val pairing = pairingProvider() ?: return@withLock
-        val store = ownerStore ?: return@withLock
-        db.withTransaction {
-            change(pairing)
-            db.contactSyncStateDao().clearAll()
+    private suspend fun answerKeptContacts(account: ReconnectExpectation, change: suspend () -> Unit): Boolean =
+        syncMutex.withLock {
+            val pairing = pairingProvider() ?: return@withLock false
+            val store = ownerStore ?: return@withLock false
+            // The answer was given for the account the question named, and only while it is still open.
+            if (pairing.contactsAccount() != account || accountCheck(pairing) != ContactsAccountCheck.ASK) {
+                return@withLock false
+            }
+            db.withTransaction {
+                change()
+                db.contactSyncStateDao().clearAll()
+            }
+            store.setContactsOwner(account)
+            true
         }
-        store.setContactsOwner(pairing.contactsAccount())
-    }
 
     private fun PairingData.contactsAccount() = ReconnectExpectation(subscriberId, serverUrl)
 

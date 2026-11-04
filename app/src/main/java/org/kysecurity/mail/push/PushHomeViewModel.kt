@@ -72,11 +72,15 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
                 graph.pullCoordinator.pullNowAsync()
             }
         }
-        // The approval wait outlives the screen that started it; whichever screen is current reports it.
-        scope.launch {
-            ApprovalWait.result.filterNotNull().collect {
-                ApprovalWait.takeResult()?.let(::reportPairing)
-            }
+    }
+
+    /** The approval wait outlives the screen that started it, so its outcome is reported by the
+     *  pairing screen that is started when it ends, or the next one to start. The Activity calls
+     *  this inside `repeatOnLifecycle(STARTED)`: a stopped screen, which the app lock may finish
+     *  on return, must not take it. */
+    suspend fun reportApprovalResults() {
+        ApprovalWait.result.filterNotNull().collect {
+            ApprovalWait.takeResult()?.let(::reportPairing)
         }
     }
 
@@ -142,8 +146,10 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
             approvalScope,
         ) {
             // Not reported here: this screen may be gone. ApprovalWait holds the result for the
-            // current one (init).
-            graph.syncCoordinator.awaitApproval(pending)
+            // next started pairing screen (reportApprovalResults). The first pull does not wait for it.
+            graph.syncCoordinator.awaitApproval(pending).also {
+                if (it is NativeRegistrationResult.Success) graph.pullCoordinator.pullNowAsync()
+            }
         }
     }
 

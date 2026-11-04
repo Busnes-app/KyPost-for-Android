@@ -270,7 +270,12 @@ class PushRepository(
         val residue = mutableListOf<String>()
         // Kept contacts must name their account before the cursor (the only record of an install
         // that synced before the owner was recorded) is cleared below.
-        if (keepContacts) recordContactsOwnerIfSynced()
+        if (keepContacts) {
+            purgeStepObserverForTest?.invoke("contactsOwner")
+            // Failing it leaves contacts nobody can name: report it like any other survivor.
+            runCatching { recordContactsOwnerIfSynced() }
+                .onFailure { android.util.Log.e(TAG, "Failed to record the contacts' account", it); residue += "contactsOwner" }
+        }
 
         /** Runs [body] and records [name] if it throws or reports incomplete. */
         suspend fun step(name: String, body: suspend () -> Boolean) {
@@ -374,12 +379,12 @@ class PushRepository(
         }
     }
 
-    /** An install that synced contacts before the owner was recorded: the cursor proves whose they are. */
+    /** An install that synced contacts before the owner was recorded: its cursor row proves whose they are. */
     private suspend fun recordContactsOwnerIfSynced() {
         if (contactsOwner() != null) return
         val leaving = securePairingStore.pairing.value ?: return
         val db = org.kysecurity.mail.data.DataRuntime.graph(context).database
-        if ((db.contactSyncStateDao().cursor(leaving.subscriberId) ?: 0L) > 0L) {
+        if (db.contactSyncStateDao().cursor(leaving.subscriberId) != null) {
             setContactsOwner(ReconnectExpectation(leaving.subscriberId, leaving.serverUrl))
         }
     }
@@ -509,10 +514,14 @@ class PushRepository(
         editPlain { prefs -> prefs[KEY_LAST_PUSH_AT] = nowEpochMs }
     }
 
-    override suspend fun appendPayload(payload: PushPayload): Boolean {
+    override suspend fun appendPayload(payload: PushPayload, generation: Long?): Boolean {
+        // Checked inside the write, as storeUnifiedPushEndpoint does: the purge advances the
+        // generation before its own history clear, so this lands before that clear or not at all.
+        fun ended() = generation != null && !org.kysecurity.mail.ProcessState.isCurrent(generation)
         if (hostileLocationSettings.isEnabled()) {
             var isNew = false
             inMemoryHistory.update { current ->
+                if (ended()) return@update current.also { isNew = false }
                 isNew = current.none { it.messageId == payload.messageId }
                 (listOf(payload) + current).distinctBy { it.messageId }.take(HISTORY_LIMIT)
             }
@@ -520,6 +529,7 @@ class PushRepository(
         }
         var isNew = false
         editSecure { values, editor ->
+            if (ended()) return@editSecure
             val current = decodeHistory(values[KEY_HISTORY_JSON])
             isNew = current.none { it.messageId == payload.messageId }
             val updated = (listOf(payload) + current)

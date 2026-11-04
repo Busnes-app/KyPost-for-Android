@@ -123,7 +123,8 @@ internal class FakePushStore(
         backing.value = backing.value.copy(lastPushReceivedAtEpochMs = nowEpochMs)
     }
 
-    override suspend fun appendPayload(payload: PushPayload): Boolean {
+    override suspend fun appendPayload(payload: PushPayload, generation: Long?): Boolean {
+        if (generation != null && !org.kysecurity.mail.ProcessState.isCurrent(generation)) return false
         events += "append:${payload.messageId}"
         return knownMessageIds.add(payload.messageId)
     }
