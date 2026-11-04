@@ -1,5 +1,6 @@
 package org.kysecurity.mail.push
 
+import org.kysecurity.mail.HEADER_DEVICE_SECRET
 import org.kysecurity.mail.testing.FakeCallFactory
 import org.kysecurity.mail.testing.response
 import org.kysecurity.mail.testing.testTlsHandshake
@@ -94,6 +95,68 @@ class PushSyncCoordinatorOrderingTest {
         assertTrue("two registrations were in flight at once", !overlapped.get())
         val events = store.events.toList()
         assertEquals(listOf("register:secret-1", "persist:secret-1", "register:secret-2", "persist:secret-2"), events)
+    }
+
+    /** An unpair tapped while a resync is in flight used to clear first, after which the resync's
+     *  late reply persisted its fresh secret and re-paired the device. Held, the unpair runs after
+     *  the persist and clears what it wrote. */
+    @Test
+    fun anUnpairWaitsForTheRegistrationInFlight() = runBlocking {
+        val store = FakePushStore(pairing = existing)
+        val registering = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val coordinator = coordinator(store, { req ->
+            store.events += "register:secret-1"
+            registering.countDown()
+            release.await(5, TimeUnit.SECONDS)
+            response(req, body("secret-1"), 200)
+        })
+
+        val resync = async(Dispatchers.IO) { coordinator.syncProvidedToken("token-a") }
+        assertTrue(registering.await(5, TimeUnit.SECONDS))
+        val unpair = async(Dispatchers.IO) { coordinator.withRegistrationsHeld { store.clearPairing() } }
+        Thread.sleep(200)
+        release.countDown()
+        listOf(resync, unpair).awaitAll()
+
+        assertEquals(listOf("register:secret-1", "persist:secret-1", "clearPairing"), store.events.take(3))
+        assertNull(store.currentPairing())
+    }
+
+    /** With the credential PIN gate on, the published pairing has no secret; a resync must send the
+     *  unwrapped one, or the relay refuses it as a rebind of someone else's device. */
+    @Test
+    fun aGatedResyncSendsTheUnwrappedSecret() = runBlocking {
+        val store = FakePushStore(pairing = existing.copy(deviceSecret = null)).apply { unwrappedSecret = "secret-old" }
+        var sent: String? = null
+        val coordinator = coordinator(store, { req ->
+            sent = req.header(HEADER_DEVICE_SECRET)
+            response(req, body("secret-1"), 200)
+        })
+
+        coordinator.syncProvidedToken("token-a")
+
+        assertEquals("secret-old", sent)
+    }
+
+    /** The link's pin re-pins only the SAME account; a replacement keeps the stored pin in charge. */
+    @Test
+    fun aLinkPinIsHonouredForTheSameAccountOnly() = runBlocking {
+        val linkPin = "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        fun tagOf(link: PairingData): org.kysecurity.mail.LinkPin? {
+            val store = FakePushStore(pairing = existing).apply { storedPin = TlsPin("old.example.com", setOf("sha256/x")) }
+            var tag: org.kysecurity.mail.LinkPin? = null
+            coordinator(store, { req ->
+                tag = req.tag(org.kysecurity.mail.LinkPin::class.java)
+                response(req, body("secret-1"), 200)
+            }).let { runBlocking { it.attemptPairing(link) } }
+            return tag
+        }
+
+        val sameAccount = existing.copy(pairingToken = "tok-fresh", deviceId = null, deviceSecret = null, spkiPin = linkPin)
+        assertEquals(linkPin, tagOf(sameAccount)?.spkiSha256)
+        val otherAccountSameHost = sameAccount.copy(subscriberId = "sub-other")
+        assertNull(tagOf(otherAccountSameHost))
     }
 
     /** The reviewer's exact scenario: a valid replacement QR confirmed while offline. The old

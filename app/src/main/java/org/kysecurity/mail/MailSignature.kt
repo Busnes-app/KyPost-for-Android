@@ -100,3 +100,13 @@ private fun escapeHtml(text: String): String = buildString {
         }
     }
 }
+
+/** True when [html] shows nothing but [signatureText]: no other text and no image. Only a short body
+ *  can be one, so a long one is never parsed (this runs on the main thread in onStop). */
+internal fun isUntouchedSignatureBody(html: String, signatureText: String): Boolean {
+    if (html.length > 4 * signatureText.length + 256) return false
+    val doc = runCatching { org.jsoup.Jsoup.parseBodyFragment(html) }.getOrNull() ?: return false
+    if (doc.body().select("img, video, audio, iframe, object, embed").isNotEmpty()) return false
+    fun words(text: String) = text.replace('\u00a0', ' ').split(Regex("\\s+")).filter { it.isNotEmpty() }
+    return words(doc.body().text()) == words(normalizeSignature(signatureText))
+}

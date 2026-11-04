@@ -293,7 +293,7 @@ class RelayMailSource(
         }
         val base = baseUrl(pairing, "/api/mail/send") ?: return MailOutcome.BadRequest("Server URL is not valid")
         val body = json.encodeToString(draft.toSendWireDto())
-        val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
+        val request = Request.Builder().url(base).post(oneShot(body.toRequestBody(JSON_MEDIA_TYPE)))
             .authed(pairing)
             .build()
         return execute(request, onCall) { code, rawBody ->
@@ -326,7 +326,7 @@ class RelayMailSource(
                 draftCopy = message.draftCopy,
             ),
         )
-        val request = Request.Builder().url(base).post(body.toRequestBody(JSON_MEDIA_TYPE))
+        val request = Request.Builder().url(base).post(oneShot(body.toRequestBody(JSON_MEDIA_TYPE)))
             .authed(pairing)
             .build()
         return execute(request, onCall) { code, rawBody -> sendOutcome(code, rawBody, scheduling = message.sendAt != null) }
@@ -762,4 +762,13 @@ private fun RelayEmailDto.toUiEmail(tab: String): Email {
         pgpSignerFingerprint = pgpSignerFingerprint,
         pgpDecryptError = pgpDecryptError,
     )
+}
+
+/** A send body OkHttp must never write twice. With an ordinary body it silently retries a POST
+ *  whose connection failed after the request went out, and the relay may already have delivered it. */
+internal fun oneShot(body: okhttp3.RequestBody): okhttp3.RequestBody = object : okhttp3.RequestBody() {
+    override fun contentType() = body.contentType()
+    override fun contentLength() = body.contentLength()
+    override fun writeTo(sink: okio.BufferedSink) = body.writeTo(sink)
+    override fun isOneShot() = true
 }

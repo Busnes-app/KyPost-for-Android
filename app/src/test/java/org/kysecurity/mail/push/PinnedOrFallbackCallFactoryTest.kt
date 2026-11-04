@@ -96,6 +96,54 @@ class PinnedOrFallbackCallFactoryTest {
         assertSame(pinnedRequest, call.request())
     }
 
+    /** Owner decision: a confirmed fresh link re-pins the SAME server after a leaf rotation. */
+    @Test
+    fun aLinkPinForThePinnedHostReplacesTheStoredPinForThatCall() {
+        val pinned = RecordingFactory()
+        val pin = TlsPin("relay.example", setOf("sha256/x"))
+        val factory = PinnedOrFallbackCallFactory(
+            pinnedProvider = { pin to pinned },
+            pinStateProvider = { TlsPinState.Pinned(pin) },
+            fallback = RecordingFactory(),
+        )
+        val linkRequest = Request.Builder()
+            .url("https://relay.example/api/register")
+            .tag(
+                org.kysecurity.mail.LinkPin::class.java,
+                org.kysecurity.mail.LinkPin("relay.example", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+            )
+            .build()
+
+        val call = factory.newCall(linkRequest)
+
+        assertSame("the stale stored pin must not be used", 0, pinned.calls)
+        assertEquals("RealCall", call.javaClass.simpleName)
+    }
+
+    /** ...and only a pin for the request's own host: `CertificatePinner` passes every host it has no
+     *  pin for, so a link pin naming another host would leave this request unpinned. */
+    @Test
+    fun aLinkPinForAnotherHostIsIgnored() {
+        val pinned = RecordingFactory()
+        val pin = TlsPin("relay.example", setOf("sha256/x"))
+        val factory = PinnedOrFallbackCallFactory(
+            pinnedProvider = { pin to pinned },
+            pinStateProvider = { TlsPinState.Pinned(pin) },
+            fallback = RecordingFactory(),
+        )
+        val linkRequest = Request.Builder()
+            .url("https://relay.example/api/register")
+            .tag(
+                org.kysecurity.mail.LinkPin::class.java,
+                org.kysecurity.mail.LinkPin("other-relay.example", "sha256/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+            )
+            .build()
+
+        factory.newCall(linkRequest)
+
+        assertSame("the stored pin must still decide", 1, pinned.calls)
+    }
+
     /** A link cannot re-authorise a server whose captured pin has gone missing. */
     @Test
     fun aLinkPinDoesNotRescueALostPin() {

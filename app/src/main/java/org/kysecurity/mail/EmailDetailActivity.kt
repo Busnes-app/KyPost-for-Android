@@ -730,9 +730,7 @@ class EmailDetailActivity : LockedActivity() {
             is ReadOutcome.Decrypted -> {
                 // The body goes to the WebView and NOWHERE else: not Room, and not fetchedBodyHtml.
                 lockedPlaceholder.visibility = View.GONE
-                val plainText = outcome.body.plain?.takeIf {
-                    isPlainTextBody(it, outcome.body.bodyMode)
-                }
+                val plainText = decryptedPlainText(outcome.body)
                 plainTextScroll.visibility = if (plainText != null) View.VISIBLE else View.GONE
                 webView.visibility = if (plainText != null) View.GONE else View.VISIBLE
                 plainTextView.text = plainText?.replace('\u00a0', ' ')?.let(::softWrapPlainText)
@@ -1446,6 +1444,12 @@ class EmailDetailActivity : LockedActivity() {
             then(TextUtils.htmlEncode(preview))
             return
         }
+        // A plain body is text: parsed as HTML its line breaks collapsed, `<bob@x>` vanished, and
+        // literal `<a href>` text became a live link in the reply.
+        if (fetchedBodyMode.trim().equals("plain", ignoreCase = true)) {
+            then(quotedPlainText(body))
+            return
+        }
         ioExecutor.execute {
             val sanitized = runCatching { QuotedHtmlSanitizer.sanitize(body) }
                 .getOrElse { TextUtils.htmlEncode(preview) }
@@ -1702,6 +1706,12 @@ internal fun emailBodyToHtml(body: String, mode: String): String {
     return "<div class=\"kypost-plain-text\">${escapeEmailText(body)}</div>"
 }
 
+/** The decrypted body for the native text view, or null for the WebView. The part the MIME reader
+ *  chose (HTML when there is any) decides, as for a relay body; an alternative text part never
+ *  hides it. */
+internal fun decryptedPlainText(body: org.kysecurity.mail.pgp.DecryptedBody): String? =
+    (body.html?.takeIf { it.isNotBlank() } ?: body.plain)?.takeIf { isPlainTextBody(it, body.bodyMode) }
+
 /** Selects native wrapping for explicit plain bodies and old rows whose mode was not persisted. */
 internal fun isPlainTextBody(body: String, mode: String): Boolean = when (mode.trim().lowercase()) {
     // Some relay/cache rows incorrectly label Markdown/plain content as HTML. Keep real markup in
@@ -1796,7 +1806,7 @@ internal fun blockExternalResources(
     document.select("style").forEach { element ->
         val cleaned = stripResourceUrls(element.data())
         element.empty()
-        element.appendChild(org.jsoup.nodes.DataNode(cleaned))
+        element.appendChild(styleData(cleaned))
     }
     document.outputSettings().prettyPrint(false)
     return document.body().html()
@@ -1909,6 +1919,9 @@ private fun escapeEmailText(text: String): String = text
     .replace("<", "&lt;")
     .replace(">", "&gt;")
     .replace("\"", "&quot;")
+
+/** A plain body quoted into a reply: escaped text with its line breaks, never parsed as HTML. */
+internal fun quotedPlainText(body: String): String = escapeEmailText(body).replace("\n", "<br>")
 
 /** True only for [ReadOutcome.FetchFailed]; NoEncryptedContent is terminal, so no Retry. */
 internal fun showsRetryButton(outcome: ReadOutcome): Boolean = outcome is ReadOutcome.FetchFailed
@@ -2035,13 +2048,20 @@ internal fun safeMimeType(raw: String, name: String = ""): String {
 private val CSS_COMMENT = Regex("""/\*[^*]*\*+(?:[^/*][^*]*\*+)*/""")
 
 // A CSS escape can spell any letter of "important" (`!\49 mportant` decodes to `!Important`).
-private val CSS_ESCAPE = Regex("""\\([0-9a-fA-F]{1,6})\s?""")
+// A non-hex escape is the character itself: `u\rl(` is `url(`.
+private val CSS_ESCAPE = Regex("""\\(?:([0-9a-fA-F]{1,6})\s?|([^\n\r\f0-9a-fA-F]))""")
+
+/** Style text is written back raw. A rewrite above can assemble `</style` out of harmless text
+ *  (`</sty/**/le>`), ending the element early and handing the rest to the WebView as live markup.
+ *  `<` means nothing in CSS outside a string, and inside one `\3C ` is the same character. */
+private fun styleData(css: String) = org.jsoup.nodes.DataNode(css.replace("<", "\\3C "))
 
 private val BANG_CANDIDATE = Regex("""\s*!((?:\\[0-9a-fA-F]{1,6}\s?|[A-Za-z\s]){1,24})""")
 
 /** [CSS_ESCAPE] reaches 0xFFFFFF, past Unicode's 0x10FFFF, and `Character.toChars` throws. */
 private fun decodeCssEscapes(candidate: String): String =
     CSS_ESCAPE.replace(candidate) { escape ->
+        escape.groups[2]?.let { return@replace it.value }
         val codePoint = escape.groupValues[1].toIntOrNull(16)
         if (codePoint != null && Character.isValidCodePoint(codePoint)) {
             String(Character.toChars(codePoint))
@@ -2073,9 +2093,10 @@ internal fun stripImportant(html: String): String {
     doc.outputSettings().prettyPrint(false)
 
     var changed = false
+    // Resources stripped again: removing `!important` can assemble one (`url!important(`).
     doc.select("[style]").forEach { element ->
         val original = element.attr("style")
-        val cleaned = stripImportantFromCss(original)
+        val cleaned = stripResourceUrls(stripImportantFromCss(original))
         if (cleaned != original) {
             element.attr("style", cleaned)
             changed = true
@@ -2083,10 +2104,10 @@ internal fun stripImportant(html: String): String {
     }
     doc.select("style").forEach { element ->
         val original = element.data()
-        val cleaned = stripImportantFromCss(original)
+        val cleaned = stripResourceUrls(stripImportantFromCss(original))
         if (cleaned != original) {
             element.empty()
-            element.appendChild(org.jsoup.nodes.DataNode(cleaned))
+            element.appendChild(styleData(cleaned))
             changed = true
         }
     }

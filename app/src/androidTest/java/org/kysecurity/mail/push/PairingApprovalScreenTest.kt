@@ -97,6 +97,28 @@ class PairingApprovalScreenTest {
         }
     }
 
+    /** The app lock finishes the pairing screen while the user approves in a browser; the wait
+     *  must survive it, and the next screen must show the card and be able to cancel it. */
+    @Test
+    fun theWaitOutlivesTheScreenAndTheNextScreenCanCancelIt() {
+        val pending = pending()
+        ActivityScenario.launch(PushPairingActivity::class.java).afterSplash().use { scenario ->
+            scenario.onActivity { activity ->
+                ViewModelProvider(activity)[PushHomeViewModel::class.java].awaitApproval(pending)
+            }
+            awaitVisibility(scenario, R.id.pushPairingApprovalPanel, View.VISIBLE)
+        }
+        assertEquals("closing the screen wiped the pending secret", "pending-secret", pending.deviceSecret)
+        ActivityScenario.launch(PushPairingActivity::class.java).afterSplash().use { scenario ->
+            awaitVisibility(scenario, R.id.pushPairingApprovalPanel, View.VISIBLE)
+            scenario.onActivity { it.findViewById<View>(R.id.btnCancelApproval).performClick() }
+            awaitVisibility(scenario, R.id.pushPairingApprovalPanel, View.GONE)
+        }
+        val deadline = SystemClock.uptimeMillis() + 5_000
+        while (pending.deviceSecret != null && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(50)
+        assertNull(pending.deviceSecret)
+    }
+
     private fun awaitVisibility(scenario: ActivityScenario<PushPairingActivity>, id: Int, visibility: Int) {
         val deadline = SystemClock.uptimeMillis() + 5_000
         while (true) {

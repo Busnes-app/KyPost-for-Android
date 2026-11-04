@@ -42,10 +42,13 @@ internal fun parseComposeIntent(
                 }
             }
             .toMap()
+        // RFC 6068: recipients may sit in the path, in a `to` header, or both.
         return ComposePrefill(
-            to = Uri.decode(uri.encodedSchemeSpecificPart.substringBefore('?')),
+            to = joinRecipients(Uri.decode(uri.encodedSchemeSpecificPart.substringBefore('?')), headers["to"]),
             subject = headers["subject"].orEmpty(),
             bodyHtml = plainTextToHtml(headers["body"].orEmpty()),
+            cc = headers["cc"].orEmpty(),
+            bcc = headers["bcc"].orEmpty(),
         )
     }
 
@@ -69,5 +72,10 @@ internal fun parseComposeIntent(
         to = intent.getStringArrayExtra(Intent.EXTRA_EMAIL)?.joinToString(", ").orEmpty(),
         subject = intent.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty(),
         bodyHtml = plainTextToHtml(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString().orEmpty()),
+        cc = intent.getStringArrayExtra(Intent.EXTRA_CC)?.joinToString(", ").orEmpty(),
+        bcc = intent.getStringArrayExtra(Intent.EXTRA_BCC)?.joinToString(", ").orEmpty(),
     )
 }
+
+internal fun joinRecipients(vararg parts: String?): String =
+    parts.filterNot { it.isNullOrBlank() }.joinToString(", ")

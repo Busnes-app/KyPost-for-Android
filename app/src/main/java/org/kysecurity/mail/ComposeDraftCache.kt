@@ -11,13 +11,25 @@ object ComposeDraftCache : ProcessScopedState {
     @Volatile
     private var sealed: Boolean = false
 
+    /** The compose screen that saved [draft], and every compose screen not yet destroyed. A draft
+     *  whose screen is still alive (stopped behind the Inbox tab) is that screen's, not a lost one:
+     *  restoring it into a new Reply replaced the reply, and left two screens able to send it. */
+    @Volatile
+    private var owner: Int = 0
+    private val liveScreens = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
+
+    fun opened(screen: Int) { liveScreens += screen }
+
+    fun closed(screen: Int) { liveScreens -= screen }
+
     init {
         ProcessState.register(this)
     }
 
-    fun save(draft: CachedDraft) {
+    fun save(draft: CachedDraft, screen: Int = 0) {
         if (sealed) return
         this.draft = draft.takeIf { it.hasContent() }
+        owner = screen
     }
 
     /** Returns and clears, and unseals: a screen asking for the draft is a live session. */
@@ -32,7 +44,13 @@ object ComposeDraftCache : ProcessScopedState {
      *  an unrelated draft would replace what the sending app asked the user to send. Recreating
      *  that screen (a rotation) is the same composition and takes its own draft back. */
     fun takeOnOpen(newExternalRequest: Boolean): CachedDraft? {
-        if (!newExternalRequest) return take()
+        if (!newExternalRequest) {
+            if (owner == 0 || owner !in liveScreens) return take()
+            // Not ours to restore, but this is still a live session: unseal so this screen's own
+            // saves count, as take() would.
+            sealed = false
+            return null
+        }
         resetForNewSession()
         take() // Unseals, so this new composition can survive a lock teardown.
         return null
@@ -40,6 +58,7 @@ object ComposeDraftCache : ProcessScopedState {
 
     fun clear() {
         draft = null
+        owner = 0
         sealed = true
     }
 

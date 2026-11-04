@@ -5,6 +5,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class PushHomeViewModel(application: Application) : AndroidViewModel(application) {
     private val graph = PushRuntime.graph(application)
@@ -25,8 +27,7 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
 
     private val isWorking = MutableStateFlow(false)
     private val localMessage = MutableStateFlow<String?>(null)
-    private val pendingApproval = MutableStateFlow<PendingApprovalUi?>(null)
-    private var approvalJob: Job? = null
+    private val pendingApproval = ApprovalWait.card
 
     /** One element per registration that succeeded; conflated, so a stopped screen still gets it. */
     private val pairedChannel = Channel<Unit>(Channel.CONFLATED)
@@ -94,6 +95,8 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
 
     /** Applies a pairing PushPairingActivity has already parsed and confirmed. */
     fun applyPairing(pairing: PairingData) {
+        // A newer confirmed link supersedes a request still waiting, or its late approval replaces this one.
+        cancelApproval()
         scope.launch {
             isWorking.value = true
             applyParsedPairing(pairing)
@@ -121,26 +124,24 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
     /** Shows the waiting-for-approval card and polls until the web page decides. Internal so the
      *  instrumented screenshot test can show the card without a server. */
     internal fun awaitApproval(pending: NativeRegistrationResult.Pending) {
-        approvalJob?.cancel()
-        pendingApproval.value = PendingApprovalUi(
-            approvalCode = pending.approvalCode,
-            serverHost = pairingUrlHost(pending.pairing.serverUrl) ?: pending.pairing.serverUrl,
-        )
-        approvalJob = scope.launch {
-            // The coordinator wipes the pending secret on every way out, including this
-            // scope's cancellation in onCleared (the screen closed).
+        // The app's scope, not this screen's: the user approves in a browser, and coming back past
+        // the app lock finishes this screen. Cancelling then wiped a secret the web had approved.
+        val approvalScope = (getApplication<Application>() as? org.kysecurity.mail.KyPostApp)?.appScope ?: scope
+        ApprovalWait.start(
+            PendingApprovalUi(
+                approvalCode = pending.approvalCode,
+                serverHost = pairingUrlHost(pending.pairing.serverUrl) ?: pending.pairing.serverUrl,
+            ),
+            approvalScope,
+        ) {
             val result = graph.syncCoordinator.awaitApproval(pending)
-            pendingApproval.value = null
+            // This screen may be gone; the next one reads the pairing from the store.
             reportPairing(result)
         }
     }
 
     /** Cancel on the waiting card: stops polling and drops the pending credentials. */
-    fun cancelApproval() {
-        approvalJob?.cancel()
-        approvalJob = null
-        pendingApproval.value = null
-    }
+    fun cancelApproval() = ApprovalWait.cancel()
 
     private fun reportPairing(result: NativeRegistrationResult) {
         if (result is NativeRegistrationResult.Success) {
@@ -171,21 +172,29 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun unpairDevice() {
+        // A request still waiting would pair the device again the moment the web approved it.
+        ApprovalWait.cancel()
+        // NonCancellable, escalation included: leaving the screen mid-unpair cancelled this in the
+        // deregister or halfway through the purge, leaving the device paired or its data behind.
         scope.launch {
-            isWorking.value = true
-            val result = graph.repository.unpairDevice(graph.deregisterClient)
-            localMessage.value = when (val network = result.deregister) {
-                is DeregisterResult.Success -> "Device unpaired"
-                is DeregisterResult.Error -> "Unpaired locally (server update failed: ${network.message})"
-            }
-            isWorking.value = false
-            // Pairing proof is already gone, so nothing downstream can tell that this account's
-            // data outlived it. Same escalation the account-replacement path makes: erase rather
-            // than leave the device pairable with another account's mail and contacts on it.
-            if (result.cleanupIncomplete) {
-                android.util.Log.e("PushHome", "Wiping: unpair could not purge ${result.residue}")
-                localMessage.value = "Could not remove this account's data (${result.residue}); erasing this device instead"
-                org.kysecurity.mail.security.SecurityWipe.wipeAndResetApp(getApplication())
+            withContext(NonCancellable) {
+                isWorking.value = true
+                val result = graph.syncCoordinator.withRegistrationsHeld {
+                    graph.repository.unpairDevice(graph.deregisterClient)
+                }
+                localMessage.value = when (val network = result.deregister) {
+                    is DeregisterResult.Success -> "Device unpaired"
+                    is DeregisterResult.Error -> "Unpaired locally (server update failed: ${network.message})"
+                }
+                isWorking.value = false
+                // Pairing proof is already gone, so nothing downstream can tell that this account's
+                // data outlived it. Same escalation the account-replacement path makes: erase rather
+                // than leave the device pairable with another account's mail and contacts on it.
+                if (result.cleanupIncomplete) {
+                    android.util.Log.e("PushHome", "Wiping: unpair could not purge ${result.residue}")
+                    localMessage.value = "Could not remove this account's data (${result.residue}); erasing this device instead"
+                    org.kysecurity.mail.security.SecurityWipe.wipeAndResetApp(getApplication())
+                }
             }
         }
     }
@@ -241,6 +250,51 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
         scope.cancel()
         super.onCleared()
     }
+}
+
+/** The one device-approval wait, held for the process rather than one pairing screen: the app
+ *  lock finishes that screen, and the next one must still show the card and be able to cancel it.
+ *  A newer pairing link, an unpair and a session reset (wipe) cancel it. The coordinator wipes
+ *  the pending secret on every way out. */
+internal object ApprovalWait : org.kysecurity.mail.ProcessScopedState {
+    val card = MutableStateFlow<PendingApprovalUi?>(null)
+    private var job: Job? = null
+
+    init {
+        org.kysecurity.mail.ProcessState.register(this)
+    }
+
+    @Synchronized
+    fun start(ui: PendingApprovalUi, scope: CoroutineScope, wait: suspend () -> Unit) {
+        job?.cancel()
+        card.value = ui
+        lateinit var started: Job
+        started = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
+            try {
+                wait()
+            } finally {
+                finished(started)
+            }
+        }
+        job = started
+        started.start()
+    }
+
+    @Synchronized
+    private fun finished(which: Job) {
+        if (job !== which) return
+        job = null
+        card.value = null
+    }
+
+    @Synchronized
+    fun cancel() {
+        job?.cancel()
+        job = null
+        card.value = null
+    }
+
+    override fun resetForNewSession() = cancel()
 }
 
 data class PushHomeUiState(

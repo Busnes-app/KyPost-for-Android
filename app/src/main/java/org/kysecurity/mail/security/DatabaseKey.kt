@@ -3,6 +3,8 @@ package org.kysecurity.mail.security
 import android.content.Context
 import android.util.Base64
 import org.kysecurity.mail.data.DATABASE_NAME
+import org.kysecurity.mail.data.DatabaseMigration
+import java.io.File
 import java.security.SecureRandom
 import java.util.Arrays
 
@@ -38,13 +40,17 @@ internal object DatabaseKey {
         return encoded
     }
 
-    /** No stored passphrase with a file present means the keyset reset; the file can never open. */
+    /** No stored passphrase with an encrypted file present means the keyset reset; the file can
+     *  never open. A plaintext file is a pre-encryption install that [DatabaseMigration] converts. */
     private fun discardUnopenableDatabase(appContext: Context) {
-        if (!appContext.getDatabasePath(DATABASE_NAME).exists()) return
+        if (!unopenableWithoutKey(appContext.getDatabasePath(DATABASE_NAME))) return
         android.util.Log.e(TAG, "The database key was reset; $DATABASE_NAME can never be opened again")
         recordCredentialReset(appContext, DATABASE_NAME)
         appContext.deleteDatabase(DATABASE_NAME)
     }
+
+    internal fun unopenableWithoutKey(file: File): Boolean =
+        file.exists() && !DatabaseMigration.isPlaintext(file)
 
     /** Part of [SecurityWipe]: an encrypted database is only as gone as its key. Returns the step
      *  names it could not remove, matching the other teardown helpers. */

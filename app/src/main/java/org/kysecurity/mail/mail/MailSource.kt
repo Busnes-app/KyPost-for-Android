@@ -63,7 +63,7 @@ fun MailOutcome<*>.userFacingMessage(): String? = when (this) {
     // the account-replacement purge — and a purge that cannot prove itself escalates to erasing the
     // device. Recommending the destructive ceremony for a routine certificate renewal is how a
     // renewed cert became a wiped mailbox.
-    is MailOutcome.CertificateMismatch -> "This server's certificate has changed since pairing — if you expect this (e.g. you renewed your server's certificate), use \"Reconnect to server\" on the pairing screen. It keeps your downloaded mail, contacts and keys."
+    is MailOutcome.CertificateMismatch -> "This server's certificate has changed since pairing — if you expect this (e.g. you renewed your server's certificate), scan a fresh pairing code from your server's web page, or use \"Reconnect to server\" on the pairing screen. Both keep your downloaded mail, contacts and keys."
     is MailOutcome.ClientSideNeeded -> "This account's PGP key is end-to-end protected, so signing and encryption aren't available on mobile. Send without them, or use webmail."
     is MailOutcome.PickupFallbackNeeded ->
         "No PGP key on file for ${keylessRecipients.joinToString(", ")} — nothing was sent."

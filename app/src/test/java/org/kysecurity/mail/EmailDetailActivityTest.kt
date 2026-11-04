@@ -968,4 +968,26 @@ class EmailDetailActivityTest {
         assertNull(decryptedAttachmentNotice(omitted = false))
         assertEquals(R.string.email_pgp_attachments_omitted, decryptedAttachmentNotice(omitted = true))
     }
+
+    @Test
+    fun quotedPlainText_isTextWithItsLineBreaks() {
+        assertEquals(
+            "Bob &lt;bob@x&gt;<br>&lt;a href=&quot;https://e&quot;&gt;x&lt;/a&gt;",
+            quotedPlainText("Bob <bob@x>\n<a href=\"https://e\">x</a>"),
+        )
+    }
+
+    /** multipart/alternative: the HTML part the MIME reader chose is rendered, not the text one. */
+    @Test
+    fun decryptedPlainText_letsTheChosenHtmlPartWin() {
+        val html = "<p>Quarterly <b>numbers</b></p>"
+        assertNull(decryptedPlainText(DecryptedBody(html = html, plain = "", bodyMode = "html", protectedSubject = null)))
+        assertNull(decryptedPlainText(DecryptedBody(html = html, plain = "Quarterly numbers", bodyMode = "html", protectedSubject = null)))
+    }
+
+    @Test
+    fun decryptedPlainText_usesTheTextPartWhenThereIsNoHtml() {
+        assertEquals("hello", decryptedPlainText(DecryptedBody(html = null, plain = "hello", bodyMode = "plain", protectedSubject = null)))
+        assertEquals("hello", decryptedPlainText(DecryptedBody(html = " ", plain = "hello", bodyMode = "html", protectedSubject = null)))
+    }
 }

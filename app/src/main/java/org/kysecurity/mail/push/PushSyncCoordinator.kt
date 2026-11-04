@@ -99,10 +99,14 @@ class PushSyncCoordinator(
             ?: fetchRegistrationCredential()
             ?: return NativeRegistrationResult.Error(UNAVAILABLE_CREDENTIAL)
 
+        // The link's pin re-pins the pinned server only for the SAME account (owner decision); for a
+        // replacement it is dropped, so the stored pin decides as it always did.
+        val registering = if (isReplacement && repository.currentTlsPin() != null) pairing.copy(spkiPin = null) else pairing
+
         // NonCancellable: the server has already invalidated the previous secret by the time it answers.
         withContext(NonCancellable) {
             val result = registrationClient.register(
-                pairing = pairing,
+                pairing = registering,
                 token = credential.token,
                 transport = credential.transport,
                 p256dh = credential.p256dh,
@@ -169,7 +173,16 @@ class PushSyncCoordinator(
                 if (remaining <= 0) return notApproved()
                 sleep(waitMs.coerceAtMost(remaining))
                 waitMs = when (val status = registrationClient.pairingStatus(pending)) {
-                    is PairingStatus.Approved -> return completeApproval(pending, status, now())
+                    is PairingStatus.Approved -> {
+                        // Approved while the app is locked: the secret can be stored only once the
+                        // PIN-derived key exists again, so hold it until unlock or expiry.
+                        while (repository.currentCredentialState() is PushRepository.PairingCredentialState.Unavailable &&
+                            pending.expiresAtEpochMs > now()
+                        ) {
+                            sleep(1_000L)
+                        }
+                        return completeApproval(pending, status, now())
+                    }
                     PairingStatus.Rejected -> return notApproved()
                     is PairingStatus.Waiting -> pollMs(status.pollIntervalSeconds ?: pending.pollIntervalSeconds)
                     is PairingStatus.Retry -> maxOf(
@@ -267,6 +280,11 @@ class PushSyncCoordinator(
         return syncCurrentPairingToken()
     }
 
+    /** Runs [block] (an unpair) with no registration in flight. A resync whose reply landed after
+     *  the unpair's clear persisted its fresh secret and re-paired the device; inside the gate, an
+     *  in-flight one finishes first and the unpair then revokes the secret it minted. */
+    suspend fun <T> withRegistrationsHeld(block: suspend () -> T): T = registrationGate.withLock { block() }
+
     /** Queues UnifiedPush callback work. Call it from the callback itself: arrival order is run order. */
     fun enqueueUnifiedPush(event: suspend PushSyncCoordinator.() -> Unit) {
         unifiedPushEvents.trySend(event)
@@ -311,7 +329,9 @@ class PushSyncCoordinator(
         // Read INSIDE the gate, not by the caller before it: a registration that completed while
         // this one queued replaced the deviceSecret, and re-registering with the stale one is the
         // request the server rejects.
-        val rawPairing = repository.state.first().pairing
+        // The unwrapped secret, not the state flow's copy: with the credential PIN gate on, that copy
+        // carries no secret, and a re-registration without one is refused as a rebind attempt.
+        val rawPairing = repository.pairingForAuthenticatedCall()
             ?: return NativeRegistrationResult.Error("Device is not paired")
 
         // Re-derive the registration URL every use: a stored host divergence left clients unpinned.

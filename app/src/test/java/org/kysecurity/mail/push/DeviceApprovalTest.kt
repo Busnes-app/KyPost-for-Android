@@ -108,6 +108,27 @@ class DeviceApprovalTest {
         }
     }
 
+    /** Approved on the web while the app sat locked behind the browser: the approval is held until
+     *  the PIN-derived key is back, not refused and wiped. */
+    @Test
+    fun anApprovalWhileLockedCompletesAfterUnlock() = runBlocking {
+        val store = FakePushStore()
+        val server = Server(listOf(200 to approvedBody), registerAnswer = 202 to pendingBody())
+        val coordinator = coordinator(store, server)
+        val pending = register(coordinator)
+        store.credentialState = PushRepository.PairingCredentialState.Unavailable
+
+        val sleeps = mutableListOf<Long>()
+        val result = coordinator.awaitApproval(pending, now = { registeredAt }, sleep = {
+            sleeps += it
+            if (sleeps.size == 3) store.credentialState = PushRepository.PairingCredentialState.NotGated
+        })
+
+        assertTrue(result is NativeRegistrationResult.Success)
+        assertEquals("pending-secret", store.currentPairing()?.deviceSecret)
+        assertEquals(listOf(3_000L, 1_000L, 1_000L), sleeps)
+    }
+
     @Test
     fun goneReturnsToTheStartWithNothingStored() = runBlocking {
         val store = FakePushStore()

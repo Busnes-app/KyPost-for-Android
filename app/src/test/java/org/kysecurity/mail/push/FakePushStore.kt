@@ -16,7 +16,7 @@ internal class FakePushStore(
     /** The marker `PushRepository.resetPairingCredential` leaves: a pairing was cleared but the
      *  account-scoped data was KEPT. Written and cleared here exactly where the real store does. */
     var reconnectMarker: ReconnectExpectation? = null,
-    private var credentialState: PushRepository.PairingCredentialState =
+    var credentialState: PushRepository.PairingCredentialState =
         PushRepository.PairingCredentialState.NotGated,
 ) : PushStore {
     private val backing = MutableStateFlow(PushState(pairing = pairing, lastTokenSyncAtEpochMs = null, syncError = null, latestPayload = null, history = emptyList()))
@@ -36,7 +36,11 @@ internal class FakePushStore(
     fun currentPairing(): PairingData? = backing.value.pairing
     fun currentDeliveryMode(): DeliveryMode = backing.value.deliveryMode
 
-    override fun pairingForAuthenticatedCall(): PairingData? = backing.value.pairing
+    /** What the PIN-derived key unwraps; the state flow's pairing carries no secret when gated. */
+    var unwrappedSecret: String? = null
+
+    override fun pairingForAuthenticatedCall(): PairingData? =
+        backing.value.pairing?.let { p -> unwrappedSecret?.let { p.copy(deviceSecret = it) } ?: p }
     override fun currentCredentialState(): PushRepository.PairingCredentialState = credentialState
     override fun currentTlsPin(): TlsPin? = storedPin
     override fun tlsPinIsLeafOnly(): Boolean = leafOnly
