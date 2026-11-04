@@ -183,6 +183,8 @@ internal class ClientEncryptedSender(
                 materialGeneration = EnrollmentSession.withKeyring { it.materialGeneration },
                 sendAt = sendAt,
                 draftCopy = draftCopy,
+                replyToMessageId = draft.replyToMessageId,
+                replyToMailbox = draft.replyToMailbox,
             ),
         )
         return clientSendOutcome(outcome)

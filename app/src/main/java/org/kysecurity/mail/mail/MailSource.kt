@@ -228,6 +228,9 @@ data class ClientEncryptedMessage(
     /** The message encrypted to the account's own key, recipients included, for Drafts if the
      *  scheduled send fails. */
     val draftCopy: String? = null,
+    /** The reply reference, as on `/api/mail/send`; null on a new message or an unthreaded resend. */
+    val replyToMessageId: String? = null,
+    val replyToMailbox: String? = null,
 )
 
 data class MailMessageBody(

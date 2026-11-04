@@ -876,6 +876,24 @@ class RelayMailSourceTest {
         assertEquals(true, oneShot)
     }
 
+    /** A replayed draft POST leaves two drafts in the user's Drafts folder. */
+    @Test
+    fun clientEncryptedDraftBodyIsOneShot_soOkHttpNeverResendsIt() {
+        var oneShot: Boolean? = null
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request ->
+                oneShot = request.body?.isOneShot()
+                jsonResponse(request, """{"ok":true}""")
+            },
+        )
+
+        source.saveClientEncryptedDraft(ClientEncryptedDraft("a@example.com", "MIME"))
+
+        assertEquals(true, oneShot)
+    }
+
     @Test
     fun send409WithoutMarker_staysBadRequest() {
         val source = RelayMailSource(
@@ -1867,6 +1885,26 @@ class RelayMailSourceTest {
         assertTrue(sendAnswering(404, "404 page not found") !is MailOutcome.ReplyThreadingRefused)
         val unthreaded = reply.copy(replyToMessageId = null)
         assertTrue(sendAnswering(404, "the message being replied to was not found; nothing was sent", unthreaded) !is MailOutcome.ReplyThreadingRefused)
+    }
+
+    /** Owner decision (Q3 A): an encrypted or signed reply threads like a plain one, and a
+     *  threading refusal is offered as "send without threading?", never a plain resend. */
+    @Test
+    fun encryptedReply_sendsTheReferenceAndMapsTheThreadingRefusal() {
+        val calls = BodyRecordingCallFactory { request ->
+            jsonResponse(request, "the message being replied to was not found; nothing was sent\n", 404)
+        }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+        val threaded = clientEncrypted().copy(replyToMessageId = "42", replyToMailbox = "Archive")
+
+        val outcome = source.sendClientEncrypted(threaded)
+        val unthreaded = source.sendClientEncrypted(clientEncrypted())
+
+        assertTrue(calls.bodies[0], calls.bodies[0].contains("\"replyToMessageId\":\"42\""))
+        assertTrue(calls.bodies[0], calls.bodies[0].contains("\"replyToMailbox\":\"Archive\""))
+        assertFalse(calls.bodies[1], calls.bodies[1].contains("replyTo"))
+        assertTrue(outcome is MailOutcome.ReplyThreadingRefused)
+        assertTrue(unthreaded !is MailOutcome.ReplyThreadingRefused)
     }
 
     /** A timeout says nothing about whether the relay sent the message. */
