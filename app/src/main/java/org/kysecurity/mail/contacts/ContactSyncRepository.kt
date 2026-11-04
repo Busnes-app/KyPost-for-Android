@@ -220,18 +220,23 @@ class ContactSyncRepository(
 
     private suspend fun answerKeptContacts(account: ReconnectExpectation, change: suspend () -> Unit): Boolean =
         syncMutex.withLock {
+            // Before the account check: a pairing change after it ends this session, and the
+            // transaction below then changes nothing (the purge advances it before clearing).
+            val session = ProcessState.generation()
             val pairing = pairingProvider() ?: return@withLock false
             val store = ownerStore ?: return@withLock false
             // The answer was given for the account the question named, and only while it is still open.
             if (pairing.contactsAccount() != account || accountCheck(pairing) != ContactsAccountCheck.ASK) {
                 return@withLock false
             }
-            db.withTransaction {
+            val applied = db.withTransaction {
+                if (!ProcessState.isCurrent(session)) return@withTransaction false
                 change()
                 db.contactSyncStateDao().clearAll()
+                true
             }
-            store.setContactsOwner(account)
-            true
+            if (applied) store.setContactsOwner(account)
+            applied
         }
 
     private fun PairingData.contactsAccount() = ReconnectExpectation(subscriberId, serverUrl)

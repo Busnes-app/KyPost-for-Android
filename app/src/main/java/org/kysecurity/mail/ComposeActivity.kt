@@ -974,8 +974,9 @@ class ComposeActivity : LockedActivity() {
 
         sendMenuItem?.isEnabled = false
         sendObserverForTest?.invoke()
-        // Captured before the async export: a session that ends while it runs refuses the send.
-        val session = ProcessState.generation()
+        // The composition's own session, not the current one: a screen that outlived its account
+        // (still STARTED in split screen, say) is refused by ComposeSend instead of sending as the next.
+        val session = openedSession
 
         bodyEditor.exportHtml { html ->
             // exportHtml's main-looper callback can fire after onDestroy.
@@ -1198,7 +1199,7 @@ class ComposeActivity : LockedActivity() {
         if (!commitTypedRecipients()) return
         // Until the save lands or fails; a second tap would otherwise start a second export.
         listOf(sendMenuItem, scheduleMenuItem, saveDraftMenuItem).forEach { it?.isEnabled = false }
-        val session = ProcessState.generation()
+        val session = openedSession
         bodyEditor.exportHtml { html ->
             if (isFinishing || isDestroyed) return@exportHtml
             // Asked again, as sendEmail does: custody can resolve between the tap and this callback.
@@ -1245,8 +1246,8 @@ class ComposeActivity : LockedActivity() {
         val source = sourceDraft ?: return
         sourceDraft = null
         val app = applicationContext
-        // The session the replacement went out in: a reset before the task runs refuses it.
-        val session = ProcessState.generation()
+        // The composition's session: a reset before the task runs refuses it.
+        val session = openedSession
         MailBackgroundExecutor.submitReporting(this, getString(R.string.compose_old_draft_delete)) {
             val repository = MailRuntime.graph(app).repository
             repository.delete(repository.beginRemoval(source.messageId, source.mailbox, session))

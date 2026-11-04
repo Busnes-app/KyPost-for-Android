@@ -272,9 +272,10 @@ class PushRepository(
         // that synced before the owner was recorded) is cleared below.
         if (keepContacts) {
             purgeStepObserverForTest?.invoke("contactsOwner")
-            // Failing it leaves contacts nobody can name: report it like any other survivor.
+            // Never aborts the purge. Not residue either: unnamed contacts already wait for the
+            // "Bring your N contacts" answer at the next pairing, so a wipe would only destroy them.
             runCatching { recordContactsOwnerIfSynced() }
-                .onFailure { android.util.Log.e(TAG, "Failed to record the contacts' account", it); residue += "contactsOwner" }
+                .onFailure { android.util.Log.e(TAG, "Failed to record the contacts' account", it) }
         }
 
         /** Runs [body] and records [name] if it throws or reports incomplete. */
@@ -426,6 +427,8 @@ class PushRepository(
         }
         tearDownPushTransport()
         val residue = clearPairing(keepContacts)
+        // Again after the purge ended the session: a pull in flight could post during the teardown.
+        runCatching { context.getSystemService(android.app.NotificationManager::class.java)?.cancelAll() }
         PullScheduler.cancelPeriodic(context)
         return UnpairOutcome(networkResult, residue)
     }

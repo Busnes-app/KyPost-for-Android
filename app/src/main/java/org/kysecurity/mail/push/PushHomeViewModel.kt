@@ -78,9 +78,10 @@ class PushHomeViewModel(application: Application) : AndroidViewModel(application
      *  pairing screen that is started when it ends, or the next one to start. The Activity calls
      *  this inside `repeatOnLifecycle(STARTED)`: a stopped screen, which the app lock may finish
      *  on return, must not take it. */
-    suspend fun reportApprovalResults() {
+    suspend fun reportApprovalResults(canShow: () -> Boolean) {
         ApprovalWait.result.filterNotNull().collect {
-            ApprovalWait.takeResult()?.let(::reportPairing)
+            // A screen the lock is finishing still reaches STARTED: leave the outcome for the next one.
+            if (canShow()) ApprovalWait.takeResult()?.let(::reportPairing)
         }
     }
 

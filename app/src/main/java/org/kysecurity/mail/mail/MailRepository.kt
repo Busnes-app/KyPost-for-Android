@@ -378,7 +378,11 @@ class MailRepository(
     ): MailOutcome<MailMessageBody> {
         val session = ProcessState.generation()
         val row = emailDao.getById(id, folder) ?: return when (val fetched = relaySource.fetchMessageBody(id, folder)) {
-            is MailOutcome.Success -> MailOutcome.Success(fetched.value.copy(toAddresses = knownTo, ccAddresses = knownCc))
+            is MailOutcome.Success -> if (ProcessState.isCurrent(session)) {
+                MailOutcome.Success(fetched.value.copy(toAddresses = knownTo, ccAddresses = knownCc))
+            } else {
+                MailOutcome.Unauthorized(SESSION_ENDED)
+            }
             else -> fetched
         }
         // The cache is the only source of these: no relay response ever populates them — not the

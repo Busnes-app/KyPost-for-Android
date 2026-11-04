@@ -137,7 +137,9 @@ class PullSyncCoordinator(
         }
         if (!ProcessState.isCurrent(session)) return PullOutcome.NotPaired
         repository.advancePullCursor(subscriberId, prepared.nextCursor)
-        repository.updateSyncState(lastSyncAtEpochMs = now, syncError = null)
+        // A registration put off by the lock stays owed: its marker is what the unlock retry reads.
+        val owed = repository.state.first().syncError.takeIf { it == PushSyncCoordinator.CREDENTIAL_GATE_DEFERRAL }
+        repository.updateSyncState(lastSyncAtEpochMs = now, syncError = owed)
         return PullOutcome.Pulled(prepared.incoming.size)
     }
 
