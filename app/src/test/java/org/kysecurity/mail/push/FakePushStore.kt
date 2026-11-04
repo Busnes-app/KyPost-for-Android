@@ -59,8 +59,12 @@ internal class FakePushStore(
         leafOnly = true
     }
 
-    override suspend fun clearPairing(): List<String> {
+    /** What the last [clearPairing] was asked to keep. */
+    var keptContacts: Boolean? = null
+
+    override suspend fun clearPairing(keepContacts: Boolean): List<String> {
         events += "clearPairing"
+        keptContacts = keepContacts
         // Unconditional, as in SecurePairingStore.clearPairing(): the destructive clear drops the
         // marker whether or not the purge it wraps could prove itself complete.
         reconnectMarker = null

@@ -129,6 +129,29 @@ class DeviceApprovalTest {
         assertEquals(listOf(3_000L, 1_000L, 1_000L), sleeps)
     }
 
+    /** The approval is already on the server, so the request's expiry no longer matters: an unlock
+     *  after it still completes the pairing instead of wiping an approved secret. */
+    @Test
+    fun anApprovalHeldWhileLockedSurvivesExpiry() = runBlocking {
+        val store = FakePushStore()
+        val server = Server(listOf(200 to approvedBody), registerAnswer = 202 to pendingBody())
+        val coordinator = coordinator(store, server)
+        val pending = register(coordinator)
+        store.credentialState = PushRepository.PairingCredentialState.Unavailable
+
+        var clock = registeredAt
+        val result = coordinator.awaitApproval(pending, now = { clock }, sleep = {
+            clock += it
+            if (clock > pending.expiresAtEpochMs + 60_000L) {
+                store.credentialState = PushRepository.PairingCredentialState.NotGated
+            }
+        })
+
+        assertTrue(result is NativeRegistrationResult.Success)
+        assertEquals("pending-secret", store.currentPairing()?.deviceSecret)
+        assertEquals(1, server.statusRequests.size)
+    }
+
     @Test
     fun goneReturnsToTheStartWithNothingStored() = runBlocking {
         val store = FakePushStore()

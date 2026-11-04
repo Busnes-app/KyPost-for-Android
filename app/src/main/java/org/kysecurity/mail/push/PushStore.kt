@@ -34,8 +34,12 @@ interface PushStore {
      *  Returns the stores that could NOT be shown to be gone, empty when the purge was complete.
      *  A caller about to activate a DIFFERENT account must treat a non-empty result as a refusal:
      *  no table in this database carries a subscriber column, so data that survives is data the
-     *  next account can read. */
-    suspend fun clearPairing(): List<String>
+     *  next account can read.
+     *
+     *  [keepContacts] keeps the contacts, groups and contact outbox (owner decision Q2): they are an
+     *  intended survivor, held for [org.kysecurity.mail.contacts.ContactsOwnerStore]'s account until
+     *  the user decides where they go. */
+    suspend fun clearPairing(keepContacts: Boolean = false): List<String>
 
     suspend fun updateDelivery(mode: DeliveryMode, pullEndpoint: String?)
     suspend fun updateTransport(transport: PushTransport?)

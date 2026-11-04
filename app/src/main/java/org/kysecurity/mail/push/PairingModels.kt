@@ -52,6 +52,14 @@ fun isAccountReplacement(
     return subscriberId != incoming.subscriberId || serverUrl != incoming.serverUrl
 }
 
+/** True when confirming [incoming] re-pins the same account to a certificate key this device has
+ *  not pinned: the confirm screen must say so (owner decision, 2026-11-04). A replacement drops
+ *  the link's pin (attemptPairing), so it never re-pins. */
+fun isRepin(incoming: PairingData, storedPin: TlsPin?, replacesAccount: Boolean): Boolean {
+    val linkPin = incoming.spkiPin ?: return false
+    return !replacesAccount && storedPin != null && linkPin !in storedPin.spkiSha256
+}
+
 /** True when both are the same https origin. Userinfo makes both sides fail closed. */
 internal fun sameOrigin(candidate: String, reference: String): Boolean {
     val a = pairingUrl(candidate) ?: return false

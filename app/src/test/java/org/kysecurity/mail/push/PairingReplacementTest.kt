@@ -73,4 +73,18 @@ class PairingReplacementTest {
         val staleMarker = ReconnectExpectation("sub-stale", "https://stale.example.com")
         assertFalse(isAccountReplacement(sameAccountAgain, current, reconnect = staleMarker))
     }
+
+    /** Owner decision (2026-11-04): a same-account link with a key this device has not pinned is a
+     *  re-pin, and the confirm screen must say the certificate changed. */
+    @Test
+    fun aSameAccountLinkWithANewKeyIsARepin() {
+        val stored = TlsPin("relay.example.com", setOf("sha256/old"))
+        val renewed = sameAccountAgain.copy(spkiPin = "sha256/new")
+
+        assertTrue(isRepin(renewed, stored, replacesAccount = false))
+        assertFalse("same key", isRepin(sameAccountAgain.copy(spkiPin = "sha256/old"), stored, replacesAccount = false))
+        assertFalse("no link pin", isRepin(sameAccountAgain, stored, replacesAccount = false))
+        assertFalse("nothing pinned yet", isRepin(renewed, storedPin = null, replacesAccount = false))
+        assertFalse("a replacement drops the link pin", isRepin(renewed, stored, replacesAccount = true))
+    }
 }

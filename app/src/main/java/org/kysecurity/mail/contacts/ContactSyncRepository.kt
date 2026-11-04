@@ -8,6 +8,7 @@ import org.kysecurity.mail.ProcessState
 import org.kysecurity.mail.pgp.PgpFingerprint
 import org.kysecurity.mail.pgp.withVerifiedRevocation
 import org.kysecurity.mail.push.PairingData
+import org.kysecurity.mail.push.ReconnectExpectation
 import org.kysecurity.mail.signon.relayOrigin
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
@@ -21,6 +22,9 @@ import java.util.UUID
 sealed class ContactSyncOutcome {
     object Success : ContactSyncOutcome()
     object NotPaired : ContactSyncOutcome()
+    /** Contacts held for another account (or made while unpaired): nothing is sent or pulled until
+     *  the user answers "Bring your N contacts into …?" ([ContactSyncRepository.bringKeptContacts]). */
+    object AwaitingAccountChoice : ContactSyncOutcome()
     object Unauthorized : ContactSyncOutcome()
     data class ServiceUnavailable(val message: String) : ContactSyncOutcome()
     data class Retry(val message: String) : ContactSyncOutcome()
@@ -39,6 +43,8 @@ class ContactSyncRepository(
     private val client: ContactSyncClient,
     private val cursorStore: ContactCursorStore,
     private val pairingProvider: suspend () -> PairingData?,
+    /** Null only in tests that predate the account check: production always passes PushRepository. */
+    private val ownerStore: ContactsOwnerStore? = null,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -78,6 +84,7 @@ class ContactSyncRepository(
         val deviceId = pairing.deviceId
         val deviceSecret = pairing.deviceSecret
         if (deviceId.isNullOrBlank() || deviceSecret.isNullOrBlank()) return@run ContactSyncOutcome.NotPaired
+        if (accountCheck(pairing) == ContactsAccountCheck.ASK) return@run ContactSyncOutcome.AwaitingAccountChoice
         val pendingChanges = db.pendingContactChangeDao().getAllPending()
         val startCursor = cursorStore.cursor(pairing.subscriberId)
         // Owed until a since=0 pull commits; until then a push acks its changes but leaves the
@@ -145,6 +152,74 @@ class ContactSyncRepository(
             )
         }
     }
+
+    /** Decides, and on [ContactsAccountCheck.ADOPT] records, whose contacts these are. Caller holds [syncMutex]. */
+    private suspend fun accountCheck(pairing: PairingData): ContactsAccountCheck {
+        val store = ownerStore ?: return ContactsAccountCheck.PROCEED
+        val current = pairing.contactsAccount()
+        val owner = store.contactsOwner()
+        val holds = db.contactDao().allUids().isNotEmpty() || db.pendingContactChangeDao().getAllPending().isNotEmpty()
+        val check = contactsAccountCheck(owner, current, holds, cursorStore.cursor(pairing.subscriberId) > 0L)
+        if (check == ContactsAccountCheck.ADOPT) {
+            // Any account change restarts from a full pull.
+            if (owner != null) cursorStore.resetCursor(pairing.subscriberId)
+            store.setContactsOwner(current)
+        }
+        return check
+    }
+
+    /** Contacts with a change not yet on the server; the unpair dialog warns with it. */
+    suspend fun unsyncedChangeCount(): Int = db.pendingContactChangeDao().getAllPending().distinctBy { it.localUid }.size
+
+    /** The number of contacts waiting for "Bring your N contacts into …?", or null when there is
+     *  no question to ask (unpaired, or the contacts are this account's). */
+    suspend fun keptContactsAwaitingChoice(): Int? = syncMutex.withLock {
+        val pairing = pairingProvider() ?: return@withLock null
+        if (accountCheck(pairing) != ContactsAccountCheck.ASK) return@withLock null
+        db.contactDao().allUids().size
+    }
+
+    /** "Yes": every held contact goes to the paired account as new. The other account's pending
+     *  updates and deletes mean nothing there and are dropped, as are its group ids and photo refs.
+     *  The caller syncs afterwards. */
+    suspend fun bringKeptContacts() = answerKeptContacts { pairing ->
+        db.pendingContactChangeDao().clearAll()
+        db.groupDao().clearAll()
+        val now = System.currentTimeMillis()
+        db.contactDao().getAll().forEach { entity ->
+            val dto = entity.toDto().copy(rev = 0, groupIDs = emptyList(), photoRef = null)
+            db.contactDao().upsertAll(listOf(entity.copy(rev = 0, groupIDsJson = "[]", photoRef = null)))
+            db.pendingContactChangeDao().enqueue(
+                PendingContactChangeEntity(
+                    localUid = dto.uid,
+                    rev = 0,
+                    changeType = CHANGE_CREATE,
+                    payloadJson = json.encodeToString(dto),
+                    createdAtEpochMs = now,
+                ),
+            )
+        }
+    }
+
+    /** "No": the held contacts are removed from this device; the paired account's are pulled next. */
+    suspend fun removeKeptContacts() = answerKeptContacts {
+        db.contactDao().clearAll()
+        db.pendingContactChangeDao().clearAll()
+        db.groupDao().clearAll()
+        db.importedDeviceContactDao().clearAll()
+    }
+
+    private suspend fun answerKeptContacts(change: suspend (PairingData) -> Unit) = syncMutex.withLock {
+        val pairing = pairingProvider() ?: return@withLock
+        val store = ownerStore ?: return@withLock
+        db.withTransaction {
+            change(pairing)
+            db.contactSyncStateDao().clearAll()
+        }
+        store.setContactsOwner(pairing.contactsAccount())
+    }
+
+    private fun PairingData.contactsAccount() = ReconnectExpectation(subscriberId, serverUrl)
 
     private fun wireBytes(dto: ContactDto): Int =
         json.encodeToString(ContactDto.serializer(), dto).toByteArray(Charsets.UTF_8).size + 1

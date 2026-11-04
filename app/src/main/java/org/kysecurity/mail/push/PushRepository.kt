@@ -55,7 +55,7 @@ class PushRepository(
     // Injected: PushGraph owns the single instance that holds the pairing StateFlow.
     private val securePairingStore: SecurePairingStore = SecurePairingStore(context),
     private val securePushState: SecurePushState = SecurePushState(context),
-) : PushStore {
+) : PushStore, org.kysecurity.mail.contacts.ContactsOwnerStore {
     private val json = Json { ignoreUnknownKeys = true }
     private val hostileLocationSettings = SecurityRuntime.graph(context).hostileLocationSettings
 
@@ -146,6 +146,10 @@ class PushRepository(
     fun replacesAnotherAccount(pairing: PairingData): Boolean =
         isAccountReplacement(pairing, securePairingStore.pairing.value, reconnectExpectation())
 
+    /** See [isRepin]. */
+    fun repinsServer(pairing: PairingData): Boolean =
+        isRepin(pairing, currentTlsPin(), replacesAnotherAccount(pairing))
+
     /** Persist a TLS pin observed on a just-succeeded call: the TOFU capture in
      *  [PushSyncCoordinator.attemptPairing], and the one-way narrowing in
      *  [PushSyncCoordinator.narrowLegacyTlsPin]. */
@@ -213,7 +217,24 @@ class PushRepository(
     }
 
     /** The account's rows in Room, or the whole file when no graph is open in this process. */
-    private suspend fun purgeDatabase() {
+    override fun contactsOwner(): ReconnectExpectation? = securePairingStore.contactsOwner()
+
+    override fun setContactsOwner(owner: ReconnectExpectation?) = securePairingStore.setContactsOwner(owner)
+
+    private suspend fun purgeDatabase(keepContacts: Boolean) {
+        if (keepContacts) {
+            // Not a wipe, so opening the database is fine, and deleting its file would take the
+            // contacts with it. Contacts, groups, the outbox and the import record stay; the sync
+            // cursor goes (any account change restarts from a full pull), and so does everything
+            // tied to the phone's address book, whose KyPost rows the purge removes.
+            val db = org.kysecurity.mail.data.DataRuntime.graph(context).database
+            db.emailDao().clearAll()
+            db.recipientPinDao().clearAll()
+            db.groupLinkDao().clearAll()
+            db.deviceContactLinkDao().deleteAll()
+            db.contactSyncStateDao().clearAll()
+            return
+        }
         // peek, not graph: building one during a wipe recreates the database, disk-backed.
         val db = org.kysecurity.mail.data.DataRuntime.peekGraph()?.database
         if (db != null) {
@@ -242,11 +263,14 @@ class PushRepository(
      *  `Log.e` the caller could not see, so an account replacement whose purge failed activated
      *  the new account over the old one's mail. Naming the survivors is what lets
      *  [PushSyncCoordinator] refuse. */
-    private suspend fun purgeAccountScopedData(): List<String> {
+    private suspend fun purgeAccountScopedData(keepContacts: Boolean): List<String> {
         // Before any data is touched: work from the outgoing session reads as stale for the whole
         // purge, not only after the processMemory step below.
         org.kysecurity.mail.ProcessState.advanceGeneration()
         val residue = mutableListOf<String>()
+        // Kept contacts must name their account before the cursor (the only record of an install
+        // that synced before the owner was recorded) is cleared below.
+        if (keepContacts) recordContactsOwnerIfSynced()
 
         /** Runs [body] and records [name] if it throws or reports incomplete. */
         suspend fun step(name: String, body: suspend () -> Boolean) {
@@ -276,8 +300,9 @@ class PushRepository(
         // into the outbox the next account inherits.
         step("database") {
             org.kysecurity.mail.contacts.device.DeviceContactSyncSettings(context).clearConsentDuring {
-                purgeDatabase()
+                purgeDatabase(keepContacts)
             }
+            if (!keepContacts) setContactsOwner(null)
             true
         }
 
@@ -338,19 +363,29 @@ class PushRepository(
         }
     }
 
-    override suspend fun clearPairing(): List<String> {
+    override suspend fun clearPairing(keepContacts: Boolean): List<String> {
         // Mail work stays held until the outgoing pairing is gone: a task started after the purge's
         // reset but before this clear would carry the new session yet send with the old credentials.
         org.kysecurity.mail.MailBackgroundExecutor.quiesce()
         try {
-            return clearPairingHeld()
+            return clearPairingHeld(keepContacts)
         } finally {
             org.kysecurity.mail.MailBackgroundExecutor.resume()
         }
     }
 
-    private suspend fun clearPairingHeld(): List<String> {
-        val residue = purgeAccountScopedData()
+    /** An install that synced contacts before the owner was recorded: the cursor proves whose they are. */
+    private suspend fun recordContactsOwnerIfSynced() {
+        if (contactsOwner() != null) return
+        val leaving = securePairingStore.pairing.value ?: return
+        val db = org.kysecurity.mail.data.DataRuntime.graph(context).database
+        if ((db.contactSyncStateDao().cursor(leaving.subscriberId) ?: 0L) > 0L) {
+            setContactsOwner(ReconnectExpectation(leaving.subscriberId, leaving.serverUrl))
+        }
+    }
+
+    private suspend fun clearPairingHeld(keepContacts: Boolean): List<String> {
+        val residue = purgeAccountScopedData(keepContacts)
         securePairingStore.clearPairing()
         inMemoryHistory.value = emptyList()
         editPlain { prefs ->
@@ -377,6 +412,7 @@ class PushRepository(
     suspend fun unpairDevice(
         deregisterClient: DeregisterClient,
         pairing: PairingData? = pairingForAuthenticatedCall(),
+        keepContacts: Boolean = false,
     ): UnpairOutcome {
         val networkResult = if (pairing != null) {
             deregisterClient.deregister(pairing)
@@ -384,7 +420,7 @@ class PushRepository(
             DeregisterResult.Error("Device is not paired")
         }
         tearDownPushTransport()
-        val residue = clearPairing()
+        val residue = clearPairing(keepContacts)
         PullScheduler.cancelPeriodic(context)
         return UnpairOutcome(networkResult, residue)
     }

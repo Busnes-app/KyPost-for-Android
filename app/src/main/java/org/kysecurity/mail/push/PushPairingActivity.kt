@@ -127,7 +127,12 @@ class PushPairingActivity : LockedActivity() {
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch { viewModel.paired.collect { org.kysecurity.mail.security.AppLockOffer.showIfDue(this@PushPairingActivity) } }
+                launch {
+                    viewModel.paired.collect {
+                        org.kysecurity.mail.security.AppLockOffer.showIfDue(this@PushPairingActivity)
+                        org.kysecurity.mail.contacts.KeptContactsPrompt.showIfNeeded(this@PushPairingActivity)
+                    }
+                }
                 viewModel.uiState.collect { state -> render(state) }
             }
         }
@@ -351,7 +356,12 @@ class PushPairingActivity : LockedActivity() {
         // nothing is: attemptPairing purges on replacement alone, and the wording has to match.
         val repository = PushRuntime.graph(this).repository
         val replaces = repository.replacesAnotherAccount(pairing)
-        val messageRes = if (replaces) R.string.pairing_confirm_replace_message else R.string.pairing_confirm_message
+        val messageRes = when {
+            replaces -> R.string.pairing_confirm_replace_message
+            // Never a silent re-pin: say the certificate changed (owner decision, 2026-11-04).
+            repository.repinsServer(pairing) -> R.string.pairing_confirm_repin_message
+            else -> R.string.pairing_confirm_message
+        }
         // The parsed host, never the raw `srv`: a raw URL in a trust prompt is a phishing surface.
         val shownHost = pairingUrlHost(pairing.serverUrl)
         if (shownHost == null) {
@@ -371,13 +381,62 @@ class PushPairingActivity : LockedActivity() {
     /** Unpairing now revokes server-side access (not just local state), so it gets the same
      *  confirm-before-destructive-action treatment as [confirmAndApplyPairing]. */
     private fun confirmAndUnpairDevice() {
-        AlertDialog.Builder(this)
-            .setTitle(R.string.push_pairing_unpair_confirm_title)
-            .setMessage(R.string.push_pairing_unpair_confirm_message)
-            .setPositiveButton(R.string.push_pairing_unpair) { _, _ -> viewModel.unpairDevice() }
-            .setNegativeButton(R.string.cancel, null)
-            .create()
-            .showSecurely()
+        lifecycleScope.launch {
+            val contacts = org.kysecurity.mail.contacts.ContactsRuntime.graph(this@PushPairingActivity).repository
+            val unsynced = contacts.unsyncedChangeCount()
+            if (isFinishing || isDestroyed) return@launch
+            // Owner decision Q2: contacts stay unless the user asks, warned about what has not synced.
+            val removeContacts = android.widget.CheckBox(this@PushPairingActivity).apply {
+                setText(R.string.push_pairing_unpair_remove_contacts)
+            }
+            val padding = (20 * resources.displayMetrics.density).toInt()
+            val body = android.widget.LinearLayout(this@PushPairingActivity).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                setPadding(padding, padding / 2, padding, 0)
+                addView(android.widget.TextView(this@PushPairingActivity).apply { setText(R.string.push_pairing_unpair_confirm_message) })
+                if (unsynced > 0) {
+                    addView(
+                        android.widget.TextView(this@PushPairingActivity).apply {
+                            text = resources.getQuantityString(R.plurals.push_pairing_unpair_unsynced, unsynced, unsynced)
+                            setPadding(0, padding / 2, 0, 0)
+                        },
+                    )
+                }
+                addView(removeContacts)
+            }
+            AlertDialog.Builder(this@PushPairingActivity)
+                .setTitle(R.string.push_pairing_unpair_confirm_title)
+                .setView(android.widget.ScrollView(this@PushPairingActivity).apply { addView(body) })
+                .setPositiveButton(R.string.push_pairing_unpair) { _, _ ->
+                    viewModel.unpairDevice(keepContacts = !removeContacts.isChecked)
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .apply {
+                    if (unsynced > 0) {
+                        setNeutralButton(R.string.push_pairing_unpair_sync_now) { _, _ -> syncContactsThenConfirmUnpair() }
+                    }
+                }
+                .create()
+                .showSecurely()
+        }
+    }
+
+    /** "Sync now" on the unpair dialog: reports the outcome, then asks again with the new count. */
+    private fun syncContactsThenConfirmUnpair() {
+        lifecycleScope.launch {
+            val outcome = org.kysecurity.mail.contacts.ContactsRuntime.graph(this@PushPairingActivity).repository.sync()
+            if (isFinishing || isDestroyed) return@launch
+            val message = when (outcome) {
+                org.kysecurity.mail.contacts.ContactSyncOutcome.Success -> getString(R.string.contacts_sync_success)
+                is org.kysecurity.mail.contacts.ContactSyncOutcome.Retry -> outcome.message
+                is org.kysecurity.mail.contacts.ContactSyncOutcome.ServiceUnavailable -> outcome.message
+                org.kysecurity.mail.contacts.ContactSyncOutcome.AwaitingAccountChoice -> getString(R.string.contacts_sync_awaiting_choice)
+                org.kysecurity.mail.contacts.ContactSyncOutcome.Unauthorized -> getString(R.string.contacts_sync_unauthorized)
+                org.kysecurity.mail.contacts.ContactSyncOutcome.NotPaired -> getString(R.string.connection_mode_relay_not_paired)
+            }
+            Toast.makeText(this@PushPairingActivity, message, Toast.LENGTH_LONG).show()
+            confirmAndUnpairDevice()
+        }
     }
 
     /** Non-destructive, but it still ends the current pairing, so it confirms like the rest. */
