@@ -75,7 +75,7 @@ biometric = "1.1.0"
 workRuntime = "2.12.0"
 lifecycleProcess = "2.9.4"
 room = "2.8.5"
-sqlcipher = "4.19.1"
+sqlcipher = "4.20.0"
 ksp = "2.3.12"
 bouncyCastlePgp = "1.86"
 # GHSA-65r4-943x-97jj (CVE-2026-75140, XmlTreeBuilder memory exhaustion) affects < 1.23.2.
