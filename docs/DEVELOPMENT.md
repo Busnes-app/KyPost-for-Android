@@ -106,6 +106,13 @@ this one install normally.
 
 ## Test coverage
 
+- `KeptContactKeyReplayTest` drives Bring, real Room and the contact outbox through
+  consent, lost-response retry, coalescing, explicit key replacement/confirmation
+  and ordinary-write controls. The relay owns key usability; its
+  [contact-sync API contract](https://github.com/Busnes-app/KyPost-Server/blob/main/docs/API.md)
+  describes `omitUnusableKey`. Requests queued before this version have no trusted
+  replay marker and retain strict behavior. For an already stuck change, edit the
+  contact to remove its refused key and retry; the upgrade does not invent consent.
 - OpenPGP new-use policy and archive compatibility (`PgpStrengthPolicyTest`); run with
   `./gradlew testPlayDebugUnitTest --tests '*PgpStrengthPolicyTest'`. Key/digest changes must
   retain historical decryption, exact keyring bytes, revocation processing and local key-change

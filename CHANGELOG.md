@@ -21,6 +21,10 @@
 
 ### Fixed
 
+- Bringing kept contacts into another account no longer stalls on an unusable PGP
+  key when the relay supports `omitUnusableKey`. The relay imports that contact
+  without a rejected key; valid keys and ordinary edits keep their behavior.
+  Older relays retain their refusal and the contact stays queued until upgraded.
 - Sharing a file into KyPost while another message was open no longer blanks that message's
   attachments.
 - A contact with a job title but no company keeps its title when edited in the phone's Contacts
