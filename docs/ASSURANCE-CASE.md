@@ -84,6 +84,12 @@ they leave the app.
 - **Least privilege.** The device secret authorises push, pull, contact sync and MFA response,
   never webmail sign-in. Contacts from other accounts upload only from accounts the user picks.
   Only the fdroid build asks for CAMERA, and CI checks that.
+  Bring kept contacts records `omitUnusableKey:true` only in its pending replay:
+  the relay's validator may omit a refused key while importing that contact.
+  Normal writes clear incoming flags; a changed or explicitly confirmed key ends
+  the replay permission. Neither response prose nor an arbitrary400 drops a key
+  or acknowledges an outbox entry; older relays retain the queued refusal.
+  Recipient pins and local signature/encryption trust are unchanged.
 - **Fail-safe defaults.** HLP tampering fails towards **enabled** (`security/HostileLocationSettings.kt`).
   A lost pin refuses to connect rather than falling back to system trust. The wipe's deregistration
   call is refused when no pin was captured.

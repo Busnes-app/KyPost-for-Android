@@ -27,6 +27,8 @@ data class ContactDto(
     val groupIDs: List<String> = emptyList(),
     val photoRef: String? = null,
     val pgpKey: String? = null,
+    /** Outbox-only consent for a Bring replay; never adopted from synced contact rows. */
+    val omitUnusableKey: Boolean = false,
     val ims: List<ContactImDto> = emptyList(),
     val websites: List<ContactUrlDto> = emptyList(),
     val relations: List<ContactRelationDto> = emptyList(),

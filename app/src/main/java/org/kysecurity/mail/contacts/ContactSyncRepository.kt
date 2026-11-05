@@ -197,7 +197,10 @@ class ContactSyncRepository(
         db.groupDao().clearAll()
         val now = System.currentTimeMillis()
         db.contactDao().getAll().forEach { entity ->
-            val dto = entity.toDto().copy(rev = 0, groupIDs = emptyList(), photoRef = null)
+            val dto = entity.toDto().copy(
+                rev = 0, groupIDs = emptyList(), photoRef = null,
+                omitUnusableKey = !entity.pgpKey.isNullOrEmpty(),
+            )
             db.contactDao().upsertAll(listOf(entity.copy(rev = 0, groupIDsJson = "[]", photoRef = null)))
             db.pendingContactChangeDao().enqueue(
                 PendingContactChangeEntity(
@@ -276,7 +279,7 @@ class ContactSyncRepository(
      *  transaction so it cannot land after an account purge. */
     suspend fun queueCreate(contact: ContactDto, verifiedInPerson: Boolean = false, session: Long? = null): String {
         val localUid = UUID.randomUUID().toString()
-        val localCopy = contact.copy(uid = localUid)
+        val localCopy = contact.copy(uid = localUid, omitUnusableKey = false)
         db.withTransaction {
             if (session != null && !ProcessState.isCurrent(session)) return@withTransaction
             db.contactDao().upsertAll(listOf(localCopy.toEntity(verifiedInPerson = verifiedInPerson)))
@@ -323,9 +326,10 @@ class ContactSyncRepository(
                     localUid = contact.uid,
                     rev = contact.rev,
                     changeType = CHANGE_UPDATE,
-                    payloadJson = json.encodeToString(contact),
+                    payloadJson = json.encodeToString(contact.copy(omitUnusableKey = false)),
                     createdAtEpochMs = System.currentTimeMillis(),
                 ),
+                preserveReplayKey = !verifiedInPerson,
             )
         }
     }
@@ -371,11 +375,11 @@ class ContactSyncRepository(
 
     /** One pending row per uid. The old rows are replaced, never edited in place: a sync may
      *  already have read them, and its ack clears by row id. */
-    private suspend fun enqueueCoalesced(change: PendingContactChangeEntity) {
+    private suspend fun enqueueCoalesced(change: PendingContactChangeEntity, preserveReplayKey: Boolean = true) {
         val dao = db.pendingContactChangeDao()
         val existing = dao.getByUid(change.localUid)
         if (existing.isNotEmpty()) dao.clearFlushed(existing.map { it.id })
-        dao.enqueue(coalescedChange(existing, change))
+        dao.enqueue(coalescedChange(existing, change, preserveReplayKey))
     }
 
     /** [snapshot] marks a since=0 reply: every live contact, so absence means deleted. */
@@ -470,11 +474,20 @@ internal fun <T> pushBatches(items: List<T>, sizeOf: (T) -> Int): List<List<T>> 
 internal fun coalescedChange(
     existing: List<PendingContactChangeEntity>,
     change: PendingContactChangeEntity,
+    preserveReplayKey: Boolean = true,
 ): PendingContactChangeEntity =
     if (change.changeType == ContactSyncRepository.CHANGE_UPDATE &&
         existing.any { it.changeType == ContactSyncRepository.CHANGE_CREATE }
     ) {
-        change.copy(changeType = ContactSyncRepository.CHANGE_CREATE)
+        val previous = existing.maxByOrNull { it.id }?.decodePayload(Json)
+        val next = change.decodePayload(Json)
+        val replay = next?.takeIf {
+            preserveReplayKey && previous?.omitUnusableKey == true && it.pgpKey == previous.pgpKey
+        }
+        change.copy(
+            changeType = ContactSyncRepository.CHANGE_CREATE,
+            payloadJson = replay?.let { Json.encodeToString(it.copy(omitUnusableKey = true)) } ?: change.payloadJson,
+        )
     } else {
         change
     }
