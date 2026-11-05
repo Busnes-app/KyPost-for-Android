@@ -42,9 +42,9 @@ class KeptContactKeyReplayTest {
 
     @After fun tearDown() = db.close()
 
-    private suspend fun seed() {
+    private suspend fun seed(key: String? = KEY) {
         db.contactDao().upsertAll(listOf(ContactDto(
-            uid = "kept", rev = 12, fn = "Alice", pgpKey = KEY,
+            uid = "kept", rev = 12, fn = "Alice", pgpKey = key,
             emails = listOf(ContactFieldDto(value = "alice@example.invalid")),
             groupIDs = listOf("previous-group"), photoRef = "previous-photo",
         ).toEntity()))
@@ -121,6 +121,25 @@ class KeptContactKeyReplayTest {
         assertTrue(repository.bringKeptContacts(account))
         repository.queueUpdate(db.contactDao().getByUid("kept")!!.toDto(), false, verifiedInPerson = true)
         assertTrue(pendingFlag() != JsonPrimitive(true))
+    }
+
+    @Test fun aNullKeyNeedsNoOmission() = assertReplayIntent(null)
+    @Test fun anEmptyKeyNeedsNoOmission() = assertReplayIntent("")
+    @Test fun aWhitespaceKeyKeepsOmissionIntent() = assertReplayIntent(" \t\n")
+    @Test fun aMalformedKeyKeepsOmissionIntent() = assertReplayIntent("garbage")
+
+    private fun assertReplayIntent(key: String?) = runBlocking {
+        seed(key)
+        val first = repository()
+        assertTrue(first.bringKeptContacts(account))
+        val expectedFlag = if (key.isNullOrEmpty()) null else JsonPrimitive(true)
+        assertEquals(expectedFlag, pendingFlag())
+        first.queueUpdate(db.contactDao().getByUid("kept")!!.toDto().copy(fn = "Edited"), false)
+        assertEquals(expectedFlag, pendingFlag())
+        assertEquals(ContactSyncOutcome.Success, repository().sync())
+        val transmitted = server.pushes.single().changes.single()
+        assertEquals(key, transmitted.pgpKey)
+        assertEquals(!key.isNullOrEmpty(), transmitted.omitUnusableKey)
     }
 
     private companion object {

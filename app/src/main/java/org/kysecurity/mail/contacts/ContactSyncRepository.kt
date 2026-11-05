@@ -199,7 +199,7 @@ class ContactSyncRepository(
         db.contactDao().getAll().forEach { entity ->
             val dto = entity.toDto().copy(
                 rev = 0, groupIDs = emptyList(), photoRef = null,
-                omitUnusableKey = !entity.pgpKey.isNullOrBlank(),
+                omitUnusableKey = !entity.pgpKey.isNullOrEmpty(),
             )
             db.contactDao().upsertAll(listOf(entity.copy(rev = 0, groupIDsJson = "[]", photoRef = null)))
             db.pendingContactChangeDao().enqueue(
