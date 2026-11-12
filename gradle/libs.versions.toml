@@ -16,7 +16,7 @@
 # defeat the control. Let the 31/34/36 emulator matrix catch the UI regressions.
 
 [versions]
-agp = "9.5.0"
+agp = "9.5.1"
 kotlin = "2.4.21"
 coreKtx = "1.10.1"
 activityKtx = "1.10.1"
@@ -76,7 +76,7 @@ workRuntime = "2.12.0"
 lifecycleProcess = "2.9.4"
 room = "2.8.5"
 sqlcipher = "4.20.0"
-ksp = "2.3.12"
+ksp = "2.3.13"
 bouncyCastlePgp = "1.86"
 # GHSA-65r4-943x-97jj (CVE-2026-75140, XmlTreeBuilder memory exhaustion) affects < 1.23.2.
 # 1.23.2 and later parse `</p>` inside <svg> as browsers do. That left QuotedHtmlSanitizer
