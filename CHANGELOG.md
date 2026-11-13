@@ -18,6 +18,8 @@
 - Leaving a message you are writing offers Save draft where this device can save drafts.
 - Accounts whose encryption key is held by the server can save drafts too (menu and when leaving
   a message), as on the web. A message marked Sign or Encrypt is not saved this way.
+- GitHub releases carry a build-provenance attestation, `kypost-vX.Y.Z.intoto.jsonl`, for both
+  APKs and their checksums. See [Verifying releases](docs/VERIFYING-RELEASES.md).
 
 ### Fixed
 

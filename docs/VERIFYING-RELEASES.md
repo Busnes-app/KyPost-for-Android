@@ -27,12 +27,15 @@ release that the Releases page shows as published.
   The release notes do not repeat this digest; this page is where it is published. If an APK on
   the Releases page carries any other certificate, do not install it. Report it as described in
   [SECURITY.md](../SECURITY.md).
-- **No build-provenance attestation.** Unlike KyAuth and the KyIdentity images, KyPost releases
-  have no Sigstore attestation, so `gh attestation verify` has nothing to check.
+- **Build provenance.** Releases after v0.6.0 carry a SLSA build-provenance attestation for both
+  APKs and both `.sha256` files, signed through GitHub's Sigstore integration with no long-lived
+  key. It is published twice: in GitHub's attestation store, and as `kypost-vX.Y.Z.intoto.jsonl`
+  on the release. It ties each file to `release.yml` running at the tag. v0.6.0 and earlier have
+  no attestation, so `gh attestation verify` has nothing to check for them.
 - **The commit the APK names.** The Android Gradle plugin writes the commit it built from into
   `META-INF/version-control-info.textproto` inside the APK. The signature covers that file, so it
-  is the release key holder's statement of the source. It is not independent proof, as an
-  attestation would be.
+  is the release key holder's statement of the source. On releases without an attestation it
+  is the only statement of the source, and it is not independent proof.
 - **The `.sha256` file** is not signed. It catches a damaged download and nothing more.
 - **Google Play** builds (`org.kysecurity.mail`) are re-signed by Google under Play App Signing and
   carry a different certificate. Nothing on this page applies to them. **F-Droid**
@@ -57,6 +60,16 @@ aapt2 dump badging kypost-v$v.apk | grep -o "^package: name=[^ ]* versionCode=[^
 sha=$(gh api repos/Busnes-app/KyPost-for-Android/commits/refs/tags/v$v --jq .sha)
 [ "$(unzip -p kypost-v$v.apk META-INF/version-control-info.textproto | sed -n 's/.*revision: "\(.*\)"/\1/p')" = "$sha" ] \
   && echo "OK: kypost-v$v.apk records commit $sha, which tag v$v points at"
+```
+
+On a release that carries `kypost-v$v.intoto.jsonl`, also check the provenance. The command fails
+unless the attestation was signed by `release.yml` at the tag and names the commit from step 3:
+
+```bash
+gh attestation verify kypost-v$v.apk --repo Busnes-app/KyPost-for-Android \
+  --bundle kypost-v$v.intoto.jsonl \
+  --cert-identity https://github.com/Busnes-app/KyPost-for-Android/.github/workflows/release.yml@refs/tags/v$v \
+  --source-digest "$sha" --source-ref refs/tags/v$v
 ```
 
 Any failure means: do not install that APK. `apksigner verify` exits non-zero on a bad signature.
