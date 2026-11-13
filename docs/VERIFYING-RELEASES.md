@@ -62,13 +62,14 @@ sha=$(gh api repos/Busnes-app/KyPost-for-Android/commits/refs/tags/v$v --jq .sha
   && echo "OK: kypost-v$v.apk records commit $sha, which tag v$v points at"
 ```
 
-On a release that carries `kypost-v$v.intoto.jsonl`, also check the provenance. It must name the
-same commit as step 3:
+On a release that carries `kypost-v$v.intoto.jsonl`, also check the provenance. The command fails
+unless the attestation was signed by `release.yml` at the tag and names the commit from step 3:
 
 ```bash
 gh attestation verify kypost-v$v.apk --repo Busnes-app/KyPost-for-Android \
   --bundle kypost-v$v.intoto.jsonl \
-  --cert-identity https://github.com/Busnes-app/KyPost-for-Android/.github/workflows/release.yml@refs/tags/v$v
+  --cert-identity https://github.com/Busnes-app/KyPost-for-Android/.github/workflows/release.yml@refs/tags/v$v \
+  --source-digest "$sha" --source-ref refs/tags/v$v
 ```
 
 Any failure means: do not install that APK. `apksigner verify` exits non-zero on a bad signature.
