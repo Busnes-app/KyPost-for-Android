@@ -626,6 +626,10 @@ dependencies {
         "androidLintTool"("org.bouncycastle:bcutil-jdk18on:1.86")
         "androidLintTool"("org.apache.commons:commons-lang3:3.21.0")
         "androidLintTool"("org.apache.httpcomponents:httpclient:4.5.14")
+        "androidLintTool"("com.google.guava:guava:33.7.2-jre")
+        // Room's annotation processor asks for guava 33.2.1-jre (GHSA-xxph-c9ww-hj94, < 33.7.2).
+        // Build-time only: guava is not on any runtime classpath, so it never reaches the APK.
+        ksp("com.google.guava:guava:33.7.2-jre")
     }
 }
 
