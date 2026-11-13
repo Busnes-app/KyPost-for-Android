@@ -537,6 +537,8 @@ configurations.named("githubImplementation") { extendsFrom(gmsImplementation) }
 // and the task reported UP-TO-DATE. A gate that does not run when its subject changes is not a
 // gate: adding android:label to the pairing forwarder passed cleanly until these were declared.
 tasks.withType<Test>().configureEach {
+    // JUnit 5 for Jazzer's @FuzzTest; every existing JUnit 4 test runs on the vintage engine.
+    useJUnitPlatform()
     inputs.files(
         "src/main/AndroidManifest.xml",
         "src/main/res/values/strings.xml",
@@ -609,6 +611,13 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(kotlin("test-junit"))
+    // Fuzz tests (CalendarInviteFuzzTest). A plain test run replays their seed corpus; see
+    // src/test/AGENTS.md for a real fuzzing run.
+    testImplementation(platform(libs.junit.bom))
+    testImplementation(libs.jazzer.junit)
+    testRuntimeOnly(libs.junit.jupiter.engine)
+    testRuntimeOnly(libs.junit.vintage.engine)
+    testRuntimeOnly(libs.junit.platform.launcher)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.test.core)

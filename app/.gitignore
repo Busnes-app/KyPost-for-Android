@@ -1,1 +1,3 @@
 /build
+# Jazzer's working corpus from a local JAZZER_FUZZ=1 run; seeds worth keeping go under src/test/resources.
+/.cifuzz-corpus

@@ -62,6 +62,12 @@ Owns JVM unit tests for app logic that can run without device/emulator.
   `ACTION_INSERT` extras by their platform key strings. `CalendarRsvpTest` checks every REPLY
   against a port of KyPost-Server's `mailmsg.CalendarReply` rules (one METHOD:REPLY, one VEVENT,
   no control chars, 75-octet lines); keep that port in step with the server.
+- `CalendarInviteFuzzTest` (Java, so OpenSSF Scorecard detects it) is a Jazzer `@FuzzTest` over
+  `parseCalendarInvite` and the REPLY that `rsvpDraft` builds from its output. Unit tests run on
+  the JUnit Platform for it; JUnit 4 tests run on the vintage engine. A normal test run replays
+  `src/test/resources/org/kysecurity/mail/mail/CalendarInviteFuzzTestInputs/parse/`. To fuzz
+  for 60 s: `JAZZER_FUZZ=1 ./gradlew testPlayDebugUnitTest --tests '*CalendarInviteFuzzTest*' --rerun`.
+  A finding is written to that seed directory as `crash-*`: rename it to say what it is and keep it.
 - Lifecycle-owned plaintext tests use pure holders such as `OwnedAttachmentSave`; prove admission,
   source cleanup isolation, and wiping without an emulator or timing-dependent threads.
   `ReadOutcomeDeliveryTest` queues the worker and consumer independently to prove completed
