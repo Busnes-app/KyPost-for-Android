@@ -156,8 +156,9 @@ The full list, with costs, is in [SECURITY.md](../SECURITY.md). The largest:
 - No test or tool enforces "no secrets in logs". A review of the 48 log calls that interpolate a
   value found names, counts, step names and URIs, not credentials or mail content. Exceptions are
   logged with their messages.
-- Releases carry no build-provenance attestation, and the release APK cannot be rebuilt to the
-  same bytes ([VERIFYING-RELEASES.md](VERIFYING-RELEASES.md)).
+- Releases up to v0.6.0 carry no build-provenance attestation (later ones attach a Sigstore
+  one), and the release APK cannot be rebuilt to the same bytes
+  ([VERIFYING-RELEASES.md](VERIFYING-RELEASES.md)).
 
 ## Evidence
 

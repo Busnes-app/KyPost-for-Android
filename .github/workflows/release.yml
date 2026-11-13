@@ -32,6 +32,9 @@ jobs:
       contents: write
       # Reading ci.yml's run for the tagged commit.
       actions: read
+      # Keyless Sigstore signing of the build-provenance attestation, and recording it.
+      id-token: write
+      attestations: write
 
     steps:
       # Full history: the gate below needs origin/main and every v* tag.
@@ -261,6 +264,36 @@ jobs:
           sha256sum "${RUNNER_TEMP}/kypost-${TAG}.aab" \
             | sed "s|${RUNNER_TEMP}/||" > "${RUNNER_TEMP}/kypost-${TAG}.aab.sha256"
 
+      # SLSA build provenance for every file the release publishes, signed keylessly through
+      # GitHub's Sigstore integration: no key to hold, the signer is this workflow at this tag.
+      # One attestation, four subjects. The bundle is also attached to the Release, because a
+      # copy only in the attestations API is invisible to anyone checking the Releases page.
+      - name: attest build provenance
+        id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/kypost-${{ github.ref_name }}.apk
+            ${{ runner.temp }}/kypost-${{ github.ref_name }}.apk.sha256
+            ${{ runner.temp }}/kypost-fdroid-${{ github.ref_name }}.apk
+            ${{ runner.temp }}/kypost-fdroid-${{ github.ref_name }}.apk.sha256
+
+      # Checked against the bundle file we are about to publish, not the API copy, so a bundle
+      # that does not verify never reaches the Releases page.
+      - name: provenance bundle verifies
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          cp "${BUNDLE}" "${RUNNER_TEMP}/kypost-${TAG}.intoto.jsonl"
+          for file in "kypost-${TAG}.apk" "kypost-${TAG}.apk.sha256" \
+                      "kypost-fdroid-${TAG}.apk" "kypost-fdroid-${TAG}.apk.sha256"; do
+            gh attestation verify "${RUNNER_TEMP}/${file}" --repo "${GITHUB_REPOSITORY}" \
+              --bundle "${RUNNER_TEMP}/kypost-${TAG}.intoto.jsonl"
+          done
+
       # R8's mapping files, one per published flavor, kept as a workflow artifact rather than
       # attached to the Release. Without them crash reports from this build are unreadable;
       # published alongside the APK they also hand an analyst a full symbol table for a
@@ -321,7 +354,8 @@ jobs:
             "${RUNNER_TEMP}/kypost-${TAG}.apk" \
             "${RUNNER_TEMP}/kypost-${TAG}.apk.sha256" \
             "${RUNNER_TEMP}/kypost-fdroid-${TAG}.apk" \
-            "${RUNNER_TEMP}/kypost-fdroid-${TAG}.apk.sha256"
+            "${RUNNER_TEMP}/kypost-fdroid-${TAG}.apk.sha256" \
+            "${RUNNER_TEMP}/kypost-${TAG}.intoto.jsonl"
 
       - name: destroy signing material
         if: always()
