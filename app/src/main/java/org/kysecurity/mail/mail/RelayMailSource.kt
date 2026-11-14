@@ -506,6 +506,24 @@ class RelayMailSource(
         )
     }
 
+    override fun answerInvite(messageId: String, folder: String, index: Int, answer: Rsvp, account: MailAccount?): CalendarAnswer {
+        val pairing = pairingProvider() ?: return CalendarAnswer.Failed("Device is not paired")
+        if (account != null && account != pairing.mailAccount()) {
+            return CalendarAnswer.Failed("The message belongs to a different account")
+        }
+        val base = baseUrl(pairing, "/api/calendar/rsvp") ?: return CalendarAnswer.Failed("Server URL is not valid")
+        val body = json.encodeToString(CalendarRsvpRequestDto(messageId, folder, index, answer.name))
+        val request = Request.Builder().url(base).post(oneShot(body.toRequestBody(JSON_MEDIA_TYPE)))
+            .authed(pairing)
+            .build()
+        return when (val outcome = execute(request) { code, raw -> MailOutcome.Success(calendarAnswer(code, raw)) }) {
+            is MailOutcome.Success -> outcome.value
+            // A network error; a pin mismatch or rate limit keeps its own wording.
+            is MailOutcome.UpstreamFailure -> CalendarAnswer.Failed(KYCALENDAR_UNREACHABLE)
+            else -> CalendarAnswer.Failed(outcome.userFacingMessage() ?: KYCALENDAR_UNREACHABLE)
+        }
+    }
+
     private fun <T> rateLimited(rawBody: String, retryAfter: String?): MailOutcome<T> =
         MailOutcome.RateLimited(
             message = rawBody.ifBlank { "Too many requests" },

@@ -1934,4 +1934,67 @@ class RelayMailSourceTest {
 
         assertEquals(listOf("/api/mail/send-pgp", "/api/mail/draft"), handed)
     }
+
+    @Test
+    fun answerInvite_postsThePartIndexAndNeverTheIcs() {
+        val calls = BodyRecordingCallFactory { request -> jsonResponse(request, """{"outcome":"answered"}""") }
+        val requests = mutableListOf<Request>()
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = Call.Factory { requests += it; calls.newCall(it) },
+        )
+
+        val answer = source.answerInvite("n1:abc/42", "INBOX", 3, Rsvp.TENTATIVE, source.currentAccount())
+
+        assertEquals(CalendarAnswer.Answered, answer)
+        assertEquals(listOf("https://relay.example.com/api/calendar/rsvp"), calls.urls)
+        assertEquals("POST", requests.single().method)
+        assertEquals("device-1", requests.single().header(HEADER_DEVICE_ID))
+        assertEquals("secret-1", requests.single().header(HEADER_DEVICE_SECRET))
+        // Exactly the four fields: no ics, no recurrenceId (always the series master).
+        assertEquals(
+            Json.parseToJsonElement("""{"messageId":"n1:abc/42","mailbox":"INBOX","index":3,"partstat":"TENTATIVE"}"""),
+            Json.parseToJsonElement(calls.bodies.single()),
+        )
+    }
+
+    @Test
+    fun answerInvite_mapsTheRelaysRefusals() {
+        fun answer(code: Int, body: String) = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { jsonResponse(it, body, code) },
+        ).answerInvite("m", "", 1, Rsvp.ACCEPTED, null)
+
+        assertEquals(CalendarAnswer.ByMail(noEvent = false), answer(409, """{"error":"KyCalendar is off","code":"kycalendar_off"}"""))
+        assertEquals(CalendarAnswer.ByMail(noEvent = true), answer(404, """{"error":"no event","code":"no_event"}"""))
+        assertEquals(CalendarAnswer.Conflict, answer(409, """{"error":"changed","code":"conflict"}"""))
+        assertEquals(CalendarAnswer.Failed("KyCalendar is unavailable"), answer(502, """{"error":"KyCalendar is unavailable","code":"kycalendar_unavailable"}"""))
+        // 429 is handled before the body: the wait is the one thing the user can act on.
+        val limited = answer(429, """{"error":"slow down","code":"rate_limited"}""")
+        assertTrue(limited is CalendarAnswer.Failed && limited.message.startsWith("Too many failed attempts"))
+    }
+
+    @Test
+    fun answerInvite_networkErrorIsShownAndNothingElseIsTried() {
+        val source = RelayMailSource(
+            pairingProvider = { testPairing() },
+            cursorProvider = FakeMailCursorProvider(),
+            callFactory = ThrowingCallFactory(java.io.IOException("timeout")),
+        )
+        assertEquals(CalendarAnswer.Failed(KYCALENDAR_UNREACHABLE), source.answerInvite("m", "", 1, Rsvp.DECLINED, null))
+    }
+
+    @Test
+    fun answerInvite_neverReachesAReplacementAccountsRelay() {
+        var pairing = testPairing()
+        val calls = BodyRecordingCallFactory { request -> jsonResponse(request, """{"outcome":"answered"}""") }
+        val source = RelayMailSource(pairingProvider = { pairing }, cursorProvider = FakeMailCursorProvider(), callFactory = calls)
+        val account = assertNotNullAccount(source.currentAccount())
+        pairing = testPairing().copy(subscriberId = "sub-2")
+
+        assertTrue(source.answerInvite("m", "", 1, Rsvp.ACCEPTED, account) is CalendarAnswer.Failed)
+        assertEquals(emptyList<String>(), calls.urls)
+    }
 }

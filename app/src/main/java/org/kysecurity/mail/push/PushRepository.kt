@@ -324,6 +324,9 @@ class PushRepository(
         step("mailSignature") {
             context.deleteSharedPreferences(org.kysecurity.mail.MailSignature.PREFS_NAME)
         }
+        step("inviteAnswers") {
+            context.deleteSharedPreferences(org.kysecurity.mail.mail.InviteAnswers.PREFS_NAME)
+        }
         // Scoping makes a stale value unreadable, not absent — these files must actually be deleted.
         // contacts_state is legacy: kept in this list so older installs do not keep the old file.
         listOf(

@@ -140,7 +140,7 @@ class CalendarRsvpTest {
         assertFalse(override("RECURRENCE-ID;TZID=Narnia:20261019T100000").canReply)
         assertFalse(override("RECURRENCE-ID:garbage").canReply)
         val badSequence = request.map { if (it.startsWith("SEQUENCE")) "SEQUENCE:99999999999" else it }
-        assertFalse(invite(*badSequence.toTypedArray()).offersRsvp("REQUEST"))
+        assertFalse(invite(*badSequence.toTypedArray()).offersRsvp(AttachmentInfo(1, "i.ics", "text/calendar", 9, "REQUEST")))
     }
 
     @Test
@@ -150,7 +150,7 @@ class CalendarRsvpTest {
         val lines = unfold(rsvpDraft(event, "me@example.com", Rsvp.ACCEPTED, now).calendarReply!!).split("\r\n")
         assertTrue("UID: event@example.com " in lines)
         // Blank is no UID at all.
-        assertFalse(invite(*request.filterNot { it.startsWith("UID") }.toTypedArray(), "UID:   ").offersRsvp("REQUEST"))
+        assertFalse(invite(*request.filterNot { it.startsWith("UID") }.toTypedArray(), "UID:   ").offersRsvp(AttachmentInfo(1, "i.ics", "text/calendar", 9, "REQUEST")))
     }
 
     @Test
@@ -286,15 +286,16 @@ class CalendarRsvpTest {
 
     @Test
     fun rsvpIsOfferedOnlyForAnAnswerableRequestFromANewEnoughRelay() {
-        assertTrue(invite(*request).offersRsvp("REQUEST"))
+        fun part(method: String) = AttachmentInfo(1, "invite.ics", "text/calendar", 100, method)
+        assertTrue(invite(*request).offersRsvp(part("REQUEST")))
         // An older relay lists no calendarMethod and would drop calendarReply.
-        assertFalse(invite(*request).offersRsvp(""))
-        assertFalse(invite(*request, method = "CANCEL").offersRsvp("CANCEL"))
-        assertFalse(invite(*request, method = "PUBLISH").offersRsvp("PUBLISH"))
+        assertFalse(invite(*request).offersRsvp(part("")))
+        assertFalse(invite(*request, method = "CANCEL").offersRsvp(part("CANCEL")))
+        assertFalse(invite(*request, method = "PUBLISH").offersRsvp(part("PUBLISH")))
         val noOrganizer = invite(*request.filterNot { it.startsWith("ORGANIZER") }.toTypedArray())
-        assertFalse(noOrganizer.offersRsvp("REQUEST"))
+        assertFalse(noOrganizer.offersRsvp(part("REQUEST")))
         val noUid = invite(*request.filterNot { it.startsWith("UID") }.toTypedArray())
-        assertFalse(noUid.offersRsvp("REQUEST"))
+        assertFalse(noUid.offersRsvp(part("REQUEST")))
     }
 
     @Test

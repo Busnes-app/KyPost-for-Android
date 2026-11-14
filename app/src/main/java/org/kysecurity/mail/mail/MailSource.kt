@@ -312,4 +312,8 @@ interface MailSource {
     fun fetchMessageBody(messageId: String, folder: String): MailOutcome<MailMessageBody>
     fun listAttachments(messageId: String, folder: String): MailOutcome<List<AttachmentInfo>>
     fun downloadAttachment(messageId: String, folder: String, index: Int): MailOutcome<DownloadedAttachment>
+
+    /** Answers the invitation in attachment [index] through KyCalendar. A non-null [account] is
+     *  checked as for [sendMail]; on a mismatch nothing is sent. */
+    fun answerInvite(messageId: String, folder: String, index: Int, answer: Rsvp, account: MailAccount?): CalendarAnswer
 }

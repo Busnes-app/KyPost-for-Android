@@ -61,7 +61,10 @@ Owns JVM unit tests for app logic that can run without device/emulator.
   scoping, the size and event caps, and malformed input. `CalendarHandoffTest` pins the
   `ACTION_INSERT` extras by their platform key strings. `CalendarRsvpTest` checks every REPLY
   against a port of KyPost-Server's `mailmsg.CalendarReply` rules (one METHOD:REPLY, one VEVENT,
-  no control chars, 75-octet lines); keep that port in step with the server.
+  no control chars, 75-octet lines); keep that port in step with the server. `KyCalendarRsvpTest`
+  covers every row of the KyCalendar "Respond" table (`docs/KYCALENDAR-RSVP.md`), the mail fallback
+  through `RsvpTracker`, and the three card states (update, CANCEL, `CONFERENCE` Join);
+  `RelayMailSourceTest` pins the `/api/calendar/rsvp` request body.
 - `CalendarInviteFuzzTest` (Java, so OpenSSF Scorecard detects it) is a Jazzer `@FuzzTest` over
   `parseCalendarInvite` and the REPLY that `rsvpDraft` builds from its output. Unit tests run on
   the JUnit Platform for it; JUnit 4 tests run on the vintage engine. A normal test run replays

@@ -689,7 +689,17 @@ Owns production Android app code and resources.
   event" tap during the body fetch waits for it (`BodyFetchGate`) rather than going out
   subject-only. The card is
   only as reliable as the relay's listing: invites appear only when `hasAttachments` is true.
-- RSVP (Accept/Maybe/Decline on the invite card) sends an RFC 5546 REPLY through
+- RSVP (Accept/Maybe/Decline on the invite card) answers through KyCalendar first, exactly as
+  the web client: `MailRepository.answerInvite` → `POST /api/calendar/rsvp` with the listed
+  part's `index`, `messageId`, folder and PARTSTAT, never the ics and never a `recurrenceId`.
+  The contract is `docs/KYCALENDAR-RSVP.md` (KyPost-Server `docs/NATIVE-RSVP.md`); `calendarAnswer`
+  maps it. Only `kycalendar_off` and `no_event` fall back to mail; every other answer (and a
+  network error) is shown and re-arms the buttons, and nothing is mailed. Deviation: a 404 with
+  no JSON body is a relay that predates the route and counts as `kycalendar_off`.
+  - The fallback is `RsvpPhase.CONFIRM_MAIL` in `RsvpTracker`; whichever screen shows the invite
+    asks, naming the reason ("KyCalendar is not in use for this mailbox" / "has no event for this
+    invitation"), and `confirmMail` lets exactly one confirmation send.
+- The mailed fallback sends an RFC 5546 REPLY through
   `MailRepository.send` with `MailDraft.calendarReply` → `/api/mail/send` `calendarReply.ics`
   (KyPost-Server #354), addressed to the ORGANIZER.
   - `rsvpDraft` copies UID and SEQUENCE, restates RECURRENCE-ID without TZID (the REPLY has no
@@ -698,22 +708,34 @@ Owns production Android app code and resources.
   - ATTENDEE is the `addresses` entry the invite lists, else the first; one that is not
     `accountAddress` (an alias) is also sent as `from`. No usable address means no RSVP.
   - **Always** unencrypted and unsigned (the relay 400s `calendarReply` beside either flag), so
-    each RSVP is confirmed in a dialog that says so. The draft never sets `sign`/`encrypt`.
-  - Buttons need the relay's `calendarMethod` (#353): an older relay ignores `calendarReply` and
-    would send plain mail. Only a 200 carrying `"calendarReply": true` (#354) is an RSVP
-    (`rsvpResult`). A 200 without it means the organizer got plain mail: the user is told to
-    update the server, the RSVP is not marked sent, and nothing is retried.
+    each mailed RSVP is confirmed in a dialog that says so. The draft never sets `sign`/`encrypt`.
+  - Buttons need the part listed as `text/calendar` with `calendarMethod` REQUEST (#353): an older
+    relay ignores `calendarReply` and would send plain mail. Only a 200 carrying
+    `"calendarReply": true` (#354) is an RSVP (`rsvpResult`). A 200 without it means the
+    organizer got plain mail: the user is told their calendar may not update, and nothing is retried.
   - A refusal shows the relay's reason; nothing else is sent instead. Only a definite refusal
     (`refusedBeforeSending`) re-arms the buttons; a timeout says "may have been sent".
-  - `RsvpTracker` (process-wide, keyed on UID + RECURRENCE-ID + SEQUENCE) owns RSVP state;
-    screens derive their buttons from its `phases` and a send never touches the Activity that
-    started it, so a rotation can neither double-send nor miss the outcome. A raised SEQUENCE
-    is answerable again. An unsure send stays locked across a rotation; a fresh open may retry.
-    The confirm captures `ProcessState.generation()` and `MailRepository.currentAccount()`.
-    `sendBoundRsvp` does no I/O once that session has ended, and `sendMail(draft, account)`
-    refuses a replaced pairing from the same read that authenticates the request (the
-    `MailAccount` shape of #155), so an old account's reply never reaches a new relay.
-    `RsvpTracker.complete` drops a completion from an ended session (no state, no toast).
+  - `RsvpTracker` (process-wide, keyed on UID + RECURRENCE-ID + SEQUENCE + DTSTAMP) owns RSVP state;
+    screens derive their buttons from its `phases` and an answer never touches the Activity that
+    started it, so a rotation can neither double-send nor miss the outcome. A raised SEQUENCE or
+    later DTSTAMP is answerable again. An unsure send stays locked across a rotation; a fresh open may retry.
+    Both the KyCalendar call and the mail capture `ProcessState.generation()` and
+    `MailRepository.currentAccount()`; `answerInvite` and `sendMail(draft, account)` refuse a
+    replaced pairing from the same read that authenticates the request (the `MailAccount` shape
+    of #155), so an old account's answer never reaches a new relay. `RsvpTracker.answered` and
+    `complete` drop a completion from an ended session (no state, no toast).
+- Invite card states (KyPost-Server #606). `InviteAnswers` remembers each answered revision as
+  SHA-256 digests only (no title, place, time, address or UID readable), at most 200; a newer
+  REQUEST (higher SEQUENCE, or equal SEQUENCE and later DTSTAMP) says which of time, place and
+  title changed and asks again. Its prefs file is deleted by the pairing purge and the Hostile
+  Location Protection enable path, and nothing is read or written while protection is on.
+  `record` runs off the main thread under `InviteAnswers.withWritesBlocked`'s lock, and the
+  enable path flips the flag and deletes the file inside that lock, so an answer finishing
+  mid-purge cannot recreate the file (`InviteAnswersTest`). A CANCEL
+  shows "Cancelled" and no answer buttons. The first `CONFERENCE` that is an `https:` URL with a
+  host and no credentials gets "Join meeting (host)", which goes through the same confirm as a
+  message link (`confirmOpenLink`) to the system browser; other schemes are ignored. The device
+  calendar actions ("Add to calendar", "Create event") are unchanged.
 - `pgp/deliverReadOutcome` owns completed attachment arrays inside the worker until rendering
   accepts them. Cancellation across the dispatcher return, render rejection, or a rendering
   exception wipes unadopted bytes; successful adoption transfers cleanup to the detail Activity.

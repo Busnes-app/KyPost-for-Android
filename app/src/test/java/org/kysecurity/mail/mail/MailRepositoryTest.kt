@@ -203,6 +203,7 @@ private class FakeMailSource(
     }
     override fun listAttachments(messageId: String, folder: String) = unsupported()
     override fun downloadAttachment(messageId: String, folder: String, index: Int) = unsupported()
+    override fun answerInvite(messageId: String, folder: String, index: Int, answer: Rsvp, account: MailAccount?) = unsupported()
 
     private fun unsupported(): Nothing = throw UnsupportedOperationException("not used by these tests")
 }
