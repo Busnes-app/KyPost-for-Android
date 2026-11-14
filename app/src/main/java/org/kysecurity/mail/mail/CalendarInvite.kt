@@ -1,5 +1,6 @@
 package org.kysecurity.mail.mail
 
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.time.DateTimeException
 import java.time.Instant
 import java.time.LocalDate
@@ -37,6 +38,10 @@ class CalendarEvent(
     val recurrenceId: String? = null,
     /** An iTIP REPLY needs a UID, an organizer, and a RECURRENCE-ID copied whole if there is one. */
     val canReply: Boolean = false,
+    /** DTSTAMP in UTC epoch milliseconds; 0 when absent or unreadable. */
+    val stamp: Long = 0,
+    /** The first CONFERENCE as an https URL without credentials (RFC 7986 §5.11); blank otherwise. */
+    val conference: String = "",
 ) {
     /** Redacted: the description is message content. */
     override fun toString(): String = "CalendarEvent(redacted)"
@@ -58,10 +63,12 @@ class CalendarInvite(
     /** Handing off a cancellation or someone's reply would add an event that is not happening. */
     val offersAdd: Boolean get() = method == "REQUEST" || method == "PUBLISH" || method.isBlank()
 
-    /** [listedMethod] is the relay's `calendarMethod` for the part (KyPost-Server #353). A relay
-     *  without it predates `calendarReply` (#354), ignores the field, and would deliver the RSVP
-     *  as plain mail, so it gets no buttons at all. */
-    fun offersRsvp(listedMethod: String): Boolean = method == "REQUEST" && primary.canReply && listedMethod.isNotEmpty()
+    /** [part] must be listed as `text/calendar` with `calendarMethod` REQUEST (KyPost-Server #353,
+     *  docs/NATIVE-RSVP.md). A relay without `calendarMethod` predates `calendarReply` (#354) and
+     *  would deliver the mailed RSVP as plain mail, so it gets no buttons at all. */
+    fun offersRsvp(part: AttachmentInfo): Boolean = method == "REQUEST" && primary.canReply &&
+        part.mimeType.substringBefore(';').trim().equals("text/calendar", ignoreCase = true) &&
+        part.calendarMethod == "REQUEST"
 }
 
 /** The listed part to download, or null. A text/calendar part (the iMIP body part) beats the
@@ -198,9 +205,25 @@ private fun toEvent(
             recurrenceId = recurrenceId,
             canReply = uid.isNotEmpty() && organizer.isNotEmpty() && sequence != null &&
                 (recurrence == null || recurrenceId != null),
+            stamp = props["DTSTAMP"]?.let(::utcStamp) ?: 0,
+            conference = props["CONFERENCE"]?.value?.let(::conferenceUrl).orEmpty(),
         ),
         isOverride = props.containsKey("RECURRENCE-ID"),
     )
+}
+
+/** DTSTAMP is UTC by definition (RFC 5545 §3.8.7.2); anything else reads as 0. */
+private fun utcStamp(line: ContentLine): Long {
+    val match = DATE_TIME.matchEntire(line.value.trim())?.takeIf { it.groupValues[2] == "Z" } ?: return 0
+    return runCatching { LocalDateTime.parse(match.groupValues[1], DATE_TIME_FORMAT).toInstant(ZoneOffset.UTC).toEpochMilli() }
+        .getOrDefault(0)
+}
+
+/** https only, with a host and no credentials; the card names the host on its Join button. */
+private fun conferenceUrl(value: String): String? {
+    val raw = value.trim().takeIf { it.length <= 2048 && it.none(Char::isISOControl) } ?: return null
+    val url = raw.toHttpUrlOrNull() ?: return null
+    return url.toString().takeIf { url.isHttps && url.host.isNotEmpty() && url.username.isEmpty() && url.password.isEmpty() }
 }
 
 /** The REPLY carries no VTIMEZONE, so a TZID cannot be copied: a date stays a date, a floating or

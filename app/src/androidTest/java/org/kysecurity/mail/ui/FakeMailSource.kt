@@ -124,4 +124,12 @@ internal class FakeMailSource : MailSource {
         MailOutcome.UpstreamFailure("test relay")
     override fun downloadAttachment(messageId: String, folder: String, index: Int): MailOutcome<DownloadedAttachment> =
         MailOutcome.UpstreamFailure("test relay")
+
+    override fun answerInvite(
+        messageId: String,
+        folder: String,
+        index: Int,
+        answer: org.kysecurity.mail.mail.Rsvp,
+        account: org.kysecurity.mail.mail.MailAccount?,
+    ) = org.kysecurity.mail.mail.CalendarAnswer.Failed("test relay")
 }

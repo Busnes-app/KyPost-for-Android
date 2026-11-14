@@ -39,7 +39,10 @@ private val PREFS_NAMES_RETAINED = setOf(
 )
 
 /** Plaintext mail metadata, no credentials; shared by the full wipe and the HLP enable path. */
-private val METADATA_PREFS_NAMES = listOf(org.kysecurity.mail.KeywordSettings.PREFS_NAME)
+private val METADATA_PREFS_NAMES = listOf(
+    org.kysecurity.mail.KeywordSettings.PREFS_NAME,
+    org.kysecurity.mail.mail.InviteAnswers.PREFS_NAME,
+)
 
 /** Listed in [PREFS_NAMES_RETAINED]: the wipe's own progress marker must outlive the wipe's own
  *  deletions, or an interruption erases the evidence that a wipe was ever started. */

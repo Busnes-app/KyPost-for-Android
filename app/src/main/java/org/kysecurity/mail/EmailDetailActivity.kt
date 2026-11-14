@@ -109,6 +109,11 @@ class EmailDetailActivity : LockedActivity() {
     private var rsvpDialog: android.app.Dialog? = null
     private var rsvpInviteKey: String? = null
 
+    /** The rendered invite and where it came from: `/api/calendar/rsvp` names the part, never the ics. */
+    private var rsvpEvent: CalendarEvent? = null
+    private var invitePart: InvitePart? = null
+    private var mailFallbackOffered = false
+
     /** False after a configuration change: an unsure RSVP stays locked across a rotation. */
     private var freshOpen = true
 
@@ -173,7 +178,12 @@ class EmailDetailActivity : LockedActivity() {
     override fun onCreateUnlocked(savedInstanceState: Bundle?) {
         freshOpen = savedInstanceState == null
         // Cancelled on destroy, so only the live screen repaints.
-        lifecycleScope.launch { rsvpTracker.phases.collect { applyRsvpButtons() } }
+        lifecycleScope.launch {
+            rsvpTracker.phases.collect {
+                applyRsvpButtons()
+                offerMailFallback()
+            }
+        }
         savedInstanceState?.let { state ->
             markReadSubmitted = state.getBoolean(STATE_MARK_READ_SUBMITTED, false)
             markReadSubmitCount = state.getInt(STATE_MARK_READ_COUNT, 0)
@@ -879,7 +889,7 @@ class EmailDetailActivity : LockedActivity() {
                 .getOrNull() ?: return@execute
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                renderInvite(invite, info.calendarMethod)
+                renderInvite(invite, InvitePart(emailId, emailFolder, info))
             }
         }
     }
@@ -893,7 +903,7 @@ class EmailDetailActivity : LockedActivity() {
     }
 
     /** Shows the invite; adding it is always the user's tap, never automatic. */
-    private fun renderInvite(invite: CalendarInvite, listedMethod: String) {
+    private fun renderInvite(invite: CalendarInvite, part: InvitePart) {
         val event = invite.primary
         findViewById<TextView>(R.id.inviteMethod).text = invite.method.takeIf { it.isNotEmpty() }
             ?.let { getString(R.string.invite_label_method, it) } ?: getString(R.string.invite_label)
@@ -904,6 +914,85 @@ class EmailDetailActivity : LockedActivity() {
             event.location.takeIf { it.isNotEmpty() }?.let { getString(R.string.invite_where, it) },
             event.organizer.takeIf { it.isNotEmpty() }?.let { getString(R.string.invite_organizer, it) },
         ).joinToString("\n")
+        findViewById<Button>(R.id.btnInviteJoin).apply {
+            val target = event.conference.takeUnless { invite.isCancelled }?.let(org.kysecurity.mail.mail::linkTargetOf)
+            visibility = if (target != null) View.VISIBLE else View.GONE
+            text = target?.let { getString(R.string.invite_join, it.host) }
+            // The same confirm as a message link: the meeting host is the sender's claim.
+            setOnClickListener { target?.let { confirmOpenLink(it.url.toString()) } }
+        }
+        findViewById<Button>(R.id.btnInviteAdd).apply {
+            visibility = if (invite.offersAdd) View.VISIBLE else View.GONE
+            setOnClickListener { handOffToCalendar(calendarInsertExtras(event)) }
+        }
+        findViewById<View>(R.id.inviteRsvpRow).visibility = if (invite.offersRsvp(part.info)) View.VISIBLE else View.GONE
+        findViewById<Button>(R.id.btnRsvpAccept).setOnClickListener { answerInvite(event, Rsvp.ACCEPTED) }
+        findViewById<Button>(R.id.btnRsvpTentative).setOnClickListener { answerInvite(event, Rsvp.TENTATIVE) }
+        findViewById<Button>(R.id.btnRsvpDecline).setOnClickListener { answerInvite(event, Rsvp.DECLINED) }
+        val key = org.kysecurity.mail.mail.rsvpKey(event).also { rsvpTracker.opened(it, freshOpen) }
+        rsvpInviteKey = key
+        rsvpEvent = event
+        invitePart = part
+        renderInviteNotes(invite, org.kysecurity.mail.mail.PriorAnswer.None)
+        applyRsvpButtons()
+        findViewById<View>(R.id.emailInviteCard).visibility = View.VISIBLE
+        applyInviteChrome()
+        if (invite.method == "REQUEST") {
+            lifecycleScope.launch {
+                val prior = priorAnswer(event)
+                if (rsvpInviteKey == key) renderInviteNotes(invite, prior)
+            }
+        }
+    }
+
+    /** What this device remembers answering for an earlier revision; None under Hostile Location Protection. */
+    private suspend fun priorAnswer(event: CalendarEvent): org.kysecurity.mail.mail.PriorAnswer {
+        val attendee = org.kysecurity.mail.mail.rsvpAttendee(event, ComposePgpController.from(this).accountAddresses())
+            ?: return org.kysecurity.mail.mail.PriorAnswer.None
+        return withContext(Dispatchers.IO) {
+            if (org.kysecurity.mail.security.SecurityRuntime.graph(this@EmailDetailActivity).hostileLocationSettings.isEnabled()) {
+                org.kysecurity.mail.mail.PriorAnswer.None
+            } else {
+                org.kysecurity.mail.mail.InviteAnswers.from(this@EmailDetailActivity).prior(event, attendee)
+            }
+        }
+    }
+
+    private fun answeredText(answer: Rsvp): String = getString(
+        when (answer) {
+            Rsvp.ACCEPTED -> R.string.invite_answered_accepted
+            Rsvp.TENTATIVE -> R.string.invite_answered_tentative
+            Rsvp.DECLINED -> R.string.invite_answered_declined
+        },
+    )
+
+    /** The status line (Cancelled, or what you answered) and the warnings. */
+    private fun renderInviteNotes(invite: CalendarInvite, prior: org.kysecurity.mail.mail.PriorAnswer) {
+        val event = invite.primary
+        val status = when {
+            invite.isCancelled -> getString(R.string.invite_status_cancelled)
+            prior is org.kysecurity.mail.mail.PriorAnswer.Same -> getString(R.string.invite_status_answered, answeredText(prior.answer))
+            else -> ""
+        }
+        findViewById<TextView>(R.id.inviteStatus).apply {
+            text = status
+            visibility = if (status.isEmpty()) View.GONE else View.VISIBLE
+        }
+        val changed = (prior as? org.kysecurity.mail.mail.PriorAnswer.Newer)?.let { newer ->
+            val words = newer.changed.map {
+                getString(
+                    when (it) {
+                        org.kysecurity.mail.mail.InviteChange.TIME -> R.string.invite_change_time
+                        org.kysecurity.mail.mail.InviteChange.PLACE -> R.string.invite_change_place
+                        org.kysecurity.mail.mail.InviteChange.TITLE -> R.string.invite_change_title
+                    },
+                )
+            }
+            val list = if (words.size <= 1) words.firstOrNull() else words.dropLast(1).joinToString(", ") + " " +
+                getString(R.string.invite_change_and) + " " + words.last()
+            if (list == null) getString(R.string.invite_changed_unspecified, answeredText(newer.answer))
+            else getString(R.string.invite_changed, list, answeredText(newer.answer))
+        }
         val notice = listOfNotNull(
             getString(R.string.invite_phishing).takeIf { phishingFlagged },
             // The organizer address is the sender's own claim; say when the From header disagrees.
@@ -911,55 +1000,106 @@ class EmailDetailActivity : LockedActivity() {
                 event.organizer.isNotEmpty() && !event.organizer.equals(extractAddress(senderHeader), ignoreCase = true)
             },
             getString(R.string.invite_cancelled).takeIf { invite.isCancelled },
-            getString(R.string.invite_updated).takeIf { invite.isUpdate },
+            changed ?: getString(R.string.invite_updated).takeIf { invite.isUpdate && prior == org.kysecurity.mail.mail.PriorAnswer.None },
             event.unknownZone?.let { getString(R.string.invite_unknown_zone, it) },
         ).joinToString("\n\n")
         findViewById<TextView>(R.id.inviteNotice).apply {
             text = notice
             visibility = if (notice.isEmpty()) View.GONE else View.VISIBLE
         }
-        findViewById<Button>(R.id.btnInviteAdd).apply {
-            visibility = if (invite.offersAdd) View.VISIBLE else View.GONE
-            setOnClickListener { handOffToCalendar(calendarInsertExtras(event)) }
-        }
-        findViewById<View>(R.id.inviteRsvpRow).visibility = if (invite.offersRsvp(listedMethod)) View.VISIBLE else View.GONE
-        findViewById<Button>(R.id.btnRsvpAccept).setOnClickListener { confirmRsvp(event, Rsvp.ACCEPTED) }
-        findViewById<Button>(R.id.btnRsvpTentative).setOnClickListener { confirmRsvp(event, Rsvp.TENTATIVE) }
-        findViewById<Button>(R.id.btnRsvpDecline).setOnClickListener { confirmRsvp(event, Rsvp.DECLINED) }
-        rsvpInviteKey = org.kysecurity.mail.mail.rsvpKey(event).also { rsvpTracker.opened(it, freshOpen) }
-        applyRsvpButtons()
-        findViewById<View>(R.id.emailInviteCard).visibility = View.VISIBLE
-        applyInviteChrome()
     }
 
     private fun rsvpButtons(): List<Button> =
         listOf(R.id.btnRsvpAccept, R.id.btnRsvpTentative, R.id.btnRsvpDecline).map { findViewById(it) }
 
-    /** From [rsvpTracker], so a send started by a screen a rotation destroyed still lands here. */
+    /** From [rsvpTracker], so an answer started by a screen a rotation destroyed still lands here. */
     private fun applyRsvpButtons() {
         val key = rsvpInviteKey ?: return
         rsvpButtons().forEach { it.isEnabled = rsvpTracker.canAnswer(key) }
     }
 
-    /** Asks before every RSVP: it is mail the user sends, and it always goes unencrypted. */
-    private fun confirmRsvp(event: CalendarEvent, answer: Rsvp) {
+    /** KyCalendar first (KyPost-Server docs/NATIVE-RSVP.md): nothing is mailed unless it says to,
+     *  and then only after [offerMailFallback]'s confirmation. */
+    private fun answerInvite(event: CalendarEvent, answer: Rsvp) {
+        val part = invitePart ?: return
         val key = org.kysecurity.mail.mail.rsvpKey(event)
-        // Process-wide, so a rotation mid-send cannot offer the same answer twice.
+        // Process-wide, so a rotation mid-answer cannot offer the same answer twice.
         if (!rsvpTracker.begin(key)) return
-        fun release() = rsvpTracker.cancel(key)
+        val session = ProcessState.generation()
+        lifecycleScope.launch {
+            var submitted = false
+            try {
+                val account = withContext(Dispatchers.IO) { mailRepository.currentAccount() }
+                if (account == null) {
+                    Toast.makeText(this@EmailDetailActivity, R.string.rsvp_no_address, Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                // Only to remember the answer; KyCalendar works out the attendee itself.
+                val attendee = org.kysecurity.mail.mail.rsvpAttendee(event, ComposePgpController.from(this@EmailDetailActivity).accountAddresses())
+                submitted = true
+                answerThroughKyCalendar(key, event, answer, part, account, attendee, session)
+            } finally {
+                if (!submitted) rsvpTracker.cancel(key)
+            }
+        }
+    }
+
+    /** On the mail executor, so leaving the screen does not lose the answer. */
+    private fun answerThroughKyCalendar(
+        key: String,
+        event: CalendarEvent,
+        answer: Rsvp,
+        part: InvitePart,
+        account: org.kysecurity.mail.mail.MailAccount,
+        attendee: String?,
+        session: Long,
+    ) {
+        val appContext = applicationContext
+        MailBackgroundExecutor.submit {
+            if (!ProcessState.isCurrent(session)) return@submit
+            val result = runCatching { mailRepository.answerInvite(part.messageId, part.folder, part.info.index, answer, account) }
+                .getOrElse { org.kysecurity.mail.mail.CalendarAnswer.Failed(org.kysecurity.mail.mail.KYCALENDAR_UNREACHABLE) }
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                // Never this Activity: the current one observes the tracker, and shows the mail
+                // confirmation itself on a fallback.
+                if (!rsvpTracker.answered(key, result, answer, session)) return@post
+                val message = when (result) {
+                    org.kysecurity.mail.mail.CalendarAnswer.Answered -> {
+                        attendee?.let { rememberAnswer(appContext, event, it, answer) }
+                        appContext.getString(R.string.rsvp_kycalendar_answered)
+                    }
+                    org.kysecurity.mail.mail.CalendarAnswer.Conflict -> appContext.getString(R.string.rsvp_kycalendar_conflict)
+                    is org.kysecurity.mail.mail.CalendarAnswer.Failed -> appContext.getString(R.string.rsvp_kycalendar_failed, result.message)
+                    is org.kysecurity.mail.mail.CalendarAnswer.ByMail -> return@post
+                }
+                Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    /** KyCalendar said to answer by mail: ask first, on whichever screen shows this invite now. */
+    private fun offerMailFallback() {
+        val key = rsvpInviteKey ?: return
+        val event = rsvpEvent ?: return
+        val fallback = rsvpTracker.phases.value[key]?.takeIf { it.phase == org.kysecurity.mail.mail.RsvpPhase.CONFIRM_MAIL }?.fallback
+        if (fallback == null || mailFallbackOffered) return
+        mailFallbackOffered = true
         lifecycleScope.launch {
             var dialogOwnsKey = false
             try {
-                dialogOwnsKey = showRsvpDialog(event, answer, key, ::release)
+                dialogOwnsKey = showRsvpDialog(event, fallback, key)
             } finally {
                 // No address, or a rotation cancelled the lookup: nothing is pending any more.
-                if (!dialogOwnsKey) release()
+                if (!dialogOwnsKey) {
+                    mailFallbackOffered = false
+                    rsvpTracker.cancel(key)
+                }
             }
         }
     }
 
     /** True once the dialog is up; from then on its dismiss listener owns [key]. */
-    private suspend fun showRsvpDialog(event: CalendarEvent, answer: Rsvp, key: String, release: () -> Unit): Boolean {
+    private suspend fun showRsvpDialog(event: CalendarEvent, fallback: org.kysecurity.mail.mail.MailFallback, key: String): Boolean {
         // The send is bound to the session and account it is confirmed under, read before the
         // addresses: a later pairing must never receive this account's reply.
         val session = ProcessState.generation()
@@ -976,30 +1116,41 @@ class EmailDetailActivity : LockedActivity() {
         val warning = getString(R.string.rsvp_confirm_not_sender).takeUnless {
             event.organizer.equals(extractAddress(senderHeader), ignoreCase = true)
         }
+        val reason = getString(if (fallback.noEvent) R.string.rsvp_mail_reason_no_event else R.string.rsvp_mail_reason_off)
+        val answer = fallback.answer
         var sending = false
         rsvpDialog = androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle(R.string.rsvp_confirm_title)
             .setMessage(
                 listOfNotNull(
-                    getString(R.string.rsvp_confirm_message, answer.subjectPrefix, event.organizer, attendee),
+                    getString(R.string.rsvp_confirm_message, reason, event.organizer, answer.subjectPrefix, attendee),
                     warning,
                 ).joinToString("\n\n"),
             )
             .setPositiveButton(R.string.rsvp_send) { _, _ ->
+                if (!rsvpTracker.confirmMail(key)) return@setPositiveButton
                 sending = true
-                sendRsvp(key, org.kysecurity.mail.mail.rsvpDraft(event, attendee, answer, java.time.Instant.now(), sendAs), account, session)
+                val draft = org.kysecurity.mail.mail.rsvpDraft(event, attendee, answer, java.time.Instant.now(), sendAs)
+                sendRsvp(key, draft, account, session) { rememberAnswer(applicationContext, event, attendee, answer) }
             }
             .setNegativeButton(android.R.string.cancel, null)
             .setOnDismissListener {
                 rsvpDialog = null
-                if (!sending) release()
+                mailFallbackOffered = false
+                if (!sending) rsvpTracker.cancel(key)
             }
             .showThemed()
         return true
     }
 
     /** On the mail executor, so leaving the screen does not cancel a reply already on its way. */
-    private fun sendRsvp(key: String, draft: MailDraft, account: org.kysecurity.mail.mail.MailAccount, session: Long) {
+    private fun sendRsvp(
+        key: String,
+        draft: MailDraft,
+        account: org.kysecurity.mail.mail.MailAccount,
+        session: Long,
+        onDelivered: () -> Unit,
+    ) {
         val appContext = applicationContext
         MailBackgroundExecutor.submit {
             val outcome = runCatching { org.kysecurity.mail.mail.sendBoundRsvp(draft, account, session, mailRepository::send) }
@@ -1013,10 +1164,13 @@ class EmailDetailActivity : LockedActivity() {
                 if (!rsvpTracker.complete(key, result, session)) return@post
                 val reason = outcome.userFacingMessage().orEmpty()
                 val message = when (result) {
-                    org.kysecurity.mail.mail.RsvpResult.SENT -> appContext.getString(R.string.rsvp_sent)
+                    org.kysecurity.mail.mail.RsvpResult.SENT -> appContext.getString(R.string.rsvp_sent, draft.to)
                     org.kysecurity.mail.mail.RsvpResult.SENT_AS_PLAIN_MAIL -> appContext.getString(R.string.rsvp_sent_as_plain_mail)
                     org.kysecurity.mail.mail.RsvpResult.REFUSED -> appContext.getString(R.string.rsvp_failed, reason)
                     org.kysecurity.mail.mail.RsvpResult.MAYBE_SENT -> appContext.getString(R.string.rsvp_maybe_sent, reason)
+                }
+                if (result == org.kysecurity.mail.mail.RsvpResult.SENT || result == org.kysecurity.mail.mail.RsvpResult.SENT_AS_PLAIN_MAIL) {
+                    onDelivered()
                 }
                 Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
             }
@@ -1541,6 +1695,16 @@ class EmailDetailActivity : LockedActivity() {
         private const val TAG = "EmailDetailActivity"
 
         private val rsvpTracker = org.kysecurity.mail.mail.RsvpTracker()
+
+        /** Remembers the answered revision as digests, so a later update can say what changed.
+         *  Nothing is kept under Hostile Location Protection. */
+        private fun rememberAnswer(context: android.content.Context, event: CalendarEvent, attendee: String, answer: Rsvp) {
+            runCatching {
+                if (!org.kysecurity.mail.security.SecurityRuntime.graph(context).hostileLocationSettings.isEnabled()) {
+                    org.kysecurity.mail.mail.InviteAnswers.from(context).record(event, attendee, answer, System.currentTimeMillis())
+                }
+            }.onFailure { android.util.Log.w(TAG, "Answer not remembered", it) }
+        }
 
         init {
             ProcessState.register(this)
@@ -2128,3 +2292,6 @@ internal fun stripImportant(html: String): String {
     }
     return if (changed) doc.body().html() else html
 }
+
+/** The listed invitation part and the message that holds it. */
+private class InvitePart(val messageId: String, val folder: String, val info: AttachmentInfo)

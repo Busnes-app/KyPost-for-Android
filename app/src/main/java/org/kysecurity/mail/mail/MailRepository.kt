@@ -375,6 +375,9 @@ class MailRepository(
     fun downloadAttachment(id: String, folder: String, index: Int): MailOutcome<DownloadedAttachment> =
         relaySource.downloadAttachment(id, folder, index)
 
+    fun answerInvite(id: String, folder: String, index: Int, answer: Rsvp, account: MailAccount?): CalendarAnswer =
+        relaySource.answerInvite(id, folder, index, answer, account)
+
     /** Room caches the bodies that were opened, not the whole window: the inbox is fetched with
      *  `bodies=0`, so a row arrives with metadata and no body, and the body is fetched on open.
      *
