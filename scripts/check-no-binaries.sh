@@ -12,7 +12,7 @@ excludes=(
   # Gradle wrapper bootstrap that gradlew runs; CI checks it with gradle/actions/wrapper-validation.
   ':!gradle/wrapper/gradle-wrapper.jar'
 )
-found=$(git ls-files -z -- . ${excludes[@]+"${excludes[@]}"} | xargs -0 -r file --mime-type | grep -E "$types" || true)
+found=$(git ls-files -z -- . ${excludes[@]+"${excludes[@]}"} | xargs -0 -r file --mime-type -- | grep -E "$types" || true)
 named=$(git ls-files -- "${archives[@]}" ${excludes[@]+"${excludes[@]}"})
 if [ -n "$found$named" ]; then
   echo "Compiled binaries are tracked; build them from source instead:" >&2
