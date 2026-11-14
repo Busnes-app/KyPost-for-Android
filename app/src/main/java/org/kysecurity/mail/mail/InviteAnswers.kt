@@ -19,17 +19,24 @@ sealed interface PriorAnswer {
 /** The answered revision of each invite (KyPost-Server docs/NATIVE-RSVP.md "Updates"), as the web
  *  client keeps it: digests only, no title, place, time, address or UID stored readable.
  *  Account-scoped: the pairing purge deletes the file, and nothing is kept under Hostile Location
- *  Protection (its enable path deletes the file too). */
+ *  Protection: its enable path turns protection on and deletes the file inside [withWritesBlocked]. */
 class InviteAnswers(private val prefs: SharedPreferences) {
-    fun record(event: CalendarEvent, attendee: String, answer: Rsvp, now: Long) {
-        val all = prefs.all
-        val editor = prefs.edit().putString(answerKey(event, attendee), answerRecord(event, answer, now))
-        // Oldest first past the cap; the key being written is already counted.
-        all.entries.sortedBy { (it.value as? String)?.substringAfterLast('|')?.toLongOrNull() ?: 0 }
-            .take((all.size + 1 - MAX_ANSWERS).coerceAtLeast(0))
-            .forEach { editor.remove(it.key) }
-        editor.apply()
-    }
+    /** Writes, synchronously, unless [protectionOn]; checked under the same lock as the enable
+     *  path, so a late answer can neither outlive the purge nor land after it. Not on the main thread. */
+    fun record(event: CalendarEvent, attendee: String, answer: Rsvp, now: Long, protectionOn: () -> Boolean) =
+        synchronized(LOCK) {
+            if (protectionOn()) return@synchronized
+            val key = answerKey(event, attendee)
+            val all = prefs.all
+            val editor = prefs.edit().putString(key, answerRecord(event, answer, now))
+            // Oldest first past the cap; the key being written counts unless it is already there.
+            val excess = all.size + (if (key in all) 0 else 1) - MAX_ANSWERS
+            all.entries.filter { it.key != key }
+                .sortedBy { (it.value as? String)?.substringAfterLast('|')?.toLongOrNull() ?: 0 }
+                .take(excess.coerceAtLeast(0))
+                .forEach { editor.remove(it.key) }
+            editor.commit()
+        }
 
     fun prior(event: CalendarEvent, attendee: String): PriorAnswer =
         priorAnswer(event, prefs.getString(answerKey(event, attendee), null))
@@ -37,6 +44,11 @@ class InviteAnswers(private val prefs: SharedPreferences) {
     companion object {
         const val PREFS_NAME = "org.kysecurity.mail.invite_answers"
         internal const val MAX_ANSWERS = 200
+        private val LOCK = Any()
+
+        /** Runs [block] with every [record] held off; the enable path flips protection and
+         *  deletes the file in here. */
+        fun <T> withWritesBlocked(block: () -> T): T = synchronized(LOCK, block)
 
         fun from(context: Context) = InviteAnswers(context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE))
     }

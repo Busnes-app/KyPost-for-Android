@@ -604,7 +604,19 @@ class SecuritySettingsActivity : LockedActivity() {
                     // Before the flag flips: an interruption must not leave a readable envelope.
                     tearDownEnrollmentForHostileLocation(this@SecuritySettingsActivity)
                 }
-                settings.setEnabled(enable)
+                if (enable) {
+                    // An RSVP finishing during the purge above may have written answer history
+                    // again. Flip and delete under its lock: no later write passes the flag.
+                    org.kysecurity.mail.mail.InviteAnswers.withWritesBlocked {
+                        settings.setEnabled(true)
+                        // False only when the file is still there.
+                        check(deleteSharedPreferences(org.kysecurity.mail.mail.InviteAnswers.PREFS_NAME)) {
+                            "invite answer history still exists"
+                        }
+                    }
+                } else {
+                    settings.setEnabled(false)
+                }
                 },
             )
         }

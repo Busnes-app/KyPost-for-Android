@@ -728,7 +728,10 @@ Owns production Android app code and resources.
   SHA-256 digests only (no title, place, time, address or UID readable), at most 200; a newer
   REQUEST (higher SEQUENCE, or equal SEQUENCE and later DTSTAMP) says which of time, place and
   title changed and asks again. Its prefs file is deleted by the pairing purge and the Hostile
-  Location Protection enable path, and nothing is read or written while protection is on. A CANCEL
+  Location Protection enable path, and nothing is read or written while protection is on.
+  `record` runs off the main thread under `InviteAnswers.withWritesBlocked`'s lock, and the
+  enable path flips the flag and deletes the file inside that lock, so an answer finishing
+  mid-purge cannot recreate the file (`InviteAnswersTest`). A CANCEL
   shows "Cancelled" and no answer buttons. The first `CONFERENCE` that is an `https:` URL with a
   host and no credentials gets "Join meeting (host)", which goes through the same confirm as a
   message link (`confirmOpenLink`) to the system browser; other schemes are ignored. The device

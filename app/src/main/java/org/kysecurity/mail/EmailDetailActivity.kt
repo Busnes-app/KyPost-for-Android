@@ -1698,13 +1698,16 @@ class EmailDetailActivity : LockedActivity() {
         private val rsvpTracker = org.kysecurity.mail.mail.RsvpTracker()
 
         /** Remembers the answered revision as digests, so a later update can say what changed.
-         *  Nothing is kept under Hostile Location Protection. */
+         *  Nothing is kept under Hostile Location Protection. Off the main thread: the write waits
+         *  out a protection change. */
         private fun rememberAnswer(context: android.content.Context, event: CalendarEvent, attendee: String, answer: Rsvp) {
-            runCatching {
-                if (!org.kysecurity.mail.security.SecurityRuntime.graph(context).hostileLocationSettings.isEnabled()) {
-                    org.kysecurity.mail.mail.InviteAnswers.from(context).record(event, attendee, answer, System.currentTimeMillis())
-                }
-            }.onFailure { android.util.Log.w(TAG, "Answer not remembered", it) }
+            val settings = org.kysecurity.mail.security.SecurityRuntime.graph(context).hostileLocationSettings
+            MailBackgroundExecutor.submit {
+                runCatching {
+                    org.kysecurity.mail.mail.InviteAnswers.from(context)
+                        .record(event, attendee, answer, System.currentTimeMillis(), settings::isEnabled)
+                }.onFailure { android.util.Log.w(TAG, "Answer not remembered", it) }
+            }
         }
 
         init {
