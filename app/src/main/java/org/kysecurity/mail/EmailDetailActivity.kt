@@ -915,7 +915,7 @@ class EmailDetailActivity : LockedActivity() {
             event.organizer.takeIf { it.isNotEmpty() }?.let { getString(R.string.invite_organizer, it) },
         ).joinToString("\n")
         findViewById<Button>(R.id.btnInviteJoin).apply {
-            val target = event.conference.takeUnless { invite.isCancelled }?.let(org.kysecurity.mail.mail::linkTargetOf)
+            val target = event.conference.takeUnless { invite.isCancelled }?.let { org.kysecurity.mail.mail.linkTargetOf(it) }
             visibility = if (target != null) View.VISIBLE else View.GONE
             text = target?.let { getString(R.string.invite_join, it.host) }
             // The same confirm as a message link: the meeting host is the sender's claim.
@@ -1182,6 +1182,7 @@ class EmailDetailActivity : LockedActivity() {
         applySectionEyebrowLabel(this, findViewById(R.id.inviteMethod))
         applyWarningCalloutTheme(this, findViewById(R.id.inviteNotice))
         applyPrimaryButtonTheme(this, findViewById(R.id.btnInviteAdd))
+        applyPrimaryButtonTheme(this, findViewById(R.id.btnInviteJoin))
         rsvpButtons().forEach { applyGhostButtonTheme(this, it) }
     }
 
