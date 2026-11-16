@@ -68,6 +68,11 @@ private const val WARNING_DARK = "#ffd25e"
 private const val SUCCESS_LIGHT = "#267442"
 private const val SUCCESS_DARK = "#86efac"
 
+// Swipe-to-delete reveal fill. A true red is too close to the Busnes rust accent for the text
+// gate, but this fill only appears behind a trash icon mid-swipe, so it needs icon contrast only.
+internal const val SWIPE_DELETE_LIGHT = "#c62828"
+internal const val SWIPE_DELETE_DARK = "#d93036"
+
 /** `--ky-*-soft`: the status mixed this far into `panel`. */
 internal const val STATUS_SOFT_PERCENT = 12
 
@@ -1018,6 +1023,9 @@ internal fun readableOn(backgroundColor: Int): Int {
 
 /** True for the app's dark themes; [EmailDetailActivity] uses it to override email HTML colors. */
 internal fun isDarkPalette(palette: ThemePalette): Boolean = readableOn(Color.parseColor(palette.bg)) == Color.WHITE
+
+internal fun swipeDeleteFill(palette: ThemePalette): String =
+    if (isDarkPalette(palette)) SWIPE_DELETE_DARK else SWIPE_DELETE_LIGHT
 
 private fun isNearWhite(color: Int): Boolean {
     return Color.red(color) > 235 && Color.green(color) > 235 && Color.blue(color) > 235
