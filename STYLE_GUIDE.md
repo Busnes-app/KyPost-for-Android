@@ -143,10 +143,10 @@ the equivalent iOS (`Presentation/Components/`) and Linux (`app/qml/components/`
 - **Snackbar** — transient messages only: `panel` slab, `inkStrong` text, `accent` action
   (`applySnackbarTheme`). A state that holds until the user acts (Compose's "Send is off") is
   an inline notice in the warning or danger tone instead (`applyWarningNoticeTheme`).
-- **Swipe-to-archive/delete on list rows** — doesn't exist yet on *any* platform's inbox
-  list. If/when swipe gestures are added, use `ItemTouchHelper` on Android with the same
-  red=delete / yellow=archive reveal coloring as the other platforms. Not required now —
-  noted so it isn't accidentally built with mismatched colors later.
+- **Swipe-to-archive/delete on list rows** — `ItemTouchHelper` in `InboxActivity`. Archive
+  reveals the half's `warning`. Delete reveals a true red (`swipeDeleteFill`: `#c62828` light,
+  `#d93036` dark), not the `danger` token: the gate forces `danger` toward magenta/pink, and this
+  fill holds only a white trash icon, so it needs 3:1 icon contrast, not text contrast.
 
 ## 5. Motion
 
