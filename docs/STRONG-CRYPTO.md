@@ -17,6 +17,7 @@ Nothing below needs configuring. Every row is what the app produces or accepts o
 | Use | Algorithms and sizes | Where |
 |---|---|---|
 | TLS, every connection the app opens (relay API, pairing, KyIdentity sign-on, push register/pull, MFA, contacts, mail, OpenPGP payloads, wipe deregistration) | TLS 1.3 and 1.2 only. ECDHE key exchange with AES-GCM or ChaCha20-Poly1305 only (OkHttp `RESTRICTED_TLS`): no CBC, 3DES, RC4, static-RSA key exchange or SHA-1 MAC. Every certificate on the platform-validated path, anchor included, has RSA >= 2048 or EC >= 256 bits; every certificate below the anchor is signed with SHA-256/384/512 (RSA PKCS#1 or ECDSA). Platform trust (system anchors only), hostname checks, and the leaf SPKI pin after pairing all still apply. | `PairingAuthHeaders.kt` (`basePairingClient`), `security/StrongTls.kt`, `res/xml/network_security_config.xml` |
+| KyIdentity sign-on token binding (`kypost-signon-pop/1`) | Ephemeral P-256 key per attempt (software JCA, never stored); its SPKI SHA-256 goes into the ID token via KyAuth, and the relay requires an ECDSA P-256 / SHA-256 signature over the relay origin and the token's SHA-256. | `signon/SignOnProof.kt` |
 | New OpenPGP messages, drafts and Sent copies | AES-256, integrity-protected (SEIPD v1 with MDC), ZIP compression, SHA-256 signatures. Every recipient key and the signing key: RSA >= 2048, or ECDH/ECDSA/EdDSA/X25519/X448/Ed25519/Ed448 >= 224 bits, with a SHA-2/SHA-3 subkey binding. Any weak recipient refuses the whole send. | `pgp/PgpEncryptor.kt`, `pgp/PgpStrengthPolicy.kt` |
 | OpenPGP keys | Not generated on the device. They arrive by enrollment (below); ECDH keys whose KDF is below SHA-256 or whose key wrap is not AES/Camellia do not parse (Bouncy Castle). | `pgp/KeyringImport.kt`, `pgp/PgpKeyring.kt` |
 | OpenPGP signature trust | Only SHA-256/384/512 and SHA3-256/512 signatures from keys meeting the key floor can earn a badge; anything else is shown as **Signature not checked**. | `pgp/PgpDecryptor.kt`, `pgp/SignerBinding.kt` |
@@ -120,5 +121,8 @@ Owned by someone else, so not claimed here:
 - `app/src/test/.../pgp/PgpStrengthPolicyTest.kt`: new messages read back as AES-256, integrity
   protected, SHA-256 signed; legacy ciphers open by default and close when strict; single DES is
   always refused; short decryption keys are refused when strict without touching the key.
+- `app/src/test/.../signon/SignOnProofTest.kt`: the spec's golden vector (thumb, exact message
+  bytes, recorded signature verifies) and a fresh-key round trip; `KyIdentitySignOnClientTest` pins
+  the `{idToken, proofKey, proof}` request and verifies the sent proof.
 - `scripts/strong-crypto-negative-controls.sh`: removes each guard in turn and requires the tests
   above to fail.

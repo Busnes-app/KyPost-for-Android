@@ -16,6 +16,7 @@ import org.kysecurity.mail.push.NativePairingDeepLinkParser
 import org.kysecurity.mail.push.PairingParseResult
 import org.kysecurity.mail.push.pairingEndpoint
 import org.kysecurity.mail.push.pairingUrlHost
+import java.security.KeyPair
 
 data class SignOnConfig(val issuerUrl: String, val clientId: String)
 
@@ -34,7 +35,11 @@ private data class SsoConfigResponse(
 }
 
 @Serializable
-internal data class SignOnRequest(@SerialName("idToken") val idToken: String) {
+internal data class SignOnRequest(
+    @SerialName("idToken") val idToken: String,
+    @SerialName("proofKey") val proofKey: String,
+    @SerialName("proof") val proof: String,
+) {
     override fun toString(): String = "SignOnRequest(redacted)"
 }
 
@@ -71,12 +76,14 @@ class KyIdentitySignOnClient(
         return SignOnConfigResult.Ready(SignOnConfig(body.issuerUrl.trimEnd('/'), body.clientId))
     }
 
-    suspend fun signOn(serverUrl: String, idToken: String): PairingParseResult {
+    /** [keyPair] is the attempt's key whose thumb went to KyAuth; [origin] is the same `relayOrigin` sent there. */
+    suspend fun signOn(serverUrl: String, origin: String, idToken: String, keyPair: KeyPair): PairingParseResult {
         val endpoint = pairingEndpoint(serverUrl, "/api/auth/native/signon")
             ?: return PairingParseResult.Error("Server URL must use https")
+        val signOn = SignOnRequest(idToken, SignOnProof.proofKey(keyPair.public), SignOnProof.sign(keyPair, origin, idToken))
         val request = Request.Builder()
             .url(endpoint)
-            .post(json.encodeToString(SignOnRequest(idToken)).toRequestBody("application/json".toMediaType()))
+            .post(json.encodeToString(signOn).toRequestBody("application/json".toMediaType()))
             .build()
         val result = withContext(Dispatchers.IO) {
             callFactory.executeSync(request, ::readBounded)
