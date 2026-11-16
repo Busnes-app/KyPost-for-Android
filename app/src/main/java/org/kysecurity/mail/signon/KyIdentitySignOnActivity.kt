@@ -26,12 +26,13 @@ import org.kysecurity.mail.pairingHttpClient
 import org.kysecurity.mail.push.PairingParseResult
 import org.kysecurity.mail.push.PushPairingActivity
 import org.kysecurity.mail.security.LockedActivity
+import java.security.KeyPair
 
 /**
  * Pairs through the KyIdentity account KyAuth publishes: read the relay's SSO config, get an ID
  * token from AccountManager (KyAuth prompts), swap it for a pairing deep link, then hand that link
  * to the ordinary pairing flow so registration, TLS pinning and secret storage stay unchanged.
- * The ID token lives in a local for one call; it is never stored or logged.
+ * The ID token and the attempt's proof key pair live in locals for one call; neither is stored or logged.
  */
 class KyIdentitySignOnActivity : LockedActivity() {
     private lateinit var button: Button
@@ -141,9 +142,14 @@ class KyIdentitySignOnActivity : LockedActivity() {
         // App scope: the app lock may destroy this activity while KyAuth's prompt is up.
         val app = application as KyPostApp
         app.appScope.launch {
+            val keyPair = SignOnProof.newKeyPair()
+            val options = Bundle().apply {
+                putString(KyIdentitySignOn.OPTION_ORIGIN, origin)
+                putString(KyIdentitySignOn.OPTION_CNF, SignOnProof.thumb(keyPair.public))
+            }
             val token = runCatching {
                 am.getAuthToken(
-                    account, config.clientId, Bundle().apply { putString(KyIdentitySignOn.OPTION_ORIGIN, origin) },
+                    account, config.clientId, options,
                     this@KyIdentitySignOnActivity, null, null,
                 )
                     .result.getString(AccountManager.KEY_AUTHTOKEN)
@@ -158,7 +164,7 @@ class KyIdentitySignOnActivity : LockedActivity() {
                 }
             }.onSuccess { idToken ->
                 if (idToken.isNullOrBlank()) finishWorking(getString(R.string.kyidentity_signon_no_token))
-                else exchange(server, idToken)
+                else exchange(server, origin, idToken, keyPair)
             }
         }
     }
@@ -170,9 +176,9 @@ class KyIdentitySignOnActivity : LockedActivity() {
         if (message != null) status.text = message
     }
 
-    private suspend fun exchange(server: String, idToken: String) {
+    private suspend fun exchange(server: String, origin: String, idToken: String, keyPair: KeyPair) {
         val result = KyIdentitySignOnClient(pairingHttpClient(PinPosture.TofuWindow, 15_000))
-            .signOn(server, idToken)
+            .signOn(server, origin, idToken, keyPair)
         when (result) {
             is PairingParseResult.Error -> finishWorking(result.reason)
             is PairingParseResult.Success -> withContext(Dispatchers.Main) {

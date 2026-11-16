@@ -1,6 +1,9 @@
 package org.kysecurity.mail.signon
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -8,9 +11,13 @@ import org.kysecurity.mail.push.PairingParseResult
 import org.kysecurity.mail.testing.BodyRecordingCallFactory
 import org.kysecurity.mail.testing.FakeCallFactory
 import org.kysecurity.mail.testing.response
+import java.security.Signature
+import java.util.Base64
 
 class KyIdentitySignOnClientTest {
     private val server = "https://mail.example.com"
+    private val origin = "https://mail.example.com"
+    private val keys = SignOnProof.newKeyPair()
 
     @Test
     fun config_ready() = runBlocking {
@@ -39,24 +46,34 @@ class KyIdentitySignOnClientTest {
     fun signOn_parsesDeepLink() = runBlocking {
         val link = "kypost://native-pair?sub=s1&srv=https%3A%2F%2Fmail.example.com&reg=https%3A%2F%2Fmail.example.com%2Fapi%2Fnotifications%2Fnative%2Fregister&pt=tok"
         val factory = BodyRecordingCallFactory { req -> response(req, """{"configured":true,"deepLink":"$link"}""", 200) }
-        val r = KyIdentitySignOnClient(factory).signOn(server, "eyJ.a.b") as PairingParseResult.Success
+        val r = KyIdentitySignOnClient(factory).signOn(server, origin, "eyJ.a.b", keys) as PairingParseResult.Success
         assertEquals("tok", r.pairing.pairingToken)
         assertEquals("$server/api/auth/native/signon", factory.requests.single().url.toString())
-        assertEquals("""{"idToken":"eyJ.a.b"}""", factory.bodies.single())
+        val sent = Json.parseToJsonElement(factory.bodies.single()).jsonObject
+        assertEquals(setOf("idToken", "proofKey", "proof"), sent.keys)
+        assertEquals("eyJ.a.b", sent["idToken"]!!.jsonPrimitive.content)
+        assertEquals(SignOnProof.proofKey(keys.public), sent["proofKey"]!!.jsonPrimitive.content)
+        val verifier = Signature.getInstance("SHA256withECDSA").apply {
+            initVerify(keys.public)
+            update(SignOnProof.message(origin, "eyJ.a.b"))
+        }
+        assertTrue(verifier.verify(Base64.getDecoder().decode(sent["proof"]!!.jsonPrimitive.content)))
     }
 
     @Test
     fun signOn_mapsStatuses() = runBlocking {
-        suspend fun at(code: Int, body: String = "") = KyIdentitySignOnClient(FakeCallFactory { req -> response(req, body, code) }).signOn(server, "t") as PairingParseResult.Error
+        suspend fun at(code: Int, body: String = "") = KyIdentitySignOnClient(FakeCallFactory { req -> response(req, body, code) }).signOn(server, origin, "t", keys) as PairingParseResult.Error
         assertTrue(at(503).reason.contains("mail.example.com"))
         assertTrue(at(403, "Access denied: this token was already used.").reason.contains("already used"))
+        assertEquals("Access denied: the sign-in proof does not match.", at(403, "Access denied: the sign-in proof does not match.\n").reason)
+        assertEquals("Update KyAuth and KyIdentity to sign in from this app.", at(403, "Update KyAuth and KyIdentity to sign in from this app.").reason)
         assertTrue(at(429).reason.contains("Try again"))
         assertTrue(at(200, """{"configured":false,"configurationError":"set PAIRING_SECRET"}""").reason.contains("PAIRING_SECRET"))
     }
 
     @Test
     fun signOn_refusalTextIsSanitised() = runBlocking {
-        suspend fun at(body: String) = (KyIdentitySignOnClient(FakeCallFactory { req -> response(req, body, 403) }).signOn(server, "t") as PairingParseResult.Error).reason
+        suspend fun at(body: String) = (KyIdentitySignOnClient(FakeCallFactory { req -> response(req, body, 403) }).signOn(server, origin, "t", keys) as PairingParseResult.Error).reason
         assertEquals("KyIdentity sign-in was refused", at("<html><body>Blocked by WAF</body></html>"))
         val long = "Access denied: this token was already used." + "x".repeat(300) + "\n" + "y".repeat(10 * 1024)
         val msg = at(long)
@@ -68,7 +85,7 @@ class KyIdentitySignOnClientTest {
     fun signOn_rejectsLinkForOtherHost() = runBlocking {
         val link = "kypost://native-pair?sub=s1&srv=https%3A%2F%2Fevil.example.net&reg=https%3A%2F%2Fevil.example.net%2Fapi%2Fnotifications%2Fnative%2Fregister&pt=tok"
         val factory = FakeCallFactory { req -> response(req, """{"configured":true,"deepLink":"$link"}""", 200) }
-        val r = KyIdentitySignOnClient(factory).signOn(server, "t") as PairingParseResult.Error
+        val r = KyIdentitySignOnClient(factory).signOn(server, origin, "t", keys) as PairingParseResult.Error
         assertTrue(r.reason.contains("different host"))
     }
 
@@ -80,6 +97,6 @@ class KyIdentitySignOnClientTest {
 
     @Test
     fun dtos_redact() {
-        assertEquals("SignOnRequest(redacted)", SignOnRequest("secret").toString())
+        assertEquals("SignOnRequest(redacted)", SignOnRequest("secret", "key", "proof").toString())
     }
 }
