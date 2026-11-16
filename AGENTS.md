@@ -72,6 +72,8 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 
 ## Child DOX Index
 
+- `docs/AGENTS.md` — mdBook manual, chapter ownership and documentation checks.
+
 - `app/` — Android application module, runtime code, resources, tests, and app-level verification contracts. See [app/AGENTS.md](app/AGENTS.md).
 
 
