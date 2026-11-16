@@ -65,7 +65,9 @@ class ComposeSharedAttachmentTest {
             }
         } finally {
             StrictMode.setVmPolicy(vmPolicy)
-            resolver.delete(foreignUri!!, null, null)
+            // Cleanup is best effort: an emulator can lose external_primary after assertions
+            // pass. The fixture must not turn that MediaProvider outage into an app failure.
+            runCatching { resolver.delete(foreignUri!!, null, null) }
             privateFile.delete()
         }
     }

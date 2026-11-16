@@ -7,6 +7,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
   workflow_dispatch:
   schedule:
@@ -30,6 +31,7 @@ concurrency:
 jobs:
   analyze:
     name: codeql-analyze
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -89,9 +91,14 @@ jobs:
 
       # --no-build-cache: CodeQL extracts what the compiler runs, and a task restored from the
       # build cache compiles nothing.
+      # Bound workers and compile in Gradle's 4 GiB heap: CodeQL tracing exhausted
+      # the separate Kotlin daemon's default heap during a multi-flavor build.
       - name: Build for CodeQL
         if: matrix.build-mode == 'manual'
-        run: ./gradlew assembleDebug --no-build-cache --stacktrace
+        run: >-
+          ./gradlew assembleDebug --no-build-cache --stacktrace --max-workers=2
+          -Pkotlin.compiler.execution.strategy=in-process
+          -Dorg.gradle.jvmargs='-Xmx4g -Dfile.encoding=UTF-8'
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3

@@ -15,6 +15,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 private const val ENCRYPTED_PREFS_FILE_NAME = "push_pairing_secure"
@@ -47,6 +49,8 @@ private const val KEY_CONTACTS_OWNER_SRV = "contacts_owner_srv"
 private const val KEY_TLS_PIN = "pair_tls_spki_pin"
 private const val KEY_TLS_PINS = "pair_tls_spki_pins"
 private const val KEY_TLS_PIN_HOST = "pair_tls_spki_pin_host"
+private const val KEY_RELAY_IDENTITY_KEY = "pair_relay_identity_key"
+private const val KEY_TLS_PIN_STATEMENT_AT = "pair_tls_pin_statement_at"
 
 /** Absent means the stored set was written under the old whole-chain rule and may contain a public
  *  CA intermediate — see [org.kysecurity.mail.security.SpkiPinner.pinsForChain]. Such a set is
@@ -67,10 +71,20 @@ private const val KEY_EVER_PAIRED = "ever_paired"
  *  [spkiSha256] holds ONE leaf pin for anything written under the current rule. `CertificatePinner`
  *  passes when ANY chain member matches ANY configured pin, so an issuer pin admits every
  *  certificate that issuer signs — see [org.kysecurity.mail.security.SpkiPinner.pinsForChain],
- *  which owns that policy, and [PushSyncCoordinator.narrowLegacyTlsPin], which retires the
- *  whole-chain sets older installs still carry. Renewal with a new key breaks the pin on purpose;
- *  the recovery is [PushHomeViewModel.reconnectToServer], which keeps the mailbox. */
-data class TlsPin(val host: String, val spkiSha256: Set<String>) {
+ *  which owns that policy, and [PushSyncCoordinator.refreshTlsPin], which retires the
+ *  whole-chain sets older installs still carry. A renewal with a new key rolls over only through
+ *  [TlsPinRollover], which needs [relayIdentityKey]; without it the recovery is a pairing link or
+ *  [PushHomeViewModel.reconnectToServer], both of which keep the mailbox.
+ *
+ *  [relayIdentityKey] is the relay's Ed25519 public key (standard base64), learned only from a
+ *  reply that arrived under this pin. [statementIssuedAt] is the signed time of the rollover that
+ *  installed this pin, 0 until a signed current-leaf baseline is authenticated; rollover refuses 0 and accepts only a newer one. */
+data class TlsPin(
+    val host: String,
+    val spkiSha256: Set<String>,
+    val relayIdentityKey: String? = null,
+    val statementIssuedAt: Long = 0,
+) {
     init {
         // An empty pin set is not "unpinned", it is worse: CertificatePinner passes vacuously when
         // no pin is configured for the host, so this must be unrepresentable rather than checked.
@@ -275,8 +289,27 @@ class SecurePairingStore(context: Context) {
         return resolveDeviceSecret(credentialKeys).isNullOrBlank()
     }
 
-    /** Persists the TOFU pin with its host; never overwritten except on a fresh pairing. */
-    suspend fun saveTlsPin(pin: TlsPin) {
+    /** Serializes every pin write, so [replaceTlsPin]'s compare and its write are one step against
+     *  a re-pair or unpair landing in between. */
+    private val pinWrites = Mutex()
+
+    /** Persists the TOFU pin with its host. */
+    suspend fun saveTlsPin(pin: TlsPin) = pinWrites.withLock {
+        val previous = cachedTlsPin
+        val floor = if (previous != null && previous.host == pin.host && previous.relayIdentityKey == pin.relayIdentityKey)
+            maxOf(previous.statementIssuedAt, pin.statementIssuedAt) else pin.statementIssuedAt
+        writeTlsPin(pin.copy(statementIssuedAt = floor))
+    }
+
+    /** Writes [pin] only if [expected] is still the stored pin; false otherwise. A rollover fetched
+     *  under [expected] must not resurrect a server the user unpaired or replaced meanwhile. */
+    suspend fun replaceTlsPin(expected: TlsPin, pin: TlsPin): Boolean = pinWrites.withLock {
+        if (cachedTlsPin != expected) return@withLock false
+        writeTlsPin(pin)
+        true
+    }
+
+    private suspend fun writeTlsPin(pin: TlsPin) {
         // ORDER: marker, then pin, then cache — the only ordering that fails closed.
         withContext(Dispatchers.IO + NonCancellable) {
             // The plain marker, so losing the encrypted file cannot look like "never pinned".
@@ -286,6 +319,11 @@ class SecurePairingStore(context: Context) {
                 // Superseded by the set above; left behind it would win on the next legacy read.
                 .remove(KEY_TLS_PIN)
                 .putString(KEY_TLS_PIN_HOST, pin.host)
+                .apply {
+                    if (pin.relayIdentityKey != null) putString(KEY_RELAY_IDENTITY_KEY, pin.relayIdentityKey)
+                    else remove(KEY_RELAY_IDENTITY_KEY)
+                }
+                .putLong(KEY_TLS_PIN_STATEMENT_AT, pin.statementIssuedAt)
                 // Every write from here on is leaf-only; this is what retires the legacy set.
                 .putBoolean(KEY_TLS_PINS_ARE_LEAVES, true)
                 .commit()
@@ -298,7 +336,7 @@ class SecurePairingStore(context: Context) {
     fun currentTlsPin(): TlsPin? = cachedTlsPin
 
     /** False while the stored set still carries whole-chain pins from before the leaf-only rule.
-     *  [org.kysecurity.mail.push.PushSyncCoordinator.narrowLegacyTlsPin] acts only on false, so
+     *  [org.kysecurity.mail.push.PushSyncCoordinator.refreshTlsPin] acts only on false, so
      *  the narrowing happens exactly once and cannot be undone by a quiet server. */
     fun tlsPinIsLeafOnly(): Boolean = prefs.getBoolean(KEY_TLS_PINS_ARE_LEAVES, false)
 
@@ -320,7 +358,12 @@ class SecurePairingStore(context: Context) {
         val pins = prefs.getStringSet(KEY_TLS_PINS, null)?.let { LinkedHashSet(it) }?.takeIf { it.isNotEmpty() }
             ?: prefs.getString(KEY_TLS_PIN, null)?.let { linkedSetOf(it) }
             ?: return null
-        return TlsPin(host = host, spkiSha256 = pins)
+        return TlsPin(
+            host = host,
+            spkiSha256 = pins,
+            relayIdentityKey = prefs.getString(KEY_RELAY_IDENTITY_KEY, null),
+            statementIssuedAt = prefs.getLong(KEY_TLS_PIN_STATEMENT_AT, 0),
+        )
     }
 
     /** Drops pairing proof and the TOFU pin.
@@ -330,7 +373,7 @@ class SecurePairingStore(context: Context) {
      *  written in the same commit as the removal it describes: a marker written afterwards can be
      *  lost to process death, and then the next pairing inherits this account's mail in silence.
      *  A second reconnect finds no pairing to name and must leave the first marker standing. */
-    suspend fun clearPairing(rememberForReconnect: Boolean = false) {
+    suspend fun clearPairing(rememberForReconnect: Boolean = false): Unit = pinWrites.withLock {
         val leaving = _pairing.value
         withContext(Dispatchers.IO + NonCancellable) {
             val editor = prefs.edit()
@@ -345,6 +388,8 @@ class SecurePairingStore(context: Context) {
                 .remove(KEY_TLS_PIN)
                 .remove(KEY_TLS_PINS)
                 .remove(KEY_TLS_PIN_HOST)
+                .remove(KEY_RELAY_IDENTITY_KEY)
+                .remove(KEY_TLS_PIN_STATEMENT_AT)
                 .remove(KEY_TLS_PINS_ARE_LEAVES)
             when {
                 !rememberForReconnect -> editor.remove(KEY_RECONNECT_SUB).remove(KEY_RECONNECT_SRV)

@@ -1180,7 +1180,7 @@ class InboxActivity : LockedActivity() {
         // The active half's status colours; a theme change recreates this screen, so they are current.
         val palette = getStoredThemePalette(this)
         val archiveColor = Color.parseColor(palette.warning)
-        val deleteColor = Color.parseColor(palette.danger)
+        val deleteColor = Color.parseColor(swipeDeleteFill(palette))
         val iconSize = (24 * resources.displayMetrics.density).toInt()
         val iconMargin = (16 * resources.displayMetrics.density).toInt()
         val archiveIcon = ContextCompat.getDrawable(this, R.drawable.ic_archive)?.mutate()?.apply {

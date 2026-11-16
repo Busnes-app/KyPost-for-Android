@@ -8,6 +8,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   # Manual trigger. Present because this workflow could not be made to fire on its own
   # events when it first landed — push and pull_request both produced no run at all,
   # in a repository where no user-defined workflow had ever run (`.github` was
@@ -33,6 +34,7 @@ concurrency:
 jobs:
   unit:
     name: ci-unit
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -134,6 +136,7 @@ jobs:
   # This also covers lintVitalRelease, which only runs on a release assembly.
   release-build:
     name: ci-release-build
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -313,6 +316,7 @@ jobs:
     # "ci-emulator (34, Fdroid)". Nothing should ever require those names directly — require
     # ci-instrumented, which is what the gate exists to provide.
     name: ci-emulator
+    if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     # Slower and flakier than unit-only, and still worth it: the wipe, teardown, Keystore
     # and enrollment-state guarantees are asserted ONLY here. A CI that ran unit tests alone
@@ -650,8 +654,9 @@ jobs:
   instrumented-gate:
     name: ci-instrumented
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: instrumented
-    if: always()
+    if: (always()) && github.event.pull_request.draft != true
     steps:
       # Every leg, including 36, which is no longer advisory — see the matrix comment. If this
       # goes red on 36 again, read the keyguard dump the emulator step prints before assuming the

@@ -78,3 +78,7 @@ Non-trivial logic must include one runnable check (unit test or minimal self-che
 ## README and topic guides
 
 Keep `README.md` as the concise product overview and navigation. Detailed procedures live in `docs/CONNECTIONS.md`, `docs/DEVELOPMENT.md`, `docs/VERIFYING-RELEASES.md`, and `docs/KYCALENDAR-RSVP.md` (the invitation-answer wire contract, changed together with KyPost-Server). `docs/STRONG-CRYPTO.md` is the algorithm and key-size table: a change to any algorithm, size or TLS setting updates it in the same PR. `docs/ASSURANCE-CASE.md` is the security argument: a change that moves a trust boundary or security requirement updates it in the same PR. Update the owning topic guide and preserve README links when a procedure changes. Commands in these guides run from the repository root.
+
+## CI resource bounds
+
+CodeQL builds all debug flavors without the build cache so extraction sees compiler work. Keep its Kotlin compilation in Gradle's 4 GiB heap with at most two workers; a separate default-sized Kotlin daemon exhausts its heap under tracing.

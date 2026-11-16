@@ -51,6 +51,14 @@ class StatusColourGateTest {
     }
 
     @Test
+    fun swipeDeleteFillCarriesAWhiteIcon() {
+        // WCAG 1.4.11 non-text contrast: the trash icon is the only thing on this fill.
+        for (fill in listOf(SWIPE_DELETE_LIGHT, SWIPE_DELETE_DARK)) {
+            assertTrue("$fill", contrast(fill, "#ffffff") >= 3.0)
+        }
+    }
+
+    @Test
     fun deltaEMatchesTheSharmaReferenceData() {
         // Sharma, Wu and Dalal (2005), table 1, pairs 1 and 17.
         assertEquals(2.0425, ciede2000(doubleArrayOf(50.0, 2.6772, -79.7751), doubleArrayOf(50.0, 0.0, -82.7485)), 1e-4)
