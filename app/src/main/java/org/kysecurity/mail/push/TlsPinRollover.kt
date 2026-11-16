@@ -1,6 +1,8 @@
 package org.kysecurity.mail.push
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -50,6 +52,36 @@ private data class TlsPinStatement(
     @SerialName("signature") val signature: String,
 )
 
+/** Learn a replay floor only from a signed statement for the leaf just authenticated.
+ * Failure leaves rollover disabled; ordinary pinned requests and manual reconnect still work. */
+internal suspend fun captureTlsPinBaseline(
+    pin: TlsPin,
+    serverUrl: String,
+    fetcher: Call.Factory? = null,
+    nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
+): TlsPin {
+    val key = pin.relayIdentityKey ?: return pin
+    val url = pairingEndpoint(serverUrl, TLS_PIN_PATH) ?: return pin
+    if (!url.host.equals(pin.host, ignoreCase = true)) return pin
+    return withContext(Dispatchers.IO) {
+        val client = fetcher ?: pairingHttpClient(PinPosture.Pinned(pin.host, pin.spkiSha256))
+        val floor = client.executeSync(Request.Builder().url(url).get().build()) { response ->
+            if (response.code != 200) return@executeSync null
+            val leaf = response.handshake?.peerCertificates?.firstOrNull() ?: return@executeSync null
+            val body = response.body?.string() ?: return@executeSync null
+            val statement = Json { ignoreUnknownKeys = true }.decodeFromString<TlsPinStatement>(body)
+            val observed = SpkiPinner.pinFor(leaf)
+            if (observed !in pin.spkiSha256 || statement.pin != observed ||
+                !statement.host.equals(pin.host, ignoreCase = true) || statement.issuedAt <= 0 ||
+                abs(nowEpochSeconds() - statement.issuedAt) > STATEMENT_MAX_SKEW_SECONDS ||
+                !verifyTlsPinStatement(key, statement.host, statement.pin, statement.issuedAt, statement.signature)
+            ) return@executeSync null
+            statement.issuedAt
+        }.getOrNull()
+        if (floor == null) pin else pin.copy(statementIssuedAt = maxOf(pin.statementIssuedAt, floor))
+    }
+}
+
 /** Signed TLS pin rollover: how a paired device survives its relay's certificate renewal.
  *
  *  The pin names one leaf, so a renewal with a new key fails every pinned call. On that failure
@@ -77,6 +109,7 @@ class TlsPinRollover(
         val stored = currentPin() ?: return false
         if (stored != failed) return stored.host.equals(failed.host, ignoreCase = true)
         val key = stored.relayIdentityKey ?: return false
+        if (stored.statementIssuedAt <= 0) return false
         val url = serverUrl()?.let { pairingEndpoint(it, TLS_PIN_PATH) } ?: return false
         if (!url.host.equals(stored.host, ignoreCase = true)) return false
         val (statement, observed) = fetcher.executeSync(Request.Builder().url(url).get().build()) { response ->

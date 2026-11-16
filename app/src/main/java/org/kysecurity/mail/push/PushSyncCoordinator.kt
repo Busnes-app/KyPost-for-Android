@@ -38,6 +38,7 @@ class PushSyncCoordinator(
     /** Removes the replaced account's device from its server, signed with its own credentials.
      *  Best effort, like Unpair's deregister. */
     private val deregisterReplaced: suspend (PairingData) -> Unit = {},
+    private val capturePinBaseline: suspend (TlsPin, String) -> TlsPin = { pin, url -> captureTlsPinBaseline(pin, url) },
 ) {
     /** ONE registration at a time, process-wide.
      *
@@ -162,7 +163,7 @@ class PushSyncCoordinator(
         // that order: a pin with no pairing is inert, but a pairing with no pin reads as
         // NeverPaired, and every credentialed call then goes out through the unpinned TOFU
         // window until some later resync happens to repair it.
-        result.tlsPin?.let { repository.saveTlsPin(it) }
+        result.tlsPin?.let { repository.saveTlsPin(capturePinBaseline(it, pairing.serverUrl)) }
         persistSuccess(pairing, result, credentialState)
         // After the replacement purge above, which clears the endpoint along with the pairing.
         recordUnifiedPush(credential.transport, credential.token, credential.p256dh, credential.auth)
@@ -408,7 +409,7 @@ class PushSyncCoordinator(
                     // Same secret, and no delivery mode in the reply: keep the stored ones.
                     refreshed.transport?.let { repository.updateTransport(it) }
                     repository.updateSyncState(lastSyncAtEpochMs = refreshed.syncedAtEpochMs, syncError = null)
-                    refreshTlsPin(refreshed.tlsPin)
+                    refreshTlsPin(refreshed.tlsPin, pairing.serverUrl)
                     recordUnifiedPush(transport, token, p256dh, auth)
                 } else if (refreshed is NativeRegistrationResult.Error) {
                     repository.updateSyncState(lastSyncAtEpochMs = null, syncError = refreshed.message)
@@ -425,7 +426,7 @@ class PushSyncCoordinator(
         when (result) {
             is NativeRegistrationResult.Success -> {
                 persistSuccess(pairing, result, credentialState)
-                refreshTlsPin(result.tlsPin)
+                refreshTlsPin(result.tlsPin, pairing.serverUrl)
                 recordUnifiedPush(transport, token, p256dh, auth)
             }
             is NativeRegistrationResult.Error -> repository.updateSyncState(lastSyncAtEpochMs = null, syncError = result.message)
@@ -458,16 +459,17 @@ class PushSyncCoordinator(
      *
      *  A key is only ever replaced by another one, never cleared: an older server omits it. The
      *  host guard is not ceremony: a pin means nothing for a host it was not observed on. */
-    private suspend fun refreshTlsPin(fresh: TlsPin?) {
+    private suspend fun refreshTlsPin(fresh: TlsPin?, serverUrl: String) {
         if (fresh == null) return
         val stored = repository.currentTlsPin()
         if (stored != null && stored.host != fresh.host) return
         val key = fresh.relayIdentityKey ?: stored?.relayIdentityKey
-        if (!repository.tlsPinIsLeafOnly()) {
-            repository.saveTlsPin(fresh.copy(relayIdentityKey = key))
-        } else if (stored != null && key != stored.relayIdentityKey) {
-            repository.saveTlsPin(stored.copy(relayIdentityKey = key))
-        }
+        val next = if (!repository.tlsPinIsLeafOnly()) fresh.copy(relayIdentityKey = key)
+            else stored?.copy(relayIdentityKey = key) ?: return
+        val floor = if (key == stored?.relayIdentityKey) stored?.statementIssuedAt ?: 0 else 0
+        val baseline = next.copy(statementIssuedAt = floor)
+        val ready = if (key != null && floor <= 0) capturePinBaseline(baseline, serverUrl) else baseline
+        if (ready != stored) repository.saveTlsPin(ready)
     }
 
     private suspend fun persistDelivery(pairing: PairingData, result: NativeRegistrationResult.Success) {

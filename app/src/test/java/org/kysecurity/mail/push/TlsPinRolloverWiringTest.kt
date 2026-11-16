@@ -42,6 +42,7 @@ class TlsPinRolloverWiringTest {
             wipeOwed = { false },
             fetchRegistrationCredential = { PushRegistrationCredential(token = "fcm-token") },
             deregisterReplaced = {},
+            capturePinBaseline = { pin, _ -> pin.copy(statementIssuedAt = 1700000000L) },
         ).syncProvidedToken("fcm-token")
     }
 
@@ -49,7 +50,7 @@ class TlsPinRolloverWiringTest {
     fun aPinnedResyncTeachesTheKeyAndAnOlderServerNeverErasesIt() {
         val store = FakePushStore(pairing = pairing).apply { storedPin = TlsPin("relay.example.com", setOf(leaf)) }
         resync(store, KEY)
-        assertEquals(TlsPin("relay.example.com", setOf(leaf), KEY), store.storedPin)
+        assertEquals(TlsPin("relay.example.com", setOf(leaf), KEY, 1700000000L), store.storedPin)
         resync(store, null)
         assertEquals(KEY, store.storedPin?.relayIdentityKey)
     }

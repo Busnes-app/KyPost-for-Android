@@ -7,6 +7,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.runBlocking
 import org.kysecurity.mail.security.SpkiPinner
 import org.kysecurity.mail.testing.FakeCallFactory
 import org.kysecurity.mail.testing.response
@@ -111,6 +112,30 @@ class TlsPinRolloverTest {
         assertTrue(h.fetcher.requests.isEmpty())
     }
 
+    @Test
+    fun aCapturedPinWithoutAnAuthenticatedReplayFloorCannotRoll() {
+        val h = Harness(storedIssuedAt = 0)
+        assertFalse(h.rollover.roll(h.stored))
+        assertTrue(h.fetcher.requests.isEmpty())
+    }
+
+    @Test
+    fun authenticatedCurrentLeafEstablishesTheFloorBeforeRollover() = runBlocking {
+        val capture = Harness(storedPins = setOf(observed), storedIssuedAt = 0)
+        val pinned = captureTlsPinBaseline(capture.stored, "https://$HOST", capture.fetcher) { NOW }
+        assertEquals(NOW, pinned.statementIssuedAt)
+        val retired = Harness(issuedAt = NOW - 1, storedIssuedAt = pinned.statementIssuedAt)
+        assertFalse(retired.rollover.roll(retired.stored))
+        assertNull(retired.saved)
+    }
+
+    @Test
+    fun anotherLeafCannotEstablishTheReplayFloor() = runBlocking {
+        val capture = Harness(storedIssuedAt = 0)
+        val pinned = captureTlsPinBaseline(capture.stored, "https://$HOST", capture.fetcher) { NOW }
+        assertEquals(0L, pinned.statementIssuedAt)
+    }
+
     private class Harness(
         statementPin: String? = null,
         statementHost: String = HOST,
@@ -118,7 +143,7 @@ class TlsPinRolloverTest {
         signingSeed: Int = 1,
         storedKey: String? = VECTOR_KEY,
         storedPins: Set<String> = setOf(VECTOR_PIN),
-        storedIssuedAt: Long = 0,
+        storedIssuedAt: Long = NOW - 1,
     ) {
         val stored = TlsPin(HOST, storedPins, storedKey, storedIssuedAt)
         var current: TlsPin? = stored

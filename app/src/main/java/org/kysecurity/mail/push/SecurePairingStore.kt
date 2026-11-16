@@ -78,7 +78,7 @@ private const val KEY_EVER_PAIRED = "ever_paired"
  *
  *  [relayIdentityKey] is the relay's Ed25519 public key (standard base64), learned only from a
  *  reply that arrived under this pin. [statementIssuedAt] is the signed time of the rollover that
- *  installed this pin, 0 for a pin captured any other way; a rollover only accepts a newer one. */
+ *  installed this pin, 0 until a signed current-leaf baseline is authenticated; rollover refuses 0 and accepts only a newer one. */
 data class TlsPin(
     val host: String,
     val spkiSha256: Set<String>,
@@ -294,7 +294,12 @@ class SecurePairingStore(context: Context) {
     private val pinWrites = Mutex()
 
     /** Persists the TOFU pin with its host. */
-    suspend fun saveTlsPin(pin: TlsPin) = pinWrites.withLock { writeTlsPin(pin) }
+    suspend fun saveTlsPin(pin: TlsPin) = pinWrites.withLock {
+        val previous = cachedTlsPin
+        val floor = if (previous != null && previous.host == pin.host && previous.relayIdentityKey == pin.relayIdentityKey)
+            maxOf(previous.statementIssuedAt, pin.statementIssuedAt) else pin.statementIssuedAt
+        writeTlsPin(pin.copy(statementIssuedAt = floor))
+    }
 
     /** Writes [pin] only if [expected] is still the stored pin; false otherwise. A rollover fetched
      *  under [expected] must not resurrect a server the user unpaired or replaced meanwhile. */

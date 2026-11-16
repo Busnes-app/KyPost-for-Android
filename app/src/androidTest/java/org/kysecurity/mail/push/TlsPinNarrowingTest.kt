@@ -63,6 +63,15 @@ class TlsPinNarrowingTest {
     }
 
     @Test
+    fun ordinaryPinWritesCannotEraseTheAuthenticatedReplayFloor() = runBlocking {
+        val store = SecurePairingStore(context)
+        val key = java.util.Base64.getEncoder().encodeToString(ByteArray(32) { 1 })
+        store.saveTlsPin(TlsPin(host, setOf(pin(1)), key, 1234L))
+        store.saveTlsPin(TlsPin(host, setOf(pin(2)), key))
+        assertEquals(1234L, SecurePairingStore(context).currentTlsPin()?.statementIssuedAt)
+    }
+
+    @Test
     fun clearingThePairingAlsoClearsTheLeafOnlyMarker() = runBlocking {
         val store = SecurePairingStore(context)
         store.saveTlsPin(TlsPin(host, setOf(pin(1))))
