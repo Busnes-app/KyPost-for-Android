@@ -72,7 +72,7 @@ class TlsPinRolloverWiringTest {
             .build()
 
     private fun rollover(current: () -> TlsPin?) =
-        TlsPinRollover(current, {}, { "https://relay.example.com" }, FakeCallFactory { fail("no fetch expected"); throw IllegalStateException() })
+        TlsPinRollover(current, { _, _ -> false }, { "https://relay.example.com" }, FakeCallFactory { fail("no fetch expected"); throw IllegalStateException() })
 
     private val request = Request.Builder().url("https://relay.example.com/api/inbox").build()
 
@@ -97,7 +97,7 @@ class TlsPinRolloverWiringTest {
     @Test
     fun theRetryIsNeverRolledAgain() {
         var rolls = 0
-        val rollover = TlsPinRollover({ rolls++; renewed }, {}, { "https://relay.example.com" })
+        val rollover = TlsPinRollover({ rolls++; renewed }, { _, _ -> false }, { "https://relay.example.com" })
         lateinit var provider: () -> Pair<TlsPin, Call.Factory>?
         // The retried client fails its pin too; a second rollover would loop on a flapping relay.
         provider = { renewed to pinnedClient(rollover, provider) }

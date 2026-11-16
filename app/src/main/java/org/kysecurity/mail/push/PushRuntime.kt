@@ -18,7 +18,7 @@ class PushGraph(context: Context) {
     /** One per process: its lock is what makes a renewal cost one signed-pin fetch. */
     val tlsPinRollover = TlsPinRollover(
         currentPin = { repository.currentTlsPin() },
-        savePin = { repository.saveTlsPin(it) },
+        replacePin = { expected, new -> repository.replaceTlsPin(expected, new) },
         serverUrl = { repository.pairedServerUrl() },
     )
 

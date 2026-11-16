@@ -38,7 +38,7 @@ class TlsPinRolloverTest {
     fun aSignedRenewedLeafReplacesThePinAndKeepsTheKey() {
         val h = Harness()
         assertTrue(h.rollover.roll(h.stored))
-        assertEquals(TlsPin(HOST, setOf(observed), VECTOR_KEY), h.saved)
+        assertEquals(TlsPin(HOST, setOf(observed), VECTOR_KEY, NOW), h.saved)
         val request = h.fetcher.requests.single()
         assertEquals("https://$HOST/kypost/api/notifications/native/tls-pin", request.url.toString())
         assertTrue("the fetch is unpinned and must carry no credential", request.headers.names().none { it.startsWith("X-Kypost", ignoreCase = true) })
@@ -55,6 +55,22 @@ class TlsPinRolloverTest {
     @Test
     fun aStaleStatementIsRefused() {
         val h = Harness(issuedAt = NOW - STATEMENT_MAX_SKEW_SECONDS - 1)
+        assertFalse(h.rollover.roll(h.stored))
+        assertNull(h.saved)
+    }
+
+    @Test
+    fun aStatementNoNewerThanTheOneThatInstalledThePinIsRefused() {
+        // A replayed statement for a retired leaf is never newer than the rollover that retired it.
+        val h = Harness(storedIssuedAt = NOW)
+        assertFalse(h.rollover.roll(h.stored))
+        assertNull(h.saved)
+    }
+
+    @Test
+    fun anUnpairDuringTheFetchIsNotUndone() {
+        val h = Harness()
+        h.beforeSave = { h.current = null }
         assertFalse(h.rollover.roll(h.stored))
         assertNull(h.saved)
     }
@@ -102,9 +118,12 @@ class TlsPinRolloverTest {
         signingSeed: Int = 1,
         storedKey: String? = VECTOR_KEY,
         storedPins: Set<String> = setOf(VECTOR_PIN),
+        storedIssuedAt: Long = 0,
     ) {
-        val stored = TlsPin(HOST, storedPins, storedKey)
-        var current: TlsPin = stored
+        val stored = TlsPin(HOST, storedPins, storedKey, storedIssuedAt)
+        var current: TlsPin? = stored
+        /** Runs inside the compare-and-swap, before the compare: where a concurrent unpair lands. */
+        var beforeSave: () -> Unit = {}
         var saved: TlsPin? = null
         val fetcher = FakeCallFactory { request ->
             val pin = statementPin ?: observed
@@ -118,7 +137,16 @@ class TlsPinRolloverTest {
         }
         val rollover = TlsPinRollover(
             currentPin = { current },
-            savePin = { saved = it; current = it },
+            replacePin = { expected, new ->
+                beforeSave()
+                if (current != expected) {
+                    false
+                } else {
+                    saved = new
+                    current = new
+                    true
+                }
+            },
             serverUrl = { "https://$HOST/kypost" },
             fetcher = fetcher,
             nowEpochSeconds = { NOW },

@@ -61,7 +61,8 @@ private data class TlsPinStatement(
  *  "Reconnect" remain the recovery. */
 class TlsPinRollover(
     private val currentPin: () -> TlsPin?,
-    private val savePin: suspend (TlsPin) -> Unit,
+    /** Compare-and-swap: writes the new pin only if the expected one is still stored. */
+    private val replacePin: suspend (expected: TlsPin, new: TlsPin) -> Boolean,
     private val serverUrl: () -> String?,
     // Unpinned on purpose, and it carries no credential: see the class comment.
     private val fetcher: Call.Factory = pairingHttpClient(PinPosture.TofuWindow),
@@ -87,11 +88,15 @@ class TlsPinRollover(
         val valid = statement.pin == observed &&
             statement.host.equals(stored.host, ignoreCase = true) &&
             abs(nowEpochSeconds() - statement.issuedAt) <= STATEMENT_MAX_SKEW_SECONDS &&
+            // Strictly newer than the rollover that installed this pin: a statement for a retired
+            // leaf, replayed by someone holding that leaf's key, is always older.
+            statement.issuedAt > stored.statementIssuedAt &&
             observed !in stored.spkiSha256 &&
             verifyTlsPinStatement(key, statement.host, statement.pin, statement.issuedAt, statement.signature)
         if (!valid) return false
-        runBlocking { savePin(TlsPin(stored.host, setOf(observed), key)) }
-        return true
+        val replaced = runBlocking { replacePin(stored, TlsPin(stored.host, setOf(observed), key, statement.issuedAt)) }
+        // Lost the race to a re-pair or unpair: the caller retries only if the pin is the same host.
+        return replaced || currentPin()?.host.equals(stored.host, ignoreCase = true)
     }
 }
 

@@ -158,6 +158,9 @@ class PushRepository(
      *  [PushSyncCoordinator.refreshTlsPin]. */
     override suspend fun saveTlsPin(pin: TlsPin) = securePairingStore.saveTlsPin(pin)
 
+    /** See [SecurePairingStore.replaceTlsPin]; for [TlsPinRollover]. */
+    suspend fun replaceTlsPin(expected: TlsPin, pin: TlsPin): Boolean = securePairingStore.replaceTlsPin(expected, pin)
+
     /** True when the stored `deviceSecret` still needs wrapping (or re-wrapping) under the current
      *  credential-key scheme; see [SecurePairingStore.needsCredentialRewrap]. */
     fun needsCredentialRewrap(): Boolean = securePairingStore.needsCredentialRewrap()
