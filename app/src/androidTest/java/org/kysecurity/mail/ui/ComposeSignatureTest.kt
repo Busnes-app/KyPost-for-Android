@@ -30,7 +30,9 @@ class ComposeSignatureTest {
         ComposeDraftCache.take()
     }
 
-    private fun openedBody(intent: Intent): String {
+    private fun openedBody(intent: Intent, restoreDraft: Boolean = false): String {
+        // Each assertion opens a new composition; the prior scenario intentionally caches on stop.
+        if (!restoreDraft) ComposeDraftCache.take()
         var body = ""
         ActivityScenario.launch<ComposeActivity>(intent).use { scenario ->
             scenario.onActivity { body = it.mirroredBodyHtmlForTest() }
@@ -91,7 +93,7 @@ class ComposeSignatureTest {
     fun aRestoredDraftGetsNothing() {
         MailSignature.save(context, MailSignature(enabled = true, text = "Ada"))
         ComposeDraftCache.save(CachedDraft("bob@example.com", "", "", "Hi", "typed, signature removed", emptyList()))
-        assertEquals("typed, signature removed", openedBody(Intent(context, ComposeActivity::class.java)))
+        assertEquals("typed, signature removed", openedBody(Intent(context, ComposeActivity::class.java), restoreDraft = true))
     }
 
     @Test

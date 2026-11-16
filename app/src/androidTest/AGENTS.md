@@ -28,6 +28,7 @@ Owns Android instrumentation tests executed on emulator/device.
 - `ActivityScenario.close()` waits 45s whenever androidx.test's EmptyActivity is already on top.
   A test that ends in `CREATED` moves back to `RESUMED` first; a for-result launch whose screen
   finished calls `awaitDestroyed()` (`ScenarioClose.kt`) after its last assertion.
+- Independent composition launches clear the preceding scenario’s in-memory draft unless the test explicitly exercises restoration. MediaStore fixture cleanup is best effort on disposable emulators; a disappearing external volume must not mask the assertion result.
 - Inbox tests that seed rows with `setEmailsForTest` use a folder no launch refresh targets, as
   `InboxNewMailTest` and `InboxUndoTest` do; the launch refresh repaints INBOX whenever it lands.
 
