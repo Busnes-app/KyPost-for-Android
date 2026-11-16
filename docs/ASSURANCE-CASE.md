@@ -54,7 +54,10 @@ they leave the app.
    follows no redirects, because OkHttp does not strip custom credential headers on a cross-host
    redirect, and it caps response bodies (8 MiB for JSON by default). After pairing, the client
    pins the server's leaf SPKI (`push/PinnedCallFactory.kt`). A request to any other host is
-   refused, and a pin that existed and is gone fails closed (`TlsPinState.Lost`). Cleartext is
+   refused, and a pin that existed and is gone fails closed (`TlsPinState.Lost`). After a
+   certificate renewal the pin moves only to a leaf the relay's Ed25519 identity key signed, as
+   observed on a credential-free fetch (`push/TlsPinRollover.kt`); the key itself arrives only on
+   replies under the pin. Cleartext is
    off app-wide (`app/src/main/res/xml/network_security_config.xml`). The same client offers only
    TLS 1.2+ ECDHE AEAD suites, and `security/StrongTls.kt` refuses a platform-validated path with a
    key below RSA-2048/EC-256 (anchor included) or a non-SHA-2 signature. `SourceRulesTest` keeps

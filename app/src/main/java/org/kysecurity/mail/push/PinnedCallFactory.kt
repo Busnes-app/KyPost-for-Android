@@ -17,6 +17,8 @@ class PinnedCallFactoryProvider(
     private val tlsPinProvider: () -> TlsPin?,
     /** Passed through to [pairingHttpClient]; null keeps OkHttp's per-phase defaults. */
     private val callTimeoutMillis: Long? = null,
+    /** Lets a pin failure after a certificate renewal recover in place; see [TlsPinRollover]. */
+    private val rollover: TlsPinRollover? = null,
 ) : () -> Pair<TlsPin, Call.Factory>? {
     /** Pin and client published as ONE reference so a client is never read against another pin. */
     @Volatile private var cached: Pair<TlsPin, Call.Factory>? = null
@@ -34,7 +36,9 @@ class PinnedCallFactoryProvider(
                 pin to pairingHttpClient(
                     posture = PinPosture.Pinned(host = pin.host, spkiSha256 = pin.spkiSha256),
                     callTimeoutMillis = callTimeoutMillis,
-                )
+                ).let { client ->
+                    rollover?.let { client.newBuilder().addInterceptor(TlsPinRolloverInterceptor(pin, it, this)).build() } ?: client
+                }
                 ).also { cached = it }
         }
     }
@@ -146,6 +150,7 @@ private val sharedPinnedCallFactory = SingletonGraph<Call.Factory> { appContext 
     PinnedOrFallbackCallFactory(
         pinnedProvider = PinnedCallFactoryProvider(
             tlsPinProvider = { PushRuntime.graph(appContext).repository.currentTlsPin() },
+            rollover = PushRuntime.graph(appContext).tlsPinRollover,
         ),
         pinStateProvider = { PushRuntime.graph(appContext).repository.tlsPinState() },
     )

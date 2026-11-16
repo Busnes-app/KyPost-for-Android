@@ -28,7 +28,8 @@ Owns the Android app module build, manifest, source sets, resources, and test ex
 - The relay's TLS certificate is pinned TOFU over **the leaf certificate, and nothing else**, and
   the pin is refreshed on every successful registration. `app/src/main/AGENTS.md` is the authority
   on that boundary — read it before touching pinning; pinning any issuer admits every certificate
-  that issuer signs. Certificate renewal fails every call closed and must not require re-pairing:
+  that issuer signs. Certificate renewal rolls the pin over through a relay-signed statement
+  (`push/TlsPinRollover.kt`); without the relay key it fails every call closed and must not require re-pairing:
   unpairing purges account-scoped data, so making it the recovery path for a routine renewal costs
   the user their cached mail. `PushRepository.resetPairingCredential` is the non-destructive
   recovery; `clearPairing` remains the destructive one. See `app/src/main/AGENTS.md`.

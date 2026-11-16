@@ -72,7 +72,7 @@ fun pairingHttpClient(posture: PinPosture, callTimeoutMillis: Long? = null): OkH
         // Whatever the set holds is registered for this host, and `CertificatePinner` passes on the
         // FIRST chain member matching ANY of them. That is why the set may only ever hold leaves:
         // one issuer pin in here would admit every certificate that issuer signs. Renewal with a
-        // new key is a re-trust through `reconnectToServer`, not a pin to relax.
+        // new key is a signed rollover (`TlsPinRollover`) or a re-trust, never a pin to relax.
         is PinPosture.Pinned -> {
             // Empty would configure no pin for the host, which CertificatePinner passes vacuously.
             // TlsPin makes that unrepresentable; this is the second half of the same guarantee.

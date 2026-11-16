@@ -31,6 +31,7 @@ Nothing below needs configuring. Every row is what the app produces or accepts o
 | Mail database | SQLCipher 4 defaults (AES-256 with per-page HMAC-SHA512) under a random 32-byte key. | `security/DatabaseKey.kt`, `data/` |
 | Password pairing (review path) | PBKDF2-HMAC-SHA256 at the server's work factor (100,000 to 12,000,000 iterations, else refused), then HKDF-SHA256. | `push/PasswordPairingClient.kt` |
 | Identifiers and pins | SHA-256 (SPKI pins, KyAuth signer pins, enrollment codes, local ids). | `security/SpkiPinner.kt`, `signon/AuthenticatorPin.kt`, `pgp/DeviceEnrollmentCode.kt` |
+| TLS pin rollover | Ed25519 signature by the relay identity key (32-byte key, Bouncy Castle `Ed25519Signer`) over host, leaf SPKI pin and issue time; a statement more than 24 h from the device clock is refused. | `push/TlsPinRollover.kt` |
 
 ## Refuse legacy encryption (strict configuration)
 

@@ -24,13 +24,12 @@ object SpkiPinner {
      *    extra steps and a UI that claims otherwise.
      *  - A pinned LEAF is a pin. It names one key.
      *
-     *  The cost is real and is NOT papered over anywhere in this file: a renewal that mints a new
-     *  key matches no stored pin, and every credentialed call to that host fails until the user
-     *  re-trusts the server through [org.kysecurity.mail.push.PushHomeViewModel.reconnectToServer],
-     *  which reopens the TOFU window WITHOUT deleting the mailbox. That ceremony is the whole
-     *  renewal story. A window of previously observed leaves was tried instead and could not
-     *  work: a pin this device has never seen cannot be learned from a connection the pin itself
-     *  rejects, so the window never held more than the one leaf already in use.
+     *  A renewal that mints a new key matches no stored pin. [org.kysecurity.mail.push.TlsPinRollover]
+     *  moves the pin to a new leaf only when the relay's identity key signed it; without that key
+     *  every credentialed call fails until a pairing link or
+     *  [org.kysecurity.mail.push.PushHomeViewModel.reconnectToServer] re-trusts the server, keeping
+     *  the mailbox. A window of previously observed leaves was tried and could not work: a pin this
+     *  device has never seen cannot be learned from a connection the pin itself rejects.
      *
      *  An entirely self-issued chain is a single self-signed server certificate, the
      *  self-hosted-relay case, and its leaf is also its anchor: pinning it is both correct and the

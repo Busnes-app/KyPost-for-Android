@@ -17,7 +17,7 @@ import org.junit.runner.RunWith
  * certificate that CA issues. Sets written before the leaf-only rule must therefore be REPLACED on
  * the next capture, never merged into, or the intermediate would outlive the rule that retired it.
  *
- * There is no rolling window to merge into any more: see [PushSyncCoordinator.narrowLegacyTlsPin].
+ * There is no rolling window to merge into any more: see [PushSyncCoordinator.refreshTlsPin].
  */
 @RunWith(AndroidJUnit4::class)
 class TlsPinNarrowingTest {
@@ -60,6 +60,15 @@ class TlsPinNarrowingTest {
 
         assertEquals(setOf(pin(1)), store.currentTlsPin()!!.spkiSha256)
         assertTrue(SecurePairingStore(context).tlsPinIsLeafOnly())
+    }
+
+    @Test
+    fun ordinaryPinWritesCannotEraseTheAuthenticatedReplayFloor() = runBlocking {
+        val store = SecurePairingStore(context)
+        val key = java.util.Base64.getEncoder().encodeToString(ByteArray(32) { 1 })
+        store.saveTlsPin(TlsPin(host, setOf(pin(1)), key, 1234L))
+        store.saveTlsPin(TlsPin(host, setOf(pin(2)), key))
+        assertEquals(1234L, SecurePairingStore(context).currentTlsPin()?.statementIssuedAt)
     }
 
     @Test
