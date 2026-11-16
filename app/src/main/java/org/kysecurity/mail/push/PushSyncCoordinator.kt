@@ -248,7 +248,8 @@ class PushSyncCoordinator(
             deliveryMode = approved.deliveryMode,
             pullEndpoint = approved.pullEndpoint,
             transport = approved.transport,
-            tlsPin = pending.tlsPin,
+            // The approval poll ran under the 202's leaf, so its key arrived under that pin.
+            tlsPin = pending.tlsPin?.copy(relayIdentityKey = approved.relayIdentityKey),
         )
         withContext(NonCancellable) {
             finishPairing(pending.pairing, success, pending.credential, credentialState, isReplacement, replaced)
@@ -407,7 +408,7 @@ class PushSyncCoordinator(
                     // Same secret, and no delivery mode in the reply: keep the stored ones.
                     refreshed.transport?.let { repository.updateTransport(it) }
                     repository.updateSyncState(lastSyncAtEpochMs = refreshed.syncedAtEpochMs, syncError = null)
-                    narrowLegacyTlsPin(refreshed.tlsPin)
+                    refreshTlsPin(refreshed.tlsPin)
                     recordUnifiedPush(transport, token, p256dh, auth)
                 } else if (refreshed is NativeRegistrationResult.Error) {
                     repository.updateSyncState(lastSyncAtEpochMs = null, syncError = refreshed.message)
@@ -424,7 +425,7 @@ class PushSyncCoordinator(
         when (result) {
             is NativeRegistrationResult.Success -> {
                 persistSuccess(pairing, result, credentialState)
-                narrowLegacyTlsPin(result.tlsPin)
+                refreshTlsPin(result.tlsPin)
                 recordUnifiedPush(transport, token, p256dh, auth)
             }
             is NativeRegistrationResult.Error -> repository.updateSyncState(lastSyncAtEpochMs = null, syncError = result.message)
@@ -447,26 +448,26 @@ class PushSyncCoordinator(
         }
     }
 
-    /** Narrows a legacy whole-chain pin set to the leaf [fresh] was observed on. Once.
+    /** After a resync validated under the stored pin: learn the relay identity key it carried,
+     *  and narrow a legacy whole-chain set to the leaf [fresh] was observed on, once.
      *
-     *  This is NOT a renewal mechanism and there is no longer one pretending to be. Installs
-     *  pinned under the old rule hold the whole chain, which admits every certificate the issuer
-     *  signs; the first resync that validates against such a set replaces it with the single leaf
-     *  actually presented. On an already leaf-only set there is nothing to do: the call validated
-     *  because that leaf was in the chain, so the leaf it observed is the leaf already stored.
+     *  Neither is a renewal. Installs pinned under the old rule hold the whole chain, which admits
+     *  every certificate the issuer signs; the first resync replaces it with the leaf actually
+     *  presented. On a leaf-only set the observed leaf IS the stored one, so only the key can be
+     *  new. Renewal is [TlsPinRollover], which verifies that key's signature over the new leaf.
      *
-     *  A renewal that mints a new key therefore breaks the pin, on purpose, and the user recovers
-     *  through [PushHomeViewModel.reconnectToServer], which reopens the TOFU window and keeps the
-     *  mailbox. See [org.kysecurity.mail.security.SpkiPinner.pinsForChain].
-     *
-     *  The host guard is not ceremony: a pin is only meaningful against the host it was observed
-     *  on, and moving one silently would leave the old host unpinned. */
-    private suspend fun narrowLegacyTlsPin(fresh: TlsPin?) {
+     *  A key is only ever replaced by another one, never cleared: an older server omits it. The
+     *  host guard is not ceremony: a pin means nothing for a host it was not observed on. */
+    private suspend fun refreshTlsPin(fresh: TlsPin?) {
         if (fresh == null) return
-        if (repository.tlsPinIsLeafOnly()) return
         val stored = repository.currentTlsPin()
         if (stored != null && stored.host != fresh.host) return
-        repository.saveTlsPin(fresh)
+        val key = fresh.relayIdentityKey ?: stored?.relayIdentityKey
+        if (!repository.tlsPinIsLeafOnly()) {
+            repository.saveTlsPin(fresh.copy(relayIdentityKey = key))
+        } else if (stored != null && key != stored.relayIdentityKey) {
+            repository.saveTlsPin(stored.copy(relayIdentityKey = key))
+        }
     }
 
     private suspend fun persistDelivery(pairing: PairingData, result: NativeRegistrationResult.Success) {

@@ -131,6 +131,9 @@ class PushRepository(
     /** The TOFU TLS pin with its host, or null. Read fresh — it changes on re-pairing. */
     override fun currentTlsPin(): TlsPin? = securePairingStore.currentTlsPin()
 
+    /** The paired relay's base URL, no credential; for [TlsPinRollover]. */
+    fun pairedServerUrl(): String? = securePairingStore.pairing.value?.serverUrl
+
     /** See [SecurePairingStore.tlsPinState] — distinguishes "never pinned" from "pin lost". */
     fun tlsPinState(): TlsPinState = securePairingStore.tlsPinState()
 
@@ -152,7 +155,7 @@ class PushRepository(
 
     /** Persist a TLS pin observed on a just-succeeded call: the TOFU capture in
      *  [PushSyncCoordinator.attemptPairing], and the one-way narrowing in
-     *  [PushSyncCoordinator.narrowLegacyTlsPin]. */
+     *  [PushSyncCoordinator.refreshTlsPin]. */
     override suspend fun saveTlsPin(pin: TlsPin) = securePairingStore.saveTlsPin(pin)
 
     /** True when the stored `deviceSecret` still needs wrapping (or re-wrapping) under the current

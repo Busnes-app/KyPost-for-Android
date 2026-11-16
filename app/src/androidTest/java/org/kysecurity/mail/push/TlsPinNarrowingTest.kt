@@ -17,7 +17,7 @@ import org.junit.runner.RunWith
  * certificate that CA issues. Sets written before the leaf-only rule must therefore be REPLACED on
  * the next capture, never merged into, or the intermediate would outlive the rule that retired it.
  *
- * There is no rolling window to merge into any more: see [PushSyncCoordinator.narrowLegacyTlsPin].
+ * There is no rolling window to merge into any more: see [PushSyncCoordinator.refreshTlsPin].
  */
 @RunWith(AndroidJUnit4::class)
 class TlsPinNarrowingTest {

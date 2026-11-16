@@ -47,6 +47,7 @@ private const val KEY_CONTACTS_OWNER_SRV = "contacts_owner_srv"
 private const val KEY_TLS_PIN = "pair_tls_spki_pin"
 private const val KEY_TLS_PINS = "pair_tls_spki_pins"
 private const val KEY_TLS_PIN_HOST = "pair_tls_spki_pin_host"
+private const val KEY_RELAY_IDENTITY_KEY = "pair_relay_identity_key"
 
 /** Absent means the stored set was written under the old whole-chain rule and may contain a public
  *  CA intermediate — see [org.kysecurity.mail.security.SpkiPinner.pinsForChain]. Such a set is
@@ -67,10 +68,14 @@ private const val KEY_EVER_PAIRED = "ever_paired"
  *  [spkiSha256] holds ONE leaf pin for anything written under the current rule. `CertificatePinner`
  *  passes when ANY chain member matches ANY configured pin, so an issuer pin admits every
  *  certificate that issuer signs — see [org.kysecurity.mail.security.SpkiPinner.pinsForChain],
- *  which owns that policy, and [PushSyncCoordinator.narrowLegacyTlsPin], which retires the
- *  whole-chain sets older installs still carry. Renewal with a new key breaks the pin on purpose;
- *  the recovery is [PushHomeViewModel.reconnectToServer], which keeps the mailbox. */
-data class TlsPin(val host: String, val spkiSha256: Set<String>) {
+ *  which owns that policy, and [PushSyncCoordinator.refreshTlsPin], which retires the
+ *  whole-chain sets older installs still carry. A renewal with a new key rolls over only through
+ *  [TlsPinRollover], which needs [relayIdentityKey]; without it the recovery is a pairing link or
+ *  [PushHomeViewModel.reconnectToServer], both of which keep the mailbox.
+ *
+ *  [relayIdentityKey] is the relay's Ed25519 public key (standard base64), learned only from a
+ *  reply that arrived under this pin. */
+data class TlsPin(val host: String, val spkiSha256: Set<String>, val relayIdentityKey: String? = null) {
     init {
         // An empty pin set is not "unpinned", it is worse: CertificatePinner passes vacuously when
         // no pin is configured for the host, so this must be unrepresentable rather than checked.
@@ -286,6 +291,10 @@ class SecurePairingStore(context: Context) {
                 // Superseded by the set above; left behind it would win on the next legacy read.
                 .remove(KEY_TLS_PIN)
                 .putString(KEY_TLS_PIN_HOST, pin.host)
+                .apply {
+                    if (pin.relayIdentityKey != null) putString(KEY_RELAY_IDENTITY_KEY, pin.relayIdentityKey)
+                    else remove(KEY_RELAY_IDENTITY_KEY)
+                }
                 // Every write from here on is leaf-only; this is what retires the legacy set.
                 .putBoolean(KEY_TLS_PINS_ARE_LEAVES, true)
                 .commit()
@@ -298,7 +307,7 @@ class SecurePairingStore(context: Context) {
     fun currentTlsPin(): TlsPin? = cachedTlsPin
 
     /** False while the stored set still carries whole-chain pins from before the leaf-only rule.
-     *  [org.kysecurity.mail.push.PushSyncCoordinator.narrowLegacyTlsPin] acts only on false, so
+     *  [org.kysecurity.mail.push.PushSyncCoordinator.refreshTlsPin] acts only on false, so
      *  the narrowing happens exactly once and cannot be undone by a quiet server. */
     fun tlsPinIsLeafOnly(): Boolean = prefs.getBoolean(KEY_TLS_PINS_ARE_LEAVES, false)
 
@@ -320,7 +329,7 @@ class SecurePairingStore(context: Context) {
         val pins = prefs.getStringSet(KEY_TLS_PINS, null)?.let { LinkedHashSet(it) }?.takeIf { it.isNotEmpty() }
             ?: prefs.getString(KEY_TLS_PIN, null)?.let { linkedSetOf(it) }
             ?: return null
-        return TlsPin(host = host, spkiSha256 = pins)
+        return TlsPin(host = host, spkiSha256 = pins, relayIdentityKey = prefs.getString(KEY_RELAY_IDENTITY_KEY, null))
     }
 
     /** Drops pairing proof and the TOFU pin.
@@ -345,6 +354,7 @@ class SecurePairingStore(context: Context) {
                 .remove(KEY_TLS_PIN)
                 .remove(KEY_TLS_PINS)
                 .remove(KEY_TLS_PIN_HOST)
+                .remove(KEY_RELAY_IDENTITY_KEY)
                 .remove(KEY_TLS_PINS_ARE_LEAVES)
             when {
                 !rememberForReconnect -> editor.remove(KEY_RECONNECT_SUB).remove(KEY_RECONNECT_SRV)

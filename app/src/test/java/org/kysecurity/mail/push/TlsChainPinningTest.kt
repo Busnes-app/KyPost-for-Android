@@ -46,7 +46,7 @@ class TlsChainPinningTest {
 
     /** Multiple pins for one host are all honoured by OkHttp, and a certificate this device has
      *  never observed is not among them. This is the shape a legacy whole-chain set has until
-     *  [PushSyncCoordinator.narrowLegacyTlsPin] replaces it with the single leaf. */
+     *  [PushSyncCoordinator.refreshTlsPin] replaces it with the single leaf. */
     @Test
     fun onlyObservedCertificatesAreEverAdmitted() {
         val client = pairingHttpClient(PinPosture.Pinned(host, setOf(currentLeaf, previousLeaf)))

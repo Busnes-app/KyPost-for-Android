@@ -15,9 +15,16 @@ class PushGraph(context: Context) {
     /** The single [MfaChallengeTracker] for the process. */
     val mfaChallengeTracker = MfaChallengeTracker(appContext)
 
+    /** One per process: its lock is what makes a renewal cost one signed-pin fetch. */
+    val tlsPinRollover = TlsPinRollover(
+        currentPin = { repository.currentTlsPin() },
+        savePin = { repository.saveTlsPin(it) },
+        serverUrl = { repository.pairedServerUrl() },
+    )
+
     // Shares one pinned-or-fallback factory; unpinned only before the first pairing. See [TlsPinState].
     private val pinnedOrFallbackCallFactory: Call.Factory = PinnedOrFallbackCallFactory(
-        pinnedProvider = PinnedCallFactoryProvider(tlsPinProvider = { repository.currentTlsPin() }),
+        pinnedProvider = PinnedCallFactoryProvider(tlsPinProvider = { repository.currentTlsPin() }, rollover = tlsPinRollover),
         pinStateProvider = { repository.tlsPinState() },
     )
 

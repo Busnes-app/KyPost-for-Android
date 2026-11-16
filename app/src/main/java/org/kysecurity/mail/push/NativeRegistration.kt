@@ -71,6 +71,8 @@ data class NativeRegistrationResponse(
     @SerialName("expiresAt") val expiresAt: String? = null,
     @SerialName("statusEndpoint") val statusEndpoint: String? = null,
     @SerialName("pollIntervalSeconds") val pollIntervalSeconds: Long? = null,
+    // The relay's Ed25519 identity key for TLS pin rollover; see [TlsPinRollover]. Absent on older servers.
+    @SerialName("relayIdentityKey") val relayIdentityKey: String? = null,
 ) {
     /** Redacted: carries a freshly minted device secret. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "NativeRegistrationResponse(redacted)"
@@ -184,6 +186,7 @@ sealed class PairingStatus {
         val deliveryMode: DeliveryMode,
         val pullEndpoint: String?,
         val transport: PushTransport?,
+        val relayIdentityKey: String? = null,
     ) : PairingStatus()
 
     /** 410: denied, expired or unknown — the server deliberately does not say which. */
@@ -280,7 +283,7 @@ class NativeRegistrationClient(
                         tlsPin = registrationHost?.let { host ->
                             SpkiPinner.pinsForChain(handshake?.peerCertificates.orEmpty())
                                 .takeIf { it.isNotEmpty() }
-                                ?.let { TlsPin(host, it) }
+                                ?.let { TlsPin(host, it, relayIdentityKeyOrNull(body.relayIdentityKey)) }
                         },
                     )
                 } else {
@@ -344,7 +347,7 @@ class NativeRegistrationClient(
                     tlsPin = url.host.let { host ->
                         SpkiPinner.pinsForChain(handshake?.peerCertificates.orEmpty())
                             .takeIf { it.isNotEmpty() }
-                            ?.let { TlsPin(host, it) }
+                            ?.let { TlsPin(host, it, relayIdentityKeyOrNull(reply.relayIdentityKey)) }
                     },
                 )
             }
@@ -445,6 +448,7 @@ class NativeRegistrationClient(
                     deliveryMode = DeliveryMode.fromWire(body.deliveryMode),
                     pullEndpoint = body.pullEndpoint,
                     transport = PushTransport.fromWire(body.transport),
+                    relayIdentityKey = relayIdentityKeyOrNull(body.relayIdentityKey),
                 )
             } else {
                 PairingStatus.Retry(null)
