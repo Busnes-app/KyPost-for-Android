@@ -59,3 +59,12 @@ KyPost for Android is released under the [MIT License](LICENSE.txt).
 - [Assurance case](docs/ASSURANCE-CASE.md) — Threat model, trust boundaries, and why the security requirements hold.
 - [Strong cryptography](docs/STRONG-CRYPTO.md) — Every algorithm and key size, the Refuse legacy encryption setting, and the old-mail exception.
 - [Development](docs/DEVELOPMENT.md) — Firebase setup, Build and test, Test coverage. <a id="firebase-setup"></a><a id="build-and-test"></a><a id="release-builds"></a><a id="channels"></a><a id="test-coverage"></a>
+
+## User manual
+
+Read the [online manual](https://busnes.app/manuals/kypost-android/) or browse its
+[Markdown sources](docs/src/introduction.md).
+
+Build and check it with `mdbook build docs` and `python3 docs/check-links.py`,
+then open `docs/book/index.html`. The documentation workflow also provides a
+downloadable `documentation-book` artifact.

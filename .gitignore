@@ -58,3 +58,6 @@ app/google-services*.json
 # Deploy-walkthrough artifacts: real-device screenshots of a live inbox, home screen
 # and pairing QR. These are never committable — treat as secrets, not build output.
 .artifacts/
+
+# Generated mdBook manual
+/docs/book/
