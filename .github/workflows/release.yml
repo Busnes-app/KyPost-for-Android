@@ -338,24 +338,28 @@ jobs:
       # `gh` is preinstalled on the runner, so this needs no third-party action — one less
       # entry in the supply chain of a job that holds the signing key.
       #
-      # --draft on purpose: the release is assembled but not announced, so the APK can be
-      # installed and checked before anyone is told it exists. Publish it from the Releases
-      # page when satisfied.
+      # New releases stay drafts for APK acceptance before announcement. An existing
+      # release keeps the publication status its operator chose.
       - name: publish draft release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          gh release create "${TAG}" \
-            --draft \
-            --title "${TAG}" \
-            --generate-notes \
+          assets=(
             "${RUNNER_TEMP}/kypost-${TAG}.apk" \
             "${RUNNER_TEMP}/kypost-${TAG}.apk.sha256" \
             "${RUNNER_TEMP}/kypost-fdroid-${TAG}.apk" \
             "${RUNNER_TEMP}/kypost-fdroid-${TAG}.apk.sha256" \
             "${RUNNER_TEMP}/kypost-${TAG}.intoto.jsonl"
+          )
+          # Reuse an operator-created release instead of hiding assets in a second
+          # draft. Preserve its notes/status and refuse to overwrite existing assets.
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" "${assets[@]}"
+          else
+            gh release create "${TAG}" --draft --title "${TAG}" --generate-notes "${assets[@]}"
+          fi
 
       - name: destroy signing material
         if: always()

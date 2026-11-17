@@ -84,3 +84,10 @@ Keep `README.md` as the concise product overview and navigation. Detailed proced
 ## CI resource bounds
 
 CodeQL builds all debug flavors without the build cache so extraction sees compiler work. Keep its Kotlin compilation in Gradle's 4 GiB heap with at most two workers; a separate default-sized Kotlin daemon exhausts its heap under tracing.
+
+## Release publication
+
+- `release.yml` attaches verified assets to an existing release, preserving notes and draft
+  status. It creates a draft only when no release exists; asset collisions fail without overwriting.
+- `python3 scripts/test-release-publication.py` exercises existing/new releases and collision
+  refusal through the actual publication shell block; CI runs it before Gradle checks.

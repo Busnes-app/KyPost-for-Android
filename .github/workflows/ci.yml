@@ -81,6 +81,9 @@ jobs:
       # does not any more: src/fdroid and src/gms compile different ChannelPush implementations,
       # and a play-only run cannot see either a break in the fdroid one or a merged-manifest
       # regression in a variant it never assembles.
+      - name: release publication regression
+        run: python3 scripts/test-release-publication.py
+
       - name: unit tests, lint and signing-secret check
         run: |
           ./gradlew checkSigningSecretsAreNotInTheTree \
