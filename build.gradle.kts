@@ -4,14 +4,14 @@
 buildscript {
     dependencies {
         constraints {
-            classpath("org.bouncycastle:bcprov-jdk18on:1.86")
-            classpath("org.bouncycastle:bcpkix-jdk18on:1.86")
-            classpath("org.bouncycastle:bcutil-jdk18on:1.86")
-            classpath("org.apache.commons:commons-lang3:3.21.0")
+            classpath("org.bouncycastle:bcprov-jdk18on:1.87")
+            classpath("org.bouncycastle:bcpkix-jdk18on:1.87")
+            classpath("org.bouncycastle:bcutil-jdk18on:1.87")
+            classpath("org.apache.commons:commons-lang3:3.22.0")
             classpath("org.bitbucket.b_c:jose4j:0.9.7")
             classpath("org.jdom:jdom2:2.0.6.1")
             // GHSA-xxph-c9ww-hj94 affects guava < 33.7.2; AGP asks for 33.4.0-jre.
-            classpath("com.google.guava:guava:33.7.2-jre")
+            classpath("com.google.guava:guava:33.8.0-jre")
             // AGP asks for KGP 2.2.10; without this Gradle fetches that version's metadata
             // before the catalog's KGP wins.
             classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${libs.versions.kotlin.get()}")

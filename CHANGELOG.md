@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Refresh compatible Android and build-tool dependencies; no account, key or stored-data migration.
+
 ### Changed
 
 - Remove Pairing keeps the contacts on this phone unless you tick "Also remove this device's
