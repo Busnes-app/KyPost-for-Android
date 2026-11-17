@@ -9,6 +9,9 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
 
+    <!-- Keep the scanner's portrait activity from implying a device requirement in Google Play. -->
+    <uses-feature android:name="android.hardware.screen.portrait" android:required="false" />
+
     <!-- Package visibility: AuthenticatorPin reads KyAuth's signing certificate. -->
     <queries>
         <package android:name="org.kysecurity.authenticator" />
