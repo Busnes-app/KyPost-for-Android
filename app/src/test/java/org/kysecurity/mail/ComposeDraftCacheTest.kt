@@ -25,6 +25,16 @@ class ComposeDraftCacheTest {
         ComposeDraftCache.take()
     }
 
+    /** A lock or rotation must not turn "choose a From" into the primary address. */
+    @Test
+    fun aRestoredDraftStillOwesItsFrom() {
+        ComposeDraftCache.save(draft(subject = "Re: hi").copy(fromRequired = true))
+        assertEquals(true, ComposeDraftCache.take()?.fromRequired)
+
+        ComposeDraftCache.save(draft(subject = "Re: hi").copy(from = "me+shop@example.invalid"))
+        assertEquals("me+shop@example.invalid", ComposeDraftCache.take()?.from)
+    }
+
     @Test
     fun takeReturnsTheSavedDraftAndClearsIt() {
         ComposeDraftCache.save(draft(subject = "Hello"))

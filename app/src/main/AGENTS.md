@@ -260,6 +260,22 @@ Owns production Android app code and resources.
   `sendOutcome` reads 200 as sent and 202 as held, each only where it was asked for, so a hold is
   never shown as sent. `ScheduledActivity` (folder picker, "Scheduled") lists `GET /api/scheduled`
   and cancels only a waiting row, after a confirm; the id is one escaped path segment.
+- Reply identity (KyPost-Server #665): Reply and Reply all ask `MailRepository.replyFrom`, which
+  fetches the body fresh (`deliveredTo`, the receipt's addresses, Bcc included; a cached body has
+  none) and the primary mailbox's addresses (`GET /api/mailboxes`, masked included), then applies
+  `replyFromAddress`, the web client's rule: the To/Cc address naming a delivered one keeps its plus
+  tag, else the delivered own address, else null. Without a receipt (external IMAP) the user's own
+  To/Cc address or "" (account default). Null (including any failed fetch) opens Compose with
+  `EXTRA_FROM_REQUIRED`: From reads "Choose an address", and Send and Save draft refuse until the
+  user picks one of the mailbox's addresses (`fromPickPending`). An empty list (no native mailboxes)
+  has nothing to pick, so the account default stands. Nothing ever substitutes the primary. The From and the
+  requirement ride `CachedDraft` through a lock or rotation; a server draft is saved only once From
+  is chosen, and Edit draft reopens with the draft's own From. A plaintext draft (`/api/mail/draft`,
+  server-held key) stores no From, so `plainDraftKeepsFrom` refuses Save draft unless From is blank,
+  the primary address (`ownAddresses` lists it first), or the list is empty; an unloaded list is
+  loaded first. The chosen From goes as `from` on
+  `/api/mail/send` and as the From of client-encrypted deliveries and drafts. `EXTRA_FROM*` are read
+  from in-app launches only. Masked-address management is not in this app.
 - Send delay (KyPost-Server #668): Compose reads `GET /api/mail/send-delay` as it opens (404 or a
   failure reads as 0, Off). Above 0, a send without a chosen time carries `sendDelay: true`; on a
   client-custody account a plain one goes through `dispatchScheduledPlainSend` for its `pgpDraft`,

@@ -193,6 +193,8 @@ private class FakeMailSource(
     /** Null keeps the old throwing behaviour, so tests asserting "must never reach the relay"
      *  still fail loudly rather than against a plausible-looking success. */
     var bodyOutcome: MailOutcome<MailMessageBody>? = null
+    var ownOutcome: MailOutcome<List<String>> = MailOutcome.Success(emptyList())
+    override fun ownAddresses(): MailOutcome<List<String>> = ownOutcome
     val bodyFetches = mutableListOf<Pair<String, String>>()
 
     override fun fetchMessageBody(messageId: String, folder: String): MailOutcome<MailMessageBody> {
@@ -239,6 +241,26 @@ class MailRepositoryTest {
     @org.junit.After
     fun unsealTheDraftCache() {
         org.kysecurity.mail.ComposeDraftCache.take()
+    }
+
+    private fun replyFromWith(body: MailOutcome<MailMessageBody>, own: MailOutcome<List<String>>): String? {
+        val source = FakeMailSource().apply { bodyOutcome = body; ownOutcome = own }
+        return repository(FakeEmailDao(), source).replyFrom("1", "INBOX", "Shop <me+shop@example.invalid>", "")
+    }
+
+    private fun bodyDeliveredTo(delivered: List<String>?) =
+        MailOutcome.Success(MailMessageBody("", toAddresses = emptyList(), ccAddresses = emptyList(), deliveredTo = delivered))
+
+    /** Never the primary by default: anything the server cannot tell leaves the From to the user. */
+    @Test
+    fun replyFrom_isWhereItWasDelivered_orNullWhenThatCannotBeTold() {
+        val own = MailOutcome.Success(listOf("me@example.invalid", "x7k2@mask.example.invalid"))
+
+        assertEquals("me+shop@example.invalid", replyFromWith(bodyDeliveredTo(listOf("me@example.invalid")), own))
+        assertNull("body fetch failed", replyFromWith(MailOutcome.UpstreamFailure("offline"), own))
+        assertNull("addresses unknown", replyFromWith(bodyDeliveredTo(listOf("x7k2@mask.example.invalid")), MailOutcome.UpstreamFailure("offline")))
+        // External IMAP: no receipt, nothing masked, so the account default stands.
+        assertEquals("", replyFromWith(bodyDeliveredTo(null), MailOutcome.UpstreamFailure("offline")))
     }
 
     /** Withheld mail is not gone mail: the cache and the sync cursor stay exactly as they were. */

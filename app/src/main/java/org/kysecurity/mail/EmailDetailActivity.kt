@@ -301,14 +301,18 @@ class EmailDetailActivity : LockedActivity() {
                 Toast.makeText(this, R.string.email_pgp_reply_disabled, Toast.LENGTH_LONG).show()
                 return@setOnClickListener
             }
-            quotedBodyHtmlAsync(emailPreview) { quoted ->
-                openCompose(
-                    to = extractAddress(emailSender),
-                    subject = withPrefix(emailSubject, "Re:"),
-                    bodyHtml = quoteForReply(emailSender, quoted),
-                    replyTo = ReplyRef(emailId, emailFolder),
-                    kind = ComposeKind.REPLY,
-                )
+            lifecycleScope.launch {
+                val from = replyFrom()
+                quotedBodyHtmlAsync(emailPreview) { quoted ->
+                    openCompose(
+                        to = extractAddress(emailSender),
+                        subject = withPrefix(emailSubject, "Re:"),
+                        bodyHtml = quoteForReply(emailSender, quoted),
+                        replyTo = ReplyRef(emailId, emailFolder),
+                        kind = ComposeKind.REPLY,
+                        from = from,
+                    )
+                }
             }
         }
         actionReplyAll.setOnClickListener {
@@ -319,6 +323,7 @@ class EmailDetailActivity : LockedActivity() {
             lifecycleScope.launch {
                 val recipients =
                     replyAllRecipients(emailSender, toRecipients, ccRecipients, pgpController.accountAddresses())
+                val from = replyFrom()
                 quotedBodyHtmlAsync(emailPreview) { quoted ->
                     openCompose(
                         to = recipients.joinToString(", "),
@@ -326,6 +331,7 @@ class EmailDetailActivity : LockedActivity() {
                         bodyHtml = quoteForReply(emailSender, quoted),
                         replyTo = ReplyRef(emailId, emailFolder),
                         kind = ComposeKind.REPLY,
+                        from = from,
                     )
                 }
             }
@@ -1535,6 +1541,12 @@ class EmailDetailActivity : LockedActivity() {
         finish()
     }
 
+    /** Where this message was delivered, as the server reports it; null when it cannot tell. */
+    private suspend fun replyFrom(): String? = withContext(Dispatchers.IO) {
+        mailRepository.replyFrom(emailId(), emailFolder(), toRecipients.joinToString(", "), ccRecipients.joinToString(", "))
+    }
+
+    /** [from] null means the reply must choose its From; blank is the account default. */
     private fun openCompose(
         to: String,
         subject: String,
@@ -1545,9 +1557,12 @@ class EmailDetailActivity : LockedActivity() {
         bcc: String = "",
         sourceDraft: ReplyRef? = null,
         kind: ComposeKind = ComposeKind.NEW,
+        from: String? = "",
     ) {
         val intent = ComposeActivity.internalIntent(this)
         intent.putExtra(ComposeActivity.EXTRA_KIND, kind.name)
+        intent.putExtra(ComposeActivity.EXTRA_FROM, from.orEmpty())
+        intent.putExtra(ComposeActivity.EXTRA_FROM_REQUIRED, from == null)
         intent.putExtra(ComposeActivity.EXTRA_TO, to)
         intent.putExtra(ComposeActivity.EXTRA_SUBJECT, subject)
         intent.putExtra(ComposeActivity.EXTRA_BODY_HTML, bodyHtml)
@@ -1657,6 +1672,8 @@ class EmailDetailActivity : LockedActivity() {
                     to = draft.protectedTo, subject = draft.protectedSubject.orEmpty(), bodyHtml = body,
                     attachments = attachments, cc = draft.protectedCc, bcc = draft.protectedBcc,
                     sourceDraft = source,
+                    // The draft's own From; without one it must be chosen again.
+                    from = extractAddress(intent.getStringExtra("email_sender").orEmpty()).ifBlank { null },
                 )
                 finish()
             }

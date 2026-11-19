@@ -361,6 +361,18 @@ class MailRepository(
         relaySource.fetchConversations(folder, limit)
     fun conversationsEnabled(): MailOutcome<Boolean> = relaySource.conversationsEnabled()
     fun setConversationsEnabled(enabled: Boolean): MailOutcome<Boolean> = relaySource.setConversationsEnabled(enabled)
+    fun ownAddresses(): MailOutcome<List<String>> = relaySource.ownAddresses()
+
+    /** The From a reply to [id] defaults to, as the server reports where it was delivered; null
+     *  when it cannot be told, and the user must choose. Asked fresh: a cached body has no receipt. */
+    fun replyFrom(id: String, folder: String, sentTo: String, cc: String): String? {
+        val body = relaySource.fetchMessageBody(id, folder) as? MailOutcome.Success ?: return null
+        val delivered = body.value.deliveredTo
+        // Without a receipt nothing is masked: the default stands if the addresses are unknown.
+        val own = (relaySource.ownAddresses() as? MailOutcome.Success)?.value
+            ?: if (delivered == null) emptyList() else return null
+        return replyFromAddress(sentTo, cc, own, delivered)
+    }
     fun sendDelaySeconds(): MailOutcome<Int> = relaySource.sendDelaySeconds()
     fun createFolder(parent: String, name: String): MailOutcome<Unit> = relaySource.createFolder(parent, name)
     fun renameFolder(folder: String, name: String): MailOutcome<Unit> = relaySource.renameFolder(folder, name)

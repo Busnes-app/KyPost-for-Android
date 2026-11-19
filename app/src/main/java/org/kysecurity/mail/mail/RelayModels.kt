@@ -234,7 +234,13 @@ data class RelayAttachmentListResponseDto(
  *  No recipients here: the endpoint carries body and bodyMode only. Reply All's `to`/`cc` come from
  *  the cached row — see [MailRepository.fetchBody]. */
 @Serializable
-data class RelayMessageBodyDto(val body: String = "", val bodyMode: String = "") {
+data class RelayMessageBodyDto(
+    val body: String = "",
+    val bodyMode: String = "",
+    /** Native received mail only (KyPost-Server #665): the addresses receiving delivered it to,
+     *  from the receipt, so Bcc included. Absent means the server cannot tell. */
+    val deliveredTo: List<String>? = null,
+) {
     /** Redacted: [body] is the message the user is reading. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "RelayMessageBodyDto(redacted)"
 }
@@ -315,3 +321,13 @@ data class RelayMailSettingsDto(
     @Serializable(with = StrictBooleanSerializer::class)
     val conversations: Boolean = true,
 )
+
+/** `GET /api/mailboxes`: the caller's native mailboxes, primary first, with their active addresses. */
+@Serializable
+data class RelayMailboxesDto(val mailboxes: List<RelayMailboxDto> = emptyList())
+
+@Serializable
+data class RelayMailboxDto(val id: String = "", val kind: String = "", val addresses: List<RelayMailboxAddressDto> = emptyList())
+
+@Serializable
+data class RelayMailboxAddressDto(val address: String = "", val kind: String = "")

@@ -341,6 +341,12 @@
     <string name="compose_pgp_resolve_failed">Couldn\'t look up recipients\' keys: %1$s</string>
     <string name="compose_pgp_encrypt_failed">Couldn\'t encrypt this message: %1$s</string>
     <string name="compose_pgp_not_paired">This device isn\'t paired with a KyPost server.</string>
+    <string name="compose_from">From</string>
+    <string name="compose_from_choose">Choose an address</string>
+    <string name="compose_from_title">Send from</string>
+    <string name="compose_from_required">Choose which of your addresses this comes from.</string>
+    <string name="compose_from_not_kept_in_draft">Drafts can\'t keep this From address. Send it now, or switch From to your main address to save it.</string>
+    <string name="compose_from_unavailable">Couldn\'t load your addresses: %1$s</string>
     <!-- Send delay (KyPost-Server #668): the message is held, then sent; Cancel sending is the only wording. -->
     <string name="compose_sending_in">Sending in %1$ds</string>
     <string name="compose_cancel_sending">Cancel sending</string>
