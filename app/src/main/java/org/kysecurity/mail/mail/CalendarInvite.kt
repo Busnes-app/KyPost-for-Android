@@ -351,6 +351,7 @@ fun MailOutcome<*>.refusedBeforeSending(): Boolean = when (this) {
     is MailOutcome.CertificateMismatch,
     is MailOutcome.ClientSideNeeded,
     is MailOutcome.RateLimited,
+    is MailOutcome.EncryptionSetupRequired,
     -> true
     else -> false
 }

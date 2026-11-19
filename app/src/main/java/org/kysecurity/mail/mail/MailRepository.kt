@@ -593,4 +593,5 @@ private fun MailOutcome<*>.failureOrNull(): MailOutcome<Nothing>? = when (this) 
     is MailOutcome.ActionRejected -> this
     is MailOutcome.ReplyThreadingRefused -> this
     is MailOutcome.RateLimited -> this
+    is MailOutcome.EncryptionSetupRequired -> this
 }

@@ -11,6 +11,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import okhttp3.Call
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -496,6 +497,7 @@ class RelayMailSource(
         val bytes = download.bytes
         val retryAfter = download.retryAfter
         if (code == 429) return rateLimited(bytes.toString(Charsets.UTF_8), retryAfter)
+        if (code == 403) encryptionSetupRequired(code, bytes.toString(Charsets.UTF_8))?.let { return it }
         if (code != 200) return mapErrorCode(code, bytes.toString(Charsets.UTF_8))
         return MailOutcome.Success(
             DownloadedAttachment(
@@ -534,7 +536,8 @@ class RelayMailSource(
         if (code == 200) MailOutcome.Success(Unit) else mapErrorCode(code, rawBody)
 
     // 429 is deliberately absent here: it needs the Retry-After header, which this signature
-    // can't see, so it is short-circuited in [execute] and [downloadAttachment] instead.
+    // can't see, so it is short-circuited in [execute] and [downloadAttachment] instead. The
+    // encryption-setup 403 is short-circuited there too, so no route's own code mapping can hide it.
     private fun <T> mapErrorCode(code: Int, rawBody: String): MailOutcome<T> = when (code) {
         400 -> if (rawBody.contains(NOT_CONFIGURED_PREFIX, ignoreCase = true)) {
             MailOutcome.NotConfigured(rawBody)
@@ -591,6 +594,7 @@ class RelayMailSource(
         val response = result.getOrNull()
             ?: return MailOutcome.UpstreamFailure(exception?.message ?: "Network error")
         if (response.code == 429) return rateLimited(response.errorBody, response.retryAfter)
+        encryptionSetupRequired(response.code, response.errorBody)?.let { return it }
         return onResponse(response.code, response.decoded, response.errorBody)
     }
 
@@ -611,6 +615,7 @@ class RelayMailSource(
         val (code, body, retryAfter) = result.getOrNull()
             ?: return MailOutcome.UpstreamFailure(exception?.message ?: "Network error")
         if (code == 429) return rateLimited(body, retryAfter)
+        encryptionSetupRequired(code, body)?.let { return it }
         return onResponse(code, body)
     }
 
@@ -619,6 +624,18 @@ class RelayMailSource(
         if (pairingUrlHost(pairing.serverUrl) == null) return null
         return "${pairing.serverUrl.trimEnd('/')}$path".toHttpUrlOrNull()
     }
+}
+
+private const val ENCRYPTION_SETUP_REQUIRED = "encryption_setup_required"
+
+/** The 403 every mailbox route answers while the account owes encryption setup, matched on the
+ *  `error` code, never on prose. Null for any other response. */
+internal fun encryptionSetupRequired(code: Int, body: String): MailOutcome.EncryptionSetupRequired? {
+    if (code != 403) return null
+    val fields = runCatching { Json.parseToJsonElement(body) as? JsonObject }.getOrNull() ?: return null
+    if ((fields["error"] as? JsonPrimitive)?.contentOrNull != ENCRYPTION_SETUP_REQUIRED) return null
+    val message = (fields["message"] as? JsonPrimitive)?.contentOrNull?.trim()
+    return MailOutcome.EncryptionSetupRequired(message?.ifBlank { null })
 }
 
 /** The server sends at most 200 code points (#351), at most 400 UTF-16 units, so this never cuts a

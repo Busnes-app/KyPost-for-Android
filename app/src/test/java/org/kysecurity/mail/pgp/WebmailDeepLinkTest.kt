@@ -139,4 +139,13 @@ class WebmailDeepLinkTest {
     fun webmailHomeUrlRefusesAnUnusableServerUrl() {
         assertNull(webmailHomeUrl("not a url"))
     }
+
+    @Test
+    fun encryptionSetupUrlIsTheWebSetupPageAndPassesTheFirstPartyGuard() {
+        assertEquals("https://relay.example.com/setup/encryption", webmailEncryptionSetupUrl("https://relay.example.com/"))
+        val onSubpath = webmailEncryptionSetupUrl("https://mail.example.com:8443/webmail")!!
+        assertEquals("https://mail.example.com:8443/webmail/setup/encryption", onSubpath)
+        assertTrue(isFirstPartyWebmailUrl("https://mail.example.com:8443/webmail", onSubpath))
+        assertNull(webmailEncryptionSetupUrl("not a url"))
+    }
 }
