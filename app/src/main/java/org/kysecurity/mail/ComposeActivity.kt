@@ -540,8 +540,10 @@ class ComposeActivity : LockedActivity() {
                 it.isNotBlank() && it.lowercase() !in lowered && plusBase(it.lowercase()) in lowered
             }
             val choices = own + listOfNotNull(tagged)
+            // Nothing to pick: the account default is the From, and Send no longer waits.
             if (choices.isEmpty()) {
-                Toast.makeText(this@ComposeActivity, getString(R.string.compose_from_unavailable, ""), Toast.LENGTH_LONG).show()
+                fromRequired = false
+                renderFrom()
                 return@launch
             }
             activeDialog = AlertDialog.Builder(this@ComposeActivity)
@@ -560,7 +562,7 @@ class ComposeActivity : LockedActivity() {
 
     /** False, with the picker open, while this composition still has to choose its From. */
     private fun fromChosen(): Boolean {
-        if (!fromRequired || composeFrom.isNotBlank()) return true
+        if (!fromPickPending(fromRequired, composeFrom, ownAddresses)) return true
         Toast.makeText(this, R.string.compose_from_required, Toast.LENGTH_LONG).show()
         pickFrom()
         return false
@@ -1302,6 +1304,11 @@ class ComposeActivity : LockedActivity() {
         // As on the web: a draft is saved with the From it will send from, never a stand-in.
         if (!fromChosen()) return
         // `/api/mail/draft` stores no From: such a draft would reopen as the primary address.
+        if (!clientSideAccount && composeFrom.isNotBlank() && ownAddresses == null) {
+            // Not loaded yet, or the quiet load failed: load, then ask again; a failure says why.
+            lifecycleScope.launch { if (loadOwnAddresses() != null && !isFinishing && !isDestroyed) saveDraft() }
+            return
+        }
         if (!clientSideAccount && !plainDraftKeepsFrom(composeFrom, ownAddresses)) {
             Toast.makeText(this, R.string.compose_from_not_kept_in_draft, Toast.LENGTH_LONG).show()
             return
@@ -1791,9 +1798,15 @@ internal fun readAtMost(input: InputStream, limit: Long, expectedSize: Long = -1
 internal enum class SendReadiness { READY, INCOMPLETE, CONFIRM_EMPTY_SUBJECT }
 
 /** A plaintext draft (`/api/mail/draft`) is stored with the server's default From, the primary
- *  address, so it may carry no other. [own] is primary first; unknown refuses. */
+ *  address, so it may carry no other. [own] is primary first; none (no native mailboxes) leaves
+ *  the default as the only From; unknown refuses. */
 internal fun plainDraftKeepsFrom(from: String, own: List<String>?): Boolean =
-    from.isBlank() || own?.firstOrNull()?.equals(from, ignoreCase = true) == true
+    from.isBlank() || own?.let { it.isEmpty() || it.first().equals(from, ignoreCase = true) } == true
+
+/** Whether Send, Save draft and the handoff still wait for the user's From pick. */
+internal fun fromPickPending(required: Boolean, from: String, own: List<String>?): Boolean =
+    // No address to pick (a relay without native mailboxes): the account default is the only From.
+    required && from.isBlank() && own?.isEmpty() != true
 
 internal fun sendReadiness(to: String, subject: String, bodyEmpty: Boolean, allowEmptySubject: Boolean): SendReadiness =
     when {

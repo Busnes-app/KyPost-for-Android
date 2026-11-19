@@ -15,7 +15,8 @@
 - Replies come from the address the message was sent to: a plus address (`you+shop@`) or a
   masked address, as your KyPost server reports it, shown in a new From row. When the server
   cannot tell, From says "Choose an address" and the reply cannot be sent or saved until you pick
-  one; it never falls back to your main address. Edit it in the From row at any time.
+  one; it never falls back to your main address. A server with no addresses to pick from sends from
+  your account's default. Edit it in the From row at any time.
 - When your KyPost server needs you to finish email encryption setup first, the inbox says
   "Finish encryption setup" with a button that opens the setup page on the web, instead of a
   sync error. The app stops syncing until then, checks again when you come back to it (or tap
