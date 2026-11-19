@@ -63,6 +63,15 @@ internal fun groupInboxRows(
     return out
 }
 
+/** A selection holds lead ids. When a refresh gives a conversation a newer lead, a selected
+ *  member's id becomes the new lead's, so the row stays selected and an action covers it all. */
+internal fun followLeads(selected: Set<String>, rows: List<InboxRow>): Set<String> {
+    if (selected.isEmpty()) return selected
+    val leadOf = HashMap<String, String>()
+    rows.filter { it.isConversation }.forEach { row -> row.members.forEach { leadOf[it.id] = row.email.id } }
+    return selected.mapTo(LinkedHashSet()) { leadOf[it] ?: it }
+}
+
 /** Senders oldest first, your replies as [me], at most three names. */
 internal fun conversationSenders(row: InboxRow, me: String): String {
     val timeline = (row.members.map { it to false } + row.sent.map { it to true }).sortedBy { it.first.atUtc.orEmpty() }

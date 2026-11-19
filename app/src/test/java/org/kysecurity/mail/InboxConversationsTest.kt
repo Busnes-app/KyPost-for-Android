@@ -97,4 +97,16 @@ class InboxConversationsTest {
         assertEquals("ana@example.invalid", senderName("<ana@example.invalid>"))
         assertEquals("ana@example.invalid", senderName("ana@example.invalid"))
     }
+
+    /** A refresh brings a newer reply, so the selected conversation has a new lead. The selection
+     *  follows it: the row stays selected and an action still finds every member. */
+    @Test
+    fun aSelectedConversation_followsItsNewLead() {
+        val a4 = email("4", "2026-11-01T11:00:00Z")
+        val refreshed = listOf(a4, a3, b2, a1)
+        val rows = groupInboxRows(refreshed, refreshed, listOf(Conversation("1", listOf("1", "3", "4"))), emptySet())
+
+        assertEquals(setOf("4", "2"), followLeads(setOf("3", "2"), rows))
+        assertEquals("unknown ids are kept", setOf("9"), followLeads(setOf("9"), rows))
+    }
 }

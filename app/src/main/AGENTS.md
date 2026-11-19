@@ -135,7 +135,8 @@ Owns production Android app code and resources.
   and Room are unchanged; grouping is in memory only. A failed or absent route keeps the last
   grouping, never toasts. A conversation row stands at its newest shown member; its `members` are
   every loaded member in that folder (not only the keyword tab), and swipes, row accessibility
-  actions and bulk selection act on all of them (chunked to `MAX_ACTION_IDS`). Your replies in Sent
+  actions and bulk selection act on all of them (chunked to `MAX_ACTION_IDS`). A selection holds lead
+  ids; when a refresh brings a newer lead, `followLeads` moves it to the new one. Your replies in Sent
   count and show, but list actions never touch them. Tapping the row expands it in place: `nested`
   rows (oldest first, replies included) only open the reader, which acts on one message; they
   neither swipe nor select. Search results stay ungrouped. Settings → Conversations writes

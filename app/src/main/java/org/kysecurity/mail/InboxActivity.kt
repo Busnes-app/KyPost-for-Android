@@ -841,9 +841,17 @@ class InboxActivity : LockedActivity() {
             groupInboxRows(filtered, allEmails.filter { it.rowKey() !in held }, conversations, expandedConversations)
         }
         conversationMembers = rows.filter { it.isConversation }.associate { it.email.rowKey() to it.members }
+        val followed = followLeads(selectedIds, rows)
+        val selectionMoved = followed != selectedIds
+        if (selectionMoved) {
+            selectedIds.clear()
+            selectedIds.addAll(followed)
+            selectionMode?.title = resources.getQuantityString(R.plurals.selection_count, selectedIds.size, selectedIds.size)
+        }
         val added = if (results == null) previous?.let { newRowsAbove(it, rows.map(InboxRow::email)) } ?: 0 else 0
         val wasAtTop = !recyclerView.canScrollVertically(-1)
         adapter.updateRows(rows)
+        if (selectionMoved) adapter.setSelection(selectedIds)
         olderFooter.shown = results == null && allEmails.isNotEmpty() && currentFolder !in olderExhausted
         keywordChipScroll.visibility = if (searchQuery == null) View.VISIBLE else View.GONE
         emptyText.text = if (results != null) {
