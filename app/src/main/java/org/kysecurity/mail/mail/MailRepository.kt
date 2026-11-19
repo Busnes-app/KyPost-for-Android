@@ -369,6 +369,7 @@ class MailRepository(
             ?: if (delivered == null) emptyList() else return null
         return replyFromAddress(sentTo, cc, own, delivered)
     }
+    fun sendDelaySeconds(): MailOutcome<Int> = relaySource.sendDelaySeconds()
     fun createFolder(parent: String, name: String): MailOutcome<Unit> = relaySource.createFolder(parent, name)
     fun renameFolder(folder: String, name: String): MailOutcome<Unit> = relaySource.renameFolder(folder, name)
 

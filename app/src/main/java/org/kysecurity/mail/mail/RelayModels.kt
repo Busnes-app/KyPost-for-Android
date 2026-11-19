@@ -161,6 +161,8 @@ data class RelayMailRequestDto(
     /** Send only; RFC 3339, whole seconds, UTC. */
     val sendAt: String? = null,
     val pgpDraft: String? = null,
+    /** Send only: hold it for the user's Send delay. Omitted when false. */
+    val sendDelay: Boolean = false,
 ) {
     /** Redacted: the body is the user's outgoing message. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "RelayMailRequestDto(redacted)"
@@ -192,6 +194,7 @@ data class RelayClientEncryptedRequestDto(
     val materialGeneration: Long? = null,
     val sendAt: String? = null,
     val draftCopy: String? = null,
+    val sendDelay: Boolean = false,
     /** Omitted when null, as on `/api/mail/send`. */
     val replyToMessageId: String? = null,
     val replyToMailbox: String? = null,
@@ -254,7 +257,16 @@ data class RelaySendResponseDto(
     @Serializable(with = StrictBooleanSerializer::class)
     val scheduled: Boolean = false,
     val sendAt: String = "",
+    /** A 202's: the held message, for `POST /api/scheduled/{id}/cancel`. */
+    val id: String = "",
+    /** A 202's: held for the Send delay rather than a chosen time. */
+    @Serializable(with = StrictBooleanSerializer::class)
+    val delayed: Boolean = false,
 )
+
+/** `GET /api/mail/send-delay`. */
+@Serializable
+data class RelaySendDelayDto(val seconds: Int = -1)
 
 @Serializable
 data class RelayScheduledSendDto(

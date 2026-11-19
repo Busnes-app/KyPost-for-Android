@@ -34,12 +34,14 @@ import org.kysecurity.mail.contacts.RecipientField
 import org.kysecurity.mail.contacts.toRecipientCandidateOrNull
 import org.kysecurity.mail.data.DataRuntime
 import androidx.core.view.isVisible
+import org.kysecurity.mail.mail.MAX_SEND_DELAY_SECONDS
 import org.kysecurity.mail.mail.MailDraft
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRuntime
 import org.kysecurity.mail.mail.MailSendOutcome
 import org.kysecurity.mail.mail.OutgoingAttachment
 import org.kysecurity.mail.mail.plusBase
+import org.kysecurity.mail.mail.SCHEDULED_CLAIMED_MESSAGE
 import org.kysecurity.mail.mail.userFacingMessage
 import org.kysecurity.mail.pgp.ClientEncryptedDraftSaver
 import org.kysecurity.mail.pgp.DraftEncryption
@@ -58,6 +60,7 @@ import org.kysecurity.mail.pgp.webmailDraftsUrl
 import org.kysecurity.mail.push.PushRuntime
 import org.kysecurity.mail.push.pinnedPairingCallFactory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
@@ -70,6 +73,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import android.os.SystemClock
 import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -140,6 +144,17 @@ class ComposeActivity : LockedActivity() {
     private var ownAddresses: List<String>? = null
     private lateinit var fromRow: View
     private lateinit var fromValue: android.widget.TextView
+    /** The user's Send delay in seconds, read as this screen opens; 0 when unknown or Off. */
+    private lateinit var sendDelay: kotlinx.coroutines.Deferred<Int>
+    @Volatile private var knownSendDelay = 0
+
+    /** Sent and held for the Send delay: the screen stays, Send off, offering Cancel until release. */
+    private var held: ComposeSend.Held? = null
+    private var heldBar: com.google.android.material.snackbar.Snackbar? = null
+    private var cancelingHeld = false
+    private val heldTick = object : Runnable {
+        override fun run() = renderHeld()
+    }
     private val mainHandler = Handler(Looper.getMainLooper())
 
     /** The editor exports its HTML asynchronously, and a configuration change destroys this
@@ -332,7 +347,14 @@ class ComposeActivity : LockedActivity() {
         )
         sendOffNotice = findViewById(R.id.composeSendOffNotice)
         findViewById<View>(R.id.composeSendOffRetry).setOnClickListener { resolveCustody() }
-        onBackPressedDispatcher.addCallback(this) { confirmDiscard() }
+        // While held the message is already on its way: leaving lets it go, nothing to discard.
+        onBackPressedDispatcher.addCallback(this) {
+            when (ComposeSend.onBack(held != null, cancelingHeld)) {
+                ComposeSend.Back.DISCARD -> confirmDiscard()
+                ComposeSend.Back.LEAVE_HELD -> leaveHeld()
+                ComposeSend.Back.WAIT -> Unit
+            }
+        }
 
         pgpChips = findViewById(R.id.composePgpChips)
         encryptChip = findViewById(R.id.composeEncryptChip)
@@ -471,6 +493,14 @@ class ComposeActivity : LockedActivity() {
                 addAttachments(streamUris)
             }
         }
+
+        val appForDelay = applicationContext
+        sendDelay = lifecycleScope.async(Dispatchers.IO) {
+            ((MailRuntime.graph(appForDelay).repository.sendDelaySeconds() as? MailOutcome.Success)?.value ?: 0)
+                .also { knownSendDelay = it }
+        }
+        // A held send belongs to the draft just restored; a new composition only lets it go.
+        ComposeSend.held()?.let { hold -> if (restored != null) resumeHeld(hold) else ComposeSend.clearHold(hold) }
 
         // A send still in flight belongs to the draft just restored (a rotation, or the lock
         // tearing the screen down): adopt it rather than offer Send again. A new composition
@@ -677,7 +707,7 @@ class ComposeActivity : LockedActivity() {
     /** Withdraws Send on an account this app cannot encrypt for. See [applyPgpComposeState]. */
     private fun applySendAvailability() {
         sendMenuItem?.isVisible = !handoffOnlyAccount
-        sendMenuItem?.isEnabled = custodyKnown && !handoffOnlyAccount && !handoffBusy && sending == null
+        sendMenuItem?.isEnabled = custodyKnown && !handoffOnlyAccount && !handoffBusy && sending == null && held == null
         // Only where this device holds the key: the fallback copy for Drafts is encrypted here.
         scheduleMenuItem?.isVisible = clientSideAccount && !handoffOnlyAccount
         scheduleMenuItem?.isEnabled = sendMenuItem?.isEnabled == true
@@ -1080,11 +1110,13 @@ class ComposeActivity : LockedActivity() {
         // (still STARTED in split screen, say) is refused by ComposeSend instead of sending as the next.
         val session = openedSession
 
-        bodyEditor.exportHtml { html ->
+        bodyEditor.exportHtml { html -> lifecycleScope.launch {
+            // A chosen time is never delayed more; the read is normally done long before Send.
+            val delayed = sendAt == null && sendDelay.await() > 0
             // exportHtml's main-looper callback can fire after onDestroy.
-            if (isFinishing || isDestroyed) return@exportHtml
+            if (isFinishing || isDestroyed) return@launch
             // Asked again: custody can resolve between the tap and this callback.
-            if (!custodyPermitsSend()) return@exportHtml
+            if (!custodyPermitsSend()) return@launch
             val draft = MailDraft(
                 to = to, cc = cc, bcc = bcc, subject = subject, body = html, mode = "html",
                 attachments = attachments.toList(),
@@ -1097,16 +1129,18 @@ class ComposeActivity : LockedActivity() {
                 replyToMailbox = replyTo?.mailbox,
                 sendAt = sendAt,
                 from = composeFrom,
+                sendDelay = delayed,
             )
             sentDraft = draft
             sentSession = session
             // A client-custody account encrypts here, not on the relay; both chips unchecked is deliberate.
+            // Held or scheduled, its plain send carries the copy for Drafts, encrypted here.
             when {
                 clientSideAccount && (draft.sign || draft.encrypt) -> dispatchClientSend(draft, session)
-                sendAt != null -> dispatchScheduledPlainSend(draft, session)
+                sendAt != null || (clientSideAccount && delayed) -> dispatchScheduledPlainSend(draft, session)
                 else -> dispatchSend(draft, session)
             }
-        }
+        } }
     }
 
     /** Mail without a subject is legal and sometimes meant; ask rather than refuse. */
@@ -1158,6 +1192,7 @@ class ComposeActivity : LockedActivity() {
     /** One branch per [ClientSendOutcome]; the rule itself is unit-tested in ClientEncryptedSenderTest. */
     private fun renderClientSendOutcome(outcome: ClientSendOutcome) {
         when (outcome) {
+            is ClientSendOutcome.Sent if outcome.heldId != null -> startHeld(outcome.heldId, outcome.scheduledAt)
             is ClientSendOutcome.Sent -> {
                 deleteSourceDraft()
                 val message = outcome.scheduledAt?.let(::scheduledMessage)
@@ -1262,8 +1297,8 @@ class ComposeActivity : LockedActivity() {
         )
     }
 
-    /** A plain scheduled send from a client-custody account: the relay sends the plaintext, as it
-     *  would now, but the copy it returns to Drafts on failure is encrypted here first. */
+    /** A plain scheduled or held send from a client-custody account: the relay sends the
+     *  plaintext, as it would now, but the copy it returns to Drafts is encrypted here first. */
     private fun dispatchScheduledPlainSend(draft: MailDraft, session: Long) {
         if (sendJob?.isActive == true) return
         sendMenuItem?.isEnabled = false
@@ -1383,6 +1418,106 @@ class ComposeActivity : LockedActivity() {
         }
     }
 
+    /** The relay holds the message until the delay ends. Measured from now with the delay this
+     *  screen read, not the server's clock; the server's time only stands in when it is unknown. */
+    private fun startHeld(id: String, releaseAt: Instant?) {
+        deleteSourceDraft()
+        val seconds = knownSendDelay.takeIf { it > 0 }?.toLong()
+            ?: releaseAt?.let { Duration.between(Instant.now(), it).seconds }?.coerceIn(1, MAX_SEND_DELAY_SECONDS.toLong())
+            ?: MAX_SEND_DELAY_SECONDS.toLong()
+        val hold = ComposeSend.Held(id, SystemClock.elapsedRealtime() + seconds * 1000)
+        ComposeSend.hold(hold)
+        resumeHeld(hold)
+    }
+
+    private fun resumeHeld(hold: ComposeSend.Held) {
+        held = hold
+        applySendAvailability()
+        renderHeld()
+    }
+
+    /** "Sending in Ns · Cancel sending", ticking each second; at release the screen closes as sent. */
+    private fun renderHeld() {
+        mainHandler.removeCallbacks(heldTick)
+        val hold = held ?: return
+        if (isFinishing || isDestroyed) return
+        val left = hold.releaseAtElapsedMs - SystemClock.elapsedRealtime()
+        if (left <= 0 && !cancelingHeld) return released(hold)
+        val text = if (cancelingHeld) getString(R.string.compose_canceling_sending)
+        else getString(R.string.compose_sending_in, ((left + 999) / 1000).toInt())
+        val bar = heldBar?.takeIf { it.isShown || it.isShownOrQueued }
+            ?: com.google.android.material.snackbar.Snackbar.make(rootView, text, com.google.android.material.snackbar.Snackbar.LENGTH_INDEFINITE)
+                .also { applySnackbarTheme(this, it) }
+                .also { heldBar = it }
+        bar.setText(text)
+        bar.setAction(if (cancelingHeld) null else getString(R.string.compose_cancel_sending)) { cancelHeld() }
+        if (!bar.isShownOrQueued) bar.show()
+        if (!cancelingHeld) mainHandler.postDelayed(heldTick, ((left - 1) % 1000) + 1)
+    }
+
+    private fun released(hold: ComposeSend.Held) {
+        ComposeSend.clearHold(hold)
+        held = null
+        heldBar?.dismiss()
+        Toast.makeText(this, R.string.compose_send_success, Toast.LENGTH_SHORT).show()
+        finishSent()
+    }
+
+    /** Back while held: the message goes at release as it would have; Compose closes now. */
+    private fun leaveHeld() {
+        held?.let(ComposeSend::clearHold)
+        held = null
+        mainHandler.removeCallbacks(heldTick)
+        finishSent()
+    }
+
+    private fun finishSent() {
+        sendSucceeded = true
+        ComposeDraftCache.clear(System.identityHashCode(this))
+        finish()
+    }
+
+    /** Returns the message to Drafts on the server and leaves this composition as it was, to edit
+     *  and send again. Too late (409, release started) means it went. */
+    private fun cancelHeld() {
+        val hold = held ?: return
+        if (cancelingHeld) return
+        cancelingHeld = true
+        // The tapped bar is dismissing itself; "Canceling sending…" gets a fresh one.
+        heldBar = null
+        renderHeld()
+        val app = applicationContext
+        // ponytail: screen-scoped; a rotation mid-request resumes the countdown without its answer.
+        // Upgrade path: run the cancel in ComposeSend beside the hold it ends.
+        lifecycleScope.launch {
+            val outcome = withContext(Dispatchers.IO) { MailRuntime.graph(app).repository.cancelScheduled(hold.id) }
+            cancelingHeld = false
+            if (isFinishing || isDestroyed || held != hold) return@launch
+            when {
+                outcome is MailOutcome.Success -> {
+                    ComposeSend.clearHold(hold)
+                    held = null
+                    heldBar?.dismiss()
+                    applySendAvailability()
+                    val message = if (outcome.value.isBlank()) R.string.compose_sending_canceled else R.string.compose_sending_canceled_later
+                    Toast.makeText(this@ComposeActivity, message, Toast.LENGTH_LONG).show()
+                }
+                outcome is MailOutcome.BadRequest && outcome.message == SCHEDULED_CLAIMED_MESSAGE -> {
+                    ComposeSend.clearHold(hold)
+                    held = null
+                    heldBar?.dismiss()
+                    Toast.makeText(this@ComposeActivity, R.string.compose_already_sent, Toast.LENGTH_LONG).show()
+                    finishSent()
+                }
+                else -> {
+                    val reason = outcome.userFacingMessage().orEmpty()
+                    Toast.makeText(this@ComposeActivity, getString(R.string.compose_cancel_sending_failed, reason), Toast.LENGTH_LONG).show()
+                    renderHeld()
+                }
+            }
+        }
+    }
+
     private fun scheduledMessage(at: Instant): String = getString(R.string.compose_scheduled_for, formatWhen(at))
 
     /** Renders [sending], whether this screen started it or the one a rotation replaced did. */
@@ -1415,6 +1550,10 @@ class ComposeActivity : LockedActivity() {
 
     private fun renderSendOutcome(outcome: MailOutcome<*>) {
         when (outcome) {
+            is MailOutcome.Success if (outcome.value as MailSendOutcome).heldId != null -> {
+                val sent = outcome.value as MailSendOutcome
+                startHeld(requireNotNull(sent.heldId), sent.scheduledAt)
+            }
             is MailOutcome.Success -> {
                 val sent = outcome.value as MailSendOutcome
                 val warning = sent.warning
@@ -1694,6 +1833,7 @@ class ComposeActivity : LockedActivity() {
 
     override fun onDestroy() {
         if (handoffBusy) handoffOpener.cancel()
+        mainHandler.removeCallbacks(heldTick)
         super.onDestroy()
         ComposeDraftCache.closed(System.identityHashCode(this))
         // Both hold message plaintext, and neither is reachable from InMemoryPlaintext.clearAll().
