@@ -16,6 +16,11 @@ internal data class ComposePrefill(
     val sourceDraftAttachments: Int = 0,
     /** Reply and Forward come only from in-app launches; everything else is a new message. */
     val kind: ComposeKind = ComposeKind.NEW,
+    /** The address to send from; blank is the account default. In-app only. */
+    val from: String = "",
+    /** A reply whose receiving address is unknown: [from] is blank and the user must pick one,
+     *  never the primary by default. In-app only. */
+    val fromRequired: Boolean = false,
 )
 
 internal fun Intent.isExternalComposeIntent(): Boolean =
@@ -64,6 +69,8 @@ internal fun parseComposeIntent(
             bcc = intent.getStringExtra(ComposeActivity.EXTRA_BCC).orEmpty(),
             sourceDraft = if (draftId.isNullOrBlank() || draftFolder.isNullOrBlank()) null else ReplyRef(draftId, draftFolder),
             sourceDraftAttachments = intent.getIntExtra(ComposeActivity.EXTRA_SOURCE_DRAFT_ATTACHMENTS, 0),
+            from = intent.getStringExtra(ComposeActivity.EXTRA_FROM).orEmpty().trim(),
+            fromRequired = intent.getBooleanExtra(ComposeActivity.EXTRA_FROM_REQUIRED, false),
             kind = ComposeKind.entries.firstOrNull { it.name == intent.getStringExtra(ComposeActivity.EXTRA_KIND) }
                 ?: ComposeKind.NEW,
         )

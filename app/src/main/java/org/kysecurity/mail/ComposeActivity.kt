@@ -33,12 +33,14 @@ import org.kysecurity.mail.contacts.RecipientCandidate
 import org.kysecurity.mail.contacts.RecipientField
 import org.kysecurity.mail.contacts.toRecipientCandidateOrNull
 import org.kysecurity.mail.data.DataRuntime
+import androidx.core.view.isVisible
 import org.kysecurity.mail.mail.MAX_SEND_DELAY_SECONDS
 import org.kysecurity.mail.mail.MailDraft
 import org.kysecurity.mail.mail.MailOutcome
 import org.kysecurity.mail.mail.MailRuntime
 import org.kysecurity.mail.mail.MailSendOutcome
 import org.kysecurity.mail.mail.OutgoingAttachment
+import org.kysecurity.mail.mail.plusBase
 import org.kysecurity.mail.mail.SCHEDULED_CLAIMED_MESSAGE
 import org.kysecurity.mail.mail.userFacingMessage
 import org.kysecurity.mail.pgp.ClientEncryptedDraftSaver
@@ -133,6 +135,15 @@ class ComposeActivity : LockedActivity() {
     /** The relay call this screen is waiting on, possibly started by the instance a rotation replaced. */
     private var sending: ComposeSend.InFlight<*>? = null
 
+    /** The address to send from; blank is the account default. A reply sets it to where the
+     *  message was delivered, or leaves it blank with [fromRequired]: then Send and Save draft wait
+     *  for the user's pick, and nothing ever fills in the primary. */
+    private var composeFrom = ""
+    private var fromRequired = false
+    /** The primary mailbox's addresses, the From choices; null until loaded. */
+    private var ownAddresses: List<String>? = null
+    private lateinit var fromRow: View
+    private lateinit var fromValue: android.widget.TextView
     /** The user's Send delay in seconds, read as this screen opens; 0 when unknown or Off. */
     private lateinit var sendDelay: kotlinx.coroutines.Deferred<Int>
     @Volatile private var knownSendDelay = 0
@@ -323,7 +334,11 @@ class ComposeActivity : LockedActivity() {
         italicChip = findViewById(R.id.composeItalic)
         underlineChip = findViewById(R.id.composeUnderline)
         linkChip = findViewById(R.id.composeLink)
+        fromRow = findViewById(R.id.composeFromRow)
+        fromValue = findViewById(R.id.composeFromValue)
+        fromValue.setOnClickListener { pickFrom() }
         dividers = listOf(
+            findViewById(R.id.composeFromDivider),
             findViewById(R.id.composeDetailsDivider1),
             findViewById(R.id.composeDetailsDivider2),
             findViewById(R.id.composeDetailsDivider3),
@@ -389,6 +404,10 @@ class ComposeActivity : LockedActivity() {
         replyTo = if (restored != null) restored.replyTo else handedOff.takeUnless { intent.isExternalComposeIntent() }
         sourceDraft = restored?.sourceDraft
         restoredDraftForTest = restored
+        restored?.let {
+            composeFrom = it.from
+            fromRequired = it.fromRequired
+        }
         if (restored != null) {
             subjectField.setText(restored.subject)
             toInput.setInitialRecipients(restored.to)
@@ -412,6 +431,8 @@ class ComposeActivity : LockedActivity() {
             val prefill = parseComposeIntent(intent, internal, ::plainTextToHtml)
             val prefilledHtml = prefill.bodyHtml
             sourceDraft = prefill.sourceDraft
+            fromRequired = prefill.fromRequired
+            composeFrom = if (prefill.fromRequired) "" else prefill.from
             // Not above text another app asked to send, nor again on a draft that already has one.
             // A restored draft (the branch above) never gets one either.
             val bodyHtml = if ((intent.isExternalComposeIntent() && prefilledHtml.isNotBlank()) || sourceDraft != null) {
@@ -512,8 +533,69 @@ class ComposeActivity : LockedActivity() {
             .launchIn(lifecycleScope)
 
         attachButton.setOnClickListener { pickAttachments.launch(arrayOf("*/*")) }
+        renderFrom()
+        if (fromRow.isVisible) lifecycleScope.launch { loadOwnAddresses(quiet = true) }
         renderCcBcc()
         applyComposeTheme()
+    }
+
+    private fun renderFrom() {
+        val shown = fromRequired || composeFrom.isNotBlank()
+        fromRow.isVisible = shown
+        findViewById<View>(R.id.composeFromDivider).isVisible = shown
+        fromValue.text = composeFrom.ifBlank { getString(R.string.compose_from_choose) }
+    }
+
+    /** Null on failure; the picker then says why and asks again on the next tap. */
+    private suspend fun loadOwnAddresses(quiet: Boolean = false): List<String>? {
+        ownAddresses?.let { return it }
+        val app = applicationContext
+        val outcome = withContext(Dispatchers.IO) { MailRuntime.graph(app).repository.ownAddresses() }
+        if (outcome !is MailOutcome.Success) {
+            if (!quiet && !isFinishing && !isDestroyed) {
+                Toast.makeText(this, getString(R.string.compose_from_unavailable, outcome.userFacingMessage().orEmpty()), Toast.LENGTH_LONG).show()
+            }
+            return null
+        }
+        return outcome.value.also { ownAddresses = it }
+    }
+
+    /** The mailbox's addresses, plus the reply's tagged one (`you+tag@`) when it is one of them. */
+    private fun pickFrom() {
+        lifecycleScope.launch {
+            val own = loadOwnAddresses() ?: return@launch
+            if (isFinishing || isDestroyed) return@launch
+            val lowered = own.map { it.lowercase() }
+            val tagged = composeFrom.takeIf {
+                it.isNotBlank() && it.lowercase() !in lowered && plusBase(it.lowercase()) in lowered
+            }
+            val choices = own + listOfNotNull(tagged)
+            // Nothing to pick: the account default is the From, and Send no longer waits.
+            if (choices.isEmpty()) {
+                fromRequired = false
+                renderFrom()
+                return@launch
+            }
+            activeDialog = AlertDialog.Builder(this@ComposeActivity)
+                .setTitle(R.string.compose_from_title)
+                .setSingleChoiceItems(choices.toTypedArray(), choices.indexOfFirst { it.equals(composeFrom, ignoreCase = true) }) { dialog, which ->
+                    composeFrom = choices[which]
+                    fromRequired = false
+                    renderFrom()
+                    dialog.dismiss()
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .create()
+                .showSecurely()
+        }
+    }
+
+    /** False, with the picker open, while this composition still has to choose its From. */
+    private fun fromChosen(): Boolean {
+        if (!fromPickPending(fromRequired, composeFrom, ownAddresses)) return true
+        Toast.makeText(this, R.string.compose_from_required, Toast.LENGTH_LONG).show()
+        pickFrom()
+        return false
     }
 
     /** Shows Cc and Bcc when asked for or when either holds an address (a reply-all, a restored
@@ -706,6 +788,8 @@ class ComposeActivity : LockedActivity() {
         dividers.forEach { it.setBackgroundColor(line) }
         val ink = Color.parseColor(palette.ink)
         findViewById<android.widget.TextView>(R.id.composeSubjectLabel).setTextColor(ink)
+        findViewById<android.widget.TextView>(R.id.composeFromLabel).setTextColor(ink)
+        fromValue.setTextColor(Color.parseColor(palette.inkStrong))
         (bodyPlaceholder as android.widget.TextView).setTextColor(ink)
         applyWarningNoticeTheme(
             this,
@@ -992,6 +1076,7 @@ class ComposeActivity : LockedActivity() {
     private fun sendEmail(allowEmptySubject: Boolean = false, sendAt: Instant? = null) {
         if (handoffBusy || sending != null || sendJob?.isActive == true) return
         if (!custodyPermitsSend()) return
+        if (!fromChosen()) return
         if (!commitTypedRecipients()) return
         if (sendAt != null) {
             // Server-held keys get no scheduling: the copy for Drafts must be encrypted here.
@@ -1043,6 +1128,7 @@ class ComposeActivity : LockedActivity() {
                 replyToMessageId = replyTo?.messageId,
                 replyToMailbox = replyTo?.mailbox,
                 sendAt = sendAt,
+                from = composeFrom,
                 sendDelay = delayed,
             )
             sentDraft = draft
@@ -1181,7 +1267,8 @@ class ComposeActivity : LockedActivity() {
         val pairing = PushRuntime.graph(this).repository.pairingForAuthenticatedCall() ?: return null
         val deviceId = pairing.deviceId ?: return null
         val deviceSecret = pairing.deviceSecret ?: return null
-        val address = pgpController.accountAddress()
+        // The chosen From goes on every delivery; the relay checks it is one of this account's.
+        val address = composeFrom.ifBlank { pgpController.accountAddress() }
         if (address.isBlank()) return null
         val resolveClient = RecipientResolveClient(callFactory = pinnedPairingCallFactory(this))
         return ClientEncryptedSender(
@@ -1216,7 +1303,7 @@ class ComposeActivity : LockedActivity() {
         if (sendJob?.isActive == true) return
         sendMenuItem?.isEnabled = false
         sendJob = lifecycleScope.launch {
-            val saver = ClientEncryptedDraftSaver(handoffOpener, pgpController.accountAddress()) {
+            val saver = ClientEncryptedDraftSaver(handoffOpener, composeFrom.ifBlank { pgpController.accountAddress() }) {
                 MailRuntime.graph(this@ComposeActivity).repository.saveClientEncryptedDraft(it)
             }
             val result = saver.encrypt(draft, OffsetDateTime.now(ZoneOffset.UTC))
@@ -1249,6 +1336,18 @@ class ComposeActivity : LockedActivity() {
         // Send disables its item before its own export, while sendJob is not yet set.
         if (handoffBusy || sending != null || sendJob?.isActive == true || sendMenuItem?.isEnabled != true) return
         if (!custodyPermitsSend() || !draftSaveAllowed()) return
+        // As on the web: a draft is saved with the From it will send from, never a stand-in.
+        if (!fromChosen()) return
+        // `/api/mail/draft` stores no From: such a draft would reopen as the primary address.
+        if (!clientSideAccount && composeFrom.isNotBlank() && ownAddresses == null) {
+            // Not loaded yet, or the quiet load failed: load, then ask again; a failure says why.
+            lifecycleScope.launch { if (loadOwnAddresses() != null && !isFinishing && !isDestroyed) saveDraft() }
+            return
+        }
+        if (!clientSideAccount && !plainDraftKeepsFrom(composeFrom, ownAddresses)) {
+            Toast.makeText(this, R.string.compose_from_not_kept_in_draft, Toast.LENGTH_LONG).show()
+            return
+        }
         if (!commitTypedRecipients()) return
         // Until the save lands or fails; a second tap would otherwise start a second export.
         listOf(sendMenuItem, scheduleMenuItem, saveDraftMenuItem).forEach { it?.isEnabled = false }
@@ -1276,7 +1375,7 @@ class ComposeActivity : LockedActivity() {
                 return@exportHtml
             }
             sendJob = lifecycleScope.launch {
-                val saver = ClientEncryptedDraftSaver(handoffOpener, pgpController.accountAddress()) {
+                val saver = ClientEncryptedDraftSaver(handoffOpener, composeFrom.ifBlank { pgpController.accountAddress() }) {
                     MailRuntime.graph(app).repository.saveClientEncryptedDraft(it)
                 }
                 // The unlock prompt is bound to this screen; the relay call outlives it, as a send does.
@@ -1531,6 +1630,8 @@ class ComposeActivity : LockedActivity() {
     /** Resolve custody and the target before asking consent or exporting composition content. */
     private fun handOffToWebmail() {
         if (handoffBusy || sendJob?.isActive == true) return
+        // The handoff saves a draft, which must carry the chosen From like any other.
+        if (!fromChosen()) return
         handoffBusy = true
         handoffAttempt++
         webmailChip.isEnabled = false
@@ -1603,7 +1704,7 @@ class ComposeActivity : LockedActivity() {
                     completeDraftHandoff(DraftSaveOutcome.NotEnrolled) { false }
                     return@launch
                 }
-                val saver = ClientEncryptedDraftSaver(handoffOpener, pgpController.accountAddress()) {
+                val saver = ClientEncryptedDraftSaver(handoffOpener, composeFrom.ifBlank { pgpController.accountAddress() }) {
                     MailRuntime.graph(this@ComposeActivity).repository.saveClientEncryptedDraft(it)
                 }
                 val result = saver.save(MailDraft(to, cc, bcc, subject, html, "html", parts))
@@ -1676,6 +1777,8 @@ class ComposeActivity : LockedActivity() {
         sign = signChip.isChecked,
         replyTo = replyTo,
         sourceDraft = sourceDraft,
+        from = composeFrom,
+        fromRequired = fromRequired && composeFrom.isBlank(),
     ).withBody(bodyHtml)
 
     /** An untouched blank composition is no draft, however much signature it carries. */
@@ -1777,6 +1880,9 @@ class ComposeActivity : LockedActivity() {
         const val EXTRA_REPLY_TOKEN = "compose_reply_token"
         /** A [ComposeKind] name; decides whether the device signature goes in. */
         const val EXTRA_KIND = "compose_kind"
+        /** In-app only, like the source draft: see [ComposePrefill.from]. */
+        const val EXTRA_FROM = "compose_from"
+        const val EXTRA_FROM_REQUIRED = "compose_from_required"
         const val EXTRA_CC = "compose_cc"
         const val EXTRA_BCC = "compose_bcc"
         const val EXTRA_SOURCE_DRAFT_ID = "compose_source_draft_id"
@@ -1830,6 +1936,17 @@ internal fun readAtMost(input: InputStream, limit: Long, expectedSize: Long = -1
 }
 
 internal enum class SendReadiness { READY, INCOMPLETE, CONFIRM_EMPTY_SUBJECT }
+
+/** A plaintext draft (`/api/mail/draft`) is stored with the server's default From, the primary
+ *  address, so it may carry no other. [own] is primary first; none (no native mailboxes) leaves
+ *  the default as the only From; unknown refuses. */
+internal fun plainDraftKeepsFrom(from: String, own: List<String>?): Boolean =
+    from.isBlank() || own?.let { it.isEmpty() || it.first().equals(from, ignoreCase = true) } == true
+
+/** Whether Send, Save draft and the handoff still wait for the user's From pick. */
+internal fun fromPickPending(required: Boolean, from: String, own: List<String>?): Boolean =
+    // No address to pick (a relay without native mailboxes): the account default is the only From.
+    required && from.isBlank() && own?.isEmpty() != true
 
 internal fun sendReadiness(to: String, subject: String, bodyEmpty: Boolean, allowEmptySubject: Boolean): SendReadiness =
     when {

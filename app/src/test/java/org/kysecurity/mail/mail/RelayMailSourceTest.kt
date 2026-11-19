@@ -1802,6 +1802,36 @@ class RelayMailSourceTest {
     }
 
     @Test
+    fun messageBody_readsWhereTheServerDeliveredIt_andAbsentIsUnknown() {
+        fun bodyAnswering(body: String) = (RelayMailSource(
+            { testPairing() }, FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body) },
+        ).fetchMessageBody("1", "INBOX") as MailOutcome.Success).value.deliveredTo
+
+        assertEquals(listOf("x7k2@mask.example.invalid"), bodyAnswering("""{"body":"","deliveredTo":["x7k2@mask.example.invalid"," "]}"""))
+        assertEquals(emptyList<String>(), bodyAnswering("""{"body":"","deliveredTo":[]}"""))
+        assertNull(bodyAnswering("""{"body":""}"""))
+    }
+
+    @Test
+    fun ownAddresses_areThePrimaryMailboxes_andNoneWithoutNativeMail() {
+        fun addressesAnswering(code: Int, body: String) = RelayMailSource(
+            { testPairing() }, FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request ->
+                assertEquals("/api/mailboxes", request.url.encodedPath)
+                jsonResponse(request, body, code)
+            },
+        ).ownAddresses()
+
+        val both = """{"mailboxes":[{"id":"b","kind":"extra","addresses":[{"address":"team@example.invalid"}]},
+            {"id":"a","kind":"primary","addresses":[{"address":"x7k2@mask.example.invalid","kind":"masked"},{"address":"me@example.invalid","kind":"primary"}]}]}"""
+        assertEquals("primary first", listOf("me@example.invalid", "x7k2@mask.example.invalid"), (addressesAnswering(200, both) as MailOutcome.Success).value)
+        assertEquals(emptyList<String>(), (addressesAnswering(200, """{"mailboxes":[]}""") as MailOutcome.Success).value)
+        assertEquals(emptyList<String>(), (addressesAnswering(404, "404 page not found") as MailOutcome.Success).value)
+        assertFalse(addressesAnswering(503, "mailbox authority is unavailable") is MailOutcome.Success)
+    }
+
+    @Test
     fun listScheduled_readsEachRow() {
         val body = """{"scheduled":[{"id":"s1","status":"scheduled","reason":"","sendAt":"2026-10-20T08:00:00Z","subject":"Hi","to":["a@example.invalid"]},
             {"id":"s2","status":"failed","reason":"late","sendAt":"bogus","subject":"","to":[]}]}"""

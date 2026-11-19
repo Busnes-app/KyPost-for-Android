@@ -12,6 +12,11 @@
 
 ### Changed
 
+- Replies come from the address the message was sent to: a plus address (`you+shop@`) or a
+  masked address, as your KyPost server reports it, shown in a new From row. When the server
+  cannot tell, From says "Choose an address" and the reply cannot be sent or saved until you pick
+  one; it never falls back to your main address. A server with no addresses to pick from sends from
+  your account's default. Edit it in the From row at any time.
 - With a Send delay set in KyPost on the web, Send holds your message for that long and shows
   "Sending in Ns · Cancel sending". Cancel sending keeps it open in Compose, exactly as you wrote
   it, to edit and send again; KyPost also puts a copy in Drafts. If it has already gone out, it

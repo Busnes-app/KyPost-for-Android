@@ -42,4 +42,21 @@ class ComposeIntentParserTest {
         assertEquals("c@example.com, e@example.com", prefill.cc)
         assertEquals("d@example.com", prefill.bcc)
     }
+
+    /** A reply's From comes only from this app; another app cannot pick the address mail goes from. */
+    @Test
+    fun fromAndItsRequirementAreReadOnlyFromInAppLaunches() {
+        val intent = Intent(Intent.ACTION_SEND)
+            .putExtra(ComposeActivity.EXTRA_FROM, "me+shop@example.com")
+            .putExtra(ComposeActivity.EXTRA_FROM_REQUIRED, true)
+        val outside = parse(intent)
+        assertEquals("", outside.from)
+        assertEquals(false, outside.fromRequired)
+
+        val inApp = parseComposeIntent(Intent().putExtra(ComposeActivity.EXTRA_FROM, " me+shop@example.com "), internal = true) { it }
+        assertEquals("me+shop@example.com", inApp.from)
+        assertEquals(false, inApp.fromRequired)
+        val mustChoose = parseComposeIntent(Intent().putExtra(ComposeActivity.EXTRA_FROM_REQUIRED, true), internal = true) { it }
+        assertEquals(true, mustChoose.fromRequired)
+    }
 }

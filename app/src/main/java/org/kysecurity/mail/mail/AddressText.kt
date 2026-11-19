@@ -29,3 +29,24 @@ fun replyAllRecipients(sender: String, to: List<String>, cc: List<String>, own: 
     val mine = own.mapTo(HashSet()) { addressFromHeader(it).lowercase() }
     return all.filterNot { it.lowercase() in mine }.ifEmpty { all }
 }
+
+/** `you+tag@example.org` without its tag; any other address as it is. */
+fun plusBase(address: String): String {
+    val at = address.lastIndexOf('@')
+    val plus = if (at < 0) -1 else address.substring(0, at).indexOf('+')
+    return if (plus < 0) address else address.substring(0, plus) + address.substring(at)
+}
+
+/** The From a reply sends from, so a reply to a masked or plus address never shows the primary.
+ *  With the receipt's [delivered] addresses (native mail, Bcc included): the To/Cc address that
+ *  names one keeps its tag, else the delivered own address; null when none is the user's, so they
+ *  must choose. Without a receipt (external IMAP, Sent) the user's own To/Cc address is used, and
+ *  "" keeps the account default. The web client's rule (frontend/src/pages/read/compose.ts). */
+fun replyFromAddress(sentTo: String, cc: String, own: List<String>, delivered: List<String>?): String? {
+    val mine = own.mapTo(HashSet()) { it.lowercase() }
+    fun isMine(address: String) = address in mine || plusBase(address) in mine
+    val headers = org.kysecurity.mail.splitAddresses(sentTo, cc).map { addressFromHeader(it).lowercase() }.filter { it.isNotBlank() }
+    if (delivered == null) return headers.firstOrNull(::isMine) ?: ""
+    val got = delivered.mapTo(LinkedHashSet()) { it.lowercase() }
+    return headers.firstOrNull { (it in got || plusBase(it) in got) && isMine(it) } ?: got.firstOrNull { it in mine }
+}
