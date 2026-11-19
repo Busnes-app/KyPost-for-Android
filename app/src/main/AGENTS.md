@@ -128,6 +128,25 @@ Owns production Android app code and resources.
   through `openWebmail`) and "Check again", and stops its 90 s poll and notification-message poll.
   Only a foreground return (`onStartUnlocked`) or Check again asks again, one inbox request; the first
   success clears the state and restarts the poll. Other screens show the message as a toast.
+- Conversations (KyPost-Server #667): while the user's `GET /api/settings/mail` `conversations` is
+  on (the default; last read kept in `MailSettings`, read on each inbox foreground and on Settings),
+  `InboxActivity` fetches `GET /api/inbox/conversations` after each successful folder refresh, with
+  `limit` = rows cached for that folder (max 500), and `groupInboxRows` folds the list. The refresh
+  paints the mail first and regroups when that answer lands (`paintThenGroup`), so a slow route never
+  holds new mail back. `/api/inbox` and Room are unchanged; grouping is in memory only, in a
+  `ConversationCache` owned by one account in one session generation: either changing empties it, and
+  an answer from an ended session is dropped. A failed or absent route keeps the last grouping (that
+  account's only), never toasts. A conversation row stands at its newest shown member; its `members` are
+  every loaded member in that folder (not only the keyword tab), and swipes, row accessibility
+  actions and bulk selection act on all of them (chunked to `MAX_ACTION_IDS`). A selection holds lead
+  ids; when a refresh brings a newer lead, `followLeads` moves it to the new one. Your replies in Sent
+  count and show, but list actions never touch them. Tapping the row expands it in place: `nested`
+  rows (oldest first, replies included) only open the reader, which acts on one message; they
+  neither swipe nor select. Search results stay ungrouped. Settings → Conversations writes
+  `PUT /api/settings/mail` and shows only what the server confirms. The server registers both
+  settings routes session-only (`withAuth`), so a paired device gets 401 there today: the app keeps
+  the last value (on), and the Settings row says to change it on the web. Never word that 401 as
+  re-pairing.
 - **`MailRepository` is the one synchronization boundary: the source returns facts, the repository
   decides when they become durable.** Two rules follow from that, and both were once broken.
   0. `refreshFolder`, `loadOlder`/`loadOlderFrom` and `fetchBody` capture `ProcessState.generation()`

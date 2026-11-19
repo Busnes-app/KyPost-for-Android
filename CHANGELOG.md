@@ -12,6 +12,11 @@
 
 ### Changed
 
+- The inbox groups replies into conversations, like KyPost on the web, when your Group messages
+  into conversations setting is on (the default). Tap a conversation to show its messages, your
+  replies included; archive, delete, move and the other list actions on it apply to the whole
+  conversation in that folder. Settings → Conversations switches it. Needs KyPost Server with
+  conversations; older servers show the list as before.
 - Replies come from the address the message was sent to: a plus address (`you+shop@`) or a
   masked address, as your KyPost server reports it, shown in a new From row. When the server
   cannot tell, From says "Choose an address" and the reply cannot be sent or saved until you pick

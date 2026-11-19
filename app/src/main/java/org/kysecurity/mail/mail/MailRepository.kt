@@ -357,6 +357,10 @@ class MailRepository(
     fun listFolders(parent: String?): MailOutcome<FolderListResult> = relaySource.listFolders(parent)
     fun listScheduled(): MailOutcome<List<ScheduledSend>> = relaySource.listScheduled()
     fun cancelScheduled(id: String): MailOutcome<String> = relaySource.cancelScheduled(id)
+    fun fetchConversations(folder: String, limit: Int): MailOutcome<List<Conversation>> =
+        relaySource.fetchConversations(folder, limit)
+    fun conversationsEnabled(): MailOutcome<Boolean> = relaySource.conversationsEnabled()
+    fun setConversationsEnabled(enabled: Boolean): MailOutcome<Boolean> = relaySource.setConversationsEnabled(enabled)
     fun ownAddresses(): MailOutcome<List<String>> = relaySource.ownAddresses()
 
     /** The From a reply to [id] defaults to, as the server reports where it was delivered; null

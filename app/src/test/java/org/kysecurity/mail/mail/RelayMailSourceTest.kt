@@ -1867,6 +1867,67 @@ class RelayMailSourceTest {
         assertEquals(SCHEDULED_GONE_MESSAGE, (cancelAnswering(404, "scheduled message not found").first as MailOutcome.BadRequest).message)
     }
 
+    @Test
+    fun fetchConversations_readsGroupsAndYourRepliesInTheirOwnFolder() {
+        val body = """{"conversations":[
+            {"id":"1","messageIds":["1","3"],"sent":[
+                {"messageId":"7","sender":"me@example.invalid","subject":"Re: Hi","atUtc":"2026-11-02T09:00:00Z","mailbox":"Sent"},
+                {"messageId":"8","subject":"no mailbox"},
+                {"subject":"no id","mailbox":"Sent"}]},
+            {"id":"x","messageIds":[]}]}"""
+        val calls = FakeCallFactory { request -> jsonResponse(request, body) }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        val groups = (source.fetchConversations("INBOX", 9000) as MailOutcome.Success).value
+
+        val url = calls.requests.single().url
+        assertEquals("/api/inbox/conversations", url.encodedPath)
+        assertEquals("INBOX", url.queryParameter("mailbox"))
+        assertEquals("the server's maximum", "500", url.queryParameter("limit"))
+        assertEquals("an empty group is dropped", listOf("1"), groups.map { it.id })
+        assertEquals(listOf("1", "3"), groups.single().messageIds)
+        val reply = groups.single().sent.single()
+        assertEquals("7" to "Sent", reply.id to reply.folder)
+        assertEquals("Re: Hi", reply.subject)
+    }
+
+    @Test
+    fun fetchConversations_onAServerWithoutTheRoute_isAFailureNotAnEmptyList() {
+        val calls = FakeCallFactory { request -> jsonResponse(request, "404 page not found", code = 404) }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        assertFalse(source.fetchConversations("INBOX", 50) is MailOutcome.Success)
+    }
+
+    @Test
+    fun mailSettings_readsAndWritesTheConversationsSwitch() {
+        val calls = BodyRecordingCallFactory { request ->
+            jsonResponse(request, if (request.method == "PUT") """{"conversations":false}""" else """{"conversations":true}""")
+        }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        assertEquals(true, (source.conversationsEnabled() as MailOutcome.Success).value)
+        assertEquals(false, (source.setConversationsEnabled(false) as MailOutcome.Success).value)
+
+        assertEquals(listOf("https://relay.example.com/api/settings/mail", "https://relay.example.com/api/settings/mail"), calls.urls)
+        assertEquals("""{"conversations":false}""", calls.bodies[1])
+        // true must be written too, though it is the default.
+        source.setConversationsEnabled(true)
+        assertEquals("""{"conversations":true}""", calls.bodies[2])
+    }
+
+    @Test
+    fun mailSettings_aMissingOrStringValueIsNotTrustedAsOff() {
+        fun reading(body: String) = RelayMailSource(
+            { testPairing() }, FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body) },
+        ).conversationsEnabled()
+
+        assertEquals("on unless turned off", true, (reading("{}") as MailOutcome.Success).value)
+        assertFalse(reading("""{"conversations":"false"}""") is MailOutcome.Success)
+        assertTrue(reading("unauthorized") is MailOutcome.UpstreamFailure)
+    }
+
     /** Pre-#350 relays refuse the action with plain-text 400; that text is what the user sees. */
     @Test
     fun unreadAction_onAServerWithoutIt_isTheServersBadRequest() {

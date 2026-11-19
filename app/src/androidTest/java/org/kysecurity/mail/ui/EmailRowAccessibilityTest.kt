@@ -13,6 +13,7 @@ import org.junit.runner.RunWith
 import org.kysecurity.mail.mail.MailRuntime
 import org.kysecurity.mail.Email
 import org.kysecurity.mail.EmailAdapter
+import org.kysecurity.mail.InboxRow
 import org.kysecurity.mail.InboxActivity
 import org.kysecurity.mail.R
 
@@ -39,8 +40,8 @@ class EmailRowAccessibilityTest {
                 val adapter = EmailAdapter(
                     listOf(email("unread", attachments = true, preview = "Due Friday")),
                     rowActions = listOf(
-                        R.string.action_archive to { e: Email -> acted += "archive:${e.id}" },
-                        R.string.action_delete to { e: Email -> acted += "delete:${e.id}" },
+                        R.string.action_archive to { r: InboxRow -> acted += "archive:${r.email.id}" },
+                        R.string.action_delete to { r: InboxRow -> acted += "delete:${r.email.id}" },
                     ),
                 )
                 val holder = adapter.onCreateViewHolder(FrameLayout(activity), 0)
@@ -66,6 +67,35 @@ class EmailRowAccessibilityTest {
                 assertEquals(listOf("Archive", "Delete"), actions.map { it.label.toString() })
                 actions.forEach { ViewCompat.performAccessibilityAction(row, it.id, null) }
                 assertEquals(listOf("archive:1", "delete:1"), acted)
+            }
+        }
+    }
+
+    /** A conversation row says it is one and offers its actions; its nested messages only open. */
+    @Test
+    fun aConversationRowSpeaksItsCount_andItsNestedMessagesOfferNoActions() {
+        ActivityScenario.launch(InboxActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val first = email("read", attachments = false)
+                val second = email("unread", attachments = false).copy(id = "2")
+                val adapter = EmailAdapter(
+                    emptyList(),
+                    rowActions = listOf(R.string.action_archive to { _: InboxRow -> }),
+                )
+                adapter.updateRows(
+                    listOf(
+                        InboxRow(second, members = listOf(first, second), conversationId = "1", expanded = true),
+                        InboxRow(first, nested = true),
+                    ),
+                )
+                val lead = adapter.onCreateViewHolder(FrameLayout(activity), 0).also { adapter.onBindViewHolder(it, 0) }.itemView
+                val nested = adapter.onCreateViewHolder(FrameLayout(activity), 0).also { adapter.onBindViewHolder(it, 1) }.itemView
+
+                val spoken = lead.contentDescription.toString()
+                assertTrue(spoken, spoken.contains("Conversation, 2 messages"))
+                assertEquals("Expanded", lead.stateDescription)
+                assertEquals(listOf("Archive"), lead.createAccessibilityNodeInfo().actionList.mapNotNull { it.label?.toString() })
+                assertTrue(nested.createAccessibilityNodeInfo().actionList.none { it.label != null })
             }
         }
     }

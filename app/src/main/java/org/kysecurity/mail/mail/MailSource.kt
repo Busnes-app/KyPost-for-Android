@@ -206,6 +206,10 @@ data class MailSendOutcome(
     val heldId: String? = null,
 )
 
+/** One `GET /api/inbox/conversations` group (KyPost-Server #667): [messageIds] are its members in
+ *  the asked folder, oldest first; [sent] are your replies, left in their Sent folder. */
+data class Conversation(val id: String, val messageIds: List<String>, val sent: List<Email> = emptyList())
+
 /** One row of `GET /api/scheduled`. [status] is the server's: scheduled, sending, returning,
  *  returned, sent, queued, uncertain or failed. */
 data class ScheduledSend(
@@ -317,6 +321,16 @@ interface MailSource {
     ): MailOutcome<MailSendOutcome>
 
     fun listScheduled(): MailOutcome<List<ScheduledSend>>
+
+    /** Groups of two or more among [mailbox]'s newest [limit] messages; any other is its own. */
+    fun fetchConversations(mailbox: String, limit: Int): MailOutcome<List<Conversation>> =
+        MailOutcome.BadRequest("Not supported")
+
+    /** The user's `conversations` switch (`GET /api/settings/mail`); on unless they turned it off. */
+    fun conversationsEnabled(): MailOutcome<Boolean> = MailOutcome.BadRequest("Not supported")
+
+    /** `PUT /api/settings/mail`; the success value is the setting as the server now holds it. */
+    fun setConversationsEnabled(enabled: Boolean): MailOutcome<Boolean> = MailOutcome.BadRequest("Not supported")
 
     /** The primary mailbox's active addresses (`GET /api/mailboxes`), masked and aliases included,
      *  its primary address first; empty for an account without a native mailbox. */
