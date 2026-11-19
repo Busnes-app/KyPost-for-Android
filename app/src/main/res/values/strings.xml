@@ -328,6 +328,11 @@
     <string name="compose_pgp_resolve_failed">Couldn\'t look up recipients\' keys: %1$s</string>
     <string name="compose_pgp_encrypt_failed">Couldn\'t encrypt this message: %1$s</string>
     <string name="compose_pgp_not_paired">This device isn\'t paired with a KyPost server.</string>
+    <string name="compose_from">From</string>
+    <string name="compose_from_choose">Choose an address</string>
+    <string name="compose_from_title">Send from</string>
+    <string name="compose_from_required">Choose which of your addresses this comes from.</string>
+    <string name="compose_from_unavailable">Couldn\'t load your addresses: %1$s</string>
     <string name="compose_send_success">Email sent successfully</string>
     <string name="compose_schedule">Schedule send</string>
     <string name="compose_save_draft">Save draft</string>

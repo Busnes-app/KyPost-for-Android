@@ -379,6 +379,22 @@ class RelayMailSource(
         }
     }
 
+    override fun ownAddresses(): MailOutcome<List<String>> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        val base = baseUrl(pairing, "/api/mailboxes") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val request = Request.Builder().url(base).get().authed(pairing).build()
+        return execute(request) { code, body ->
+            // A relay without native mailboxes (older than KyPost-Server #665's base) has none.
+            if (code == 404) return@execute MailOutcome.Success(emptyList())
+            if (code != 200) return@execute mapErrorCode(code, body)
+            val parsed = runCatching { json.decodeFromString<RelayMailboxesDto>(body) }.getOrNull()
+                ?: return@execute MailOutcome.UpstreamFailure("Malformed mailboxes response")
+            // This app reads and sends as the primary mailbox only.
+            val primary = parsed.mailboxes.firstOrNull { it.kind == "primary" } ?: parsed.mailboxes.firstOrNull()
+            MailOutcome.Success(primary?.addresses.orEmpty().map { it.address.trim() }.filter { it.contains('@') })
+        }
+    }
+
     override fun cancelScheduled(id: String): MailOutcome<String> {
         val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
         // The server's ids are UUIDs; anything else ("..") could walk the path elsewhere.
@@ -437,6 +453,7 @@ class RelayMailSource(
                     bodyMode = parsed.bodyMode,
                     toAddresses = emptyList(),
                     ccAddresses = emptyList(),
+                    deliveredTo = parsed.deliveredTo?.map { it.trim() }?.filter { it.contains('@') },
                 ),
             )
         }

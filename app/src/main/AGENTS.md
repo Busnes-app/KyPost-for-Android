@@ -241,6 +241,18 @@ Owns production Android app code and resources.
   `sendOutcome` reads 200 as sent and 202 as held, each only where it was asked for, so a hold is
   never shown as sent. `ScheduledActivity` (folder picker, "Scheduled") lists `GET /api/scheduled`
   and cancels only a waiting row, after a confirm; the id is one escaped path segment.
+- Reply identity (KyPost-Server #665): Reply and Reply all ask `MailRepository.replyFrom`, which
+  fetches the body fresh (`deliveredTo`, the receipt's addresses, Bcc included; a cached body has
+  none) and the primary mailbox's addresses (`GET /api/mailboxes`, masked included), then applies
+  `replyFromAddress`, the web client's rule: the To/Cc address naming a delivered one keeps its plus
+  tag, else the delivered own address, else null. Without a receipt (external IMAP) the user's own
+  To/Cc address or "" (account default). Null (including any failed fetch) opens Compose with
+  `EXTRA_FROM_REQUIRED`: From reads "Choose an address", and Send and Save draft refuse until the
+  user picks one of the mailbox's addresses. Nothing ever substitutes the primary. The From and the
+  requirement ride `CachedDraft` through a lock or rotation; a server draft is saved only once From
+  is chosen, and Edit draft reopens with the draft's own From. The chosen From goes as `from` on
+  `/api/mail/send` and as the From of client-encrypted deliveries and drafts. `EXTRA_FROM*` are read
+  from in-app launches only. Masked-address management is not in this app.
 - Save draft: client custody encrypts the draft here (above). A server-held key saves it through
   the relay's plaintext `/api/mail/draft`, as the web app does (the server stores those drafts
   unencrypted anyway), but only while Sign and Encrypt are both off: `draftSaveAllowed` withdraws

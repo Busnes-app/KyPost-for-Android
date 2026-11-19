@@ -9,6 +9,42 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
+        <!-- Shown for a reply with its own From, or one whose From must be chosen. -->
+        <LinearLayout
+            android:id="@+id/composeFromRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:minHeight="@dimen/compose_row_min_height"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/composeFromLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="@dimen/compose_field_label_width"
+                android:text="@string/compose_from"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/composeFromValue"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:background="?attr/selectableItemBackground"
+                android:minHeight="48dp"
+                android:gravity="center_vertical"
+                android:textSize="16sp" />
+
+        </LinearLayout>
+
+        <View
+            android:id="@+id/composeFromDivider"
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:visibility="gone" />
+
         <org.kysecurity.mail.RecipientInputView
             android:id="@+id/composeToInput"
             android:layout_width="match_parent"

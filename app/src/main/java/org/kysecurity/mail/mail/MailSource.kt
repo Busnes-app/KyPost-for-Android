@@ -244,6 +244,8 @@ data class MailMessageBody(
     val bodyMode: String = "",
     val toAddresses: List<String>,
     val ccAddresses: List<String>,
+    /** Where the server delivered it (`deliveredTo`); null when it cannot tell. See [replyFromAddress]. */
+    val deliveredTo: List<String>? = null,
 ) {
     /** Redacted: the html is message content. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "MailMessageBody(redacted)"
@@ -308,6 +310,10 @@ interface MailSource {
     ): MailOutcome<MailSendOutcome>
 
     fun listScheduled(): MailOutcome<List<ScheduledSend>>
+
+    /** The primary mailbox's active addresses (`GET /api/mailboxes`), masked and aliases included;
+     *  empty for an account without a native mailbox. */
+    fun ownAddresses(): MailOutcome<List<String>> = MailOutcome.Success(emptyList())
 
     /** Returns the message to Drafts; the success value is the server's warning, blank if none. */
     fun cancelScheduled(id: String): MailOutcome<String>

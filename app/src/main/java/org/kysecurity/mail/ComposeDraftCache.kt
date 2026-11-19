@@ -104,6 +104,9 @@ data class CachedDraft(
     val replyTo: ReplyRef? = null,
     /** The draft this edits, so its old copy is still deleted after a lock teardown. */
     val sourceDraft: ReplyRef? = null,
+    /** From, and whether it must still be chosen: a restore never turns "choose" into the primary. */
+    val from: String = "",
+    val fromRequired: Boolean = false,
 ) {
     /** An untouched compose screen is not worth restoring, and caching it would silently
      *  resurrect an empty draft over a later Reply's prefilled fields. */

@@ -92,4 +92,39 @@ class AddressTextTest {
         assertEquals("", addressFromHeader("Unknown sender"))
         assertEquals("", addressFromHeader(""))
     }
+
+    @Test
+    fun plusBase_dropsOnlyTheLocalPartTag() {
+        assertEquals("me@example.invalid", plusBase("me+news@example.invalid"))
+        assertEquals("me@example.invalid", plusBase("me@example.invalid"))
+        assertEquals("me@ex+ample.invalid", plusBase("me@ex+ample.invalid"))
+    }
+
+    // The web client's replyFromAddress vectors (frontend/src/pages/read/compose.ts).
+    private val own = listOf("me@example.invalid", "x7k2@mask.example.invalid")
+
+    @Test
+    fun replyFrom_keepsThePlusTagTheSenderUsed() {
+        assertEquals(
+            "me+shop@example.invalid",
+            replyFromAddress("Shop <me+shop@example.invalid>", "", own, listOf("me@example.invalid")),
+        )
+    }
+
+    @Test
+    fun replyFrom_usesTheMaskedAddressItWasDeliveredTo_evenAsBcc() {
+        assertEquals("x7k2@mask.example.invalid", replyFromAddress("list@other.invalid", "", own, listOf("X7K2@mask.example.invalid")))
+    }
+
+    @Test
+    fun replyFrom_isNullWhenNoDeliveredAddressIsTheUsers_neverThePrimary() {
+        assertEquals(null, replyFromAddress("me@example.invalid", "", own, listOf("someone@else.invalid")))
+        assertEquals(null, replyFromAddress("me@example.invalid", "", own, emptyList()))
+    }
+
+    @Test
+    fun replyFrom_withoutAReceipt_takesTheUsersOwnHeaderAddress_elseTheDefault() {
+        assertEquals("me+a@example.invalid", replyFromAddress("a@b.invalid", "Me <me+a@example.invalid>", own, null))
+        assertEquals("", replyFromAddress("a@b.invalid", "", own, null))
+    }
 }
