@@ -1301,6 +1301,11 @@ class ComposeActivity : LockedActivity() {
         if (!custodyPermitsSend() || !draftSaveAllowed()) return
         // As on the web: a draft is saved with the From it will send from, never a stand-in.
         if (!fromChosen()) return
+        // `/api/mail/draft` stores no From: such a draft would reopen as the primary address.
+        if (!clientSideAccount && !plainDraftKeepsFrom(composeFrom, ownAddresses)) {
+            Toast.makeText(this, R.string.compose_from_not_kept_in_draft, Toast.LENGTH_LONG).show()
+            return
+        }
         if (!commitTypedRecipients()) return
         // Until the save lands or fails; a second tap would otherwise start a second export.
         listOf(sendMenuItem, scheduleMenuItem, saveDraftMenuItem).forEach { it?.isEnabled = false }
@@ -1784,6 +1789,11 @@ internal fun readAtMost(input: InputStream, limit: Long, expectedSize: Long = -1
 }
 
 internal enum class SendReadiness { READY, INCOMPLETE, CONFIRM_EMPTY_SUBJECT }
+
+/** A plaintext draft (`/api/mail/draft`) is stored with the server's default From, the primary
+ *  address, so it may carry no other. [own] is primary first; unknown refuses. */
+internal fun plainDraftKeepsFrom(from: String, own: List<String>?): Boolean =
+    from.isBlank() || own?.firstOrNull()?.equals(from, ignoreCase = true) == true
 
 internal fun sendReadiness(to: String, subject: String, bodyEmpty: Boolean, allowEmptySubject: Boolean): SendReadiness =
     when {

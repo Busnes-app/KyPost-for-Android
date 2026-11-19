@@ -1747,8 +1747,8 @@ class RelayMailSourceTest {
         ).ownAddresses()
 
         val both = """{"mailboxes":[{"id":"b","kind":"extra","addresses":[{"address":"team@example.invalid"}]},
-            {"id":"a","kind":"primary","addresses":[{"address":"me@example.invalid","kind":"primary"},{"address":"x7k2@mask.example.invalid","kind":"masked"}]}]}"""
-        assertEquals(listOf("me@example.invalid", "x7k2@mask.example.invalid"), (addressesAnswering(200, both) as MailOutcome.Success).value)
+            {"id":"a","kind":"primary","addresses":[{"address":"x7k2@mask.example.invalid","kind":"masked"},{"address":"me@example.invalid","kind":"primary"}]}]}"""
+        assertEquals("primary first", listOf("me@example.invalid", "x7k2@mask.example.invalid"), (addressesAnswering(200, both) as MailOutcome.Success).value)
         assertEquals(emptyList<String>(), (addressesAnswering(200, """{"mailboxes":[]}""") as MailOutcome.Success).value)
         assertEquals(emptyList<String>(), (addressesAnswering(404, "404 page not found") as MailOutcome.Success).value)
         assertFalse(addressesAnswering(503, "mailbox authority is unavailable") is MailOutcome.Success)

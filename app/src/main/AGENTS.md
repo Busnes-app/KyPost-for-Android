@@ -250,7 +250,9 @@ Owns production Android app code and resources.
   `EXTRA_FROM_REQUIRED`: From reads "Choose an address", and Send and Save draft refuse until the
   user picks one of the mailbox's addresses. Nothing ever substitutes the primary. The From and the
   requirement ride `CachedDraft` through a lock or rotation; a server draft is saved only once From
-  is chosen, and Edit draft reopens with the draft's own From. The chosen From goes as `from` on
+  is chosen, and Edit draft reopens with the draft's own From. A plaintext draft (`/api/mail/draft`,
+  server-held key) stores no From, so `plainDraftKeepsFrom` refuses Save draft unless From is blank
+  or the primary address (`ownAddresses` lists it first). The chosen From goes as `from` on
   `/api/mail/send` and as the From of client-encrypted deliveries and drafts. `EXTRA_FROM*` are read
   from in-app launches only. Masked-address management is not in this app.
 - Save draft: client custody encrypts the draft here (above). A server-held key saves it through

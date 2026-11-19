@@ -391,7 +391,9 @@ class RelayMailSource(
                 ?: return@execute MailOutcome.UpstreamFailure("Malformed mailboxes response")
             // This app reads and sends as the primary mailbox only.
             val primary = parsed.mailboxes.firstOrNull { it.kind == "primary" } ?: parsed.mailboxes.firstOrNull()
-            MailOutcome.Success(primary?.addresses.orEmpty().map { it.address.trim() }.filter { it.contains('@') })
+            // The primary address first: a plaintext draft can keep no other (see plainDraftKeepsFrom).
+            val addresses = primary?.addresses.orEmpty().sortedBy { it.kind != "primary" }
+            MailOutcome.Success(addresses.map { it.address.trim() }.filter { it.contains('@') })
         }
     }
 

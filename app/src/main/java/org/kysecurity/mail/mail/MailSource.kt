@@ -311,8 +311,8 @@ interface MailSource {
 
     fun listScheduled(): MailOutcome<List<ScheduledSend>>
 
-    /** The primary mailbox's active addresses (`GET /api/mailboxes`), masked and aliases included;
-     *  empty for an account without a native mailbox. */
+    /** The primary mailbox's active addresses (`GET /api/mailboxes`), masked and aliases included,
+     *  its primary address first; empty for an account without a native mailbox. */
     fun ownAddresses(): MailOutcome<List<String>> = MailOutcome.Success(emptyList())
 
     /** Returns the message to Drafts; the success value is the server's warning, blank if none. */
