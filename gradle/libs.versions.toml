@@ -40,7 +40,7 @@ firebaseBom = "35.2.0"
 kotlinxCoroutinesPlayServices = "1.11.0"
 playServicesCodeScanner = "16.1.0"
 playBilling = "9.1.0"
-googleServices = "4.5.0"
+googleServices = "4.6.0"
 securityCrypto = "1.1.0"
 # Newest stable, and abandoned at this branch. Audited 2026-08-21; staying on 1.1.0 deliberately.
 #
