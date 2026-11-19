@@ -1464,6 +1464,57 @@ class RelayMailSourceTest {
         assertEquals(reason, (outcome as MailOutcome.BadRequest).message)
     }
 
+    private fun sourceRefusing(body: String, code: Int = 403) = RelayMailSource(
+        pairingProvider = { testPairing() },
+        cursorProvider = FakeMailCursorProvider(),
+        callFactory = FakeCallFactory { request -> jsonResponse(request, body, code) },
+    )
+
+    private val setupRequired =
+        """{"error":"encryption_setup_required","message":"Finish email encryption setup in KyPost on the web before using mail here."}"""
+
+    /** Every request path (streamed, string, binary) decodes it, before any route's own mapping. */
+    @Test
+    fun encryptionSetupRequired_isRecognisedOnEveryRequestPath() {
+        val expected = MailOutcome.EncryptionSetupRequired(
+            "Finish email encryption setup in KyPost on the web before using mail here.",
+        )
+        val source = sourceRefusing(setupRequired)
+
+        assertEquals(expected, source.fetchInbox("INBOX", 50))
+        assertEquals(expected, source.sendMail(MailDraft(to = "a@example.com", subject = "s", body = "b")))
+        assertEquals(expected, source.fetchMessageBody("1", "INBOX"))
+        assertEquals(expected, source.listScheduled())
+        assertEquals(expected, source.downloadAttachment("1", "INBOX", 0))
+    }
+
+    /** It is not a sign-out: nothing tells the user to re-pair, so pairing is kept. */
+    @Test
+    fun encryptionSetupRequired_isNotAnAuthFailure() {
+        val outcome = sourceRefusing(setupRequired).fetchInbox("INBOX", 50)
+
+        assertFalse(outcome is MailOutcome.Unauthorized)
+        assertFalse(outcome.userFacingMessage().orEmpty().contains("pair", ignoreCase = true))
+        assertTrue(outcome.refusedBeforeSending())
+    }
+
+    @Test
+    fun encryptionSetupRequired_withoutAMessageLeavesTheWordingToTheApp() {
+        val outcome = sourceRefusing("""{"error":"encryption_setup_required"}""").fetchInbox("INBOX", 50)
+
+        assertEquals(MailOutcome.EncryptionSetupRequired(null), outcome)
+        assertEquals("Finish email encryption setup in KyPost on the web, then come back.", outcome.userFacingMessage())
+    }
+
+    /** Matched on the code only: other 403s, prose naming it, and the code on another status stay as they were. */
+    @Test
+    fun otherRefusals_areNotEncryptionSetup() {
+        val draft = MailDraft(to = "a@example.com", subject = "s", body = "b")
+        assertTrue(sourceRefusing("""{"error":"forbidden"}""").sendMail(draft) is MailOutcome.BadRequest)
+        assertTrue(sourceRefusing("encryption_setup_required").sendMail(draft) is MailOutcome.BadRequest)
+        assertTrue(sourceRefusing(setupRequired, code = 409).sendMail(draft) is MailOutcome.BadRequest)
+    }
+
     private fun sourceAnswering(body: String, cursor: String? = null): Pair<RelayMailSource, FakeCallFactory> {
         val callFactory = FakeCallFactory { request -> jsonResponse(request, body) }
         return RelayMailSource(

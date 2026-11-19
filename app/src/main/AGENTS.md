@@ -118,6 +118,16 @@ Owns production Android app code and resources.
   the operation. Compose calls the plaintext `saveDraft` transport only for a server-held key, and
   never for a composition marked to sign or encrypt (owner Q4 A). Retry after a successful
   save but failed browser launch can create another draft: the relay exposes no draft ID/upsert.
+- Encryption setup required (KyPost-Server #666): every mailbox route answers a device whose
+  account still owes first sign-in encryption setup with `403 {"error":"encryption_setup_required"}`.
+  `RelayMailSource` decodes it once, in its shared request paths before any per-route mapping, to
+  `MailOutcome.EncryptionSetupRequired` (matched on `error`, never on prose; the server's `message`
+  is shown when present). It is not a sign-out, a network error or a retry: nothing touches pairing,
+  keys, Room, cursors or compose drafts. `InboxActivity` keeps it in `EncryptionSetupGate`, shows the
+  full-pane "Finish encryption setup" state with "Open KyPost on the web" (`<serverUrl>/setup/encryption`
+  through `openWebmail`) and "Check again", and stops its 90 s poll and notification-message poll.
+  Only a foreground return (`onStartUnlocked`) or Check again asks again, one inbox request; the first
+  success clears the state and restarts the poll. Other screens show the message as a toast.
 - **`MailRepository` is the one synchronization boundary: the source returns facts, the repository
   decides when they become durable.** Two rules follow from that, and both were once broken.
   0. `refreshFolder`, `loadOlder`/`loadOlderFrom` and `fetchBody` capture `ProcessState.generation()`

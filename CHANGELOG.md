@@ -12,6 +12,10 @@
 
 ### Changed
 
+- When your KyPost server needs you to finish email encryption setup first, the inbox says
+  "Finish encryption setup" with a button that opens the setup page on the web, instead of a
+  sync error. The app stops syncing until then, checks again when you come back to it (or tap
+  Check again), and keeps your pairing, keys and unsent mail.
 - Remove Pairing keeps the contacts on this phone unless you tick "Also remove this device's
   contacts". It warns when contact changes have not synced yet and offers Sync now. Pairing a
   different account, or pairing after adding contacts while unpaired, asks "Bring your N contacts

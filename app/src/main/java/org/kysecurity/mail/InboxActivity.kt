@@ -64,6 +64,9 @@ class InboxActivity : LockedActivity() {
     private lateinit var inboxRoot: View
     private lateinit var inboxContent: View
     private lateinit var newMailPill: Chip
+    private lateinit var encryptionSetupState: View
+    private lateinit var encryptionSetupBody: TextView
+    private val encryptionSetup = EncryptionSetupGate()
     private lateinit var adapter: EmailAdapter
     private val olderFooter = LoadOlderAdapter { loadOlderMail() }
     /** Per folder: where the next older page starts, and folders with nothing older left. */
@@ -332,6 +335,12 @@ class InboxActivity : LockedActivity() {
             hideNewMailPill()
         }
 
+        encryptionSetupState = findViewById(R.id.encryptionSetupState)
+        encryptionSetupBody = findViewById(R.id.encryptionSetupBody)
+        findViewById<View>(R.id.encryptionSetupOpenWeb).setOnClickListener { openEncryptionSetup() }
+        // One mailbox request; a success clears the state and restarts the poll.
+        findViewById<View>(R.id.encryptionSetupCheckAgain).setOnClickListener { refreshInbox() }
+
         cancelLoading.setOnClickListener {
             pendingMessageId = null
             mainHandler.removeCallbacks(pendingMessagePollRunnable)
@@ -537,6 +546,8 @@ class InboxActivity : LockedActivity() {
         }
 
         if (!isFinal) return
+        // Kept pending, not polled: the re-check that clears the state looks for it again.
+        if (encryptionSetup.blocked) return
 
         if (System.currentTimeMillis() < pendingMessageDeadlineMs) {
             // Still inside the deep-link wait window: the backend may not have indexed it yet.
@@ -568,6 +579,8 @@ class InboxActivity : LockedActivity() {
 
     private fun scheduleNextRefresh() {
         mainHandler.removeCallbacks(refreshRunnable)
+        // No poll while mail is withheld: only a foreground return or Check again asks again.
+        if (encryptionSetup.blocked) return
         // ponytail: foreground best-effort cadence; upgrade path is server push + work resumption.
         mainHandler.postDelayed(refreshRunnable, REFRESH_INTERVAL_MS)
     }
@@ -620,9 +633,12 @@ class InboxActivity : LockedActivity() {
             mailRepository.refreshFolder(folder, forceFullResync = forceFullResync)
         val (emails, unread) = mailRepository.cachedEmailsAndUnread(folder)
         runOnUiThread { unreadByFolder = unread }
-        val errorMessage = outcome.userFacingMessage()
+        // The setup screen says it; a toast on top would repeat it.
+        val errorMessage = outcome.takeIf { it !is MailOutcome.EncryptionSetupRequired }?.userFacingMessage()
         keywordSettings.rememberKeywords(emails.flatMap { it.keywords }.toSet())
         runOnUiThread {
+            // Account-wide, so applied even when the user has since switched folder.
+            applyEncryptionSetup(outcome)
             applyRefreshedEmails(
                 folder,
                 emails,
@@ -666,6 +682,30 @@ class InboxActivity : LockedActivity() {
         }
         if (errorMessage != null) {
             Toast.makeText(this, errorMessage, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun applyEncryptionSetup(outcome: MailOutcome<*>) {
+        if (isFinishing || isDestroyed) return
+        val changed = encryptionSetup.record(outcome)
+        if (encryptionSetup.blocked) {
+            mainHandler.removeCallbacks(refreshRunnable)
+            mainHandler.removeCallbacks(pendingMessagePollRunnable)
+            hideNewMailPill()
+            encryptionSetupBody.text = encryptionSetup.serverMessage ?: getString(R.string.encryption_setup_body)
+        } else if (changed && lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) {
+            // Not after onStop: a re-check that lands in the background must not re-arm the poll.
+            scheduleNextRefresh()
+        }
+        encryptionSetupState.isVisible = encryptionSetup.blocked
+    }
+
+    /** Built from the pairing's own server URL; `openWebmail` refuses anything else. */
+    private fun openEncryptionSetup() {
+        val serverUrl = shownAccount?.serverUrl
+        val url = serverUrl?.let { org.kysecurity.mail.pgp.webmailEncryptionSetupUrl(it) }
+        if (url == null || !org.kysecurity.mail.pgp.openWebmail(this, serverUrl, url)) {
+            Toast.makeText(this, R.string.security_encryption_webmail_failed, Toast.LENGTH_SHORT).show()
         }
     }
 
