@@ -117,6 +117,16 @@ internal object ComposeSend : ProcessScopedState {
         if (held == hold) held = null
     }
 
+    enum class Back { DISCARD, LEAVE_HELD, WAIT }
+
+    /** What Back does on Compose. Held, the message goes at release and Compose closes; while a
+     *  Cancel is in flight it waits for the answer, which says whether the message went. */
+    fun onBack(held: Boolean, canceling: Boolean): Back = when {
+        held && canceling -> Back.WAIT
+        held -> Back.LEAVE_HELD
+        else -> Back.DISCARD
+    }
+
     /** Only [sent] itself: a later send must not be dropped by an older one's late completion. */
     fun clear(sent: InFlight<*>) = synchronized(lock) {
         if (inFlight === sent) inFlight = null

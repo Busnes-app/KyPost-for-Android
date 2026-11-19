@@ -216,4 +216,12 @@ class ComposeSendTest {
         ComposeSend.resetForNewSession()
         assertNull("another account's Compose must not offer this Cancel", ComposeSend.held())
     }
+
+    /** Back during a Cancel must not close Compose as sent and drop the Cancel's answer. */
+    @Test
+    fun back_waitsForAnInFlightCancel() {
+        assertEquals(ComposeSend.Back.DISCARD, ComposeSend.onBack(held = false, canceling = false))
+        assertEquals(ComposeSend.Back.LEAVE_HELD, ComposeSend.onBack(held = true, canceling = false))
+        assertEquals(ComposeSend.Back.WAIT, ComposeSend.onBack(held = true, canceling = true))
+    }
 }

@@ -251,7 +251,7 @@ Owns production Android app code and resources.
   timed from this device's clock with the delay it read. Cancel posts `/api/scheduled/{id}/cancel`:
   success leaves the composition exactly as it was, to edit and send again (the server also puts
   a copy in Drafts); 409 says "Already sent" and closes. At release, or on Back, Compose closes as
-  sent. The hold lives in `ComposeSend.held` (process-scoped, dropped on a session reset), so a
+  sent; Back does nothing while a Cancel is in flight (`ComposeSend.onBack`), so its answer lands. The hold lives in `ComposeSend.held` (process-scoped, dropped on a session reset), so a
   rotation or the app lock resumes the bar on the restored draft instead of offering Send again; a
   new composition just lets it go. The delay is set on the web only. The words are "Sending in Ns" and
   "Cancel sending", as on the web (KyPost-Server #663 rules out the other word).

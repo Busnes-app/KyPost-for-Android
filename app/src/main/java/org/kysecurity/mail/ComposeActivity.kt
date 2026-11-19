@@ -333,7 +333,13 @@ class ComposeActivity : LockedActivity() {
         sendOffNotice = findViewById(R.id.composeSendOffNotice)
         findViewById<View>(R.id.composeSendOffRetry).setOnClickListener { resolveCustody() }
         // While held the message is already on its way: leaving lets it go, nothing to discard.
-        onBackPressedDispatcher.addCallback(this) { if (held != null) leaveHeld() else confirmDiscard() }
+        onBackPressedDispatcher.addCallback(this) {
+            when (ComposeSend.onBack(held != null, cancelingHeld)) {
+                ComposeSend.Back.DISCARD -> confirmDiscard()
+                ComposeSend.Back.LEAVE_HELD -> leaveHeld()
+                ComposeSend.Back.WAIT -> Unit
+            }
+        }
 
         pgpChips = findViewById(R.id.composePgpChips)
         encryptChip = findViewById(R.id.composeEncryptChip)
