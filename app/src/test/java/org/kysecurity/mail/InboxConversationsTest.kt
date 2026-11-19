@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.kysecurity.mail.mail.Conversation
+import org.kysecurity.mail.mail.MailAccount
 
 class InboxConversationsTest {
 
@@ -108,5 +109,37 @@ class InboxConversationsTest {
 
         assertEquals(setOf("4", "2"), followLeads(setOf("3", "2"), rows))
         assertEquals("unknown ids are kept", setOf("9"), followLeads(setOf("9"), rows))
+    }
+
+    private val first = MailAccount("sub-1", "https://one.example.invalid")
+    private val second = MailAccount("sub-2", "https://two.example.invalid")
+    private val reply = email("90", "2026-11-01T12:00:00Z", sender = "Me <me@one.example.invalid>", folder = "Sent")
+
+    /** Another account's message ids can repeat this one's; its Sent replies must not attach. */
+    @Test
+    fun conversationCache_isClearedWhenTheAccountChanges() {
+        val cache = ConversationCache()
+        assertTrue(cache.put(first, session = 1, current = 1, "INBOX", listOf(Conversation("1", listOf("1", "3"), listOf(reply)))))
+
+        assertEquals(1, cache.get(first, current = 1, "INBOX").size)
+        assertEquals("a new account starts with no grouping", emptyList<Conversation>(), cache.get(second, current = 1, "INBOX"))
+        assertEquals("and the old one's is gone, not set aside", emptyList<Conversation>(), cache.get(first, current = 1, "INBOX"))
+    }
+
+    @Test
+    fun conversationCache_isClearedWhenTheSessionEnds() {
+        val cache = ConversationCache()
+        cache.put(first, session = 1, current = 1, "INBOX", listOf(thread))
+
+        assertEquals(emptyList<Conversation>(), cache.get(first, current = 2, "INBOX"))
+    }
+
+    /** A fetch started before the session ended answers for the old account: it is dropped. */
+    @Test
+    fun conversationCache_dropsAnAnswerFromAnEndedSession() {
+        val cache = ConversationCache()
+
+        assertFalse(cache.put(second, session = 1, current = 2, "INBOX", listOf(Conversation("1", listOf("1", "3"), listOf(reply)))))
+        assertEquals(emptyList<Conversation>(), cache.get(second, current = 2, "INBOX"))
     }
 }

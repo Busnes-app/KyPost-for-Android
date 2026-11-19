@@ -1,6 +1,7 @@
 package org.kysecurity.mail
 
 import org.kysecurity.mail.mail.Conversation
+import org.kysecurity.mail.mail.MailAccount
 
 /** One inbox list row. A plain message has [members] = [email]. A conversation row stands where
  *  its newest shown member is; [members] are its loaded members in this folder, oldest first, and
@@ -83,4 +84,30 @@ internal fun conversationSenders(row: InboxRow, me: String): String {
 internal fun senderName(sender: String): String {
     val name = sender.substringBefore('<').trim().trim('"')
     return name.ifBlank { sender.substringAfter('<').substringBefore('>').trim() }.ifBlank { sender }
+}
+
+/** The server's groupings, per folder, for one account in one session: another account's message
+ *  ids can repeat this one's, and its Sent replies must never attach to them. Main thread only. */
+internal class ConversationCache {
+    private var owner: Pair<MailAccount?, Long>? = null
+    private val byFolder = mutableMapOf<String, List<Conversation>>()
+
+    /** False, keeping nothing, when the session the fetch started under ([session]) has ended. */
+    fun put(account: MailAccount?, session: Long, current: Long, folder: String, conversations: List<Conversation>): Boolean {
+        if (session != current) return false
+        ownedBy(account, session)
+        byFolder[folder] = conversations
+        return true
+    }
+
+    fun get(account: MailAccount?, current: Long, folder: String): List<Conversation> {
+        ownedBy(account, current)
+        return byFolder[folder].orEmpty()
+    }
+
+    private fun ownedBy(account: MailAccount?, session: Long) {
+        if (owner == account to session) return
+        owner = account to session
+        byFolder.clear()
+    }
 }

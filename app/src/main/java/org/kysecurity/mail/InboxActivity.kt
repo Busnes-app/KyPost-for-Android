@@ -78,8 +78,8 @@ class InboxActivity : LockedActivity() {
     private lateinit var mailRepository: MailRepository
     private lateinit var keywordSettings: KeywordSettings
     private lateinit var mailSettings: MailSettings
-    /** Per folder, as the server last grouped it; empty while the user's switch is off. */
-    private val conversationsByFolder = mutableMapOf<String, List<Conversation>>()
+    /** Per folder, as the server last grouped it for the shown account in this session. */
+    private val conversationCache = ConversationCache()
     private val expandedConversations = mutableSetOf<String>()
     /** The shown conversation rows' members, by their lead row: what a list action covers. */
     private var conversationMembers: Map<Pair<String, String>, List<Email>> = emptyMap()
@@ -651,6 +651,7 @@ class InboxActivity : LockedActivity() {
         if (folder != currentFolder) return
         // Read before the rows: the account they are shown, and acted on, under.
         val account = mailRepository.currentAccount()
+        val session = ProcessState.generation()
         // Not only on a cold open: returning from a message must show its read overlay now, not
         // after the network answers. A pull re-reads the folder and paints once.
         if (showCacheFirst || !forceFullResync) {
@@ -666,15 +667,14 @@ class InboxActivity : LockedActivity() {
         val outcome: MailOutcome<MailFetchResult> =
             mailRepository.refreshFolder(folder, forceFullResync = forceFullResync)
         val (emails, unread) = mailRepository.cachedEmailsAndUnread(folder)
-        // Null keeps the last grouping: an older server without the route, or a failed fetch.
         val conversations = when {
-            !mailSettings.conversations() -> emptyList()
+            !mailSettings.conversations() -> MailOutcome.Success(emptyList())
             outcome !is MailOutcome.Success || emails.isEmpty() -> null
-            else -> (mailRepository.fetchConversations(folder, emails.size) as? MailOutcome.Success)?.value
+            else -> mailRepository.fetchConversations(folder, emails.size)
         }
         runOnUiThread {
             unreadByFolder = unread
-            conversations?.let { conversationsByFolder[folder] = it }
+            storeConversations(folder, account, session, conversations)
         }
         // The setup screen says it; a toast on top would repeat it.
         val errorMessage = outcome.takeIf { it !is MailOutcome.EncryptionSetupRequired }?.userFacingMessage()
@@ -691,6 +691,13 @@ class InboxActivity : LockedActivity() {
                 account = account,
             )
         }
+    }
+
+    /** Anything but a success (an older server without the route, a failed fetch) keeps the last
+     *  grouping, but only this account's in this session: an answer from an ended one is dropped. */
+    private fun storeConversations(folder: String, account: MailAccount?, session: Long, fetched: MailOutcome<List<Conversation>>?) {
+        val conversations = (fetched as? MailOutcome.Success)?.value ?: return
+        conversationCache.put(account, session, ProcessState.generation(), folder, conversations)
     }
 
     /** Paints only if [folder] is still the folder on screen. The IO executor is FIFO, but a
@@ -837,7 +844,7 @@ class InboxActivity : LockedActivity() {
         val rows = if (results != null) {
             results.map(::InboxRow)
         } else {
-            val conversations = if (mailSettings.conversations()) conversationsByFolder[currentFolder].orEmpty() else emptyList()
+            val conversations = if (mailSettings.conversations()) conversationCache.get(shownAccount, ProcessState.generation(), currentFolder) else emptyList()
             groupInboxRows(filtered, allEmails.filter { it.rowKey() !in held }, conversations, expandedConversations)
         }
         conversationMembers = rows.filter { it.isConversation }.associate { it.email.rowKey() to it.members }
@@ -1477,6 +1484,14 @@ class InboxActivity : LockedActivity() {
 
     @androidx.annotation.VisibleForTesting
     internal fun refreshForTest() = refreshInbox()
+
+    /** Hands the folder on screen a conversations answer as a refresh would, opening [expand]. */
+    @androidx.annotation.VisibleForTesting
+    internal fun applyConversationsForTest(fetched: MailOutcome<List<Conversation>>, expand: Set<String> = emptySet()) {
+        storeConversations(currentFolder, shownAccount, ProcessState.generation(), fetched)
+        expandedConversations += expand
+        renderFilteredEmails()
+    }
 
     /** Seeds the list the way a refresh would. */
     @androidx.annotation.VisibleForTesting
