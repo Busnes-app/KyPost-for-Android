@@ -102,6 +102,21 @@ internal object ComposeSend : ProcessScopedState {
 
     fun current(): InFlight<*>? = synchronized(lock) { inFlight }
 
+    /** A sent message the relay holds for the Send delay, until [releaseAtElapsedMs]
+     *  (`SystemClock.elapsedRealtime`). Kept here, not in the screen, so the Compose a rotation or
+     *  the app lock replaced resumes its Cancel instead of offering Send again. */
+    data class Held(val id: String, val releaseAtElapsedMs: Long)
+
+    private var held: Held? = null
+
+    fun hold(hold: Held) = synchronized(lock) { held = hold }
+
+    fun held(): Held? = synchronized(lock) { held }
+
+    fun clearHold(hold: Held) = synchronized(lock) {
+        if (held == hold) held = null
+    }
+
     /** Only [sent] itself: a later send must not be dropped by an older one's late completion. */
     fun clear(sent: InFlight<*>) = synchronized(lock) {
         if (inFlight === sent) inFlight = null
@@ -111,6 +126,8 @@ internal object ComposeSend : ProcessScopedState {
         val stopping = synchronized(lock) {
             tearingDown = true
             inFlight = null
+            // The server still sends it; only this account's Cancel is gone.
+            held = null
             running.toList()
         }
         try {

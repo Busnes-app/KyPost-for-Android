@@ -357,6 +357,7 @@ class MailRepository(
     fun listFolders(parent: String?): MailOutcome<FolderListResult> = relaySource.listFolders(parent)
     fun listScheduled(): MailOutcome<List<ScheduledSend>> = relaySource.listScheduled()
     fun cancelScheduled(id: String): MailOutcome<String> = relaySource.cancelScheduled(id)
+    fun sendDelaySeconds(): MailOutcome<Int> = relaySource.sendDelaySeconds()
     fun createFolder(parent: String, name: String): MailOutcome<Unit> = relaySource.createFolder(parent, name)
     fun renameFolder(folder: String, name: String): MailOutcome<Unit> = relaySource.renameFolder(folder, name)
 

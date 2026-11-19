@@ -328,6 +328,14 @@
     <string name="compose_pgp_resolve_failed">Couldn\'t look up recipients\' keys: %1$s</string>
     <string name="compose_pgp_encrypt_failed">Couldn\'t encrypt this message: %1$s</string>
     <string name="compose_pgp_not_paired">This device isn\'t paired with a KyPost server.</string>
+    <!-- Send delay (KyPost-Server #668): the message is held, then sent; Cancel sending is the only wording. -->
+    <string name="compose_sending_in">Sending in %1$ds</string>
+    <string name="compose_cancel_sending">Cancel sending</string>
+    <string name="compose_canceling_sending">Canceling sending…</string>
+    <string name="compose_sending_canceled">Sending canceled. Edit it and send again. A copy is in Drafts.</string>
+    <string name="compose_sending_canceled_later">Sending canceled. Edit it and send again. It will be saved to Drafts shortly.</string>
+    <string name="compose_already_sent">Already sent</string>
+    <string name="compose_cancel_sending_failed">Couldn\'t cancel sending: %1$s</string>
     <string name="compose_send_success">Email sent successfully</string>
     <string name="compose_schedule">Schedule send</string>
     <string name="compose_save_draft">Save draft</string>

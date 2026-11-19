@@ -540,6 +540,33 @@ class ClientEncryptedSenderTest {
         }
     }
 
+    /** Held for the Send delay: dated now like any send, with the copy a Cancel returns to Drafts. */
+    @Test
+    fun aDelayedSendIsDatedNow_andCarriesTheFlagAndADraftCopy() = runBlocking {
+        val transport = FakeClientEncryptedTransport()
+        sender(
+            resolver = FakeRecipientKeyResolver(resolvedAll(listOf("alice@example.invalid"), TestPgpPrivateKey.ARMORED_PUBLIC)),
+            transport = transport,
+        ).send(draft().copy(sendDelay = true), sign = false)
+
+        val message = transport.sent.single()
+        assertTrue(message.sendDelay)
+        assertNull("no chosen time", message.sendAt)
+        assertTrue(requireNotNull(message.draftCopy).isNotBlank())
+    }
+
+    /** A chosen time is never delayed more, and the server would refuse both at once. */
+    @Test
+    fun aScheduledSendIsNeverAlsoDelayed() = runBlocking {
+        val transport = FakeClientEncryptedTransport()
+        sender(
+            resolver = FakeRecipientKeyResolver(resolvedAll(listOf("alice@example.invalid"), TestPgpPrivateKey.ARMORED_PUBLIC)),
+            transport = transport,
+        ).send(draft().copy(sendDelay = true), sign = false, sendAt = java.time.Instant.parse("2026-10-20T08:00:00Z"))
+
+        assertFalse(transport.sent.single().sendDelay)
+    }
+
     @Test
     fun aSendNowCarriesNoDraftCopyOrSendTime() = runBlocking {
         val transport = FakeClientEncryptedTransport()

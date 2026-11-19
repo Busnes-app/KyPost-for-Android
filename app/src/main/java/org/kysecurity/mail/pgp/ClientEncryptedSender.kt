@@ -15,7 +15,13 @@ private const val TIER_KEY_CHANGED = "key_changed"
 /** Every way a client-encrypted send can end. One per row of the compose screen's exit table. */
 internal sealed class ClientSendOutcome {
     /** [scheduledAt] is set when the relay is holding it for later. */
-    data class Sent(val sentSaved: Boolean, val warning: String, val scheduledAt: java.time.Instant? = null) : ClientSendOutcome()
+    data class Sent(
+        val sentSaved: Boolean,
+        val warning: String,
+        val scheduledAt: java.time.Instant? = null,
+        /** Held for the Send delay; see [MailSendOutcome.heldId]. */
+        val heldId: String? = null,
+    ) : ClientSendOutcome()
 
     object Cancelled : ClientSendOutcome()
     object NotEnrolled : ClientSendOutcome()
@@ -57,7 +63,7 @@ internal fun interface ClientEncryptedTransport {
 /** The relay's answer to a client-encrypted send, for the sender and for a Compose that adopted it. */
 internal fun clientSendOutcome(outcome: MailOutcome<*>): ClientSendOutcome =
     when (val sent = (outcome as? MailOutcome.Success)?.value) {
-        is MailSendOutcome -> ClientSendOutcome.Sent(sent.sentSaved, sent.warning, sent.scheduledAt)
+        is MailSendOutcome -> ClientSendOutcome.Sent(sent.sentSaved, sent.warning, sent.scheduledAt, sent.heldId)
         else -> ClientSendOutcome.SendFailed(outcome)
     }
 
@@ -80,8 +86,10 @@ internal class ClientEncryptedSender(
 ) {
 
     /** A non-null [sendAt] schedules it: every delivery is dated then, as the relay requires, and a
-     *  copy for Drafts rides along in case the scheduled send fails. */
+     *  copy for Drafts rides along in case the scheduled send fails. [MailDraft.sendDelay] holds it
+     *  for the Send delay, dated now and with the same copy, which a Cancel returns to Drafts. */
     suspend fun send(draft: MailDraft, sign: Boolean, sendAt: java.time.Instant? = null): ClientSendOutcome {
+        val held = sendAt == null && draft.sendDelay
         val from = accountAddress.trim()
         if (from.isEmpty()) return ClientSendOutcome.NoAccountAddress
 
@@ -157,7 +165,7 @@ internal class ClientEncryptedSender(
         // Scoped to withSigner: the explicit active signer, never a historical member; null means the app locked meanwhile.
         val ciphertexts = EnrollmentSession.withSigner { signer ->
             val bundle = encryptAll(signer, sign, protectedContent, groups, keys, fields, from, date, boundaryToken)
-            if (bundle !is EncryptedBundle.Ok || sendAt == null) return@withSigner bundle
+            if (bundle !is EncryptedBundle.Ok || (sendAt == null && !held)) return@withSigner bundle
             signer?.let { encryptDraftCopy(it, draft, fields, from, date) }?.let { bundle.copy(draftCopy = it) }
                 ?: EncryptedBundle.Failed("could not encrypt the copy for Drafts")
         } ?: return ClientSendOutcome.NotEnrolled
@@ -183,6 +191,7 @@ internal class ClientEncryptedSender(
                 materialGeneration = EnrollmentSession.withKeyring { it.materialGeneration },
                 sendAt = sendAt,
                 draftCopy = draftCopy,
+                sendDelay = held,
                 replyToMessageId = draft.replyToMessageId,
                 replyToMailbox = draft.replyToMailbox,
             ),
