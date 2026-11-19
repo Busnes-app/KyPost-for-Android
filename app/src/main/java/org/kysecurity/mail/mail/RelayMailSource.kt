@@ -36,6 +36,8 @@ private const val SCHEDULED_FULL_MARKER = "too many scheduled messages"
 internal const val SCHEDULED_GONE_MESSAGE = "That scheduled message is no longer on the server"
 internal const val SCHEDULING_UNSUPPORTED_MESSAGE = "This server can't schedule mail yet. Update KyPost Server to use it."
 internal const val SCHEDULE_IGNORED_WARNING = "Sent now: this server can't schedule mail. Update KyPost Server to schedule."
+/** The longest Send delay the server offers (10, 20, 30, 60 or 90 seconds). */
+internal const val MAX_SEND_DELAY_SECONDS = 90
 private val SCHEDULED_ID = Regex("[A-Za-z0-9-]{1,64}")
 internal const val SCHEDULED_CLAIMED_MESSAGE = "It is already being sent, so it can no longer be canceled"
 private const val REENROLLMENT_REQUIRED_MARKER = "reenrollmentRequired"
@@ -301,7 +303,7 @@ class RelayMailSource(
             if (draft.replyToMessageId != null && isReplyThreadingRefusal(code, rawBody)) {
                 return@execute MailOutcome.ReplyThreadingRefused(rawBody.trim())
             }
-            sendOutcome(code, rawBody, scheduling = draft.sendAt != null)
+            sendOutcome(code, rawBody, draft.sendAt, draft.sendDelay)
         }
     }
 
@@ -325,6 +327,7 @@ class RelayMailSource(
                 materialGeneration = message.materialGeneration,
                 sendAt = message.sendAt?.wireTime(),
                 draftCopy = message.draftCopy,
+                sendDelay = message.sendDelay,
                 replyToMessageId = message.replyToMessageId,
                 replyToMailbox = message.replyToMailbox,
             ),
@@ -336,26 +339,45 @@ class RelayMailSource(
             if (message.replyToMessageId != null && isReplyThreadingRefusal(code, rawBody)) {
                 return@execute MailOutcome.ReplyThreadingRefused(rawBody.trim())
             }
-            sendOutcome(code, rawBody, scheduling = message.sendAt != null)
+            sendOutcome(code, rawBody, message.sendAt, message.sendDelay)
         }
     }
 
-    /** 200 is sent, 202 is held for later, and a 202 counts only where a hold was asked for. */
-    private fun sendOutcome(code: Int, rawBody: String, scheduling: Boolean): MailOutcome<MailSendOutcome> {
+    /** 200 is sent, 202 is held for later, and a 202 counts only where a hold was asked for: a
+     *  chosen [sendAt], or the Send delay. */
+    private fun sendOutcome(code: Int, rawBody: String, sendAt: java.time.Instant?, sendDelay: Boolean): MailOutcome<MailSendOutcome> {
         if (code != 200 && code != 202) return mapErrorCode(code, rawBody)
         val parsed = runCatching { json.decodeFromString<RelaySendResponseDto>(rawBody) }.getOrNull()
             ?: return MailOutcome.UpstreamFailure("Malformed send response")
         if (code == 200) {
             // A relay older than KyPost-Server #388 ignores sendAt and sends at once. It went: say so.
-            val warning = if (scheduling) SCHEDULE_IGNORED_WARNING else parsed.warning
+            // A 200 to sendDelay is an ordinary send: the delay is Off, or this message is never held.
+            val warning = if (sendAt != null) SCHEDULE_IGNORED_WARNING else parsed.warning
             return MailOutcome.Success(
                 MailSendOutcome(sentSaved = parsed.sentSaved, warning = warning, calendarReplySent = parsed.calendarReply),
             )
         }
-        if (!scheduling) return MailOutcome.UpstreamFailure("Mail relay request failed ($code)")
+        if (sendAt == null && !sendDelay) return MailOutcome.UpstreamFailure("Mail relay request failed ($code)")
         val at = runCatching { java.time.Instant.parse(parsed.sendAt) }.getOrNull()
         if (!parsed.scheduled || at == null) return MailOutcome.UpstreamFailure("Malformed schedule response")
-        return MailOutcome.Success(MailSendOutcome(sentSaved = false, warning = "", scheduledAt = at))
+        // A held message is canceled by its id; one we cannot name is not offered as cancelable.
+        val heldId = parsed.id.takeIf { sendAt == null && parsed.delayed && it.matches(SCHEDULED_ID) }
+        if (sendAt == null && heldId == null) return MailOutcome.UpstreamFailure("Malformed schedule response")
+        return MailOutcome.Success(MailSendOutcome(sentSaved = false, warning = "", scheduledAt = at, heldId = heldId))
+    }
+
+    override fun sendDelaySeconds(): MailOutcome<Int> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        val base = baseUrl(pairing, "/api/mail/send-delay") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val request = Request.Builder().url(base).get().authed(pairing).build()
+        return execute(request) { code, body ->
+            // A relay older than KyPost-Server #668 has no delay: it sends at once.
+            if (code == 404) return@execute MailOutcome.Success(0)
+            if (code != 200) return@execute mapErrorCode(code, body)
+            val seconds = runCatching { json.decodeFromString<RelaySendDelayDto>(body) }.getOrNull()?.seconds
+            if (seconds != null && seconds in 0..MAX_SEND_DELAY_SECONDS) MailOutcome.Success(seconds)
+            else MailOutcome.UpstreamFailure("Malformed send delay response")
+        }
     }
 
     override fun listScheduled(): MailOutcome<List<ScheduledSend>> {
@@ -772,6 +794,7 @@ private fun MailDraft.toSendWireDto(): RelayMailRequestDto =
         replyToMailbox = replyToMailbox,
         sendAt = sendAt?.wireTime(),
         pgpDraft = pgpDraft,
+        sendDelay = sendDelay,
     )
 
 private fun java.time.Instant.wireTime(): String = truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString()

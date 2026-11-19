@@ -1691,6 +1691,83 @@ class RelayMailSourceTest {
     }
 
     @Test
+    fun aDelayedSend_asksForTheDelay_andReadsTheHoldItsCancelNames() {
+        val calls = BodyRecordingCallFactory { request ->
+            jsonResponse(request, """{"scheduled":true,"id":"h-1","sendAt":"2026-10-20T08:00:30Z","delayed":true}""", code = 202)
+        }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        val outcome = source.sendMail(MailDraft(to = "a@example.invalid", subject = "S", body = "B", sendDelay = true))
+
+        val fields = Json.parseToJsonElement(calls.bodies.single()).jsonObject
+        assertEquals("true", fields["sendDelay"]!!.jsonPrimitive.content)
+        assertNull("no chosen time", fields["sendAt"])
+        val held = (outcome as MailOutcome.Success).value
+        assertEquals("h-1", held.heldId)
+        assertEquals(java.time.Instant.parse("2026-10-20T08:00:30Z"), held.scheduledAt)
+    }
+
+    @Test
+    fun withoutTheDelay_theFlagIsNotSent_andA200IsAnOrdinarySend() {
+        val calls = BodyRecordingCallFactory { request -> jsonResponse(request, """{"ok":true,"sentSaved":true}""") }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        source.sendMail(MailDraft(to = "a@example.invalid", subject = "S", body = "B"))
+        // Delay Off on the server, or a calendar reply: it went now, with no warning.
+        val sent = (source.sendMail(MailDraft(to = "a@example.invalid", subject = "S", body = "B", sendDelay = true)) as MailOutcome.Success).value
+
+        assertFalse(calls.bodies[0], calls.bodies[0].contains("sendDelay"))
+        assertNull(sent.heldId)
+        assertNull(sent.scheduledAt)
+        assertEquals("", sent.warning)
+    }
+
+    @Test
+    fun aHoldWithoutAUsableIdIsNotReadAsSent() {
+        fun holdAnswering(body: String) = RelayMailSource(
+            { testPairing() }, FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request -> jsonResponse(request, body, 202) },
+        ).sendMail(MailDraft(to = "a@example.invalid", subject = "S", body = "B", sendDelay = true))
+
+        assertTrue(holdAnswering("""{"scheduled":true,"sendAt":"2026-10-20T08:00:30Z","delayed":true}""") is MailOutcome.UpstreamFailure)
+        assertTrue(holdAnswering("""{"scheduled":true,"id":"../x","sendAt":"2026-10-20T08:00:30Z","delayed":true}""") is MailOutcome.UpstreamFailure)
+        assertTrue(holdAnswering("""{"scheduled":true,"id":"h-1","sendAt":"2026-10-20T08:00:30Z"}""") is MailOutcome.UpstreamFailure)
+    }
+
+    @Test
+    fun aDelayedClientEncryptedSend_carriesTheFlagAndItsDraftCopy() {
+        val calls = BodyRecordingCallFactory { request ->
+            jsonResponse(request, """{"scheduled":true,"id":"h-2","sendAt":"2026-10-20T08:00:30Z","delayed":true}""", code = 202)
+        }
+        val source = RelayMailSource({ testPairing() }, FakeMailCursorProvider(), callFactory = calls)
+
+        val outcome = source.sendClientEncrypted(clientEncrypted().copy(sendDelay = true, draftCopy = "DRAFT"))
+
+        val fields = Json.parseToJsonElement(calls.bodies.single()).jsonObject
+        assertEquals("true", fields["sendDelay"]!!.jsonPrimitive.content)
+        assertEquals("DRAFT", fields["draftCopy"]!!.jsonPrimitive.content)
+        assertEquals("h-2", (outcome as MailOutcome.Success).value.heldId)
+    }
+
+    @Test
+    fun sendDelaySeconds_readsTheSetting_andAnOlderServerHasNone() {
+        fun delayAnswering(code: Int, body: String) = RelayMailSource(
+            { testPairing() }, FakeMailCursorProvider(),
+            callFactory = FakeCallFactory { request ->
+                assertEquals("/api/mail/send-delay", request.url.encodedPath)
+                jsonResponse(request, body, code)
+            },
+        ).sendDelaySeconds()
+
+        assertEquals(30, (delayAnswering(200, """{"seconds":30}""") as MailOutcome.Success).value)
+        assertEquals(0, (delayAnswering(200, """{"seconds":0}""") as MailOutcome.Success).value)
+        assertEquals(0, (delayAnswering(404, "404 page not found") as MailOutcome.Success).value)
+        assertTrue(delayAnswering(200, """{"seconds":-1}""") is MailOutcome.UpstreamFailure)
+        assertTrue(delayAnswering(200, """{"seconds":3600}""") is MailOutcome.UpstreamFailure)
+        assertTrue(delayAnswering(200, "{}") is MailOutcome.UpstreamFailure)
+    }
+
+    @Test
     fun aFullScheduleAndAnOversizedMessageSayWhatToDo() {
         fun sendAnswering(code: Int, body: String) = RelayMailSource(
             { testPairing() }, FakeMailCursorProvider(),
