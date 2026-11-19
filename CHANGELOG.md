@@ -17,6 +17,11 @@
   replies included; archive, delete, move and the other list actions on it apply to the whole
   conversation in that folder. Settings → Conversations switches it. Needs KyPost Server with
   conversations; older servers show the list as before.
+- With a Send delay set in KyPost on the web, Send holds your message for that long and shows
+  "Sending in Ns · Cancel sending". Cancel sending keeps it open in Compose, exactly as you wrote
+  it, to edit and send again; KyPost also puts a copy in Drafts. If it has already gone out, it
+  says "Already sent". With the delay Off (the default), or on an older server, Send works as
+  before.
 - When your KyPost server needs you to finish email encryption setup first, the inbox says
   "Finish encryption setup" with a button that opens the setup page on the web, instead of a
   sync error. The app stops syncing until then, checks again when you come back to it (or tap

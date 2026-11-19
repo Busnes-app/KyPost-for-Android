@@ -257,6 +257,20 @@ Owns production Android app code and resources.
   `sendOutcome` reads 200 as sent and 202 as held, each only where it was asked for, so a hold is
   never shown as sent. `ScheduledActivity` (folder picker, "Scheduled") lists `GET /api/scheduled`
   and cancels only a waiting row, after a confirm; the id is one escaped path segment.
+- Send delay (KyPost-Server #668): Compose reads `GET /api/mail/send-delay` as it opens (404 or a
+  failure reads as 0, Off). Above 0, a send without a chosen time carries `sendDelay: true`; on a
+  client-custody account a plain one goes through `dispatchScheduledPlainSend` for its `pgpDraft`,
+  and an encrypted one gets a `draftCopy` (dated now, unlike a scheduled send), since the server
+  refuses a held message it could not return to Drafts encrypted. A 202 with `delayed` and an id is
+  a hold (`MailSendOutcome.heldId`); a 200 is an ordinary send (delay Off, or a message the server
+  never holds). Held, Compose stays open with Send off and a "Sending in Ns · Cancel sending" bar
+  timed from this device's clock with the delay it read. Cancel posts `/api/scheduled/{id}/cancel`:
+  success leaves the composition exactly as it was, to edit and send again (the server also puts
+  a copy in Drafts); 409 says "Already sent" and closes. At release, or on Back, Compose closes as
+  sent; Back does nothing while a Cancel is in flight (`ComposeSend.onBack`), so its answer lands. The hold lives in `ComposeSend.held` (process-scoped, dropped on a session reset), so a
+  rotation or the app lock resumes the bar on the restored draft instead of offering Send again; a
+  new composition just lets it go. The delay is set on the web only. The words are "Sending in Ns" and
+  "Cancel sending", as on the web (KyPost-Server #663 rules out the other word).
 - Save draft: client custody encrypts the draft here (above). A server-held key saves it through
   the relay's plaintext `/api/mail/draft`, as the web app does (the server stores those drafts
   unencrypted anyway), but only while Sign and Encrypt are both off: `draftSaveAllowed` withdraws

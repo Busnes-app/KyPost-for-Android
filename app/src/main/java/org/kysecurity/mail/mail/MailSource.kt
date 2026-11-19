@@ -157,6 +157,9 @@ data class MailDraft(
     /** Send only, with [sendAt] on a client-custody account: what Drafts gets back if the send
      *  fails, encrypted on this device to the account's own key. */
     val pgpDraft: String? = null,
+    /** Send only: hold it for the user's Send delay (KyPost-Server #668). The relay ignores it
+     *  with the delay Off; a client-custody account must also carry [pgpDraft]. */
+    val sendDelay: Boolean = false,
 ) {
     /** Redacted: the body is the user's outgoing message. Enforced by `SourceRulesTest`. */
     override fun toString(): String = "MailDraft(redacted)"
@@ -199,6 +202,8 @@ data class MailSendOutcome(
     val calendarReplySent: Boolean = false,
     /** Non-null when the relay accepted it for later instead of sending it (202). */
     val scheduledAt: java.time.Instant? = null,
+    /** Non-null when it is held for the Send delay: the id that cancels it, until [scheduledAt]. */
+    val heldId: String? = null,
 )
 
 /** One `GET /api/inbox/conversations` group (KyPost-Server #667): [messageIds] are its members in
@@ -238,6 +243,8 @@ data class ClientEncryptedMessage(
     /** The message encrypted to the account's own key, recipients included, for Drafts if the
      *  scheduled send fails. */
     val draftCopy: String? = null,
+    /** Hold it for the Send delay; needs [draftCopy]. */
+    val sendDelay: Boolean = false,
     /** The reply reference, as on `/api/mail/send`; null on a new message or an unthreaded resend. */
     val replyToMessageId: String? = null,
     val replyToMailbox: String? = null,
@@ -322,6 +329,8 @@ interface MailSource {
 
     /** `PUT /api/settings/mail`; the success value is the setting as the server now holds it. */
     fun setConversationsEnabled(enabled: Boolean): MailOutcome<Boolean> = MailOutcome.BadRequest("Not supported")
+    /** The user's Send delay in seconds (`GET /api/mail/send-delay`); 0 is Off. */
+    fun sendDelaySeconds(): MailOutcome<Int> = MailOutcome.Success(0)
 
     /** Returns the message to Drafts; the success value is the server's warning, blank if none. */
     fun cancelScheduled(id: String): MailOutcome<String>

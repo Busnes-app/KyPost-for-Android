@@ -361,6 +361,7 @@ class MailRepository(
         relaySource.fetchConversations(folder, limit)
     fun conversationsEnabled(): MailOutcome<Boolean> = relaySource.conversationsEnabled()
     fun setConversationsEnabled(enabled: Boolean): MailOutcome<Boolean> = relaySource.setConversationsEnabled(enabled)
+    fun sendDelaySeconds(): MailOutcome<Int> = relaySource.sendDelaySeconds()
     fun createFolder(parent: String, name: String): MailOutcome<Unit> = relaySource.createFolder(parent, name)
     fun renameFolder(folder: String, name: String): MailOutcome<Unit> = relaySource.renameFolder(folder, name)
 

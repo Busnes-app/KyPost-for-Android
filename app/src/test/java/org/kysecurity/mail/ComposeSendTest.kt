@@ -199,4 +199,29 @@ class ComposeSendTest {
             assertTrue(sending.outcome.isCancelled)
         }
     }
+
+    /** The Compose a rotation or the app lock made resumes the hold; a stale one cannot drop it. */
+    @Test
+    fun aHoldOutlivesItsScreen_andOnlyItsOwnClearOrAResetEndsIt() {
+        val hold = ComposeSend.Held("h-1", releaseAtElapsedMs = 30_000)
+        ComposeSend.hold(hold)
+
+        ComposeSend.clearHold(ComposeSend.Held("h-0", releaseAtElapsedMs = 10_000))
+        assertSame(hold, ComposeSend.held())
+
+        ComposeSend.clearHold(hold)
+        assertNull(ComposeSend.held())
+
+        ComposeSend.hold(hold)
+        ComposeSend.resetForNewSession()
+        assertNull("another account's Compose must not offer this Cancel", ComposeSend.held())
+    }
+
+    /** Back during a Cancel must not close Compose as sent and drop the Cancel's answer. */
+    @Test
+    fun back_waitsForAnInFlightCancel() {
+        assertEquals(ComposeSend.Back.DISCARD, ComposeSend.onBack(held = false, canceling = false))
+        assertEquals(ComposeSend.Back.LEAVE_HELD, ComposeSend.onBack(held = true, canceling = false))
+        assertEquals(ComposeSend.Back.WAIT, ComposeSend.onBack(held = true, canceling = true))
+    }
 }
