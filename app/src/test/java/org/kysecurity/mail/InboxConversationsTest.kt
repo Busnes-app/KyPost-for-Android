@@ -142,4 +142,25 @@ class InboxConversationsTest {
         assertFalse(cache.put(second, session = 1, current = 2, "INBOX", listOf(Conversation("1", listOf("1", "3"), listOf(reply)))))
         assertEquals(emptyList<Conversation>(), cache.get(second, current = 2, "INBOX"))
     }
+
+    /** New mail is shown before the conversations request, however long that one takes. */
+    @Test
+    fun aRefreshPaintsTheMailBeforeAskingForItsGrouping() {
+        val events = mutableListOf<String>()
+        paintThenGroup(
+            paint = { events += "paint" },
+            group = { events += "group"; listOf(thread) },
+            regroup = { events += "regroup" },
+        )
+
+        assertEquals(listOf("paint", "group", "regroup"), events)
+    }
+
+    @Test
+    fun noGrouping_leavesThePaintAlone() {
+        val events = mutableListOf<String>()
+        paintThenGroup<List<Conversation>>(paint = { events += "paint" }, group = { null }, regroup = { events += "regroup" })
+
+        assertEquals(listOf("paint"), events)
+    }
 }

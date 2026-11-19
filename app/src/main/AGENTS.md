@@ -131,9 +131,12 @@ Owns production Android app code and resources.
 - Conversations (KyPost-Server #667): while the user's `GET /api/settings/mail` `conversations` is
   on (the default; last read kept in `MailSettings`, read on each inbox foreground and on Settings),
   `InboxActivity` fetches `GET /api/inbox/conversations` after each successful folder refresh, with
-  `limit` = rows cached for that folder (max 500), and `groupInboxRows` folds the list. `/api/inbox`
-  and Room are unchanged; grouping is in memory only. A failed or absent route keeps the last
-  grouping, never toasts. A conversation row stands at its newest shown member; its `members` are
+  `limit` = rows cached for that folder (max 500), and `groupInboxRows` folds the list. The refresh
+  paints the mail first and regroups when that answer lands (`paintThenGroup`), so a slow route never
+  holds new mail back. `/api/inbox` and Room are unchanged; grouping is in memory only, in a
+  `ConversationCache` owned by one account in one session generation: either changing empties it, and
+  an answer from an ended session is dropped. A failed or absent route keeps the last grouping (that
+  account's only), never toasts. A conversation row stands at its newest shown member; its `members` are
   every loaded member in that folder (not only the keyword tab), and swipes, row accessibility
   actions and bulk selection act on all of them (chunked to `MAX_ACTION_IDS`). A selection holds lead
   ids; when a refresh brings a newer lead, `followLeads` moves it to the new one. Your replies in Sent

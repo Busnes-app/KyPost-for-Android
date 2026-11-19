@@ -667,30 +667,41 @@ class InboxActivity : LockedActivity() {
         val outcome: MailOutcome<MailFetchResult> =
             mailRepository.refreshFolder(folder, forceFullResync = forceFullResync)
         val (emails, unread) = mailRepository.cachedEmailsAndUnread(folder)
-        val conversations = when {
-            !mailSettings.conversations() -> MailOutcome.Success(emptyList())
-            outcome !is MailOutcome.Success || emails.isEmpty() -> null
-            else -> mailRepository.fetchConversations(folder, emails.size)
-        }
-        runOnUiThread {
-            unreadByFolder = unread
-            storeConversations(folder, account, session, conversations)
-        }
         // The setup screen says it; a toast on top would repeat it.
         val errorMessage = outcome.takeIf { it !is MailOutcome.EncryptionSetupRequired }?.userFacingMessage()
         keywordSettings.rememberKeywords(emails.flatMap { it.keywords }.toSet())
-        runOnUiThread {
-            // Account-wide, so applied even when the user has since switched folder.
-            applyEncryptionSetup(outcome)
-            applyRefreshedEmails(
-                folder,
-                emails,
-                isFinal = true,
-                errorMessage = errorMessage,
-                refreshedAt = System.currentTimeMillis().takeIf { outcome is MailOutcome.Success },
-                account = account,
-            )
-        }
+        paintThenGroup(
+            paint = {
+                runOnUiThread {
+                    unreadByFolder = unread
+                    // Account-wide, so applied even when the user has since switched folder.
+                    applyEncryptionSetup(outcome)
+                    applyRefreshedEmails(
+                        folder,
+                        emails,
+                        isFinal = true,
+                        errorMessage = errorMessage,
+                        refreshedAt = System.currentTimeMillis().takeIf { outcome is MailOutcome.Success },
+                        account = account,
+                    )
+                    // The mail is in: the pull spinner need not wait for the grouping.
+                    swipeRefresh.isRefreshing = false
+                }
+            },
+            group = {
+                when {
+                    !mailSettings.conversations() -> MailOutcome.Success(emptyList())
+                    outcome !is MailOutcome.Success || emails.isEmpty() -> null
+                    else -> mailRepository.fetchConversations(folder, emails.size)
+                }
+            },
+            regroup = { conversations ->
+                runOnUiThread {
+                    storeConversations(folder, account, session, conversations)
+                    if (folder == currentFolder) renderFilteredEmails()
+                }
+            },
+        )
     }
 
     /** Anything but a success (an older server without the route, a failed fetch) keeps the last

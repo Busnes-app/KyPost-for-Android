@@ -111,3 +111,10 @@ internal class ConversationCache {
         byFolder.clear()
     }
 }
+
+/** Ends a refresh: the mail is painted first, then its grouping is asked for, so a slow or
+ *  failing conversations request never holds new mail back. A null grouping leaves it. */
+internal fun <T : Any> paintThenGroup(paint: () -> Unit, group: () -> T?, regroup: (T) -> Unit) {
+    paint()
+    group()?.let(regroup)
+}
