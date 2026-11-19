@@ -30,3 +30,7 @@ fun webmailDraftsUrl(serverUrl: String): String? {
 fun webmailHomeUrl(serverUrl: String): String? =
     serverUrl.toHttpUrlOrNull()?.newBuilder()?.encodedPath("/")?.query(null)?.fragment(null)
         ?.build()?.toString()
+
+/** The web's first sign-in encryption setup page (KyPost-Server docs/E2E_PGP.md). */
+fun webmailEncryptionSetupUrl(serverUrl: String): String? =
+    "${serverUrl.trimEnd('/')}/setup/encryption".toHttpUrlOrNull()?.toString()

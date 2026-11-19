@@ -47,6 +47,11 @@ sealed class MailOutcome<out T> {
      *  credentials. [retryAfterSeconds] is null when the header was absent or unparseable;
      *  callers should still back off rather than retrying immediately. */
     data class RateLimited(val message: String, val retryAfterSeconds: Long?) : MailOutcome<Nothing>()
+
+    /** Relay 403 `encryption_setup_required` (KyPost-Server #666): the account owes encryption
+     *  setup on the web, so every mailbox route is withheld. Not a sign-out and not retryable;
+     *  [message] is the server's own wording, null when it sent none. */
+    data class EncryptionSetupRequired(val message: String?) : MailOutcome<Nothing>()
 }
 
 /** Wording tailored per failure kind, per docs/Mobile_Mail_Relay.md's error table — never auto-clears
@@ -74,6 +79,7 @@ fun MailOutcome<*>.userFacingMessage(): String? = when (this) {
     is MailOutcome.RateLimited -> retryAfterSeconds
         ?.let { "Too many failed attempts — try again in ${formatRetryAfter(it)}" }
         ?: "Too many failed attempts — try again later"
+    is MailOutcome.EncryptionSetupRequired -> message ?: "Finish email encryption setup in KyPost on the web, then come back."
 }
 
 internal fun formatRetryAfter(seconds: Long): String = when {

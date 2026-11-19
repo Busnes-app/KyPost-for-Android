@@ -241,6 +241,22 @@ class MailRepositoryTest {
         org.kysecurity.mail.ComposeDraftCache.take()
     }
 
+    /** Withheld mail is not gone mail: the cache and the sync cursor stay exactly as they were. */
+    @Test
+    fun encryptionSetupRequired_leavesCachedMailAndCursorUntouched() {
+        val dao = FakeEmailDao()
+        dao.put(row("kept", "INBOX"))
+        val cursors = FakeCursorProvider()
+        val source = FakeMailSource(fetchOutcome = MailOutcome.EncryptionSetupRequired(null))
+
+        val outcome = repository(dao, source, cursors).refreshFolder("INBOX")
+
+        assertEquals(MailOutcome.EncryptionSetupRequired(null), outcome)
+        assertEquals(setOf("INBOX" to "kept"), dao.rows.keys)
+        assertTrue(cursors.saved.isEmpty())
+        assertTrue(cursors.fullResyncs.isEmpty())
+    }
+
     @Test
     fun nonDeltaResult_replacesFolderSnapshotWholesale() {
         val dao = FakeEmailDao()

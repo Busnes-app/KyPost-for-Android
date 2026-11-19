@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Replaces the list while the server withholds mail until encryption setup is finished.
+     Clickable so a pull or tap never reaches the list beneath. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/encryptionSetupState"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?android:attr/colorBackground"
+    android:clickable="true"
+    android:focusable="true"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:visibility="gone">
+
+    <TextView
+        android:id="@+id/encryptionSetupTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:accessibilityHeading="true"
+        android:gravity="center"
+        android:text="@string/encryption_setup_title"
+        android:textAppearance="?attr/textAppearanceHeadline6" />
+
+    <TextView
+        android:id="@+id/encryptionSetupBody"
+        android:accessibilityLiveRegion="polite"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center"
+        android:text="@string/encryption_setup_body"
+        android:textColor="?android:attr/textColorSecondary" />
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/encryptionSetupOpenWeb"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:text="@string/encryption_setup_open_web" />
+
+    <Button
+        android:id="@+id/encryptionSetupCheckAgain"
+        style="@style/Widget.MaterialComponents.Button.TextButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/encryption_setup_check_again" />
+</LinearLayout>

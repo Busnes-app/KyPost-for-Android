@@ -89,6 +89,8 @@
                     android:accessibilityLiveRegion="polite"
                     android:visibility="gone" />
 
+                <include layout="@layout/inbox_encryption_setup" />
+
             </FrameLayout>
 
         </LinearLayout>
