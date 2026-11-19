@@ -92,7 +92,7 @@ startupRuntime = "1.2.0"
 # Test-only. Jazzer's @FuzzTest is a JUnit 5 test, so unit tests run on the JUnit Platform and the
 # existing JUnit 4 tests run through the vintage engine.
 jazzer = "0.30.0"
-junitBom = "5.14.4"
+junitBom = "6.1.3"
 
 [libraries]
 jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
