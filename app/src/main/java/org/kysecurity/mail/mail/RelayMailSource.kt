@@ -36,6 +36,8 @@ private const val SCHEDULED_FULL_MARKER = "too many scheduled messages"
 internal const val SCHEDULED_GONE_MESSAGE = "That scheduled message is no longer on the server"
 internal const val SCHEDULING_UNSUPPORTED_MESSAGE = "This server can't schedule mail yet. Update KyPost Server to use it."
 internal const val SCHEDULE_IGNORED_WARNING = "Sent now: this server can't schedule mail. Update KyPost Server to schedule."
+/** The server's default and maximum, its inbox window. */
+internal const val MAX_CONVERSATION_WINDOW = 500
 private val SCHEDULED_ID = Regex("[A-Za-z0-9-]{1,64}")
 internal const val SCHEDULED_CLAIMED_MESSAGE = "It is already being sent, so it can no longer be canceled"
 private const val REENROLLMENT_REQUIRED_MARKER = "reenrollmentRequired"
@@ -376,6 +378,55 @@ class RelayMailSource(
                     )
                 },
             )
+        }
+    }
+
+    override fun fetchConversations(mailbox: String, limit: Int): MailOutcome<List<Conversation>> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        val base = baseUrl(pairing, "/api/inbox/conversations") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val url = base.newBuilder()
+            .addQueryParameter("mailbox", mailbox)
+            .addQueryParameter("limit", limit.coerceIn(1, MAX_CONVERSATION_WINDOW).toString())
+            .build()
+        val request = Request.Builder().url(url).get().authed(pairing).build()
+        return executeStreaming(request, RelayConversationsDto.serializer()) { code, parsed, errorBody ->
+            if (code != 200) return@executeStreaming mapErrorCode(code, errorBody)
+            if (parsed == null) return@executeStreaming MailOutcome.UpstreamFailure("Malformed conversations response")
+            MailOutcome.Success(
+                parsed.conversations.filter { it.messageIds.isNotEmpty() }.map { group ->
+                    Conversation(
+                        id = group.id,
+                        messageIds = group.messageIds,
+                        sent = group.sent.mapNotNull { row ->
+                            val folder = (row["mailbox"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+                                ?: return@mapNotNull null
+                            runCatching { json.decodeFromJsonElement(RelayEmailDto.serializer(), row) }.getOrNull()
+                                ?.takeIf { it.messageId.isNotBlank() }
+                                ?.toUiEmail(tab = "")?.copy(folder = folder)
+                        },
+                    )
+                },
+            )
+        }
+    }
+
+    override fun conversationsEnabled(): MailOutcome<Boolean> = mailSettings(null)
+
+    override fun setConversationsEnabled(enabled: Boolean): MailOutcome<Boolean> = mailSettings(enabled)
+
+    /** GET when [conversations] is null, else PUT; either answers the settings now held. */
+    private fun mailSettings(conversations: Boolean?): MailOutcome<Boolean> {
+        val pairing = pairingProvider() ?: return MailOutcome.Unauthorized("Device is not paired")
+        val base = baseUrl(pairing, "/api/settings/mail") ?: return MailOutcome.BadRequest("Server URL is not valid")
+        val builder = Request.Builder().url(base).authed(pairing)
+        // Built by hand: the default Json leaves out a field equal to its default.
+        if (conversations == null) builder.get()
+        else builder.put("""{"conversations":$conversations}""".toRequestBody(JSON_MEDIA_TYPE))
+        return execute(builder.build()) { code, body ->
+            if (code != 200) return@execute mapErrorCode(code, body)
+            runCatching { json.decodeFromString<RelayMailSettingsDto>(body) }.getOrNull()
+                ?.let { MailOutcome.Success(it.conversations) }
+                ?: MailOutcome.UpstreamFailure("Malformed mail settings response")
         }
     }
 

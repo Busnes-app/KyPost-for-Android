@@ -14,6 +14,8 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.navigation.NavigationBarView
 import kotlinx.coroutines.launch
 import org.kysecurity.mail.contacts.device.DeviceContactSyncEnabler
+import org.kysecurity.mail.mail.MailOutcome
+import org.kysecurity.mail.mail.MailRuntime
 import org.kysecurity.mail.contacts.device.DeviceContactsRuntime
 import org.kysecurity.mail.pgp.PgpKeyActivity
 import org.kysecurity.mail.security.LockedActivity
@@ -62,6 +64,7 @@ class SettingsActivity : LockedActivity() {
         findViewById<View>(R.id.settingsPgp).setOnClickListener {
             startActivity(Intent(this, PgpKeyActivity::class.java))
         }
+        findViewById<View>(R.id.settingsConversations).setOnClickListener { toggleConversations() }
         findViewById<View>(R.id.settingsSignature).setOnClickListener {
             startActivity(Intent(this, SignatureSettingsActivity::class.java))
         }
@@ -91,6 +94,46 @@ class SettingsActivity : LockedActivity() {
         applyTheme()
         contactSyncObserver = contactSyncObserver ?: DeviceContactsRuntime.graph(this).settings.observe(::renderContactSync)
         renderContactSync()
+        renderConversations()
+        loadConversations()
+    }
+
+    /** The server's switch, shared by every client; this device shows the value it last read. */
+    private fun renderConversations() {
+        val on = MailSettings(this).conversations()
+        findViewById<TextView>(R.id.settingsConversationsBody).setText(
+            if (on) R.string.settings_conversations_on_body else R.string.settings_conversations_off_body,
+        )
+    }
+
+    private fun loadConversations() {
+        val repository = MailRuntime.graph(this).repository
+        val settings = MailSettings(applicationContext)
+        MailBackgroundExecutor.submit {
+            val outcome = repository.conversationsEnabled()
+            if (outcome is MailOutcome.Success) {
+                settings.setConversations(outcome.value)
+                runOnUiThread { if (!isDestroyed) renderConversations() }
+            }
+        }
+    }
+
+    /** Changed on the server first; the row follows only what the server confirms. */
+    private fun toggleConversations() {
+        val repository = MailRuntime.graph(this).repository
+        val settings = MailSettings(applicationContext)
+        val wanted = !settings.conversations()
+        MailBackgroundExecutor.submit {
+            val outcome = repository.setConversationsEnabled(wanted)
+            if (outcome is MailOutcome.Success) settings.setConversations(outcome.value)
+            runOnUiThread {
+                if (isDestroyed) return@runOnUiThread
+                if (outcome !is MailOutcome.Success) {
+                    Toast.makeText(this, R.string.settings_conversations_failed, Toast.LENGTH_LONG).show()
+                }
+                renderConversations()
+            }
+        }
     }
 
     override fun onPause() {
@@ -144,6 +187,7 @@ class SettingsActivity : LockedActivity() {
             R.id.settingsPairing,
             R.id.settingsContactSync,
             R.id.settingsPgp,
+            R.id.settingsConversations,
             R.id.settingsSignature,
             R.id.settingsAbout,
             R.id.settingsPrivacy,

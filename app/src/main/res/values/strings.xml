@@ -42,6 +42,10 @@
     <string name="settings_pgp_body">Show or scan PGP key QR codes</string>
     <string name="settings_signature">Signature</string>
     <string name="settings_signature_body">A signature for mail you write on this device</string>
+    <string name="settings_conversations">Conversations</string>
+    <string name="settings_conversations_on_body">On. Messages are grouped into conversations. Tap to turn off</string>
+    <string name="settings_conversations_off_body">Off. Tap to group messages into conversations</string>
+    <string name="settings_conversations_failed">Couldn\'t change this from the app. You can change it in KyPost on the web, under Settings, Mail.</string>
     <string name="signature_enabled">Add a signature</string>
     <string name="signature_on_reply">Add to replies</string>
     <string name="signature_on_forward">Add to forwards</string>
@@ -101,6 +105,15 @@
     <string name="action_move">Move to folder</string>
     <string name="selection_selected">Selected</string>
     <string name="selection_limit">Up to %1$d messages at a time</string>
+    <!-- Senders, then how many messages the conversation holds: "Ana, me (3)". -->
+    <string name="conversation_row_senders">%1$s (%2$d)</string>
+    <string name="conversation_me">me</string>
+    <string name="conversation_expanded">Expanded</string>
+    <string name="conversation_collapsed">Collapsed</string>
+    <plurals name="conversation_row_description">
+        <item quantity="one">Conversation, %d message</item>
+        <item quantity="other">Conversation, %d messages</item>
+    </plurals>
     <string name="undo">Undo</string>
     <plurals name="undo_message">
         <item quantity="one">%1$s: %2$d message</item>

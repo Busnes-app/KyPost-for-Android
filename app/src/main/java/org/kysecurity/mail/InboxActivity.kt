@@ -28,6 +28,7 @@ import com.google.android.material.navigation.NavigationBarView
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
+import org.kysecurity.mail.mail.Conversation
 import org.kysecurity.mail.mail.FolderInfo
 import org.kysecurity.mail.mail.MAX_ACTION_IDS
 import org.kysecurity.mail.mail.MailAccount
@@ -76,6 +77,12 @@ class InboxActivity : LockedActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var mailRepository: MailRepository
     private lateinit var keywordSettings: KeywordSettings
+    private lateinit var mailSettings: MailSettings
+    /** Per folder, as the server last grouped it; empty while the user's switch is off. */
+    private val conversationsByFolder = mutableMapOf<String, List<Conversation>>()
+    private val expandedConversations = mutableSetOf<String>()
+    /** The shown conversation rows' members, by their lead row: what a list action covers. */
+    private var conversationMembers: Map<Pair<String, String>, List<Email>> = emptyMap()
     // Volatile: the IO executor reads it to decide whether its queued refresh is still wanted.
     @Volatile private var currentFolder = "INBOX"
 
@@ -176,6 +183,7 @@ class InboxActivity : LockedActivity() {
 
         mailRepository = MailRuntime.graph(this).repository
         keywordSettings = KeywordSettings(this)
+        mailSettings = MailSettings(this)
 
         initViews()
         applyFolderTitle()
@@ -233,8 +241,16 @@ class InboxActivity : LockedActivity() {
     override fun onStartUnlocked() {
         // A failed read clears its overlay; repaint from the cache so the row shows unread again.
         mailRepository.setOverlayListener { runOnUiThread { repaintFromCache() } }
+        // Queued first: the refresh after it groups, or not, by the setting it reads.
+        refreshConversationSetting()
         refreshInbox()
         scheduleNextRefresh()
+    }
+
+    /** The server's switch, read once per foreground; a failure keeps the last one read. */
+    private fun refreshConversationSetting() = ioExecutor.execute {
+        val outcome = runCatching { mailRepository.conversationsEnabled() }.getOrNull()
+        (outcome as? MailOutcome.Success)?.let { mailSettings.setConversations(it.value) }
     }
 
     private fun repaintFromCache() {
@@ -389,20 +405,18 @@ class InboxActivity : LockedActivity() {
     private fun setupRecyclerView() {
         adapter = EmailAdapter(
             emptyList(),
-            onEmailLongClick = ::toggleSelected,
-            onEmailClick = { email -> if (selectionMode != null) toggleSelected(email) else openEmailDetail(email) },
+            onEmailLongClick = { row -> toggleSelected(row.email) },
+            onEmailClick = { row ->
+                when {
+                    selectionMode != null -> if (!row.nested) toggleSelected(row.email)
+                    row.isConversation -> toggleConversation(row)
+                    else -> openEmailDetail(row.email)
+                }
+            },
             // Like the swipes, off while selecting.
             rowActions = listOf(
-                R.string.action_archive to { email: Email ->
-                    if (selectionMode == null) {
-                        submitRowAction(email, getString(R.string.action_archive), mailRepository::archive)
-                    }
-                },
-                R.string.action_delete to { email: Email ->
-                    if (selectionMode == null) {
-                        submitRowAction(email, getString(R.string.action_delete), mailRepository::delete)
-                    }
-                },
+                R.string.action_archive to { row: InboxRow -> if (selectionMode == null) archiveRow(row) },
+                R.string.action_delete to { row: InboxRow -> if (selectionMode == null) deleteRow(row) },
             ),
         )
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -412,6 +426,26 @@ class InboxActivity : LockedActivity() {
                 if (!recyclerView.canScrollVertically(-1)) hideNewMailPill()
             }
         })
+    }
+
+    private fun toggleConversation(row: InboxRow) {
+        val id = row.conversationId ?: return
+        if (!expandedConversations.remove(id)) expandedConversations += id
+        renderFilteredEmails()
+    }
+
+    /** A conversation row acts on every member in this folder; a message row on itself. */
+    private fun archiveRow(row: InboxRow) = actOnRow(row, R.string.action_archive, mailRepository::archive, MailAction.ARCHIVE)
+
+    private fun deleteRow(row: InboxRow) = actOnRow(row, R.string.action_delete, mailRepository::delete, MailAction.DELETE)
+
+    private fun actOnRow(row: InboxRow, label: Int, mutate: RowMutation, action: MailAction) {
+        if (row.nested) return
+        if (row.members.size > 1) {
+            submitRowsAction(row.members.map { it.copy(folder = it.sourceFolder()) }, getString(label), action)
+        } else {
+            submitRowAction(row.email, getString(label), mutate)
+        }
     }
 
     /** Pages from the last page's `nextBefore`; the first page starts at the oldest row held. */
@@ -632,7 +666,16 @@ class InboxActivity : LockedActivity() {
         val outcome: MailOutcome<MailFetchResult> =
             mailRepository.refreshFolder(folder, forceFullResync = forceFullResync)
         val (emails, unread) = mailRepository.cachedEmailsAndUnread(folder)
-        runOnUiThread { unreadByFolder = unread }
+        // Null keeps the last grouping: an older server without the route, or a failed fetch.
+        val conversations = when {
+            !mailSettings.conversations() -> emptyList()
+            outcome !is MailOutcome.Success || emails.isEmpty() -> null
+            else -> (mailRepository.fetchConversations(folder, emails.size) as? MailOutcome.Success)?.value
+        }
+        runOnUiThread {
+            unreadByFolder = unread
+            conversations?.let { conversationsByFolder[folder] = it }
+        }
         // The setup screen says it; a toast on top would repeat it.
         val errorMessage = outcome.takeIf { it !is MailOutcome.EncryptionSetupRequired }?.userFacingMessage()
         keywordSettings.rememberKeywords(emails.flatMap { it.keywords }.toSet())
@@ -790,9 +833,17 @@ class InboxActivity : LockedActivity() {
         val held = heldActions.heldEmails().map { it.rowKey() }.toSet()
         val results = searchResults?.filter { it.rowKey() !in held }
         val filtered = results ?: KeywordTabs.filterEmails(allEmails, selectedTab).filter { it.rowKey() !in held }
-        val added = if (results == null) previous?.let { newRowsAbove(it, filtered) } ?: 0 else 0
+        // Search results are not the folder, so they stay ungrouped.
+        val rows = if (results != null) {
+            results.map(::InboxRow)
+        } else {
+            val conversations = if (mailSettings.conversations()) conversationsByFolder[currentFolder].orEmpty() else emptyList()
+            groupInboxRows(filtered, allEmails.filter { it.rowKey() !in held }, conversations, expandedConversations)
+        }
+        conversationMembers = rows.filter { it.isConversation }.associate { it.email.rowKey() to it.members }
+        val added = if (results == null) previous?.let { newRowsAbove(it, rows.map(InboxRow::email)) } ?: 0 else 0
         val wasAtTop = !recyclerView.canScrollVertically(-1)
-        adapter.updateEmails(filtered)
+        adapter.updateRows(rows)
         olderFooter.shown = results == null && allEmails.isNotEmpty() && currentFolder !in olderExhausted
         keywordChipScroll.visibility = if (searchQuery == null) View.VISIBLE else View.GONE
         emptyText.text = if (results != null) {
@@ -847,6 +898,7 @@ class InboxActivity : LockedActivity() {
         hideNewMailPill()
         currentFolder = folder
         selectedTab = KeywordTabs.ALL
+        expandedConversations.clear()
         selectionMode?.finish()
         exitSearch()
         emptyText.visibility = View.GONE
@@ -981,6 +1033,9 @@ class InboxActivity : LockedActivity() {
         override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
             // The whole list, not the visible tab: a row selected under another tab is still selected.
             val chosen = (searchResults ?: allEmails).filter { it.id in selectedIds }
+                // A selected conversation is every member it has in this folder.
+                .flatMap { conversationMembers[it.rowKey()] ?: listOf(it) }
+                .distinctBy { it.rowKey() }
                 // Pinned now: Move answers later, when the screen may show another folder.
                 .map { it.copy(folder = it.sourceFolder()) }
             when (item.itemId) {
@@ -1030,7 +1085,8 @@ class InboxActivity : LockedActivity() {
         val account = shownAccount
         val session = ProcessState.generation()
         holdForUndo(emails, label) {
-            byFolder.forEach { (folder, rows) ->
+            // Chunked to the server's cap: whole conversations can take a selection past it.
+            byFolder.flatMap { (folder, rows) -> rows.chunked(MAX_ACTION_IDS).map { folder to it } }.forEach { (folder, rows) ->
                 val claims = mailRepository.beginRemovals(rows.map { it.id }, folder, session)
                 val dropped = { claims.forEach(mailRepository::abandon) }
                 MailBackgroundExecutor.submitReporting(this, label, onDropped = dropped) {
@@ -1245,8 +1301,14 @@ class InboxActivity : LockedActivity() {
             ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT
         ) {
             // No swipes in selection mode, nor on the "Load older mail" footer.
-            override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int =
-                if (selectionMode != null || viewHolder.bindingAdapter !== adapter) 0 else super.getSwipeDirs(recyclerView, viewHolder)
+            override fun getSwipeDirs(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder): Int {
+                val position = viewHolder.bindingAdapterPosition
+                // Nor on a conversation's nested messages: those open, and act from the reader.
+                val nested = viewHolder.bindingAdapter === adapter && position in 0 until adapter.itemCount &&
+                    adapter.getRowAt(position).nested
+                return if (selectionMode != null || viewHolder.bindingAdapter !== adapter || nested) 0
+                else super.getSwipeDirs(recyclerView, viewHolder)
+            }
 
             override fun onMove(
                 recyclerView: RecyclerView,
@@ -1300,12 +1362,10 @@ class InboxActivity : LockedActivity() {
             override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
                 val position = viewHolder.bindingAdapterPosition
                 if (viewHolder.bindingAdapter !== adapter || position < 0 || position >= adapter.itemCount) return
-                val email = adapter.getEmailAt(position)
+                val row = adapter.getRowAt(position)
                 when (direction) {
-                    ItemTouchHelper.LEFT ->
-                        submitRowAction(email, getString(R.string.action_archive), mailRepository::archive)
-                    ItemTouchHelper.RIGHT ->
-                        submitRowAction(email, getString(R.string.action_delete), mailRepository::delete)
+                    ItemTouchHelper.LEFT -> archiveRow(row)
+                    ItemTouchHelper.RIGHT -> deleteRow(row)
                 }
             }
         })

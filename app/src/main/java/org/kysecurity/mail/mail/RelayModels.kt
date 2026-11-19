@@ -281,3 +281,25 @@ data class RelayPickupFallbackDto(
 data class RelayClientEncryptedDraftDto(val to: String, val pgpDraft: String) {
     override fun toString(): String = "RelayClientEncryptedDraftDto(redacted)"
 }
+
+/** One `GET /api/inbox/conversations` group. [sent] rows are inbox rows plus their `mailbox`,
+ *  decoded one by one so a malformed reply drops only itself. */
+@Serializable
+data class RelayConversationDto(
+    val id: String = "",
+    val messageIds: List<String> = emptyList(),
+    val sent: List<kotlinx.serialization.json.JsonObject> = emptyList(),
+) {
+    /** Redacted: [sent] carries your replies' subjects and previews. */
+    override fun toString(): String = "RelayConversationDto(redacted)"
+}
+
+@Serializable
+data class RelayConversationsDto(val conversations: List<RelayConversationDto> = emptyList())
+
+/** `GET|PUT /api/settings/mail`. */
+@Serializable
+data class RelayMailSettingsDto(
+    @Serializable(with = StrictBooleanSerializer::class)
+    val conversations: Boolean = true,
+)

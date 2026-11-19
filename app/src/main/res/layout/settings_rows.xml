@@ -172,6 +172,30 @@
     <View style="@style/Widget.KyPost.ListRowDivider" />
 
     <LinearLayout
+        android:id="@+id/settingsConversations"
+        style="@style/Widget.KyPost.ListRow">
+
+        <ImageView
+            style="@style/Widget.KyPost.ListRowIcon"
+            android:importantForAccessibility="no"
+            android:src="@drawable/ic_row_conversations" />
+
+        <LinearLayout style="@style/Widget.KyPost.ListRowText">
+
+            <TextView
+                style="@style/Widget.KyPost.ListRowTitle"
+                android:text="@string/settings_conversations" />
+
+            <TextView
+                android:id="@+id/settingsConversationsBody"
+                style="@style/Widget.KyPost.ListRowBody"
+                android:text="@string/settings_conversations_on_body" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <View style="@style/Widget.KyPost.ListRowDivider" />
+
+    <LinearLayout
         android:id="@+id/settingsSignature"
         style="@style/Widget.KyPost.ListRow">
 

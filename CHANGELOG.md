@@ -12,6 +12,11 @@
 
 ### Changed
 
+- The inbox groups replies into conversations, like KyPost on the web, when your Group messages
+  into conversations setting is on (the default). Tap a conversation to show its messages, your
+  replies included; archive, delete, move and the other list actions on it apply to the whole
+  conversation in that folder. Settings → Conversations switches it. Needs KyPost Server with
+  conversations; older servers show the list as before.
 - When your KyPost server needs you to finish email encryption setup first, the inbox says
   "Finish encryption setup" with a button that opens the setup page on the web, instead of a
   sync error. The app stops syncing until then, checks again when you come back to it (or tap

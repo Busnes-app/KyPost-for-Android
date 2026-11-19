@@ -26,20 +26,22 @@ import java.time.format.FormatStyle
 import java.util.Locale
 
 class EmailAdapter(
-    private var emails: List<Email>,
-    private val onEmailLongClick: ((Email) -> Unit)? = null,
-    private val onEmailClick: ((Email) -> Unit)? = null,
-    /** (label, action): the screen-reader stand-ins for the row's swipes. */
-    private val rowActions: List<Pair<Int, (Email) -> Unit>> = emptyList(),
+    emails: List<Email>,
+    private val onEmailLongClick: ((InboxRow) -> Unit)? = null,
+    private val onEmailClick: ((InboxRow) -> Unit)? = null,
+    /** (label, action): the screen-reader stand-ins for the row's swipes. Not on nested rows. */
+    private val rowActions: List<Pair<Int, (InboxRow) -> Unit>> = emptyList(),
 ) : RecyclerView.Adapter<EmailAdapter.EmailViewHolder>() {
+
+    private var rows: List<InboxRow> = emails.map(::InboxRow)
 
     private var selectedIds: Set<String> = emptySet()
 
     class EmailViewHolder(
         view: View,
-        private val onEmailClick: ((Email) -> Unit)?,
-        private val onEmailLongClick: ((Email) -> Unit)?,
-        private val rowActions: List<Pair<Int, (Email) -> Unit>>,
+        private val onEmailClick: ((InboxRow) -> Unit)?,
+        private val onEmailLongClick: ((InboxRow) -> Unit)?,
+        private val rowActions: List<Pair<Int, (InboxRow) -> Unit>>,
     ) : RecyclerView.ViewHolder(view) {
         private val cardView: CardView = view as CardView
         private val contentLayout: LinearLayout = view.findViewById(R.id.emailItemContent)
@@ -53,7 +55,8 @@ class EmailAdapter(
         /** Removed on rebind: a recycled row must not keep acting on the email it showed before. */
         private var actionIds: List<Int> = emptyList()
 
-        fun bind(email: Email, palette: ThemePalette, selected: Boolean) {
+        fun bind(row: InboxRow, palette: ThemePalette, selected: Boolean) {
+            val email = row.email
             // A message this app can't render is worth knowing before tapping it — otherwise the
             // only signal is opening it and finding nothing there.
             val pgpState = pgpMessageStateOf(email.pgpEncrypted, email.pgpDecryptError, email.hasBody)
@@ -82,7 +85,20 @@ class EmailAdapter(
                     context.getString(R.string.email_row_pgp_failed_description, email.subject)
                 else -> email.subject
             }
-            senderTextView.text = email.sender
+            senderTextView.text = if (row.isConversation) {
+                context.getString(
+                    R.string.conversation_row_senders,
+                    conversationSenders(row, context.getString(R.string.conversation_me)),
+                    row.count,
+                )
+            } else {
+                email.sender
+            }
+            // Nested under its conversation: indented, so it reads as one of its messages.
+            (itemView.layoutParams as? ViewGroup.MarginLayoutParams)?.let {
+                it.marginStart = dpToPx(if (row.nested) NESTED_INDENT_DP else ROW_MARGIN_DP)
+                itemView.layoutParams = it
+            }
             dateTextView.text = inboxRowDate(email.atUtc, ZonedDateTime.now(), Locale.getDefault())
             val woken = email.wokenAt != null
             snoozedBadge.visibility = if (woken) View.VISIBLE else View.GONE
@@ -90,21 +106,23 @@ class EmailAdapter(
             // Plain text into a TextView: the relay already flattened it, and nothing here parses it.
             previewTextView.text = email.preview
             previewTextView.visibility = if (email.preview.isBlank()) View.GONE else View.VISIBLE
-            val isUnread = email.status == "unread"
+            val isUnread = row.unread
             // The whole row is one focus stop; the unread dot and the 📎 have no voice of their own.
             itemView.contentDescription = listOfNotNull(
                 context.getString(R.string.email_row_unread).takeIf { isUnread },
+                context.resources.getQuantityString(R.plurals.conversation_row_description, row.count, row.count)
+                    .takeIf { row.isConversation },
                 spokenSubject,
-                context.getString(R.string.email_row_from, email.sender),
+                context.getString(R.string.email_row_from, senderTextView.text),
                 email.preview.takeIf { it.isNotBlank() },
                 dateTextView.text.toString().takeIf { it.isNotBlank() },
                 context.getString(R.string.email_row_snoozed).takeIf { woken },
                 context.getString(R.string.email_row_has_attachments).takeIf { email.hasAttachments },
             ).joinToString(", ")
             actionIds.forEach { ViewCompat.removeAccessibilityAction(itemView, it) }
-            actionIds = rowActions.map { (label, action) ->
+            actionIds = if (row.nested) emptyList() else rowActions.map { (label, action) ->
                 ViewCompat.addAccessibilityAction(itemView, context.getString(label)) { _, _ ->
-                    action(email)
+                    action(row)
                     true
                 }
             }
@@ -116,7 +134,13 @@ class EmailAdapter(
             applyCardOutline(itemView.context, cardView, selected)
             contentLayout.setBackgroundColor(background)
             itemView.isActivated = selected
-            itemView.stateDescription = if (selected) itemView.context.getString(R.string.selection_selected) else null
+            itemView.stateDescription = when {
+                selected -> itemView.context.getString(R.string.selection_selected)
+                row.isConversation -> itemView.context.getString(
+                    if (row.expanded) R.string.conversation_expanded else R.string.conversation_collapsed,
+                )
+                else -> null
+            }
 
             unreadDot.visibility = if (isUnread) View.VISIBLE else View.GONE
             if (isUnread) {
@@ -129,9 +153,11 @@ class EmailAdapter(
             // Muted, so a snippet that starts with a name and address does not read as a sender.
             previewTextView.setTextColor(withAlpha(Color.parseColor(palette.ink), 0.72f))
 
-            itemView.setOnClickListener { onEmailClick?.invoke(email) }
+            itemView.setOnClickListener { onEmailClick?.invoke(row) }
+            // A nested row is one message of the conversation; select the conversation instead.
             itemView.setOnLongClickListener {
-                onEmailLongClick?.invoke(email)
+                if (row.nested) return@setOnLongClickListener false
+                onEmailLongClick?.invoke(row)
                 onEmailLongClick != null
             }
         }
@@ -145,30 +171,38 @@ class EmailAdapter(
 
     override fun onBindViewHolder(holder: EmailViewHolder, position: Int) {
         val palette = getStoredThemePalette(holder.itemView.context)
-        holder.bind(emails[position], palette, emails[position].id in selectedIds)
+        val row = rows[position]
+        holder.bind(row, palette, !row.nested && row.email.id in selectedIds)
     }
 
-    override fun getItemCount(): Int = emails.size
+    override fun getItemCount(): Int = rows.size
 
-    fun getEmailAt(position: Int): Email = emails[position]
+    fun getRowAt(position: Int): InboxRow = rows[position]
 
-    fun currentEmails(): List<Email> = emails
+    fun currentEmails(): List<Email> = rows.map { it.email }
     fun setSelection(ids: Set<String>) {
         val before = selectedIds
         selectedIds = ids.toSet()
-        dispatchSelectionUpdate(emails, before, selectedIds, AdapterListUpdateCallback(this))
+        dispatchSelectionUpdate(currentEmails(), before, selectedIds, AdapterListUpdateCallback(this))
     }
 
     /** The day the date labels were formatted for: after midnight "today" shows a time it no longer means. */
     private var labelledDay: LocalDate = LocalDate.now()
 
-    fun updateEmails(newEmails: List<Email>) {
-        val previous = emails
-        emails = newEmails
+    fun updateEmails(newEmails: List<Email>) = updateRows(newEmails.map(::InboxRow))
+
+    fun updateRows(newRows: List<InboxRow>) {
+        val previous = rows
+        rows = newRows
         val today = LocalDate.now()
         val dayChanged = today != labelledDay
         labelledDay = today
-        dispatchEmailListUpdate(previous, newEmails, AdapterListUpdateCallback(this), dayChanged)
+        dispatchListUpdate(previous, newRows, InboxRow::key, AdapterListUpdateCallback(this), dayChanged)
+    }
+
+    private companion object {
+        const val ROW_MARGIN_DP = 8
+        const val NESTED_INDENT_DP = 32
     }
 }
 
@@ -225,11 +259,19 @@ internal fun dispatchEmailListUpdate(
     new: List<Email>,
     callback: ListUpdateCallback,
     dayChanged: Boolean = false,
+) = dispatchListUpdate(old, new, Email::id, callback, dayChanged)
+
+internal fun <T> dispatchListUpdate(
+    old: List<T>,
+    new: List<T>,
+    key: (T) -> Any,
+    callback: ListUpdateCallback,
+    dayChanged: Boolean = false,
 ) {
     DiffUtil.calculateDiff(object : DiffUtil.Callback() {
         override fun getOldListSize(): Int = old.size
         override fun getNewListSize(): Int = new.size
-        override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean = old[oldPos].id == new[newPos].id
+        override fun areItemsTheSame(oldPos: Int, newPos: Int): Boolean = key(old[oldPos]) == key(new[newPos])
         override fun areContentsTheSame(oldPos: Int, newPos: Int): Boolean = old[oldPos] == new[newPos]
     }).dispatchUpdatesTo(callback)
     // Rebinds, not a reload: a range change keeps an in-flight swipe's holder.
