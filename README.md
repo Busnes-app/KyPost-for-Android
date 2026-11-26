@@ -16,7 +16,7 @@ Install and configure [KyPost Server](https://github.com/Busnes-app/KyPost-Serve
 including the user’s IMAP/SMTP mailbox (or a separately qualified native mailbox). This
 client does not connect directly to an email provider.
 
-1. Use a signed APK from an actually published [GitHub release](https://github.com/Busnes-app/KyPost-for-Android/releases), or your approved Play listing. The GitHub v0.4.2 release is still a draft as of 2026-10-20; a draft is not a public download. F-Droid publication is pending. For local evaluation, use the debug build below.
+1. Use a signed APK from an actually published [GitHub release](https://github.com/Busnes-app/KyPost-for-Android/releases), or your approved Play listing. The GitHub v0.4.2 release is still a draft as of 2026-10-20; a draft is not a public download. F-Droid publication is pending. For local evaluation, use the debug build in [Development](docs/DEVELOPMENT.md#build-and-test).
 2. In KyPost’s web security/device settings, create a new pairing QR/link for your everyday account. Open it in the intended KyPost channel on the phone and confirm the displayed server.
 3. Grant notification permission if wanted, then verify inbox access and a controlled send/reply. A scanned QR is not a successful pairing until registration returns success.
 4. Device sign-on through KyAuth currently supports the pinned **Play** package only. GitHub and F-Droid variants hide/refuse it; use QR/link pairing there.
@@ -32,7 +32,7 @@ channel/package is a separate install and requires pairing again. See [Channels]
 - **Contacts**: A two-way contact sync runs against a self-hosted KyPost server. Bringing kept contacts to another account can omit keys the relay refuses, with an updated relay; older relays keep those contacts queued. Open it from the Inbox overflow menu. Contacts held by other accounts on the phone (Google, SIM, …) are uploaded to your server only from accounts you pick under **Import from other accounts**; none are picked by default.
 - **PGP**: One screen shows your own PGP public-key QR code and scans another person's, saving that key onto an existing contact. The app also encrypts outgoing mail to a recipient's key, and decrypts client-custody mail on the device once it holds a sealed key envelope — see **Device enrollment** in [SECURITY.md](SECURITY.md). Without that envelope, encrypted mail hands off to webmail instead.
   New mail refuses obsolete keys and signatures; old mail and private keys remain readable. See [OpenPGP strength and key migration](SECURITY.md#openpgp-strength-and-existing-keys) before updating an old identity.
-- **Calendar invites**: A message carrying an invite shows a card with its time in your zone, place, organizer address and method. **Add to calendar** hands the event to your calendar app, which then keeps its own copy; KyPost never adds an event by itself. **Accept / Maybe / Decline** answers through KyCalendar when your server has it; otherwise, after you confirm, it mails an RSVP to the organizer, always **unencrypted**. An update to an invite you answered says what changed, a cancellation shows "Cancelled", and a video meeting link gets a **Join meeting** button. See [docs/KYCALENDAR-RSVP.md](docs/KYCALENDAR-RSVP.md). KyPost does not sync calendars — use DAVx5 for that.
+- **Calendar invites**: A message carrying an invite shows a card with its time in your zone, place, organizer address and method. **Add to calendar** hands the event to your calendar app, which then keeps its own copy; KyPost never adds an event by itself. **Accept / Maybe / Decline** answers through KyCalendar when your server has it; otherwise, after you confirm, it mails an RSVP to the organizer, always **unencrypted**. An update to an invite you answered says what changed, a cancellation shows "Cancelled", and a video meeting link gets a **Join meeting** button. See [Calendar RSVP](docs/KYCALENDAR-RSVP.md). KyPost does not sync calendars — use DAVx5 for that.
 - **MFA push approval**: Push notifications approve or deny KyPost account logins. An in-app screen does the same when OEM background limits block the action notification.
 - **Themes**: The app shares theme presets with the KyPost web app. The default, **Follow system**, switches between **Busnes Light** and its charcoal counterpart **Busnes Dark** with the system dark mode, and the 15 older presets are still offered. Select a theme in the Themes screen.
 - **Push notifications**: The app shows system notifications and keeps an in-app notification history for new mail. Each user selects a delivery mode (`push` or `pull`).
@@ -44,27 +44,23 @@ The Google/Firebase dependency details below apply to Play/GitHub variants. F-Dr
 - The app does not use the Android advertising ID (AAID). No source file calls `AdvertisingIdClient`, and no merged manifest declares `com.google.android.gms.permission.AD_ID`.
 - No advertising or attribution library is in the dependency graph. The resolved Google Play services artifacts are `play-services-base`, `-basement`, `-cloud-messaging`, `-code-scanner`, `-stats`, and `-tasks`. Neither `play-services-ads-identifier` nor `play-services-appset` is present.
 - Firebase Analytics is not included. The build pulls `firebase-messaging`, `firebase-installations`, and their support artifacts. FCM identifies the device with the Firebase installation id, not with an advertising id.
-- The device identifiers the app does hold are the FCM token and the pairing material described in **Push notification pairing**. Both go only to the paired KyPost relay.
+- The device identifiers the app does hold are the FCM token and the pairing material described in [Push notification pairing](docs/CONNECTIONS.md#push-notification-pairing). Both go only to the paired KyPost relay.
+
+## Documentation
+
+- [User manual](https://busnes.app/manuals/kypost-android/) ([Markdown sources](docs/src/introduction.md)) — build and check locally with `mdbook build docs` and `python3 docs/check-links.py`, then open `docs/book/index.html`. The documentation workflow also uploads a `documentation-book` artifact.
+- [Connections](docs/CONNECTIONS.md) — Push notification pairing, Pull mode (FCM and relay bypass), Notification permission behavior (Android 13 and later), Pairing from a desktop QR code, and related procedures. <a id="push-notification-pairing"></a><a id="pull-mode-fcm-and-relay-bypass"></a><a id="notification-permission-behavior-android-13-and-later"></a><a id="pairing-from-a-desktop-qr-code"></a><a id="troubleshooting-checklist"></a>
+- [Calendar RSVP](docs/KYCALENDAR-RSVP.md) — Wire contract for answering invitations through KyCalendar and the mail fallback.
+- [Verifying releases](docs/VERIFYING-RELEASES.md) — Check a release APK's signing certificate and the commit it names, and why a rebuild does not match yet.
+- [Assurance case](docs/ASSURANCE-CASE.md) — Threat model, trust boundaries, and why the security requirements hold.
+- [Strong cryptography](docs/STRONG-CRYPTO.md) — Every algorithm and key size, the Refuse legacy encryption setting, and the old-mail exception.
+- [Development](docs/DEVELOPMENT.md) — Firebase setup, Build and test, Test coverage. <a id="firebase-setup"></a><a id="build-and-test"></a><a id="release-builds"></a><a id="channels"></a><a id="test-coverage"></a>
+- [Style guide](STYLE_GUIDE.md) — Visual tokens, theme pairs, and component conventions.
+- [Contributing](CONTRIBUTING.md) — Contribution workflow, review process, and required checks.
+- [Security policy](SECURITY.md) — Security model and private vulnerability reporting route.
 
 ## License
 
 KyPost for Android is released under the [MIT License](LICENSE.txt).
 
 [![OctoCounts](https://api.octocounts.com/badge/Busnes-app/KyPost-for-Android/branch/main)](https://octocounts.com/github/Busnes-app/KyPost-for-Android/tree/main)
-
-## Documentation
-
-- [Connections](docs/CONNECTIONS.md) — Push notification pairing, Pull mode (FCM and relay bypass), Notification permission behavior (Android 13 and later), Pairing from a desktop QR code, and related procedures. <a id="push-notification-pairing"></a><a id="pull-mode-fcm-and-relay-bypass"></a><a id="notification-permission-behavior-android-13-and-later"></a><a id="pairing-from-a-desktop-qr-code"></a><a id="troubleshooting-checklist"></a>
-- [Verifying releases](docs/VERIFYING-RELEASES.md) — Check a release APK's signing certificate and the commit it names, and why a rebuild does not match yet.
-- [Assurance case](docs/ASSURANCE-CASE.md) — Threat model, trust boundaries, and why the security requirements hold.
-- [Strong cryptography](docs/STRONG-CRYPTO.md) — Every algorithm and key size, the Refuse legacy encryption setting, and the old-mail exception.
-- [Development](docs/DEVELOPMENT.md) — Firebase setup, Build and test, Test coverage. <a id="firebase-setup"></a><a id="build-and-test"></a><a id="release-builds"></a><a id="channels"></a><a id="test-coverage"></a>
-
-## User manual
-
-Read the [online manual](https://busnes.app/manuals/kypost-android/) or browse its
-[Markdown sources](docs/src/introduction.md).
-
-Build and check it with `mdbook build docs` and `python3 docs/check-links.py`,
-then open `docs/book/index.html`. The documentation workflow also provides a
-downloadable `documentation-book` artifact.
