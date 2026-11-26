@@ -81,8 +81,8 @@ android {
         applicationId = "org.kysecurity.mail"
         minSdk = 31
         targetSdk = 36
-        versionCode = 35
-        versionName = "0.6.1.1"
+        versionCode = 36
+        versionName = "0.6.1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField(
@@ -150,8 +150,8 @@ android {
         // a flavor source set, so the sources resolve for javac and are invisible to kotlinc —
         // which shows up as "Unresolved reference 'ChannelPush'" and nothing else.
         listOf("play", "github").forEach { flavor ->
-            getByName(flavor).java.srcDir("src/gms/java")
-            getByName(flavor).kotlin.srcDir("src/gms/java")
+            getByName(flavor).java.directories += "src/gms/java"
+            getByName(flavor).kotlin.directories += "src/gms/java"
         }
         getByName("play").manifest.srcFile("src/play/AndroidManifest.xml")
         getByName("github").manifest.srcFile("src/gms/AndroidManifest.xml")
@@ -281,7 +281,7 @@ android {
     sourceSets {
         // Room's MigrationTestHelper (used by the androidTest MigrationTest) reads exported
         // schema JSON from assets at runtime.
-        getByName("androidTest").assets.srcDirs("$projectDir/schemas")
+        getByName("androidTest").assets.directories += "$projectDir/schemas"
     }
 
 }
@@ -528,7 +528,7 @@ androidComponents.onVariants { variant ->
 // Declared once and extended into play and github, so the Google dependencies are named in one
 // place and fdroid provably cannot resolve them. A `configurations.all` exclude would not do:
 // that hides the artifact while leaving the flavor's compile path claiming it exists.
-val gmsImplementation by configurations.creating
+val gmsImplementation = configurations.create("gmsImplementation")
 configurations.named("playImplementation") { extendsFrom(gmsImplementation) }
 configurations.named("githubImplementation") { extendsFrom(gmsImplementation) }
 
