@@ -2,7 +2,7 @@
 
 ## Inbox and contacts
 
-Use the server-provided keyword tabs and tune them in Keywords. Compose completes addresses from contacts; the address-book picker adds recipients directly. Open Contacts from the Inbox menu to review two-way synchronization.
+Use the server-provided keyword tabs and tune them in **Keywords**. Compose completes addresses from contacts; the address-book picker adds recipients directly. Open **Contacts** from the inbox menu to review two-way synchronization.
 
 ## Push or pull
 
