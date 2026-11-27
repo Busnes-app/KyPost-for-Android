@@ -56,7 +56,7 @@ internal class XWingEnrollmentKeys(private val authenticate: suspend (Cipher) ->
             throw cancelled
         } ?: return false
         if (generation != ProcessState.generation()) return false
-        val seed = ByteArray(XWING_SEED_BYTES).also { SecureRandom().nextBytes(it) }
+        val seed = ByteArray(XWING_SEED_BYTES).also { secureRandom.nextBytes(it) }
         return try {
             // No suspension while seed bytes exist. A cancelled dispatcher return cannot strand them.
             val key = xwingPublicKey(seed)
@@ -136,6 +136,7 @@ internal class XWingEnrollmentKeys(private val authenticate: suspend (Cipher) ->
     companion object {
         const val ALIAS = "kypost_device_enrollment_xwing_wrap"
         private const val AUTHENTICATORS = KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL
+        private val secureRandom = SecureRandom()
         private fun store() = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         fun deleteWrapKey(): Boolean = runCatching {
             store().run {
