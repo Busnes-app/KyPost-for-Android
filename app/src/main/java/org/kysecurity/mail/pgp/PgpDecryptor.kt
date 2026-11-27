@@ -168,11 +168,11 @@ internal object PgpDecryptor {
             ?: return DecryptResult.Failed("this message is too large or too deeply nested to open")
         val (plaintext, signature) = literal
 
-        // Integrity is mandatory; `||` short-circuits verify(), which throws on a tag-9 packet.
-        // BC requires the whole stream to have been read before verify() can answer, so by here
-        // the plaintext already exists — zero it on the failing path rather than handing an
-        // unauthenticated decryption to the collector.
-        if (!encrypted.isIntegrityProtected || !encrypted.verify()) {
+        // Integrity is mandatory; short-circuit verify() on a tag-9 packet. BC drains the stream
+        // here. SEIPDv2 tag failure throws; MDC failure returns false. Both must scrub the
+        // collected plaintext instead of escaping to the outer generic failure handler.
+        val intact = runCatching { encrypted.isIntegrityProtected && encrypted.verify() }.getOrDefault(false)
+        if (!intact) {
             java.util.Arrays.fill(plaintext, 0)
             return DecryptResult.Failed("this message failed its integrity check")
         }
@@ -260,7 +260,12 @@ internal object PgpDecryptor {
                 is PGPLiteralData -> {
                     val bytes = readAllWithLimit(obj.inputStream, MAX_DECRYPTED_PLAINTEXT_BYTES)
                         ?: return null
-                    return bytes to verifyOnePass(onePass, bytes, factory, signerPublicKeys, decryptedWith)
+                    return try {
+                        bytes to verifyOnePass(onePass, bytes, factory, signerPublicKeys, decryptedWith)
+                    } catch (failure: Exception) {
+                        bytes.fill(0)
+                        throw failure
+                    }
                 }
             }
             obj = factory.nextObject()
@@ -282,28 +287,33 @@ internal object PgpDecryptor {
         // during a growth (old + new, at most 1.5 x the cap) or a final trim.
         var bytes = ByteArray(minOf(DEFAULT_BUFFER_SIZE, limit))
         var size = 0
-        while (true) {
-            if (size == bytes.size) {
-                if (size >= limit) {
-                    // At the ceiling. One more readable byte means the message is over the limit,
-                    // and the caller must not be handed a prefix as if it were the whole thing.
-                    if (input.read() < 0) return bytes
-                    // Refused: nothing about this message may outlive the refusal.
+        try {
+            while (true) {
+                if (size == bytes.size) {
+                    if (size >= limit) {
+                        // At the ceiling. One more readable byte means the message is over the limit,
+                        // and the caller must not be handed a prefix as if it were the whole thing.
+                        if (input.read() < 0) return bytes
+                        // Refused: nothing about this message may outlive the refusal.
+                        java.util.Arrays.fill(bytes, 0)
+                        return null
+                    }
+                    val grown = bytes.copyOf(minOf(bytes.size.toLong() * 2, limit.toLong()).toInt())
                     java.util.Arrays.fill(bytes, 0)
-                    return null
+                    bytes = grown
                 }
-                val grown = bytes.copyOf(minOf(bytes.size.toLong() * 2, limit.toLong()).toInt())
-                java.util.Arrays.fill(bytes, 0)
-                bytes = grown
+                val count = input.read(bytes, size, bytes.size - size)
+                if (count < 0) break
+                size += count
             }
-            val count = input.read(bytes, size, bytes.size - size)
-            if (count < 0) break
-            size += count
+            if (size == bytes.size) return bytes
+            val trimmed = bytes.copyOf(size)
+            java.util.Arrays.fill(bytes, 0)
+            return trimmed
+        } catch (failure: Exception) {
+            bytes.fill(0)
+            throw failure
         }
-        if (size == bytes.size) return bytes
-        val trimmed = bytes.copyOf(size)
-        java.util.Arrays.fill(bytes, 0)
-        return trimmed
     }
 
     private fun verifyOnePass(

@@ -27,12 +27,20 @@ internal class DeviceEnrollmentViewModel(application: Application) : AndroidView
     @Volatile
     private var activityOpener: VaultOpener? = null
 
+    @Volatile
+    private var activityCipherPrompt: EnrollmentCipherPrompt? = null
+
+    private val xwingKeys = XWingEnrollmentKeys { cipher -> activityCipherPrompt?.authenticate(cipher) }
+
     private val ceremony = EnrollmentCeremony(
         identity = AndroidIdentitySource(application),
         transport = AndroidEnrollmentTransport(application),
-        keys = AndroidEnrollmentKeys,
+        keys = xwingKeys,
         // A proxy, not the Activity: the ViewModel outlives it. With none installed, seal() is Cancelled.
         sealer = object : VaultSealer {
+            override fun rememberAcknowledgement(ack: EnrollmentReport.Keyring): Boolean =
+                activitySealer?.rememberAcknowledgement(ack) ?: false
+
             override suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind, ack: EnrollmentReport.Keyring?): SealOutcome =
                 activitySealer?.seal(plaintext, kind, ack) ?: SealOutcome.Cancelled
         },
@@ -61,9 +69,10 @@ internal class DeviceEnrollmentViewModel(application: Application) : AndroidView
         }
     }
 
-    fun installVaultPorts(sealer: VaultSealer?, opener: VaultOpener?) {
+    fun installVaultPorts(sealer: VaultSealer?, opener: VaultOpener?, cipherPrompt: EnrollmentCipherPrompt? = null) {
         activitySealer = sealer
         activityOpener = opener
+        activityCipherPrompt = cipherPrompt
     }
 
     /** Reopens a polling window against the same keypair. Ignored while one is already running, so

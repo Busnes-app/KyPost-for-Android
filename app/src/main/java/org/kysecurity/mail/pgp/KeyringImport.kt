@@ -21,7 +21,7 @@ internal sealed class KeyringImportOutcome {
 }
 
 /**
- * Local import of an authenticated `kypost-pgp-keyring-v1` plaintext. No Android, no transport:
+ * Local import of an authenticated v1/v2 keyring plaintext. No Android, no transport:
  * the caller has already opened the envelope, and nothing here acknowledges anything to a server.
  *
  * Order is the contract: validate the entire ring against [expectedActiveFingerprint] (the key
@@ -35,7 +35,7 @@ internal sealed class KeyringImportOutcome {
 internal suspend fun importKeyring(
     plaintext: ByteArray,
     expectedActiveFingerprint: String,
-    /** The delivered version (3 or 5), which the acknowledgement must repeat to the server. */
+    /** The delivered version (3, 5 or 6), which the acknowledgement must repeat to the server. */
     envelopeVersion: Int,
     previousVault: VaultOpener,
     /** The kind of the record on disk right now, read without authentication, or null when there
@@ -58,6 +58,7 @@ internal suspend fun importKeyring(
         OpenOutcome.NoSecureLockScreen -> return ring.dropWith(KeyringImportOutcome.NoSecureLockScreen)
         is OpenOutcome.Failed -> return ring.dropWith(KeyringImportOutcome.Failed(opened.message))
     }
+    val ack = EnrollmentReport.Keyring(ring.materialGeneration, expectedActiveFingerprint.uppercase().filterNot { it.isWhitespace() }, envelopeVersion)
     if (previousHeld) {
         // Equal inventories or active keys prove nothing about certifications or revocations;
         // only the identical bytes are known to be the same ring.
@@ -66,6 +67,9 @@ internal suspend fun importKeyring(
         when (sealedKind()) {
             // Durable already: nothing to write, and completion is idempotent.
             VaultRecordKind.KEYRING -> {
+                // A dual-active v2 ring may arrive under its other active fingerprint or a new
+                // transport version. Restating an old acknowledgement would be incorrect.
+                if (!sealer.rememberAcknowledgement(ack)) return ring.dropWith(KeyringImportOutcome.Failed("The acknowledgement could not be stored"))
                 ring.wipe()
                 onLocalComplete()
                 return KeyringImportOutcome.Replayed
@@ -77,7 +81,6 @@ internal suspend fun importKeyring(
         }
     }
 
-    val ack = EnrollmentReport.Keyring(ring.materialGeneration, ring.activeFingerprint, envelopeVersion)
     return when (val sealed = sealer.seal(ring.original, VaultRecordKind.KEYRING, ack)) {
         SealOutcome.Sealed -> {
             EnrollmentSession.putKeyring(ring)

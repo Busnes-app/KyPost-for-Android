@@ -24,6 +24,18 @@ class FixtureProvenanceTest {
         )
     }
 
+    @Test
+    fun pqcFixturesAreTheServersPinnedBytes() {
+        val lines = String(SharedFixtures.bytes("PQC-SHA256SUMS")).trim().lines()
+        assertEquals(15, lines.size)
+        for (line in lines) {
+            val (expected, name) = line.split("  ", limit = 2)
+            assertEquals(name, expected, sha256(SharedFixtures.bytes(name)))
+            val deviceCopy = java.io.File("src/androidTest/resources/kypost-server/pqc/" + name.substringAfterLast('/'))
+            if (deviceCopy.exists()) assertEquals("Android copy $name", expected, sha256(deviceCopy.readBytes()))
+        }
+    }
+
     private fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 }

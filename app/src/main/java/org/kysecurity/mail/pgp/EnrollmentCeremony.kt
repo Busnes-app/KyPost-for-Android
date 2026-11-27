@@ -106,7 +106,7 @@ internal class EnrollmentCeremony(
         // Mints a FRESH keypair, destroying any previous one. A key that outlives a ceremony is a
         // standing unauthenticated path to every envelope the relay has retained.
         keyPairLive = true
-        if (!keys.newKeyPair()) {
+        if (!keys.prepare()) {
             failAndDestroy(FailureReason.NO_DEVICE_KEY)
             return
         }
@@ -214,7 +214,9 @@ internal class EnrollmentCeremony(
             return
         }
 
-        val expected = if (isKeyringVersion(fields.version)) {
+        val ringDelivery = fields.version == ENVELOPE_VERSION_HPKE_KEYRING ||
+            (fields.version == ENVELOPE_VERSION_XWING && (delivery.materialGeneration ?: 0) > 0)
+        val expected = if (ringDelivery) {
             keyringDelivery(delivery) ?: run { failAndDestroy(FailureReason.ENVELOPE_MALFORMED); return }
         } else {
             null
@@ -237,7 +239,17 @@ internal class EnrollmentCeremony(
 
         // RFC 9180: DH(skR, pkE) is the Keystore agreement. A failed one (a key the Keystore will
         // no longer agree with) is indistinguishable from a hostile envelope, and treated the same.
-        val plaintext = hpkeOpenBase(fields.epk, ownPoint, info, fields.ct, keys::sharedSecret)
+        // One publication has one key/suite; no downgrade from X-Wing to a P-256 delivery.
+        if (fields.version !in enrollmentVersions(ownPoint)) {
+            failAndDestroy(FailureReason.ENVELOPE_MALFORMED)
+            return
+        }
+        val plaintext = try {
+            keys.openEnvelope(fields, info)
+        } catch (_: EnrollmentAuthenticationCancelled) {
+            emit(EnrollmentUiState.ReadyToFinish)
+            return
+        }
         if (plaintext == null) {
             failAndDestroy(FailureReason.COULD_NOT_OPEN)
             return
@@ -376,7 +388,7 @@ internal class EnrollmentCeremony(
             KeyringImportOutcome.Imported, KeyringImportOutcome.Replayed -> {
                 plaintext.fill(0)
                 mailCache.clearServerDecryptedBodies()
-                val ack = EnrollmentSession.withKeyring { EnrollmentReport.Keyring(it.materialGeneration, it.activeFingerprint, envelopeVersion) }
+                val ack = EnrollmentSession.withKeyring { EnrollmentReport.Keyring(it.materialGeneration, requireNotNull(fingerprint), envelopeVersion) }
                 if (ack == null) failAndDestroy(FailureReason.SEAL_FAILED) else report(ack)
             }
             KeyringImportOutcome.InvalidRing, KeyringImportOutcome.RefusedIncomparable ->

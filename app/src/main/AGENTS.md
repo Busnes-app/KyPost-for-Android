@@ -360,38 +360,45 @@ Owns production Android app code and resources.
   absence, or a store that cannot be read, fails closed while a record exists: only "Remove from
   this device" may discard it. The one unavoidable loss is a legacy preference keyset `openEncryptedPrefs` proves
   unrecoverable; that record was already unopenable.
-  **Enrollment is HPKE only (v4/v5).** `OPENABLE_ENVELOPE_VERSIONS` is `[4, 5]`, advertised on
-  publish and the only versions `parseDeviceEnvelope` returns. The custom v2/v3 formats (ECDH +
-  HKDF salted with the device point + AES-GCM, not a published construction) are retired: no
-  parser, no opener. `EnrollmentCeremony` refuses a delivery record naming 2 or 3
-  (`RETIRED_ENVELOPE_VERSIONS`) as `RETIRED_ENVELOPE` ("update your KyPost server") before parsing,
-  so no key agreement runs and nothing is saved or acknowledged. Do not reintroduce them: the
-  agreement key lives for one ceremony and the vault holds opened material, never an envelope, so
-  no stored data needs a v2/v3 opener. The parsed version travels in `DeviceEnvelopeFields`, and
-  every envelope is opened only against the delivery record the server returned beside it.
-  v4 carries one armored key and v5 the `kypost-pgp-keyring-v1` ring: exactly
-  `{v, alg: "HPKE-Base-P256-SHA256-A256GCM", enc, ct}`, numeric `v` (exact token), canonical
-  base64, `enc` a 65-byte P-256 point, v4 at `PGP_DEVICE_ENVELOPE_LEGACY_BYTES` and v5 at
-  `PGP_DEVICE_ENVELOPE_V3_BYTES` (128 KiB) of UTF-8. The length-prefixed binding (domain
-  `kypost-device-envelope/v4|v5`) is HPKE `info`; HPKE `aad` is empty. `pgp/HpkeRecipient.kt` is
-  the recipient side only, for mode_base / DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-256-GCM,
-  with `DH(skR, pkE)` from the Keystore's `KeyAgreement` through `EnrollmentKeys.sharedSecret`.
-  Never replace it with a library that needs the raw private key, and never add an exportable
-  key branch to fit one: the enrollment key stays a non-exportable Keystore key. The binding
-  (`deviceEnvelopeAad`) takes only 4 or 5, the device ID unchanged (nonempty, at most 65,535 UTF-8
-  bytes, lengths in bytes) and the caller's fingerprint, normalised to bare uppercase hex (40 or
-  64 digits for v5), never read from the envelope. `hkdfSha256` now serves only password pairing
-  and lives in `push/PasswordPairingClient.kt`.
-  `pgp/PgpKeyring.kt` parses `kypost-pgp-keyring-v1` plaintext into a validated holder without
+  **Enrollment is HPKE only (v4/v5/v6).** The parser accepts `[4, 5, 6]`; publication claims
+  `[6]` for its one X-Wing key or `[4, 5]` for a legacy P-256 key. Custom v2/v3 formats stay
+  retired and are refused before any key operation. Every opened envelope must match the verified
+  delivery version and checked identity. Both device ID (unchanged UTF-8) and normalized full
+  fingerprint are length-prefixed in HPKE `info`, with domain `kypost-device-envelope/vN`;
+  HPKE `aad` is empty. JSON has exactly `{v, alg, enc, ct}`, once each, numeric version and
+  canonical padded standard base64. v4/v5 use `HPKE-Base-P256-SHA256-A256GCM`, a 65-byte on-curve
+  `enc`, non-exportable Keystore ECDH and `HpkeRecipient.kt`. v6 uses
+  `HPKE-Base-XWing-SHA256-A256GCM`, KEM 0x647A / HKDF-SHA256 / AES-256-GCM, a 1120-byte `enc`
+  and BC 1.87's lightweight HPKE API (`XWingEnvelope.kt`). v5 retains its 128 KiB wire cap;
+  v6 admits 512 KiB serialized; the legacy armor bound is unchanged. v6 generation > 0 carries
+  a complete ring; generation 0 carries one armored private key. Metadata, durable import and
+  acknowledgement rules apply before anything is reported enrolled.
+  New Android ceremonies use `XWingEnrollmentKeys`: a fresh seed is wrapped under an owned,
+  non-exportable StrongBox/TEE AES-256-GCM key with per-use user authentication, never a software
+  fallback. Only wrapped seed bytes, nonce and public key survive between operations; no seed is
+  written to disk. Seed buffers are wiped after wrapping and opening; BC expanded key objects
+  cannot be reliably wiped and are transient. `EnrollmentCipherPrompt` is Activity-owned and
+  cancels on destruction; seed-open cancellation leaves the ceremony retryable. Each holder has
+  its own alias, so a cancelled generation cannot delete another holder's key. Teardown revokes
+  every owned wrap alias. Legacy P-256 opening remains available through `EnrollmentKeys`.
+  SAS v1 stays byte-identical for P-256; SAS v2 hashes the domain `kypost-device-sas/v2`, the
+  length-prefixed full 1216-byte X-Wing key, length-prefixed device ID and uint64BE bucket.
+  The Go and WASM fixtures and every-byte SAS mutation are pinned by JVM tests.
+  `pgp/PgpKeyring.kt` parses v1 and `kypost-pgp-keyring-v2` plaintext into a validated holder without
   touching the vault or session: at most `PGP_KEYRING_JSON_BYTES`, strict UTF-8, no duplicate JSON
-  keys (kotlinx keeps the last silently, so `jsonHasDuplicateKeys` scans first), exactly the five
+  keys (kotlinx keeps the last silently, so `jsonHasDuplicateKeys` scans first), exactly the versioned
   ring fields and two-or-three member fields, a positive safe-integer generation, fingerprints
   compared case-insensitively and reported uppercase, at most 16 members and 256 inventory
   entries. Each member is one unprotected private ring whose primary fingerprint matches its
   entry, checked from the packet header before any extraction so no attacker-chosen passphrase KDF
   runs, with every subkey bound by the primary; the fingerprints derived from all packets must
-  equal the declared inventory exactly, and exactly one member is the active one. The caller
-  passes the active fingerprint it committed to in the AAD and the ring must name that same key:
+  equal the declared inventory exactly, and each active fingerprint names exactly one member of its declared key version.
+  v1 uses `activeFingerprint`; v2 replaces it with `active: {v4?: <40-hex>, v6?: <64-hex>}`,
+  at least one present, with all other fields unchanged. The caller's delivery fingerprint must
+  name an active member. The default signer remains v4 when present; v6 sending is refused until
+  P4 supplies the profile and delivery-group split. Original v1/v2 bytes persist unchanged under
+  the existing authenticated KEYRING record kind; its local plaintext cap is 512 KiB. The caller
+  passes the active fingerprint it committed to in the AAD and the ring must name that key as active:
   every AAD input is public, so a self-consistent ring alone could name any active key its author
   controls. Historical
   members stay for decryption and are not signers. The holder keeps the original plaintext bytes
@@ -440,11 +447,14 @@ Owns production Android app code and resources.
   A keyring record binds its format byte into the GCM tag as AAD on seal and open; legacy records
   predate that and stay AAD-free. A
   legacy ceremony over a held keyring refuses the merge (`withLegacyArmor` is null) and leaves the
-  record. `probeEnrollment` reports a keyring record as `ENROLLED_KEYRING`: `isEnrolled()` for this
+  record. Identical-ring replay refreshes the stored delivery acknowledgement before completion,
+  so changing the active binding or transport cannot leave a stale worker report.
+  `probeEnrollment` reports a keyring record as `ENROLLED_KEYRING`: `isEnrolled()` for this
   device's own reading, signing and settings row.
   **Live keyring delivery (KyPost-Server #201, #210, #212, #492).** `EnrollmentClients.publishKey`
-  advertises `envelopeVersions: [4, 5]`. Since #492 the server seals only v4/v5 and an omitted
-  list is no claim, so never drop it. The envelope fetch carries `DeliveryMetadata`
+  advertises the matching per-key `envelopeVersions` and `openpgp: ["v4", "v6", "rfc9980"]`.
+  Old servers ignore `openpgp`; the claim describes codec support, not durable material import.
+  An omitted envelope list is no claim, so never drop it. The envelope fetch carries `DeliveryMetadata`
   (`version`, `fingerprint`, `materialGeneration`, the keyring's `primaryFingerprints` and
   `keyFingerprints`), absent only from a server older than #210. The ceremony opens any envelope
   only with a delivery record of the same version whose fingerprint is the checked identity
@@ -1328,3 +1338,14 @@ launcher-only: the two adaptive-icon XMLs are its only referents, and the in-app
 (`applyKyPostTopBar`, `activity_tip.xml`) draws `ic_launcher_foreground` directly. At
 `minSdk 31` those XMLs in `mipmap-anydpi` resolve ahead of the per-density
 `ic_launcher*.webp`, which still carry the older cream-ringed composite.
+
+## Spec A reader qualification
+
+- `PqcInteropTest` uses BC 1.87 through the app decryptor for v6 PKESK, SEIPDv2/OCB and ID 35,
+  including strict policy, and verifies ML-DSA-65+Ed25519 signatures with tamper rejection.
+- PGP QR generation and comparison retain all 40 v4 or 64 v6 hex digits, case-insensitively;
+  truncated and mismatched fingerprints remain failures.
+
+- AEAD failures may throw while streaming, parsing a signature tail or verifying the final tag.
+  `PgpDecryptor` wipes collected plaintext on every such exception as well as a false MDC result;
+  `PgpReadFailureWipeTest` observes the abandoned buffer directly.

@@ -20,6 +20,7 @@ private val JSON_MEDIA_TYPE = "application/json".toMediaType()
 private data class PublishEnrollmentKeyRequest(
     @SerialName("publicKey") val publicKey: String,
     @SerialName("envelopeVersions") val envelopeVersions: List<Int>,
+    @SerialName("openpgp") val openpgp: List<String>,
 )
 
 /** The three metadata fields go together: absent for the legacy boolean, all present for a
@@ -100,7 +101,11 @@ internal class EnrollmentClients(
         deviceSecret: String,
         encodedPublicKey: String,
     ): EnrollmentCallResult {
-        val body = json.encodeToString(PublishEnrollmentKeyRequest(encodedPublicKey, OPENABLE_ENVELOPE_VERSIONS))
+        val key = strictBase64(encodedPublicKey)
+            ?: return EnrollmentCallResult.Failed("Invalid enrollment public key")
+        val versions = enrollmentVersions(key)
+        if (versions.isEmpty()) return EnrollmentCallResult.Failed("Unsupported enrollment public key")
+        val body = json.encodeToString(PublishEnrollmentKeyRequest(encodedPublicKey, versions, listOf("v4", "v6", "rfc9980")))
         return call(serverUrl, "/api/pgp/device/enrollment-key", deviceId, deviceSecret, body) {
             EnrollmentCallResult.Ok
         }
@@ -171,7 +176,7 @@ internal class EnrollmentClients(
 
         val result = withContext(Dispatchers.IO) {
             callFactory.executeSync(request) { response ->
-                Triple(response.code, response.body?.string().orEmpty(), response.header("Retry-After"))
+                Triple(response.code, response.body.string(), response.header("Retry-After"))
             }
         }
         val (code, raw, retryAfter) = result.getOrNull()

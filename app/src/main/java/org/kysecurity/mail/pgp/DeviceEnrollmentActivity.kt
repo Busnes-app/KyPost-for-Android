@@ -54,6 +54,7 @@ class DeviceEnrollmentActivity : LockedActivity() {
     private val sealExecutor = Executors.newSingleThreadExecutor()
 
     private val vaultOpener = AndroidVaultOpener(this)
+    private val enrollmentCipherPrompt = EnrollmentCipherPrompt(this)
 
     private class LiveSeal(
         val prompt: BiometricPrompt,
@@ -84,6 +85,9 @@ class DeviceEnrollmentActivity : LockedActivity() {
 
     /** An anonymous object because `VaultSealer` is internal and a public class cannot widen it. */
     private val vaultSealer = object : VaultSealer {
+        override fun rememberAcknowledgement(ack: EnrollmentReport.Keyring): Boolean =
+            EnrollmentVault(applicationContext).storeKeyringAck(ack)
+
         override suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind, ack: EnrollmentReport.Keyring?): SealOutcome {
             val vault = EnrollmentVault(applicationContext)
 
@@ -203,7 +207,7 @@ class DeviceEnrollmentActivity : LockedActivity() {
 
         // Installed here rather than in onStart: the ceremony may reach the seal at any moment, and
         // a null sealer resolves as a cancel.
-        viewModel.installVaultPorts(vaultSealer, vaultOpener)
+        viewModel.installVaultPorts(vaultSealer, vaultOpener, enrollmentCipherPrompt)
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -228,6 +232,7 @@ class DeviceEnrollmentActivity : LockedActivity() {
     }
 
     override fun onDestroy() {
+        enrollmentCipherPrompt.cancel()
         // Guarded: touching `viewModel` after ComponentActivity cleared the store would start a new one.
         if (!created) {
             vaultOpener.cancel()
@@ -267,6 +272,9 @@ class DeviceEnrollmentActivity : LockedActivity() {
         sealExecutor.shutdown()
         super.onDestroy()
     }
+
+    @VisibleForTesting
+    internal suspend fun authenticateEnrollmentCipherForTest(cipher: Cipher): Cipher? = enrollmentCipherPrompt.authenticate(cipher)
 
     @VisibleForTesting
     internal suspend fun openPreviousVaultForTest(): OpenOutcome = vaultOpener.open()

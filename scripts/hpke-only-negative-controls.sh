@@ -8,7 +8,7 @@ files=(app/src/main/java/org/kysecurity/mail/pgp/DeviceEnvelope.kt app/src/main/
 git diff --quiet HEAD -- "${files[@]}" || { echo "refusing: ${files[*]} differ from HEAD"; exit 2; }
 trap 'git checkout -q HEAD -- "${files[@]}"' EXIT
 
-advertise='s/= listOf(ENVELOPE_VERSION_HPKE, ENVELOPE_VERSION_HPKE_KEYRING)/= listOf(2, 3, ENVELOPE_VERSION_HPKE, ENVELOPE_VERSION_HPKE_KEYRING)/'
+advertise='s/= listOf(ENVELOPE_VERSION_HPKE, ENVELOPE_VERSION_HPKE_KEYRING, ENVELOPE_VERSION_XWING)/= listOf(2, 3, ENVELOPE_VERSION_HPKE, ENVELOPE_VERSION_HPKE_KEYRING, ENVELOPE_VERSION_XWING)/'
 refusal='s/if (delivery?.version in RETIRED_ENVELOPE_VERSIONS)/if (false)/'
 mutations=(
   "advertise and parse v2/v3|$advertise"

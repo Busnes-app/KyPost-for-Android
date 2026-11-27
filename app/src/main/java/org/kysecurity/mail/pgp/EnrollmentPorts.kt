@@ -35,17 +35,28 @@ internal interface EnrollmentTransport {
 
 /** A port rather than a direct [EnrollmentKeyStore] call so "delete on every exit" is testable. */
 internal interface EnrollmentKeys {
+    /** X-Wing authenticates its hardware wrap before publishing. Legacy keys need no prompt. */
+    suspend fun prepare(): Boolean = newKeyPair()
+
     /** Mints a fresh keypair for one ceremony, destroying any previous one. */
     fun newKeyPair(): Boolean
 
-    /** The uncompressed SEC1 point, `0x04 ‖ X ‖ Y`. **The code derives from this** — never from
+    /** The raw X-Wing public key, or legacy uncompressed SEC1 point, `0x04 ‖ X ‖ Y`. **The code derives from this** — never from
      *  anything the server sent back, and never from a cached copy of what was published. */
     fun rawPublicKey(): ByteArray?
 
-    /** The base64 of the same point, as published. */
+    /** The base64 of the same public key, as published. */
     fun encodedPublicKey(): String?
 
     fun sharedSecret(epk: ByteArray): ByteArray?
+
+    /** Legacy HPKE uses non-exportable Keystore ECDH. X-Wing overrides to authenticate seed open. */
+    suspend fun openEnvelope(fields: DeviceEnvelopeFields, info: ByteArray): ByteArray? {
+        if (fields.version == ENVELOPE_VERSION_XWING) return null
+        val point = rawPublicKey() ?: return null
+        if (point.size != 65) return null
+        return hpkeOpenBase(fields.epk, point, info, fields.ct, ::sharedSecret)
+    }
 
     fun deleteKeyPair(): Boolean
 }
@@ -66,6 +77,9 @@ internal sealed class SealOutcome {
 
 /** The re-seal, behind an interface because `BiometricPrompt` is Activity-bound. */
 internal interface VaultSealer {
+    /** Refresh public delivery metadata after an identical ring replay; its bytes are already durable. */
+    fun rememberAcknowledgement(ack: EnrollmentReport.Keyring): Boolean
+
     /** [ack] is stored beside a keyring record once it is durable, for the worker's restatement. */
     suspend fun seal(plaintext: ByteArray, kind: VaultRecordKind, ack: EnrollmentReport.Keyring? = null): SealOutcome
 }

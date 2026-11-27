@@ -27,6 +27,11 @@ internal object PgpStrengthPolicy {
         PublicKeyAlgorithmTags.Ed448,
         -> key.bitStrength >= 224
 
+        // RFC 9980 category-3 hybrids. Strength is defined by the algorithm, not BC's EC-bit field.
+        PublicKeyAlgorithmTags.MLDSA65_Ed25519,
+        PublicKeyAlgorithmTags.MLKEM768_X25519,
+        -> true
+
         else -> false
     }
 

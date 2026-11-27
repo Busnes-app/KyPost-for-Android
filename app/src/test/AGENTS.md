@@ -27,7 +27,7 @@ Owns JVM unit tests for app logic that can run without device/emulator.
   commit named in its `PROVENANCE.md`; `FixtureProvenanceTest` pins their SHA-256 and every scalar
   in them is public test data. The v2/v3 vectors in `device-envelope-v3.json` are now refusal
   inputs only: `DeviceEnvelopeTest` proves they and v2/v3-labelled HPKE framing do not parse,
-  pins `OPENABLE_ENVELOPE_VERSIONS == [4, 5]`, the exact `info` bytes and every v4/v5 framing
+  pins `OPENABLE_ENVELOPE_VERSIONS == [4, 5, 6]`, the exact `info` bytes and every v4/v5 framing
   rejection. `EnrollmentCeremonyDeliveryTest` delivers them, and honest HPKE seals under a v2/v3
   binding, and requires `RETIRED_ENVELOPE` with no key agreement, seal, acknowledgement, durable
   report, cache clear or session. `scripts/hpke-only-negative-controls.sh` re-admits v2/v3
@@ -46,8 +46,8 @@ Owns JVM unit tests for app logic that can run without device/emulator.
   real HPKE key schedule, the generator as `enc`) and proves the live path: import and a `Keyring` acknowledgement on a
   matching delivery record, `KEYRING_REJECTED` with nothing sealed when generation, members or
   inventory differ, `ENVELOPE_MALFORMED` without a v5 delivery record, no durable retry after 409,
-  and the untouched v4 path. `EnrollmentClientsTest` pins the wire bodies: exactly
-  `envelopeVersions: [4, 5]` on publish, delivery metadata on fetch, and the three acknowledgement shapes.
+  and the untouched v4 path. `EnrollmentClientsTest` pins the wire bodies: matching per-key
+  `envelopeVersions` and the OpenPGP capability on publish, delivery metadata on fetch, and the three acknowledgement shapes.
 - `HpkeRecipientTest` checks `HpkeRecipient.kt` byte for byte against the CFRG vector for mode 0 /
   KEM 0x0010 / KDF 0x0001 / AEAD 0x0002 (`kypost-server/hpke-cfrg-p256-aes256.json`, provenance in
   its `PROVENANCE.md`): shared_secret, key, base_nonce, exporter_secret and encryptions[0], with
@@ -99,3 +99,17 @@ Owns JVM unit tests for app logic that can run without device/emulator.
 # Child DOX Index
 
 - No child AGENTS.md files.
+
+## Spec A fixtures
+
+- `PQC-SHA256SUMS` pins the new shared RFC 9980/OpenPGP and Go/WASM X-Wing fixtures at the
+  server commit recorded in `PROVENANCE.md`; `FixtureProvenanceTest` checks every copied byte.
+- `PqcInteropTest` exercises the production reader and verifier, seed/public-key parity, both
+  X-Wing envelopes, tag/context/wrong-seed rejection, and mutations of all 1216 SAS key bytes.
+- `PgpKeyringV2Test` covers both active certificate classes, either omitted class, full inventory,
+  wrong class/member rejection, exact-byte import and reopening above the old 128 KiB cap.
+- `EnrollmentCeremonyXWingTest` requires version/generation/inventory validation, durable sealing
+  before acknowledgement, the v6 legacy payload path, and retry after seed-auth cancellation.
+
+- `PqcInteropTest` also verifies a v6 one-pass composite signature and refuses a changed final
+  AEAD tag. `PgpReadFailureWipeTest` requires a buffer passed to a failing stream to be zeroed.

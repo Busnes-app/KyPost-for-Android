@@ -9,6 +9,7 @@ internal object EnrollmentTeardown {
         val vault = EnrollmentVault(context)
         failed += vault.destroy()
         if (!EnrollmentKeyStore.deleteKeyPair()) failed += "deleteAgreementKey"
+        if (!XWingEnrollmentKeys.deleteWrapKey()) failed += "deleteXWingWrapKey"
         // After destroy, which clears the same store. This is the one signal that lets the worker
         // tell the server "not enrolled"; an ordinary probe never may.
         if (!vault.markTeardownReport()) failed += "markTeardown"
