@@ -14,11 +14,13 @@ import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 
 internal const val PGP_KEYRING_FORMAT = "kypost-pgp-keyring-v1"
+internal const val PGP_KEYRING_FORMAT_V2 = "kypost-pgp-keyring-v2"
 
 /** The largest integer every peer (JavaScript included) represents exactly. */
 private const val MAX_SAFE_GENERATION = (1L shl 53) - 1
 
 private val RING_KEYS = setOf("format", "materialGeneration", "activeFingerprint", "keyFingerprints", "keys")
+private val RING_V2_KEYS = RING_KEYS - "activeFingerprint" + "active"
 private val MEMBER_KEYS = setOf("fingerprint", "privateKey")
 private val MEMBER_OPTIONAL_KEYS = setOf("revocationCertificate")
 private val FINGERPRINT = Regex("[0-9A-F]{40}|[0-9A-F]{64}")
@@ -36,7 +38,7 @@ internal class PgpKeyringMember(
 }
 
 /**
- * A validated `kypost-pgp-keyring-v1` ring. [original] is the exact plaintext that validated: it,
+ * A validated v1/v2 keyring. [original] is the exact plaintext that validated: it,
  * not a re-serialization, is what a later increment seals. [wipe] zeroes the byte copies this
  * holder owns; the JSON String and element tree the parser produced, and Bouncy Castle's packet
  * objects, are ordinary heap objects that cannot be zeroed and are simply dropped.
@@ -48,6 +50,7 @@ internal class PgpKeyring(
     /** Every primary and subkey fingerprint, uppercase, as derived from the packets. */
     val keyFingerprints: Set<String>,
     val members: List<PgpKeyringMember>,
+    val activeFingerprints: Map<String, String> = mapOf((if (activeFingerprint.length == 40) "v4" else "v6") to activeFingerprint),
 ) {
     val active: PgpKeyringMember get() = members.first { it.fingerprint == activeFingerprint }
 
@@ -85,16 +88,34 @@ private fun parseRing(plaintext: ByteArray, expected: String?): PgpKeyring? = ru
     val text = decodeStrictUtf8(plaintext) ?: return null
     if (jsonHasDuplicateKeys(text)) return null
     val root = Json.parseToJsonElement(text).jsonObject
-    if (root.keys != RING_KEYS) return null
-    if (root.string("format") != PGP_KEYRING_FORMAT) return null
+    val activeFingerprints = when (root.string("format")) {
+        PGP_KEYRING_FORMAT -> {
+            if (root.keys != RING_KEYS) return null
+            val fingerprint = root.fingerprint("activeFingerprint") ?: return null
+            mapOf((if (fingerprint.length == 40) "v4" else "v6") to fingerprint)
+        }
+        PGP_KEYRING_FORMAT_V2 -> {
+            if (root.keys != RING_V2_KEYS) return null
+            val active = root["active"] as? JsonObject ?: return null
+            if (active.isEmpty() || active.keys.any { it != "v4" && it != "v6" }) return null
+            active.mapValues { (version, value) ->
+                val fingerprint = (value as? JsonPrimitive)?.fingerprint() ?: return null
+                if (fingerprint.length != if (version == "v4") 40 else 64) return null
+                fingerprint
+            }
+        }
+        else -> return null
+    }
 
     val generation = root["materialGeneration"]?.jsonPrimitive ?: return null
     if (generation.isString) return null
     val materialGeneration = generation.content.toLongOrNull() ?: return null
     if (materialGeneration !in 1..MAX_SAFE_GENERATION) return null
 
-    val activeFingerprint = root.fingerprint("activeFingerprint") ?: return null
-    if (expected != null && activeFingerprint != expected) return null
+    if (expected != null && expected !in activeFingerprints.values) return null
+    // Keep classical sending as the default until the P4 delivery-group rollout. A delivery may
+    // bind either active certificate; opening a ring never promotes a historical member.
+    val activeFingerprint = activeFingerprints["v4"] ?: activeFingerprints.getValue("v6")
     val inventory = root["keyFingerprints"]?.jsonArray ?: return null
     if (inventory.isEmpty() || inventory.size > MemoryBudget.PGP_KEYRING_FINGERPRINT_COUNT) return null
     val declared = HashSet<String>()
@@ -116,7 +137,10 @@ private fun parseRing(plaintext: ByteArray, expected: String?): PgpKeyring? = ru
         }
     }
     if (derived != declared) return null
-    if (members.count { it.fingerprint == activeFingerprint } != 1) return null
+    for ((version, fingerprint) in activeFingerprints) {
+        val member = members.singleOrNull { it.fingerprint == fingerprint } ?: return null
+        if (member.ring.publicKey.version != if (version == "v4") 4 else 6) return null
+    }
 
     PgpKeyring(
         original = plaintext.copyOf(),
@@ -124,6 +148,7 @@ private fun parseRing(plaintext: ByteArray, expected: String?): PgpKeyring? = ru
         activeFingerprint = activeFingerprint,
         keyFingerprints = derived,
         members = members,
+        activeFingerprints = activeFingerprints,
     )
 }.getOrNull()
 

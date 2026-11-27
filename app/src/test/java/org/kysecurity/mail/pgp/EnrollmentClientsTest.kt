@@ -13,13 +13,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EnrollmentClientsTest {
+    private val testKey = java.util.Base64.getEncoder().encodeToString(org.bouncycastle.asn1.x9.ECNamedCurveTable.getByName("secp256r1").g.getEncoded(false))
 
     @Test
     fun publishKey_sendsDeviceHeadersAndTheKey() = runBlocking {
         val factory = FakeCallFactory { req -> response(req, """{"ok":true}""", 200) }
         val clients = EnrollmentClients(callFactory = factory)
 
-        val result = clients.publishKey("https://relay.example.com/", "dev-1", "secret-1", "BASE64KEY")
+        val result = clients.publishKey("https://relay.example.com/", "dev-1", "secret-1", testKey)
 
         assertEquals(EnrollmentCallResult.Ok, result)
         val sent = factory.requests.single()
@@ -28,7 +29,7 @@ class EnrollmentClientsTest {
         assertEquals("dev-1", sent.header("X-Kypost-Device-Id"))
         assertEquals("secret-1", sent.header("X-Kypost-Device-Secret"))
         val body = okio.Buffer().also { sent.body!!.writeTo(it) }.readUtf8()
-        assertTrue("the key must actually be sent: $body", body.contains("\"publicKey\":\"BASE64KEY\""))
+        assertTrue("the key must actually be sent: $body", body.contains("\"publicKey\":\"$testKey\""))
     }
 
     /** Exactly the RFC 9180 HPKE forms. The retired v2/v3 are never claimed, and omitting the
@@ -37,11 +38,31 @@ class EnrollmentClientsTest {
     fun publishKey_advertisesOnlyHpkeVersions() = runBlocking {
         val factory = FakeCallFactory { req -> response(req, """{"ok":true}""", 200) }
 
-        EnrollmentClients(callFactory = factory).publishKey("https://relay.example.com", "d", "s", "K")
+        EnrollmentClients(callFactory = factory).publishKey("https://relay.example.com", "d", "s", testKey)
 
         val body = okio.Buffer().also { factory.requests.single().body!!.writeTo(it) }.readUtf8()
         val versions = Json.parseToJsonElement(body).jsonObject["envelopeVersions"]!!.jsonArray.map { it.jsonPrimitive.int }
         assertEquals(body, listOf(4, 5), versions)
+    }
+
+    @Test
+    fun xwingPublicationClaimsOnlyItsSuiteAndV6OpenPgpReads() = runBlocking {
+        val factory = FakeCallFactory { req -> response(req, """{"ok":true}""", 200) }
+        val key = java.util.Base64.getEncoder().encodeToString(xwingPublicKey(ByteArray(32) { 0x65 }))
+        EnrollmentClients(factory).publishKey("https://relay.example.com", "d", "s", key)
+        val body = Json.parseToJsonElement(okio.Buffer().also { factory.requests.single().body!!.writeTo(it) }.readUtf8()).jsonObject
+        assertEquals(listOf(6), body["envelopeVersions"]!!.jsonArray.map { it.jsonPrimitive.int })
+        assertEquals(listOf("v4", "v6", "rfc9980"), body["openpgp"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(key, body["publicKey"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun invalidPublicationNeverReachesTheRelay() = runBlocking {
+        val factory = FakeCallFactory { req -> response(req, "{}", 200) }
+        for (key in listOf("garbage", "AQI=", "")) {
+            assertTrue(EnrollmentClients(factory).publishKey("https://relay.example.com", "d", "s", key) is EnrollmentCallResult.Failed)
+        }
+        assertTrue(factory.requests.isEmpty())
     }
 
     /** The delivery metadata the server records beside the envelope; the ceremony validates the

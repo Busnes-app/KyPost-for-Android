@@ -19,3 +19,13 @@ against that upstream file as the only matching entry, unmodified, on 2026-10-27
 Independent framing references at the same commit, not copied:
 `backend/internal/cryptutil/device_envelope_v3_test.go` and
 `frontend/src/lib/deviceEnvelopeV3.test.ts`. `FixtureProvenanceTest` pins the checksums.
+
+## Spec A PQC fixtures
+
+`device-envelope-xwing.json`, `device-envelope-xwing-browser.json` and `openpgp-v6/`
+were copied byte-for-byte from KyPost-Server commit
+`4eb06d13e8b04993e74deacc1b1888f8e4e556e0` (PR #755, `spec-a-p2`).
+`PQC-SHA256SUMS` pins every copied file; `FixtureProvenanceTest` verifies it. These keys
+and seeds are public test secrets. The RFC 9980 files originate in server P0 and were
+independently checked by its `testdata/openpgp-v6/crosscheck/BcCheck.java` with BC 1.87.
+The Android tests run the production parser, decryptor, verifier and X-Wing adapter.

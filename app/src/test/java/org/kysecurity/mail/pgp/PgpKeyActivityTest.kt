@@ -19,6 +19,22 @@ class PgpKeyActivityTest {
     }
 
     @Test
+    fun v4AndV6FingerprintsRoundTripWithoutTruncationAndCompareInFull() {
+        for (fingerprint in listOf(fp, "AB".repeat(32))) {
+            val spaced = fingerprint.lowercase().chunked(4).joinToString(" ")
+            val url = requireNotNull(PgpKeyActivity.ownQrUrl("https://mail.example.com", "abc123", spaced))
+            val parsed = requireNotNull(PgpKeyActivity.parsePgpQrKeyUrl(url))
+            assertEquals(fingerprint, parsed.fingerprint)
+            assertEquals(ScannedKeyCheck.CONFIRMED, PgpKeyActivity.checkScannedKey(parsed.fingerprint, spaced))
+            assertEquals(ScannedKeyCheck.CONFIRMED, PgpKeyActivity.checkScannedKey(fingerprint.lowercase(), spaced))
+            assertEquals(ScannedKeyCheck.MISMATCH, PgpKeyActivity.checkScannedKey(fingerprint.dropLast(1) + "0", spaced))
+            if (fingerprint.length == 64) {
+                assertEquals(ScannedKeyCheck.MISMATCH, PgpKeyActivity.checkScannedKey(fingerprint.take(40), spaced))
+            }
+        }
+    }
+
+    @Test
     fun ownQrUrl_withoutFingerprint_hasNoFragment() {
         assertEquals(
             "https://mail.example.com/api/pgp/qr/key?t=abc123",
@@ -27,8 +43,8 @@ class PgpKeyActivityTest {
     }
 
     @Test
-    fun ownQrUrl_nonV4Fingerprint_isLeftOut() {
-        val url = PgpKeyActivity.ownQrUrl("https://mail.example.com", "abc123", "AB".repeat(32))
+    fun ownQrUrl_malformedFingerprint_isLeftOut() {
+        val url = PgpKeyActivity.ownQrUrl("https://mail.example.com", "abc123", "AB".repeat(31))
         assertFalse(url!!.contains('#'))
     }
 
@@ -60,7 +76,7 @@ class PgpKeyActivityTest {
 
     @Test
     fun scannedKey_malformedFingerprint_isMismatch() {
-        listOf("", fp.dropLast(1), fp + "0", fp.lowercase(), fp.dropLast(1) + "G", TestPgpKey.FINGERPRINT).forEach {
+        listOf("", fp.dropLast(1), fp + "0", fp.dropLast(1) + "G", TestPgpKey.FINGERPRINT).forEach {
             assertEquals(it, ScannedKeyCheck.MISMATCH, PgpKeyActivity.checkScannedKey(it, TestPgpKey.FINGERPRINT))
         }
     }

@@ -40,6 +40,18 @@ class EnrollmentKeyringRecordTest {
         assertTrue("an unknown format byte fails closed", runCatching { vault.stored() }.isFailure)
     }
 
+    @Test
+    fun largerPqRingRecordsRoundTripAtTheNewCapButLegacyKeepsItsBound() {
+        val ciphertext = ByteArray(org.kysecurity.mail.MemoryBudget.PGP_KEYRING_JSON_BYTES + 16) { 7 }
+        assertTrue(vault.store(ByteArray(12), ciphertext, VaultRecordKind.KEYRING))
+        org.junit.Assert.assertArrayEquals(ciphertext, EnrollmentVault(context).stored()!!.ciphertext)
+        assertFalse(vault.store(ByteArray(12), ciphertext + 1, VaultRecordKind.KEYRING))
+        assertFalse(vault.store(ByteArray(12), ciphertext, VaultRecordKind.LEGACY_ARMOR))
+        val ack = EnrollmentReport.Keyring(3, "A".repeat(64), 6)
+        assertTrue(vault.storeKeyringAck(ack))
+        assertEquals(ack, EnrollmentVault(context).keyringAck())
+    }
+
     /** The instrumentation copy of the shared fixture must not drift from the pinned one. */
     @Test
     fun theFixtureCopyIsTheServersBytes() {

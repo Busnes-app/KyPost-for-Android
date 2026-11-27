@@ -197,7 +197,7 @@ class PgpKeyringTest {
     fun rejectsMalformedUtf8AndOversizedPlaintext() {
         assertNull(parse(ringBytes + byteArrayOf(0xFF.toByte())))
         assertNull(parse(byteArrayOf(0xC0.toByte(), 0x80.toByte()) + ringBytes))
-        val padded = ring.toString().dropLast(1) + " ".repeat(128 * 1024) + "}"
+        val padded = ring.toString().dropLast(1) + " ".repeat(org.kysecurity.mail.MemoryBudget.PGP_KEYRING_JSON_BYTES) + "}"
         assertNull(parse(padded.toByteArray(Charsets.UTF_8)))
         assertNull(decodeStrictUtf8(byteArrayOf(0xED.toByte(), 0xA0.toByte(), 0x80.toByte())))
     }

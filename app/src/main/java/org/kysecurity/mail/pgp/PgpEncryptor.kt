@@ -141,7 +141,7 @@ internal object PgpEncryptor {
         ).keyRings.asSequence()
             .flatMap { ring -> ring.publicKeys.asSequence().map { ring.publicKey to it } }
             .filter { (primary, key) ->
-                key.isEncryptionKey && !key.hasRevocation() && !key.hasExpired() &&
+                primary.version == 4 && key.isEncryptionKey && !key.hasRevocation() && !key.hasExpired() &&
                     !primary.hasRevocation() && !primary.hasExpired() && key.mayEncrypt(primary)
             }
             .filter { (primary, key) -> PgpStrengthPolicy.memberAllowed(primary, key) }
@@ -172,6 +172,8 @@ internal object PgpEncryptor {
         ring: PGPSecretKeyRing,
         intendedRecipients: List<PGPPublicKey>,
     ): PGPSignatureGenerator? = runCatching {
+        // P3 qualifies reads only. P4 adds the v6 profile and split delivery groups.
+        if (ring.publicKey.version != 4) return null
         val secretKey = ring.secretKeys.asSequence()
             .firstOrNull { it.isSigningKey && !it.publicKey.hasRevocation() && !it.publicKey.hasExpired() }
             ?: return null

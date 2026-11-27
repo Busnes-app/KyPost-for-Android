@@ -170,6 +170,12 @@ internal class FakeDecryptedMailCache(private val cachedRows: Int = 3) : Decrypt
 internal class FakeVaultSealer(
     var outcome: SealOutcome = SealOutcome.Sealed,
 ) : VaultSealer {
+    val replayedAcks = mutableListOf<EnrollmentReport.Keyring>()
+    override fun rememberAcknowledgement(ack: EnrollmentReport.Keyring): Boolean {
+        replayedAcks += ack
+        return true
+    }
+
     var failure: Exception? = null
     /** A copy of what was handed over, taken before the ceremony zeroes the caller's array, so a
      *  test can prove the original was wiped without the fake's own copy being wiped too. */

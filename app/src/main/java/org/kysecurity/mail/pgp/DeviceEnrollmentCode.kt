@@ -13,8 +13,14 @@ private const val CODE_LENGTH = 14
 /** SAS from this device's own keystore key (never server-supplied); deviceId hashed as-is. */
 internal fun deviceEnrollmentCode(rawPublicKey: ByteArray, deviceId: String, bucket: Long): String {
     val id = deviceId.toByteArray(Charsets.UTF_8)
-    val preimage = ByteBuffer.allocate(rawPublicKey.size + 2 + id.size + 8)
+    require(rawPublicKey.size == 65 || rawPublicKey.size == XWING_PUBLIC_KEY_BYTES) { "unsupported enrollment key" }
+    require(id.isNotEmpty() && id.size <= 0xFFFF && bucket >= 0) { "invalid SAS context" }
+    val prefix = if (rawPublicKey.size == XWING_PUBLIC_KEY_BYTES) {
+        "kypost-device-sas/v2".toByteArray(Charsets.UTF_8) + byteArrayOf(0x04, 0xC0.toByte())
+    } else ByteArray(0)
+    val preimage = ByteBuffer.allocate(prefix.size + rawPublicKey.size + 2 + id.size + 8)
         .order(ByteOrder.BIG_ENDIAN)
+        .put(prefix)
         .put(rawPublicKey)
         .putShort(id.size.toShort())
         .put(id)

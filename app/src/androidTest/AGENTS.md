@@ -85,3 +85,16 @@ Owns Android instrumentation tests executed on emulator/device.
 
 - No child AGENTS.md files.
 
+
+## Spec A enrollment
+
+- `EnrollmentCipherPromptLifecycleTest` recreates under the seed CryptoObject prompt and requires
+  cancellation, focus recovery and no installed material. It runs in the isolated prompt pass.
+- `XWingEnrollmentKeysTest` refuses unauthenticated/cancelled seed wrapping (and software-only
+  hardware) and proves teardown deletes owned wrap aliases. Positive hardware authentication
+  needs a StrongBox/TEE physical device; an emulator does not qualify that path.
+- `EnrollmentKeyringRecordTest` also checks the 512 KiB ring-record cap, unchanged legacy bound,
+  and durable v6 acknowledgement metadata.
+
+- `PqcInteropDeviceTest` runs the pinned RFC 9980 decrypt/verify and Go X-Wing/SAS vector on
+  Android itself. Its public fixture copies are compared to JVM provenance by `FixtureProvenanceTest`.

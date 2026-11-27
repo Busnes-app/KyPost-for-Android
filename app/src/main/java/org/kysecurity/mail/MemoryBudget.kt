@@ -81,24 +81,26 @@ internal object MemoryBudget {
      *  before any base64 work. */
     const val PGP_DEVICE_ENVELOPE_V3_BYTES = 128 * 1024
 
-    /** `kypost-pgp-keyring-v1` plaintext, bounded before JSON or OpenPGP work. Reader capacity is
-     *  broader than storage admission: base64 expansion inside the envelope cap keeps stored rings
-     *  below 96 KiB. */
-    const val PGP_KEYRING_JSON_BYTES = 128 * 1024
+    /** v1/v2 keyring plaintext, bounded before JSON or OpenPGP work. The v6 serialized envelope
+     *  cap separately accounts for base64 expansion; the local vault admits a full 512 KiB ring. */
+    const val PGP_KEYRING_JSON_BYTES = 512 * 1024
+
+    /** PQ rings and v6 X-Wing delivery, serialized; counts stay at 16 primaries / 256 keys. */
+    const val PGP_DEVICE_ENVELOPE_V6_BYTES = 512 * 1024
 
     /** A ring lists at most this many primary keys, and this many primary+subkey fingerprints. */
     const val PGP_KEYRING_PRIMARY_COUNT = 16
     const val PGP_KEYRING_FINGERPRINT_COUNT = 256
 
-    /** Importing a v5 ring, at peak: the serialized envelope as a String (two bytes per char) and
+    /** Importing a v5/v6 ring, at peak: the serialized envelope as a String (two bytes per char) and
      *  its decoded ciphertext; the plaintext bytes, their String copy, and the JSON element tree
      *  charged at another String; the per-member armor copies handed to the OpenPGP parser and
      *  the parsed packets, each charged at the plaintext cap; and the previous sealed bundle held
      *  beside the new one while replacement is established. Legacy enrollment keeps
      *  [PGP_ENROLLMENT_PEAK_BYTES] untouched. */
     const val PGP_KEYRING_IMPORT_PEAK_BYTES =
-        2 * PGP_DEVICE_ENVELOPE_V3_BYTES +
-            PGP_DEVICE_ENVELOPE_V3_BYTES +
+        2 * PGP_DEVICE_ENVELOPE_V6_BYTES +
+            PGP_DEVICE_ENVELOPE_V6_BYTES +
             PGP_KEYRING_JSON_BYTES +
             2 * PGP_KEYRING_JSON_BYTES +
             2 * PGP_KEYRING_JSON_BYTES +

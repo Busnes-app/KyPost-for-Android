@@ -537,6 +537,9 @@ configurations.named("githubImplementation") { extendsFrom(gmsImplementation) }
 // and the task reported UP-TO-DATE. A gate that does not run when its subject changes is not a
 // gate: adding android:label to the pairing forwarder passed cleanly until these were declared.
 tasks.withType<Test>().configureEach {
+    // FixtureProvenanceTest compares the instrumentation copies with the pinned JVM fixtures.
+    inputs.dir("src/androidTest/resources/kypost-server/pqc")
+        .withPropertyName("pqcDeviceFixtures").withPathSensitivity(PathSensitivity.RELATIVE)
     // JUnit 5 for Jazzer's @FuzzTest; every existing JUnit 4 test runs on the vintage engine.
     useJUnitPlatform()
     inputs.files(

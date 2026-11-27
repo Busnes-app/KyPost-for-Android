@@ -40,12 +40,13 @@ private const val IV_BYTES = 12
 private const val GCM_TAG_BYTES = 16
 
 /** The sealed plaintext is the bounded enrollment output; GCM appends its tag. */
-private const val CIPHERTEXT_MAX_BYTES = MemoryBudget.PGP_SECRET_KEY_OUTPUT_BYTES + GCM_TAG_BYTES
+private const val LEGACY_CIPHERTEXT_MAX_BYTES = MemoryBudget.PGP_SECRET_KEY_OUTPUT_BYTES + GCM_TAG_BYTES
+private const val CIPHERTEXT_MAX_BYTES = MemoryBudget.PGP_KEYRING_JSON_BYTES + GCM_TAG_BYTES
 private const val RECORD_MIN_BYTES = 1 + IV_BYTES + GCM_TAG_BYTES
 private const val RECORD_MAX_BYTES = 1 + IV_BYTES + CIPHERTEXT_MAX_BYTES
 
 /** NO_WRAP base64 grows 3 bytes to 4 characters, rounded up to a whole quantum. */
-private const val LEGACY_CT_MAX_CHARS = (CIPHERTEXT_MAX_BYTES + 2) / 3 * 4
+private const val LEGACY_CT_MAX_CHARS = (LEGACY_CIPHERTEXT_MAX_BYTES + 2) / 3 * 4
 private const val LEGACY_IV_MAX_CHARS = (IV_BYTES + 2) / 3 * 4
 
 /** A sealed record as read back. Not a `data class`: equality over the arrays would be identity.
@@ -191,7 +192,8 @@ internal class EnrollmentVault(
      * `finishWrite` logs a failed sync or rename instead of reporting it.
      */
     fun store(iv: ByteArray, ciphertext: ByteArray, kind: VaultRecordKind = VaultRecordKind.LEGACY_ARMOR): Boolean {
-        if (iv.size != IV_BYTES || ciphertext.size !in GCM_TAG_BYTES..CIPHERTEXT_MAX_BYTES) {
+        val cap = if (kind == VaultRecordKind.KEYRING) CIPHERTEXT_MAX_BYTES else LEGACY_CIPHERTEXT_MAX_BYTES
+        if (iv.size != IV_BYTES || ciphertext.size !in GCM_TAG_BYTES..cap) {
             Log.e("EnrollmentVault", "Refusing to store a malformed record")
             return false
         }
@@ -301,6 +303,7 @@ internal class EnrollmentVault(
         check(record.size.toLong() == length) { "Invalid enrollment vault" }
         val kind = VaultRecordKind.entries.firstOrNull { it.recordVersion == record[0] }
         checkNotNull(kind) { "Invalid enrollment vault" }
+        if (kind == VaultRecordKind.LEGACY_ARMOR) check(length <= 1 + IV_BYTES + LEGACY_CIPHERTEXT_MAX_BYTES) { "Oversized legacy vault" }
         return StoredRecord(record.copyOfRange(1, 1 + IV_BYTES), record.copyOfRange(1 + IV_BYTES, record.size), kind)
     }
 

@@ -21,18 +21,30 @@ internal val RETIRED_ENVELOPE_VERSIONS = setOf(2, 3)
 /** The acknowledgement version of a keyring record stored before v5 existed (`EnrollmentVault`). */
 internal const val ENVELOPE_VERSION_KEYRING = 3
 
-/** One armored key (v4) and the complete `kypost-pgp-keyring-v1` ring (v5), sealed with RFC 9180
+/** One armored key (v4), a complete ring (v5), and X-Wing delivery (v6), sealed with RFC 9180
  *  HPKE (`HpkeRecipient.kt`); the binding is HPKE info. */
 internal const val ENVELOPE_VERSION_HPKE = 4
 internal const val ENVELOPE_VERSION_HPKE_KEYRING = 5
 
 /** What this build opens, advertised on publish. */
-internal val OPENABLE_ENVELOPE_VERSIONS = listOf(ENVELOPE_VERSION_HPKE, ENVELOPE_VERSION_HPKE_KEYRING)
+internal const val ENVELOPE_VERSION_XWING = 6
+internal val OPENABLE_ENVELOPE_VERSIONS = listOf(ENVELOPE_VERSION_HPKE, ENVELOPE_VERSION_HPKE_KEYRING, ENVELOPE_VERSION_XWING)
 
-internal fun isKeyringVersion(version: Int): Boolean = version == ENVELOPE_VERSION_HPKE_KEYRING
+/** One publication carries one key: never claim a P-256 suite for an X-Wing key. */
+internal fun enrollmentVersions(rawPublicKey: ByteArray): List<Int> = when (rawPublicKey.size) {
+    XWING_PUBLIC_KEY_BYTES -> listOf(ENVELOPE_VERSION_XWING)
+    65 -> listOf(ENVELOPE_VERSION_HPKE, ENVELOPE_VERSION_HPKE_KEYRING)
+    else -> emptyList()
+}
+
+internal fun isKeyringVersion(version: Int): Boolean = version == ENVELOPE_VERSION_HPKE_KEYRING || version == ENVELOPE_VERSION_XWING
 
 private fun envelopeCap(version: Int): Int =
-    if (isKeyringVersion(version)) MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES else MemoryBudget.PGP_DEVICE_ENVELOPE_LEGACY_BYTES
+    when (version) {
+        ENVELOPE_VERSION_XWING -> MemoryBudget.PGP_DEVICE_ENVELOPE_V6_BYTES
+        ENVELOPE_VERSION_HPKE_KEYRING -> MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES
+        else -> MemoryBudget.PGP_DEVICE_ENVELOPE_LEGACY_BYTES
+    }
 
 internal fun envelopeDomain(version: Int): String = "$ENVELOPE_DOMAIN_PREFIX$version"
 
@@ -44,25 +56,30 @@ internal class DeviceEnvelopeFields(val version: Int, val epk: ByteArray, val ct
 private val HPKE_ENVELOPE_KEYS = setOf("v", "alg", "enc", "ct")
 
 /**
- * v4/v5 framing, as strict as the server's `ParseDeviceEnvelopeVersion`: exactly
- * `{v, alg, enc, ct}`, numeric `v`, canonical base64, `enc` a P-256 point, a ciphertext longer
- * than its tag. Null for anything else, v2/v3 included; the caller re-runs the ceremony, never retries.
+ * v4/v5/v6 framing, as strict as the server's `ParseDeviceEnvelopeVersion`: exactly
+ * `{v, alg, enc, ct}`, numeric `v`, canonical base64, `enc` a P-256 point or 1120-byte X-Wing
+ * encapsulation, and an authenticated ciphertext. Null otherwise, v2/v3 included.
  */
 internal fun parseDeviceEnvelope(json: String): DeviceEnvelopeFields? = runCatching {
     // A String's UTF-8 length is at least its char count, so this bounds the parse without
     // measuring; the exact per-version cap is applied once the version is known.
     if (json.length > OPENABLE_ENVELOPE_VERSIONS.maxOf(::envelopeCap)) return null
+    if (jsonHasDuplicateKeys(json)) return null
     val o = Json.parseToJsonElement(json).jsonObject
     val v = o["v"]?.jsonPrimitive ?: return null
     // Exact token match: no quoted "4", no 4.0 or 04.
     if (v.isString) return null
     val version = OPENABLE_ENVELOPE_VERSIONS.firstOrNull { it.toString() == v.content } ?: return null
-    if (o.keys != HPKE_ENVELOPE_KEYS || o.getValue("alg").jsonPrimitive.content != HPKE_ENVELOPE_ALG) return null
+    val alg = if (version == ENVELOPE_VERSION_XWING) XWING_ENVELOPE_ALG else HPKE_ENVELOPE_ALG
+    if (o.keys != HPKE_ENVELOPE_KEYS || o.getValue("alg").jsonPrimitive.let { !it.isString || it.content != alg }) return null
     if (utf8Length(json) > envelopeCap(version)) return null
     val enc = o.getValue("enc").jsonPrimitive.takeIf { it.isString }?.let { strictBase64(it.content) }
     val ct = o.getValue("ct").jsonPrimitive.takeIf { it.isString }?.let { strictBase64(it.content) }
-    if (enc == null || enc.size != 65 || enc[0] != 0x04.toByte() || !isP256Point(enc)) return null
-    if (ct == null || ct.size <= GCM_TAG_BYTES) return null
+    if (enc == null) return null
+    if (version == ENVELOPE_VERSION_XWING) {
+        if (enc.size != XWING_ENCAPSULATION_BYTES) return null
+    } else if (enc.size != 65 || enc[0] != 0x04.toByte() || !isP256Point(enc)) return null
+    if (ct == null || ct.size < GCM_TAG_BYTES || (version != ENVELOPE_VERSION_XWING && ct.size == GCM_TAG_BYTES)) return null
     DeviceEnvelopeFields(version = version, epk = enc, ct = ct)
 }.getOrNull()
 
@@ -99,7 +116,7 @@ internal fun utf8Length(text: String): Long {
 /** `domain || uint16BE(len(deviceId)) || deviceId || uint16BE(len(fingerprint)) || fingerprint`
  *
  *  The HPKE info. The device ID goes in unchanged: no trimming, normalization or case folding.
- *  The fingerprint is uppercase hex without whitespace; v5 additionally requires a full 40- or
+ *  The fingerprint is uppercase hex without whitespace; v5/v6 additionally require a full 40- or
  *  64-digit fingerprint, the only lengths a validated active key can have. */
 internal fun deviceEnvelopeAad(version: Int, deviceId: String, pgpFingerprint: String): ByteArray {
     require(version in OPENABLE_ENVELOPE_VERSIONS) { "unsupported envelope version" }

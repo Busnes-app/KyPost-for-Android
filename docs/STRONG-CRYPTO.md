@@ -21,8 +21,8 @@ Nothing below needs configuring. Every row is what the app produces or accepts o
 | New OpenPGP messages, drafts and Sent copies | AES-256, integrity-protected (SEIPD v1 with MDC), ZIP compression, SHA-256 signatures. Every recipient key and the signing key: RSA >= 2048, or ECDH/ECDSA/EdDSA/X25519/X448/Ed25519/Ed448 >= 224 bits, with a SHA-2/SHA-3 subkey binding. Any weak recipient refuses the whole send. | `pgp/PgpEncryptor.kt`, `pgp/PgpStrengthPolicy.kt` |
 | OpenPGP keys | Not generated on the device. They arrive by enrollment (below); ECDH keys whose KDF is below SHA-256 or whose key wrap is not AES/Camellia do not parse (Bouncy Castle). | `pgp/KeyringImport.kt`, `pgp/PgpKeyring.kt` |
 | OpenPGP signature trust | Only SHA-256/384/512 and SHA3-256/512 signatures from keys meeting the key floor can earn a badge; anything else is shown as **Signature not checked**. | `pgp/PgpDecryptor.kt`, `pgp/SignerBinding.kt` |
-| OpenPGP decryption of received mail | Integrity protection is mandatory. Session ciphers AES-128/192/256, Twofish and Camellia open; plaintext (NULL), single DES, SAFER and unknown ciphers are refused before any ciphertext is decrypted. Legacy ciphers and keys: see the exception below. | `pgp/PgpDecryptor.kt`, `pgp/PgpStrengthPolicy.kt` (`archiveCipherAllowed`) |
-| Device enrollment envelope | v4/v5 only: RFC 9180 HPKE mode_base, KEM 0x0010 DHKEM(P-256, HKDF-SHA256), KDF 0x0001 HKDF-SHA256, AEAD 0x0002 AES-256-GCM; `info` binds `kypost-device-envelope/vN`, the device ID and the fingerprint, each length-prefixed; HPKE `aad` is empty. The retired custom v2/v3 formats are neither advertised nor opened: a delivered one is refused with "update your server". The P-256 agreement key is non-exportable in the Android Keystore and lives for one ceremony. | `pgp/HpkeRecipient.kt`, `pgp/DeviceEnvelope.kt`, `pgp/EnrollmentKeyStore.kt` |
+| OpenPGP decryption of received mail | Integrity protection is mandatory. v6 PKESK + SEIPDv2 (OCB) and RFC 9980 ID 35 decrypt through BC 1.87; ML-DSA-65+Ed25519 (ID 30) signatures verify. Session ciphers AES-128/192/256, Twofish and Camellia open; plaintext (NULL), single DES, SAFER and unknown ciphers are refused before any ciphertext is decrypted. Legacy ciphers and keys: see the exception below. | `pgp/PgpDecryptor.kt`, `pgp/PgpStrengthPolicy.kt` (`archiveCipherAllowed`) |
+| Device enrollment envelope | v6 for new enrollment: HPKE mode_base, KEM 0x647A X-Wing (ML-KEM-768 + X25519), 1216-byte public key and 1120-byte encapsulation. Legacy v4/v5 still open with KEM 0x0010 DHKEM(P-256, HKDF-SHA256). Both use KDF 0x0001 HKDF-SHA256, AEAD 0x0002 AES-256-GCM; `info` binds `kypost-device-envelope/vN`, the device ID and the fingerprint, each length-prefixed; HPKE `aad` is empty. The retired custom v2/v3 formats are neither advertised nor opened: a delivered one is refused with "update your server". The X-Wing seed survives between operations only as AES-256-GCM ciphertext under a non-exportable StrongBox/TEE key with per-use user authentication; software-only protection is refused. Seed buffers are wiped; BC expanded key objects cannot be reliably erased. The P-256 agreement key remains non-exportable. Both live for one ceremony. SAS v2 binds every byte of the X-Wing public key. | `pgp/XWingEnvelope.kt`, `pgp/XWingEnrollmentKeys.kt`, `pgp/EnrollmentCipherPrompt.kt`, `pgp/HpkeRecipient.kt`, `pgp/DeviceEnvelope.kt` |
 | Enrolled key at rest | AES-256-GCM under a Keystore key that requires the secure lock screen. | `pgp/EnrollmentVault.kt` |
 | App PIN | PBKDF2-HMAC-SHA256, 150,000 iterations, 16-byte salt, 256-bit output, mixed with a Keystore HMAC-SHA256 pepper (StrongBox first). | `security/PinHasher.kt`, `security/CredentialCipher.kt` |
 | Device secret wrap | AES-256-GCM under the PIN-derived, peppered key. | `security/CredentialCipher.kt` |
@@ -82,7 +82,7 @@ and RSA recipients get the session key with PKCS#1 v1.5 padding. These are fixed
 format that recipients support today. RFC 9580's SEIPD v2 (AEAD) is not supported by GnuPG, so
 using it would make mail unreadable for most recipients. The MDC is not a signature: its security
 does not rest on SHA-1 collision resistance, which is what makes SHA-1 unacceptable for
-signatures. Integrity failures fail closed and zero the plaintext (`PgpDecryptor.kt`). Bouncy
+signatures. Integrity failures fail closed and zero the plaintext, including thrown AEAD failures during streaming or final verification (`PgpDecryptor.kt`). Bouncy
 Castle's PKCS#1 v1.5 decoding is the library's own. Upgrade path: send SEIPD v2 when every
 recipient key advertises it.
 
@@ -127,3 +127,23 @@ Owned by someone else, so not claimed here:
   the `{idToken, proofKey, proof}` request and verifies the sent proof.
 - `scripts/strong-crypto-negative-controls.sh`: removes each guard in turn and requires the tests
   above to fail.
+
+## Spec A read rollout
+
+v1 keyrings remain readable; v2 replaces `activeFingerprint` with an `active` object containing
+optional `v4` (40 hex) and `v6` (64 hex) fingerprints, with at least one present. Generation,
+member list and complete fingerprint inventory retain their existing validation. Original bytes
+are sealed without reserialization. Rings and v6 serialized envelopes have 512 KiB caps; member
+and inventory counts stay at 16 and 256. v4/v5 transport bounds stay unchanged. This app has no
+recovery-file importer; the server/browser recovery-file limit is owned there.
+
+The enrollment-key publication reports `openpgp: ["v4", "v6", "rfc9980"]` beside its matching
+envelope suite. This is a read-codec claim, never proof of durable enrollment. Classical sending
+remains the default for a dual-active ring; v6 sending waits for P4's profile and split groups.
+A different stored ring still requires explicit recovery; this change does not loosen replacement
+safety. QR fingerprints carry all 40 or 64 hex digits.
+
+`PqcInteropTest`, `EnrollmentCeremonyXWingTest` and `PgpKeyringV2Test` qualify the production paths
+against pinned Go/WASM and RFC 9980 fixtures (`src/test/resources/kypost-server/PROVENANCE.md`).
+`XWingEnrollmentKeysTest` and `EnrollmentCipherPromptLifecycleTest` cover Android refusal and
+prompt cleanup; successful StrongBox/TEE per-use authentication still needs physical hardware.

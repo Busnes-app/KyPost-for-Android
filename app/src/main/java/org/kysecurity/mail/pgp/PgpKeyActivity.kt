@@ -411,14 +411,14 @@ class PgpKeyActivity : LockedActivity() {
 
     companion object {
         private const val QR_SIZE_PX = 720
-        private val QR_FINGERPRINT = Regex("[0-9A-F]{40}")
+        private val QR_FINGERPRINT = Regex("[0-9A-F]{40}|[0-9A-F]{64}")
 
         /** Never the server's `url` field — see [renderQr]. Null if no valid URL can be built.
-         *  [fingerprint] goes in the fragment, which is never sent to the server; only a v4 one fits. */
+         *  [fingerprint] goes in the fragment, which is never sent to the server; v4 and v6 fingerprints are carried in full. */
         internal fun ownQrUrl(serverUrl: String, token: String, fingerprint: String? = null): String? {
             if (token.isBlank()) return null
             val base = serverUrl.trimEnd('/').toHttpUrlOrNull() ?: return null
-            val fp = fingerprint?.replace(" ", "")?.takeIf { QR_FINGERPRINT.matches(it) }
+            val fp = fingerprint?.uppercase()?.filterNot { it.isWhitespace() }?.takeIf { QR_FINGERPRINT.matches(it) }
             return base.newBuilder()
                 .addPathSegments("api/pgp/qr/key")
                 .addQueryParameter("t", token)
@@ -430,7 +430,7 @@ class PgpKeyActivity : LockedActivity() {
         /** [expected] is the code's `fp`; null means the code carried none. */
         internal fun checkScannedKey(expected: String?, computed: String): ScannedKeyCheck = when {
             expected == null -> ScannedKeyCheck.UNVERIFIED
-            QR_FINGERPRINT.matches(expected) && expected == computed.replace(" ", "") -> ScannedKeyCheck.CONFIRMED
+            QR_FINGERPRINT.matches(expected.uppercase()) && expected.equals(computed.filterNot { it.isWhitespace() }, ignoreCase = true) -> ScannedKeyCheck.CONFIRMED
             else -> ScannedKeyCheck.MISMATCH
         }
 

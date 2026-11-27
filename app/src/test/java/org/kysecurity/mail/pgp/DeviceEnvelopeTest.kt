@@ -22,7 +22,7 @@ class DeviceEnvelopeTest {
     /** The only versions published, and so the only ones a current server seals for this device. */
     @Test
     fun onlyHpkeVersionsAreOpenable() {
-        assertEquals(listOf(4, 5), OPENABLE_ENVELOPE_VERSIONS)
+        assertEquals(listOf(4, 5, 6), OPENABLE_ENVELOPE_VERSIONS)
         assertTrue(RETIRED_ENVELOPE_VERSIONS.none { it in OPENABLE_ENVELOPE_VERSIONS })
     }
 
@@ -163,7 +163,7 @@ class DeviceEnvelopeTest {
     /** Fails loudly at the call site rather than silently producing a binding that will never open. */
     @Test
     fun binding_refusesRetiredVersionsAndMalformedInput() {
-        for (version in RETIRED_ENVELOPE_VERSIONS + listOf(1, 6)) {
+        for (version in RETIRED_ENVELOPE_VERSIONS + listOf(1, 7)) {
             assertFailsWith<IllegalArgumentException>("v$version") { deviceEnvelopeAad(version, "dev-1", "A".repeat(40)) }
         }
         assertFailsWith<IllegalArgumentException> { deviceEnvelopeAad(4, "dev-1", "not-a-fingerprint") }

@@ -108,12 +108,13 @@ class MemoryBudgetTest {
     @Test
     fun keyringImportCountsEveryTermAndFitsBesideLegacyEnrollment() {
         assertEquals(
-            3L * MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES + 9L * MemoryBudget.PGP_KEYRING_JSON_BYTES,
+            3L * MemoryBudget.PGP_DEVICE_ENVELOPE_V6_BYTES + 9L * MemoryBudget.PGP_KEYRING_JSON_BYTES,
             MemoryBudget.PGP_KEYRING_IMPORT_PEAK_BYTES.toLong(),
         )
         assertTrue(MemoryBudget.PGP_KEYRING_IMPORT_PEAK_BYTES + MemoryBudget.PGP_ENROLLMENT_PEAK_BYTES <= MemoryBudget.ASSUMED_HEAP_BYTES)
         assertEquals(128 * 1024, MemoryBudget.PGP_DEVICE_ENVELOPE_V3_BYTES)
-        assertEquals(128 * 1024, MemoryBudget.PGP_KEYRING_JSON_BYTES)
+        assertEquals(512 * 1024, MemoryBudget.PGP_KEYRING_JSON_BYTES)
+        assertEquals(512 * 1024, MemoryBudget.PGP_DEVICE_ENVELOPE_V6_BYTES)
         assertTrue(
             "a legacy envelope holding the largest admitted key must still parse",
             MemoryBudget.PGP_DEVICE_ENVELOPE_LEGACY_BYTES > (MemoryBudget.PGP_SECRET_KEY_INPUT_BYTES + 16) * 4 / 3,
