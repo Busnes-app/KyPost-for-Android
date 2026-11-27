@@ -91,4 +91,24 @@ class EnrollmentCeremonyXWingTest {
         assertEquals(listOf(VaultRecordKind.LEGACY_ARMOR), sealer.kinds)
         assertEquals(listOf(EnrollmentReport.Legacy), transport.reported)
     }
+
+    @Test fun wrapKeyValidationAcceptsPerUseHardwareKeysAndRejectsTimedOrSoftwareKeys() {
+        val strongBox = android.security.keystore.KeyProperties.SECURITY_LEVEL_STRONGBOX
+        val tee = android.security.keystore.KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT
+        val software = android.security.keystore.KeyProperties.SECURITY_LEVEL_SOFTWARE
+        val auth = XWingEnrollmentKeys.AUTHENTICATORS
+
+        for (level in listOf(strongBox, tee)) {
+            for (duration in listOf(-1, 0)) {
+                assertTrue("hardware level=$level duration=$duration must pass",
+                    XWingEnrollmentKeys.isValidWrapKeyInfo(level, 256, true, duration, auth))
+            }
+        }
+        assertFalse(XWingEnrollmentKeys.isValidWrapKeyInfo(software, 256, true, -1, auth))
+        assertFalse(XWingEnrollmentKeys.isValidWrapKeyInfo(tee, 256, true, 1, auth))
+        assertFalse(XWingEnrollmentKeys.isValidWrapKeyInfo(tee, 256, false, -1, auth))
+        assertFalse(XWingEnrollmentKeys.isValidWrapKeyInfo(tee, 128, true, -1, auth))
+        assertFalse(XWingEnrollmentKeys.isValidWrapKeyInfo(tee, 256, true, -1,
+            android.security.keystore.KeyProperties.AUTH_DEVICE_CREDENTIAL))
+    }
 }

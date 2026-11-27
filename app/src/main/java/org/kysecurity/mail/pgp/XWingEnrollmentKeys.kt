@@ -112,9 +112,13 @@ internal class XWingEnrollmentKeys(private val authenticate: suspend (Cipher) ->
     private fun wrapKey(): SecretKey {
         val key = store().getKey(alias, null) as SecretKey
         val info = SecretKeyFactory.getInstance(key.algorithm, "AndroidKeyStore").getKeySpec(key, KeyInfo::class.java) as KeyInfo
-        check(info.securityLevel == KeyProperties.SECURITY_LEVEL_STRONGBOX || info.securityLevel == KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT)
-        check(info.keySize == 256 && info.isUserAuthenticationRequired && info.userAuthenticationValidityDurationSeconds == 0 &&
-            info.userAuthenticationType == AUTHENTICATORS)
+        check(isValidWrapKeyInfo(
+            securityLevel = info.securityLevel,
+            keySize = info.keySize,
+            userAuthenticationRequired = info.isUserAuthenticationRequired,
+            userAuthenticationValidityDurationSeconds = info.userAuthenticationValidityDurationSeconds,
+            userAuthenticationType = info.userAuthenticationType,
+        ))
         return key
     }
 
@@ -135,9 +139,25 @@ internal class XWingEnrollmentKeys(private val authenticate: suspend (Cipher) ->
 
     companion object {
         const val ALIAS = "kypost_device_enrollment_xwing_wrap"
-        private const val AUTHENTICATORS = KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL
+        internal const val AUTHENTICATORS = KeyProperties.AUTH_BIOMETRIC_STRONG or KeyProperties.AUTH_DEVICE_CREDENTIAL
         private val secureRandom = SecureRandom()
         private fun store() = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+
+        internal fun isValidWrapKeyInfo(
+            securityLevel: Int,
+            keySize: Int,
+            userAuthenticationRequired: Boolean,
+            userAuthenticationValidityDurationSeconds: Int,
+            userAuthenticationType: Int,
+        ): Boolean =
+            (securityLevel == KeyProperties.SECURITY_LEVEL_STRONGBOX ||
+                securityLevel == KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT) &&
+                keySize == 256 &&
+                userAuthenticationRequired &&
+                // Android KeyInfo reports -1 (or 0 on some HALs/APIs) for per-use auth; any
+                // positive value indicates a time-based validity window which must be rejected.
+                userAuthenticationValidityDurationSeconds <= 0 &&
+                userAuthenticationType == AUTHENTICATORS
         fun deleteWrapKey(): Boolean = runCatching {
             store().run {
                 val owned = aliases().asSequence().filter { it == ALIAS || it.startsWith("$ALIAS.") }.toList()
