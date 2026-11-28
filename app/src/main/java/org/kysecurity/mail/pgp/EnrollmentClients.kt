@@ -16,6 +16,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 private val JSON_MEDIA_TYPE = "application/json".toMediaType()
 
+/** The OpenPGP formats this build reads. Sent on every key and state write: the server reads an
+ *  omitted list as `["v4"]`, so one write without it downgrades the device and blocks the v6 switch. */
+internal val OPENPGP_CAPABILITIES = listOf("v4", "v6", "rfc9980")
+
 @Serializable
 private data class PublishEnrollmentKeyRequest(
     @SerialName("publicKey") val publicKey: String,
@@ -24,13 +28,15 @@ private data class PublishEnrollmentKeyRequest(
 )
 
 /** The three metadata fields go together: absent for the legacy boolean, all present for a
- *  keyring acknowledgement. The server answers 400 to any other combination. */
+ *  keyring acknowledgement. The server answers 400 to any other combination. [openpgp] has no
+ *  default on purpose: `Json` drops default values, which would silently omit it. */
 @Serializable
 private data class EnrollmentStateRequest(
     @SerialName("encryptionEnrolled") val encryptionEnrolled: Boolean,
     @SerialName("envelopeVersion") val envelopeVersion: Int? = null,
     @SerialName("materialGeneration") val materialGeneration: Long? = null,
     @SerialName("fingerprint") val fingerprint: String? = null,
+    @SerialName("openpgp") val openpgp: List<String>,
 )
 
 @Serializable
@@ -105,7 +111,7 @@ internal class EnrollmentClients(
             ?: return EnrollmentCallResult.Failed("Invalid enrollment public key")
         val versions = enrollmentVersions(key)
         if (versions.isEmpty()) return EnrollmentCallResult.Failed("Unsupported enrollment public key")
-        val body = json.encodeToString(PublishEnrollmentKeyRequest(encodedPublicKey, versions, listOf("v4", "v6", "rfc9980")))
+        val body = json.encodeToString(PublishEnrollmentKeyRequest(encodedPublicKey, versions, OPENPGP_CAPABILITIES))
         return call(serverUrl, "/api/pgp/device/enrollment-key", deviceId, deviceSecret, body) {
             EnrollmentCallResult.Ok
         }
@@ -146,10 +152,10 @@ internal class EnrollmentClients(
         // Always written explicitly. This route requires the field — unlike the tri-state pointer
         // on registration, an absent value here is a 400, not "no opinion".
         val request = when (report) {
-            EnrollmentReport.NotEnrolled -> EnrollmentStateRequest(false)
-            EnrollmentReport.Legacy -> EnrollmentStateRequest(true)
+            EnrollmentReport.NotEnrolled -> EnrollmentStateRequest(false, openpgp = OPENPGP_CAPABILITIES)
+            EnrollmentReport.Legacy -> EnrollmentStateRequest(true, openpgp = OPENPGP_CAPABILITIES)
             is EnrollmentReport.Keyring -> EnrollmentStateRequest(
-                true, report.envelopeVersion, report.materialGeneration, report.fingerprint,
+                true, report.envelopeVersion, report.materialGeneration, report.fingerprint, OPENPGP_CAPABILITIES,
             )
         }
         val body = json.encodeToString(request)

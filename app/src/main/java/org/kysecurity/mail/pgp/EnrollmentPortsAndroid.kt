@@ -87,6 +87,7 @@ internal class AndroidEnrollmentTransport(context: Context) : EnrollmentTranspor
         withContext(Dispatchers.IO) {
             val p = pairing() ?: return@withContext EnrollmentCallResult.Unauthorized
             clients.reportState(p.serverUrl, p.deviceId!!, p.deviceSecret!!, report)
+                .also { if (it is EnrollmentCallResult.Ok) EnrollmentVault(appContext).markCapabilitiesReported() }
         }
 
     override fun enqueueDurableReport() = EnrollmentStateWorker.enqueue(appContext)

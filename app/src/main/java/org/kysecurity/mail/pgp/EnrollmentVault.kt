@@ -31,6 +31,7 @@ private const val ACK_GENERATION = "ack_generation"
 private const val ACK_FINGERPRINT = "ack_fingerprint"
 private const val ACK_VERSION = "ack_version"
 private const val TEARDOWN_REPORT = "teardown_report"
+private const val OPENPGP_REPORTED = "openpgp_reported"
 
 /** Same shape as the encrypted-prefs opener: three reads in all before absence counts. */
 private const val ABSENCE_RECHECKS = 2
@@ -255,6 +256,13 @@ internal class EnrollmentVault(
     fun markTeardownReport(): Boolean = ackPrefs.edit().putBoolean(TEARDOWN_REPORT, true).commit()
     fun teardownReportPending(): Boolean = ackPrefs.getBoolean(TEARDOWN_REPORT, false)
     fun clearTeardownReport(): Boolean = ackPrefs.edit().remove(TEARDOWN_REPORT).commit()
+
+    /** The capability list the server last accepted from this device. Builds before it existed never
+     *  sent one, so a missing or different value means the server still holds an older list. */
+    fun capabilitiesReported(): Boolean =
+        ackPrefs.getString(OPENPGP_REPORTED, null) == OPENPGP_CAPABILITIES.joinToString(",")
+    fun markCapabilitiesReported(): Boolean =
+        ackPrefs.edit().putString(OPENPGP_REPORTED, OPENPGP_CAPABILITIES.joinToString(",")).commit()
 
     /** `java.io` cannot open a directory, so this goes through the libc bindings; a failed fsync
      *  throws `ErrnoException` and counts as a failed store. */

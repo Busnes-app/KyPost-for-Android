@@ -38,6 +38,17 @@ import java.security.SecureRandom
 import java.util.Date
 
 class PgpStrengthPolicyTest {
+    /** Spec A Q7 admits RFC 9980 category 3 only. Category 5 (ML-DSA-87+Ed448, ML-KEM-1024+X448)
+     *  earns no strength credit, so its signatures cannot verify as trusted. */
+    @Test
+    fun pqcAllowlistIsCategoryThreeOnly() {
+        assertTrue(PgpStrengthPolicy.algorithmAllowed(PublicKeyAlgorithmTags.MLDSA65_Ed25519, 0))
+        assertTrue(PgpStrengthPolicy.algorithmAllowed(PublicKeyAlgorithmTags.MLKEM768_X25519, 0))
+        assertEquals(31, PublicKeyAlgorithmTags.MLDSA87_Ed448)
+        assertFalse(PgpStrengthPolicy.algorithmAllowed(PublicKeyAlgorithmTags.MLDSA87_Ed448, Int.MAX_VALUE))
+        assertFalse(PgpStrengthPolicy.algorithmAllowed(PublicKeyAlgorithmTags.MLKEM1024_X448, Int.MAX_VALUE))
+    }
+
     @Test
     fun obsoleteDetachedDigestsRemainPresentButUnchecked() {
         for (hash in obsoleteDigests) {

@@ -85,6 +85,7 @@ internal class EnrollmentStateWorker(
         val clients = EnrollmentClients(callFactory = pinnedPairingCallFactory(applicationContext))
         val result = clients.reportState(pairing.serverUrl, deviceId, deviceSecret, report)
         if (tornDown && teardownReportSpent(result)) vault.clearTeardownReport()
+        if (result is EnrollmentCallResult.Ok) vault.markCapabilitiesReported()
         return when (enrollmentReportOutcome(result, runAttemptCount)) {
             EnrollmentReportOutcome.DONE -> Result.success()
             EnrollmentReportOutcome.RETRY -> Result.retry()
@@ -102,6 +103,16 @@ internal class EnrollmentStateWorker(
             OneTimeWorkRequestBuilder<EnrollmentStateWorker>()
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .build()
+
+        private val capabilityRefreshChecked = java.util.concurrent.atomic.AtomicBoolean()
+
+        /** Devices enrolled by builds that never sent `openpgp` stay v4-only on the server. The
+         *  contract lets `enrollment-state` carry the list without a new ceremony, so the first
+         *  authenticated sync of each process restates the probed state once, until one lands. */
+        fun refreshCapabilities(context: Context) {
+            if (!capabilityRefreshChecked.compareAndSet(false, true)) return
+            if (!EnrollmentVault(context.applicationContext).capabilitiesReported()) enqueue(context)
+        }
 
         fun enqueue(context: Context) {
             WorkManager.getInstance(context.applicationContext)

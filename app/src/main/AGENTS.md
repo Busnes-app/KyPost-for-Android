@@ -452,7 +452,12 @@ Owns production Android app code and resources.
   `probeEnrollment` reports a keyring record as `ENROLLED_KEYRING`: `isEnrolled()` for this
   device's own reading, signing and settings row.
   **Live keyring delivery (KyPost-Server #201, #210, #212, #492).** `EnrollmentClients.publishKey`
-  advertises the matching per-key `envelopeVersions` and `openpgp: ["v4", "v6", "rfc9980"]`.
+  advertises the matching per-key `envelopeVersions` and `openpgp: ["v4", "v6", "rfc9980"]`
+  (`OPENPGP_CAPABILITIES`). Every `reportState` body carries the same list: the server stores an
+  omitted one as `["v4"]`, so a single state write without it blocks the account's v6 switch.
+  Devices enrolled before that are refreshed once: the first credentialed pull of each process
+  calls `EnrollmentStateWorker.refreshCapabilities`, which re-enqueues the probed report until one
+  lands (`EnrollmentVault.capabilitiesReported`, set on `Ok` by the worker and the ceremony).
   Old servers ignore `openpgp`; the claim describes codec support, not durable material import.
   An omitted envelope list is no claim, so never drop it. The envelope fetch carries `DeliveryMetadata`
   (`version`, `fingerprint`, `materialGeneration`, the keyring's `primaryFingerprints` and

@@ -24,6 +24,8 @@ class PullSyncCoordinator(
     // which is exactly where a concurrency bug hides.
     private val notifier: (IncomingPush) -> Unit,
     private val ensurePeriodic: () -> Unit,
+    /** Runs once a device credential is in hand; restates this device's OpenPGP capabilities. */
+    private val refreshCapabilities: () -> Unit = {},
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -57,6 +59,7 @@ class PullSyncCoordinator(
 
         // Armed in both modes: the worker is the heartbeat, and pullOnce decides whether to poll.
         ensurePeriodic()
+        refreshCapabilities()
         val now = clock()
         val heartbeat = state.deliveryMode == DeliveryMode.PUSH
         if (heartbeat && now - pushQuietSince(state) < PUSH_QUIET_THRESHOLD_MS) return PullOutcome.PushHealthy

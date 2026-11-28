@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Report this device's OpenPGP v6 support on every enrollment-state write. Earlier builds left
+  each Android device marked v4-only, which kept its account from moving to v6. Devices enrolled
+  by those builds report it once, silently, on their next sync; no re-enrollment needed.
+
 - Attach verified APKs to an existing GitHub release instead of creating a second draft.
   Preserve its notes and publication status, and refuse to overwrite existing assets.
   No application, account, key or stored-data migration.

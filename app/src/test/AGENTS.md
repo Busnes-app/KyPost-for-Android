@@ -47,7 +47,10 @@ Owns JVM unit tests for app logic that can run without device/emulator.
   matching delivery record, `KEYRING_REJECTED` with nothing sealed when generation, members or
   inventory differ, `ENVELOPE_MALFORMED` without a v5 delivery record, no durable retry after 409,
   and the untouched v4 path. `EnrollmentClientsTest` pins the wire bodies: matching per-key
-  `envelopeVersions` and the OpenPGP capability on publish, delivery metadata on fetch, and the three acknowledgement shapes.
+  `envelopeVersions` and the OpenPGP capability on publish, delivery metadata on fetch, and the
+  three acknowledgement shapes, each also carrying `openpgp` (the server reads its absence as v4).
+  `PullHeartbeatTest` proves the capability refresh hook runs on every credentialed pull and never
+  unpaired; `PgpStrengthPolicyTest.pqcAllowlistIsCategoryThreeOnly` pins category 3 only (no ID 31/36).
 - `HpkeRecipientTest` checks `HpkeRecipient.kt` byte for byte against the CFRG vector for mode 0 /
   KEM 0x0010 / KDF 0x0001 / AEAD 0x0002 (`kypost-server/hpke-cfrg-p256-aes256.json`, provenance in
   its `PROVENANCE.md`): shared_secret, key, base_nonce, exporter_secret and encryptions[0], with

@@ -9,12 +9,14 @@ import org.bouncycastle.openpgp.PGPPublicKey
  *  only [archiveCipherAllowed] applies, plus [keyAllowed] when the user refuses legacy encryption. */
 internal object PgpStrengthPolicy {
     // Existing v4 RSA role tags remain readable; the policy does not generate those tags.
+    fun keyAllowed(key: PGPPublicKey): Boolean = algorithmAllowed(key.algorithm, key.bitStrength)
+
     @Suppress("DEPRECATION")
-    fun keyAllowed(key: PGPPublicKey): Boolean = when (key.algorithm) {
+    fun algorithmAllowed(algorithm: Int, bitStrength: Int): Boolean = when (algorithm) {
         PublicKeyAlgorithmTags.RSA_GENERAL,
         PublicKeyAlgorithmTags.RSA_ENCRYPT,
         PublicKeyAlgorithmTags.RSA_SIGN,
-        -> key.bitStrength >= 2048
+        -> bitStrength >= 2048
 
         // Bouncy Castle refuses to parse an ECDH key whose KDF is below SHA-256 or whose key wrap
         // is not AES/Camellia, so no KDF check is needed here.
@@ -25,9 +27,10 @@ internal object PgpStrengthPolicy {
         PublicKeyAlgorithmTags.X448,
         PublicKeyAlgorithmTags.Ed25519,
         PublicKeyAlgorithmTags.Ed448,
-        -> key.bitStrength >= 224
+        -> bitStrength >= 224
 
-        // RFC 9980 category-3 hybrids. Strength is defined by the algorithm, not BC's EC-bit field.
+        // RFC 9980 category-3 hybrids only (Spec A Q7): ML-DSA-87 (31) and ML-KEM-1024 (36) fall to
+        // `else`. Strength is defined by the algorithm, not BC's EC-bit field.
         PublicKeyAlgorithmTags.MLDSA65_Ed25519,
         PublicKeyAlgorithmTags.MLKEM768_X25519,
         -> true

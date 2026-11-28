@@ -34,6 +34,7 @@ class PullHeartbeatTest {
         val requests = AtomicInteger()
         val shown = mutableListOf<IncomingPush>()
         val armed = AtomicInteger()
+        val refreshed = AtomicInteger()
         val coordinator = PullSyncCoordinator(
             repository = store,
             pullClient = PullNotificationClient(
@@ -44,6 +45,7 @@ class PullHeartbeatTest {
             ),
             notifier = { shown += it },
             ensurePeriodic = { armed.incrementAndGet() },
+            refreshCapabilities = { refreshed.incrementAndGet() },
             clock = { now },
         )
     }
@@ -136,5 +138,18 @@ class PullHeartbeatTest {
         assertEquals(PullOutcome.Pulled(1), h.coordinator.pullOnce())
         assertTrue(h.shown.isEmpty())
         assertEquals(1L, store.cursor)
+    }
+
+    /** Devices enrolled before the client sent `openpgp` are v4-only on the server until they
+     *  restate it. The hook runs on every credentialed pull, push-healthy included, and never unpaired. */
+    @Test
+    fun credentialedPullRefreshesCapabilitiesEvenWhenPushIsHealthy() = runBlocking {
+        val h = Harness(pushModeStore(lastPushAt = now), now, """{"deliveryMode":"push","cursor":0,"notifications":[]}""")
+        assertEquals(PullOutcome.PushHealthy, h.coordinator.pullOnce())
+        assertEquals(1, h.refreshed.get())
+
+        val unpaired = Harness(FakePushStore(), now, "{}")
+        assertEquals(PullOutcome.NotPaired, unpaired.coordinator.pullOnce())
+        assertEquals(0, unpaired.refreshed.get())
     }
 }

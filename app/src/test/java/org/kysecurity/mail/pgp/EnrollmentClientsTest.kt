@@ -120,7 +120,7 @@ class EnrollmentClientsTest {
 
         val body = okio.Buffer().also { factory.requests.single().body!!.writeTo(it) }.readUtf8()
         assertEquals(
-            """{"encryptionEnrolled":true,"envelopeVersion":3,"materialGeneration":2,"fingerprint":"5F117951610CAF01500FA059CDE63F0EBEC934A2"}""",
+            """{"encryptionEnrolled":true,"envelopeVersion":3,"materialGeneration":2,"fingerprint":"5F117951610CAF01500FA059CDE63F0EBEC934A2","openpgp":["v4","v6","rfc9980"]}""",
             body,
         )
     }
@@ -140,7 +140,8 @@ class EnrollmentClientsTest {
     }
 
     /** A bare true is what a legacy account accepts; a converted one refuses it with 409. The
-     *  three metadata fields go together, so none of them may leak into the legacy body. */
+     *  three metadata fields go together, so none of them may leak into the legacy body. The
+     *  capability list rides along on every state body: the server reads its absence as v4-only. */
     @Test
     fun reportState_legacyBodyIsTheBareBoolean() = runBlocking {
         val factory = FakeCallFactory { req -> response(req, """{"ok":true}""", 200) }
@@ -148,7 +149,7 @@ class EnrollmentClientsTest {
         EnrollmentClients(callFactory = factory).reportState("https://relay.example.com", "d", "s", EnrollmentReport.Legacy)
 
         val body = okio.Buffer().also { factory.requests.single().body!!.writeTo(it) }.readUtf8()
-        assertEquals("""{"encryptionEnrolled":true}""", body)
+        assertEquals("""{"encryptionEnrolled":true,"openpgp":["v4","v6","rfc9980"]}""", body)
     }
 
     /** The server records nothing on 409 and returns the current values; the same claim cannot
@@ -218,7 +219,7 @@ class EnrollmentClientsTest {
         val sent = factory.requests.single()
         assertEquals("https://relay.example.com/api/pgp/device/enrollment-state", sent.url.toString())
         val body = okio.Buffer().also { sent.body!!.writeTo(it) }.readUtf8()
-        assertTrue("must state an opinion explicitly: $body", body.contains("\"encryptionEnrolled\":false"))
+        assertEquals("""{"encryptionEnrolled":false,"openpgp":["v4","v6","rfc9980"]}""", body)
     }
 
     /** Treated exactly as MfaResponseClient treats it — both come from the same shared

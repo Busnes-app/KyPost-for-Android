@@ -119,4 +119,18 @@ class EnrollmentKeyringRecordTest {
         assertTrue(vault.clearTeardownReport())
         assertFalse(vault.teardownReportPending())
     }
+
+    /** Only the exact current list counts as reported: a value from an older capability set (or
+     *  none, from a build that never sent one) sends the device through one refresh. */
+    @Test
+    fun theCapabilityMarkerMatchesOnlyTheCurrentList() {
+        val prefs = context.getSharedPreferences(EnrollmentVault.ACK_PREFS_FILE, Context.MODE_PRIVATE)
+        assertTrue(prefs.edit().remove("openpgp_reported").commit())
+        assertFalse(vault.capabilitiesReported())
+        assertTrue(prefs.edit().putString("openpgp_reported", "v4").commit())
+        assertFalse(EnrollmentVault(context).capabilitiesReported())
+        assertTrue(vault.markCapabilitiesReported())
+        assertTrue(EnrollmentVault(context).capabilitiesReported())
+        assertTrue(prefs.edit().remove("openpgp_reported").commit())
+    }
 }

@@ -39,6 +39,7 @@ class PushGraph(context: Context) {
             }
         },
         ensurePeriodic = { PullScheduler.ensurePeriodic(appContext) },
+        refreshCapabilities = { org.kysecurity.mail.pgp.EnrollmentStateWorker.refreshCapabilities(appContext) },
     )
     val syncCoordinator = PushSyncCoordinator(
         repository = repository,
